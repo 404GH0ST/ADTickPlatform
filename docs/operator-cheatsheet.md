@@ -24,6 +24,7 @@ Manual alternatives:
 ```bash
 make smoke-prod-short-match
 make smoke-prod-host-recovery
+make validate-attack-map-load
 make smoke-prod-db-restore
 make capture-prod-host-baseline
 ```
@@ -82,6 +83,12 @@ Database restore drill:
 make smoke-prod-db-restore
 ```
 
+Attack-map load validation:
+
+```bash
+make validate-attack-map-load
+```
+
 Firewall teardown if rules drift badly:
 
 ```bash
@@ -120,6 +127,12 @@ Latest go-live run artifacts:
 
 ```bash
 ls -1 .runtime/go-live-check-*
+```
+
+Latest attack-map load validation artifacts:
+
+```bash
+ls -1 .runtime/attack-map-load-*
 ```
 
 Diff the current host against a saved baseline:

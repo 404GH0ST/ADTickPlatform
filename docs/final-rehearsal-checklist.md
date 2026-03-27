@@ -146,6 +146,22 @@ Pass criteria:
 
 ## 5. Operational Baseline Snapshot
 
+Validate that the high-fanout attack feed and scoreboard path still meet release-candidate budgets:
+
+```bash
+make validate-attack-map-load
+```
+
+Pass criteria:
+- the validation exits `0`
+- `attack-map-load-report.json` shows `validation_status: "passed"`
+- submission throughput stays above the configured floor
+- submission p95, recompute, and attack-feed visibility stay within the configured thresholds
+
+Artifacts:
+- `.runtime/attack-map-load-*/attack-map-load-report.json`
+- `.runtime/attack-map-load-*/attack-map-load.env`
+
 Capture final known-good state:
 
 ```bash
@@ -198,8 +214,9 @@ Convenience:
 make go-live-check
 ```
 
-This runs sections 3, 4, and 5 in sequence and writes the captured baseline artifacts into a timestamped `.runtime/go-live-check-*` directory.
+This runs sections 3, 4, 5, and the final baseline capture in sequence and writes the captured artifacts into a timestamped `.runtime/go-live-check-*` directory.
 That directory also includes the generated short-match participant metadata used to chain the recovery drill against the same organizer-created state.
+By default it also nests the attack-map load validation artifacts under `attack-map-load/`.
 It also records the git revision and a `prod.env` SHA256 fingerprint for the validated run.
 
 If any section fails:
