@@ -15,6 +15,7 @@ attack_map_load_output_dir="${artifact_dir}/attack-map-load"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 include_attack_map_load="${GO_LIVE_CHECK_INCLUDE_ATTACK_MAP_LOAD:-true}"
 operations_status_file="${artifact_dir}/operations-status.json"
+summary_file="${artifact_dir}/summary.json"
 
 load_env_file "${prod_env}"
 edge_base_url="${GO_LIVE_CHECK_BASE_URL:-$(derive_edge_base_url)}"
@@ -86,7 +87,52 @@ ${attack_map_artifacts}
 - final-compose-ps.txt
 EOF
 
+jq -nc \
+  --arg generated_at "${timestamp}" \
+  --arg edge_base_url "${edge_base_url}" \
+  --arg artifact_dir "${artifact_dir}" \
+  --arg short_match_env "short-match.env" \
+  --arg operations_status "operations-status.json" \
+  --arg git_revision "git-revision.txt" \
+  --arg prod_env_sha256 "prod-env.sha256" \
+  --arg final_iptables_filter "final-iptables-filter.txt" \
+  --arg final_iptables_raw "final-iptables-raw.txt" \
+  --arg final_nft_ruleset "final-nft-ruleset.txt" \
+  --arg final_wg_show "final-wg-show.txt" \
+  --arg final_compose_ps "final-compose-ps.txt" \
+  --argjson include_attack_map_load "$( [[ "${include_attack_map_load}" == "true" ]] && printf 'true' || printf 'false' )" \
+  '{
+    validation: "go-live-check",
+    generated_at: $generated_at,
+    edge_base_url: $edge_base_url,
+    artifact_dir: $artifact_dir,
+    include_attack_map_load: $include_attack_map_load,
+    commands: [
+      "make smoke-prod-short-match",
+      "make smoke-prod-host-recovery",
+      "make capture-prod-host-baseline"
+    ] + (if $include_attack_map_load then ["make validate-attack-map-load"] else [] end),
+    artifacts: {
+      short_match_env: $short_match_env,
+      operations_status: $operations_status,
+      git_revision: $git_revision,
+      prod_env_sha256: $prod_env_sha256,
+      final_iptables_filter: $final_iptables_filter,
+      final_iptables_raw: $final_iptables_raw,
+      final_nft_ruleset: $final_nft_ruleset,
+      final_wg_show: $final_wg_show,
+      final_compose_ps: $final_compose_ps,
+      attack_map_load: (if $include_attack_map_load then {
+        readme: "attack-map-load/README.txt",
+        env: "attack-map-load/attack-map-load.env",
+        report: "attack-map-load/attack-map-load-report.json",
+        operations_status: "attack-map-load/operations-status.json"
+      } else null end)
+    }
+  }' > "${summary_file}"
+
 echo "go-live check passed:"
 printf '  %s\n' \
   "${artifact_dir}" \
-  "${artifact_dir}/README.txt"
+  "${artifact_dir}/README.txt" \
+  "${summary_file}"

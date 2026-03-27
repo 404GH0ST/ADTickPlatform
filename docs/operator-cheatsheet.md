@@ -142,10 +142,22 @@ Inspect the final organizer runtime alert snapshot:
 jq . .runtime/go-live-check-<timestamp>/operations-status.json
 ```
 
+Inspect the machine-readable go-live summary:
+
+```bash
+jq . .runtime/go-live-check-<timestamp>/summary.json
+```
+
 Latest release-candidate validation artifacts:
 
 ```bash
 ls -1 .runtime/release-candidate-*
+```
+
+Inspect the machine-readable release-candidate summary:
+
+```bash
+jq . .runtime/release-candidate-<timestamp>/summary.json
 ```
 
 Latest attack-map load validation artifacts:

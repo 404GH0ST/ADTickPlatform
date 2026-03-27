@@ -8,6 +8,7 @@ source "${ROOT_DIR}/scripts/lib/common.sh"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 artifact_dir="${RELEASE_CANDIDATE_OUTPUT_DIR:-.runtime/release-candidate-${timestamp}}"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
+summary_file="${artifact_dir}/summary.json"
 
 mkdir -p "${artifact_dir}"
 
@@ -57,7 +58,48 @@ Artifacts in this directory:
 - prod-env.sha256
 EOF
 
+jq -nc \
+  --arg generated_at "${timestamp}" \
+  --arg artifact_dir "${artifact_dir}" \
+  --arg git_revision "git-revision.txt" \
+  --arg prod_env_sha256 "prod-env.sha256" \
+  '{
+    validation: "release-candidate",
+    generated_at: $generated_at,
+    artifact_dir: $artifact_dir,
+    commands: [
+      "make preflight-prod-host",
+      "make prod-config",
+      "make prod-host-config",
+      "make up-prod-host",
+      "make smoke-prod-db-restore",
+      "make go-live-check"
+    ],
+    artifacts: {
+      git_revision: $git_revision,
+      prod_env_sha256: $prod_env_sha256,
+      prod_db_restore: {
+        readme: "prod-db-restore/README.txt",
+        backup_sql: "prod-db-restore/postgres-backup.sql",
+        backup_sha256: "prod-db-restore/postgres-backup.sql.sha256"
+      },
+      go_live_check: {
+        readme: "go-live-check/README.txt",
+        summary: "go-live-check/summary.json",
+        short_match_env: "go-live-check/short-match.env",
+        operations_status: "go-live-check/operations-status.json",
+        attack_map_load: {
+          readme: "go-live-check/attack-map-load/README.txt",
+          env: "go-live-check/attack-map-load/attack-map-load.env",
+          report: "go-live-check/attack-map-load/attack-map-load-report.json",
+          operations_status: "go-live-check/attack-map-load/operations-status.json"
+        }
+      }
+    }
+  }' > "${summary_file}"
+
 echo "release-candidate validation passed:"
 printf '  %s\n' \
   "${artifact_dir}" \
-  "${artifact_dir}/README.txt"
+  "${artifact_dir}/README.txt" \
+  "${summary_file}"
