@@ -36,18 +36,6 @@ if command -v sha256sum >/dev/null 2>&1 && [[ -f "${prod_env}" ]]; then
   sha256sum "${prod_env}" > "${artifact_dir}/prod-env.sha256"
 fi
 
-EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
-EVENT_READY_OUTPUT="${event_ready_artifact_note}" \
-EVENT_READY_DATE="${event_ready_date}" \
-  "${ROOT_DIR}/scripts/render-event-ready-note.sh"
-
-if [[ -n "${event_ready_output}" ]]; then
-  EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
-  EVENT_READY_OUTPUT="${event_ready_output}" \
-  EVENT_READY_DATE="${event_ready_date}" \
-    "${ROOT_DIR}/scripts/render-event-ready-note.sh"
-fi
-
 cat > "${artifact_dir}/README.txt" <<EOF
 Release-candidate validation completed at ${timestamp}.
 
@@ -115,6 +103,18 @@ jq -nc \
       event_ready_note: $event_ready_note
     }
   }' > "${summary_file}"
+
+EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
+EVENT_READY_OUTPUT="${event_ready_artifact_note}" \
+EVENT_READY_DATE="${event_ready_date}" \
+  "${ROOT_DIR}/scripts/render-event-ready-note.sh"
+
+if [[ -n "${event_ready_output}" ]]; then
+  EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
+  EVENT_READY_OUTPUT="${event_ready_output}" \
+  EVENT_READY_DATE="${event_ready_date}" \
+    "${ROOT_DIR}/scripts/render-event-ready-note.sh"
+fi
 
 echo "release-candidate validation passed:"
 printf '  %s\n' \

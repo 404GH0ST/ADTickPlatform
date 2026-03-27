@@ -48,6 +48,21 @@ make render-event-ready-note
 
 `make validate-prod-release-candidate` now renders `event-ready-YYYY-MM-DD.md` into the artifact directory automatically. Set `EVENT_READY_OUTPUT=docs/event-ready-YYYY-MM-DD.md` if you want the wrapper to also write the checked-in note in one pass.
 
+Verify that the checked-in event-ready note still matches the validated artifact tree:
+
+```bash
+EVENT_READY_DATE=YYYY-MM-DD \
+make verify-event-ready-note
+```
+
+Verify the full release-candidate gate before tagging:
+
+```bash
+make verify-release-candidate
+```
+
+This checks the latest `.runtime/release-candidate-*` evidence set, verifies the checked-in readiness note matches the validated artifacts, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, and by default rejects tagging if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+
 ## Core Commands
 
 Bring the host stack up:

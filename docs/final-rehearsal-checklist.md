@@ -236,6 +236,20 @@ This wraps preflight, compose validation, `up-prod-host`, the database restore d
 It also renders `event-ready-YYYY-MM-DD.md` into that artifact directory automatically.
 Set `EVENT_READY_OUTPUT=docs/event-ready-YYYY-MM-DD.md` if you want the wrapper to mirror the generated note into the checked-in docs path during the same run.
 
+Before tagging the release, verify the checked-in readiness note still matches the validated artifact tree:
+
+```bash
+EVENT_READY_DATE=YYYY-MM-DD make verify-event-ready-note
+```
+
+Final release gate:
+
+```bash
+make verify-release-candidate
+```
+
+This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, verifies the checked-in readiness note, and rejects the release if `git HEAD` does not match the validated commit.
+
 ---
 
 ## Fast Triage Commands

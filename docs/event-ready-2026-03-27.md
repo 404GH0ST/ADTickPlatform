@@ -6,12 +6,12 @@ Validation date:
 
 Validated git revision:
 
-- `8fbdf2e` `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9`
+- `a2d7e84` `a2d7e84a85a23cb30459e583349a887a7fe40b1c`
 
 Important:
 
 - the latest 2026-03-27 validation was rerun from the release-candidate wrapper with machine-readable summaries
-- the release candidate should point at commit `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9`
+- the release candidate should point at commit `a2d7e84a85a23cb30459e583349a887a7fe40b1c`
 
 Validated host commands:
 
@@ -37,51 +37,51 @@ Event-day references:
 
 Validated artifact directories:
 
-- `.runtime/release-candidate-20260327T185627Z`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/attack-map-load`
+- `.runtime/release-candidate-20260327T192203Z`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/attack-map-load`
 
 Expected evidence from the release-candidate run:
 
-- `.runtime/release-candidate-20260327T185627Z/README.txt`
-- `.runtime/release-candidate-20260327T185627Z/summary.json`
-- `.runtime/release-candidate-20260327T185627Z/git-revision.txt`
-- `.runtime/release-candidate-20260327T185627Z/prod-env.sha256`
+- `.runtime/release-candidate-20260327T192203Z/README.txt`
+- `.runtime/release-candidate-20260327T192203Z/summary.json`
+- `.runtime/release-candidate-20260327T192203Z/git-revision.txt`
+- `.runtime/release-candidate-20260327T192203Z/prod-env.sha256`
 
 Expected evidence from the nested restore drill:
 
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/README.txt`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/postgres-backup.sql`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/postgres-backup.sql.sha256`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/pre-restore-game-status.json`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/post-restore-game-status.json`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/pre-restore-scoreboard.json`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/post-restore-scoreboard.json`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/pre-restore-attacks.json`
-- `.runtime/release-candidate-20260327T185627Z/prod-db-restore/post-restore-attacks.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/README.txt`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/postgres-backup.sql`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/postgres-backup.sql.sha256`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/pre-restore-game-status.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/post-restore-game-status.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/pre-restore-scoreboard.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/post-restore-scoreboard.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/pre-restore-attacks.json`
+- `.runtime/release-candidate-20260327T192203Z/prod-db-restore/post-restore-attacks.json`
 
 Expected evidence from the nested go-live run:
 
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/README.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/summary.json`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/short-match.env`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/operations-status.json`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/git-revision.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/prod-env.sha256`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/final-iptables-filter.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/final-iptables-raw.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/final-nft-ruleset.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/final-wg-show.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/final-compose-ps.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/README.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/summary.json`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/short-match.env`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/operations-status.json`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/git-revision.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/prod-env.sha256`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/final-iptables-filter.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/final-iptables-raw.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/final-nft-ruleset.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/final-wg-show.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/final-compose-ps.txt`
 
 Expected evidence from the nested attack-map load validation:
 
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/attack-map-load/README.txt`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/attack-map-load/attack-map-load.env`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/attack-map-load/attack-map-load-report.json`
-- `.runtime/release-candidate-20260327T185627Z/go-live-check/attack-map-load/operations-status.json`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/attack-map-load/README.txt`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/attack-map-load/attack-map-load.env`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/attack-map-load/attack-map-load-report.json`
+- `.runtime/release-candidate-20260327T192203Z/go-live-check/attack-map-load/operations-status.json`
 
 Release note:
 
-- create the release tag from commit `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9` after committing this readiness note update
+- create the release tag from commit `a2d7e84a85a23cb30459e583349a887a7fe40b1c` after committing this readiness note update
