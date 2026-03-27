@@ -117,10 +117,14 @@ The repository includes extensive scripts for validating platform functionality.
 - **Browser Regression Tests**: `bunx playwright install chromium && make e2e`
 - **Participant Flow Simulation**: `make smoke-participant`
 - **Full Docker Challenge Smoke Test**: `make smoke-sample-challenge-docker`
+- **Attack Map Load Validation**: `ATTACK_MAP_LOAD_MIN_SUBMISSIONS_PER_SECOND=5 ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS=1500 ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS=5000 ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS=3000 make simulate-attack-map-load`
+- **Release-Candidate Attack Map Validation**: `make validate-attack-map-load`
 - **Production Database Restore Drill**: `make smoke-prod-db-restore`
 
 GitHub Actions runs `make ci` plus the Playwright browser regression suite on pushes and pull requests so the main branch stays aligned with the documented local validation path.
 When the browser job fails, CI uploads `apps/web/playwright-report` and `apps/web/test-results` so traces, screenshots, videos, and snapshot diffs are available from the failed run.
+`make simulate-attack-map-load` now also emits measured throughput and latency summaries, and it can fail the run when the optional threshold environment variables are exceeded. Use `ATTACK_MAP_LOAD_REPORT_FILE` to persist a JSON report for release-candidate evidence.
+`make validate-attack-map-load` applies a fixed threshold profile, waits for the edge endpoints, and stores the JSON report plus env metadata in `.runtime/attack-map-load-*`.
 
 If you need to reset the environment to a clean state during testing:
 ```bash
