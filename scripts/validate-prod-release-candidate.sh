@@ -47,6 +47,7 @@ Artifacts in this directory:
 - prod-db-restore/postgres-backup.sql.sha256
 - go-live-check/README.txt
 - go-live-check/short-match.env
+- go-live-check/operations-status.json
 - go-live-check/attack-map-load/README.txt
 - go-live-check/attack-map-load/attack-map-load.env
 - go-live-check/attack-map-load/attack-map-load-report.json

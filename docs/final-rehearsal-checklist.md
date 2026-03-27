@@ -217,6 +217,7 @@ make go-live-check
 This runs sections 3, 4, 5, and the final baseline capture in sequence and writes the captured artifacts into a timestamped `.runtime/go-live-check-*` directory.
 That directory also includes the generated short-match participant metadata used to chain the recovery drill against the same organizer-created state.
 By default it also nests the attack-map load validation artifacts under `attack-map-load/`.
+It also captures `operations-status.json` and expects the organizer runtime alert surface to report `healthy: true` with no active alerts at the end of the run.
 It also records the git revision and a `prod.env` SHA256 fingerprint for the validated run.
 
 If any section fails:

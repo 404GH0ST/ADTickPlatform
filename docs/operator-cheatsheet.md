@@ -136,6 +136,12 @@ Latest go-live run artifacts:
 ls -1 .runtime/go-live-check-*
 ```
 
+Inspect the final organizer runtime alert snapshot:
+
+```bash
+jq . .runtime/go-live-check-<timestamp>/operations-status.json
+```
+
 Latest release-candidate validation artifacts:
 
 ```bash
