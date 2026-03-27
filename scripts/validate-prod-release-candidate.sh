@@ -16,6 +16,7 @@ echo "release-candidate validation: artifacts=${artifact_dir}"
 "${ROOT_DIR}/scripts/preflight-prod-host.sh"
 docker compose --env-file "${prod_env}" -f deploy/compose/prod.yml config >/dev/null
 docker compose --env-file "${prod_env}" -f deploy/compose/prod.yml -f "${PROD_HOST_OVERRIDE:-deploy/compose/prod.host-enforcement.yml}" config >/dev/null
+make up-prod-host
 
 RESTORE_DRILL_OUTPUT_DIR="${artifact_dir}/prod-db-restore" "${ROOT_DIR}/scripts/smoke-prod-db-restore.sh"
 GO_LIVE_CHECK_OUTPUT_DIR="${artifact_dir}/go-live-check" "${ROOT_DIR}/scripts/go-live-check.sh"
@@ -38,6 +39,7 @@ Commands run:
 - make preflight-prod-host
 - make prod-config
 - make prod-host-config
+- make up-prod-host
 - make smoke-prod-db-restore
 - make go-live-check
 

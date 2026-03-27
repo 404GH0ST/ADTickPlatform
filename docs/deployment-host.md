@@ -156,7 +156,7 @@ Run the full release-candidate host workflow:
 ```bash
 make validate-prod-release-candidate
 ```
-This wraps host preflight, compose validation, the database restore drill, and `go-live-check` into a single `.runtime/release-candidate-*` directory so one command yields the full evidence set for a candidate build.
+This wraps host preflight, compose validation, `up-prod-host`, the database restore drill, and `go-live-check` into a single `.runtime/release-candidate-*` directory so one command yields the full evidence set for a candidate build.
 
 ### Capture Baseline
 After the stack is in a known-good state, capture an incident-response baseline:

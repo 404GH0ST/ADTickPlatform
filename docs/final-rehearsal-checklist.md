@@ -231,7 +231,7 @@ Release-candidate convenience:
 make validate-prod-release-candidate
 ```
 
-This wraps preflight, compose validation, the database restore drill, and `go-live-check` into one timestamped `.runtime/release-candidate-*` directory.
+This wraps preflight, compose validation, `up-prod-host`, the database restore drill, and `go-live-check` into one timestamped `.runtime/release-candidate-*` directory.
 
 ---
 
