@@ -248,7 +248,15 @@ Final release gate:
 make verify-release-candidate
 ```
 
-This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, verifies the checked-in readiness note, and rejects the release if `git HEAD` does not match the validated commit.
+This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, confirms the rendered event-ready note exists inside the artifact tree, and rejects the release if `git HEAD` does not match the validated commit.
+
+Create the actual annotated release tag only after that passes:
+
+```bash
+RELEASE_TAG=vYYYY.MM.DD make tag-release
+```
+
+The tag step is stricter than the general verification step: it also requires the checked-in readiness note to match the validated artifact tree before it creates the annotated tag.
 
 ---
 

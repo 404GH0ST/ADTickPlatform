@@ -10,6 +10,7 @@ require_bin jq
 ARTIFACT_DIR="${RELEASE_CANDIDATE_ARTIFACT_DIR:-}"
 NOTE_PATH="${EVENT_READY_NOTE_PATH:-}"
 REQUIRE_HEAD_MATCH="${RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH:-true}"
+REQUIRE_EVENT_READY_NOTE="${RELEASE_CANDIDATE_REQUIRE_EVENT_READY_NOTE:-false}"
 
 usage() {
   cat <<'EOF'
@@ -20,6 +21,7 @@ Optional:
   RELEASE_CANDIDATE_ARTIFACT_DIR=.runtime/release-candidate-<timestamp>
   EVENT_READY_NOTE_PATH=docs/event-ready-YYYY-MM-DD.md
   RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false
+  RELEASE_CANDIDATE_REQUIRE_EVENT_READY_NOTE=true
 EOF
 }
 
@@ -60,23 +62,39 @@ if [[ -z "${validated_commit}" || -z "${validated_short_commit}" ]]; then
 fi
 
 event_ready_rel="$(jq -r '.artifacts.event_ready_note // empty' "${summary_file}")"
-if [[ -z "${event_ready_rel}" ]]; then
-  if [[ -z "${NOTE_PATH}" ]]; then
-    NOTE_PATH="$(grep -l "${validated_commit}" docs/event-ready-*.md 2>/dev/null | sort | tail -n 1 || true)"
-  fi
-else
+event_ready_artifact_file=""
+event_ready_filename=""
+if [[ -n "${event_ready_rel}" ]]; then
   event_ready_filename="$(basename "${event_ready_rel}")"
-  if [[ -z "${NOTE_PATH}" ]]; then
-    NOTE_PATH="docs/${event_ready_filename}"
-  fi
+  event_ready_artifact_file="${ARTIFACT_DIR}/${event_ready_rel}"
 fi
 
-if [[ -z "${NOTE_PATH}" || ! -f "${NOTE_PATH}" ]]; then
-  echo "missing matching event-ready note for validated commit ${validated_commit}" >&2
+if [[ -z "${event_ready_artifact_file}" || ! -f "${event_ready_artifact_file}" ]]; then
+  echo "missing rendered event-ready artifact note for validated commit ${validated_commit}" >&2
   exit 1
 fi
 
-event_ready_filename="$(basename "${NOTE_PATH}")"
+if [[ "${REQUIRE_EVENT_READY_NOTE}" == "true" ]]; then
+  if [[ -z "${NOTE_PATH}" ]]; then
+    if [[ -n "${event_ready_filename}" ]]; then
+      NOTE_PATH="docs/${event_ready_filename}"
+    else
+      NOTE_PATH="$(grep -l "${validated_commit}" docs/event-ready-*.md 2>/dev/null | sort | tail -n 1 || true)"
+    fi
+  fi
+
+  if [[ -z "${NOTE_PATH}" || ! -f "${NOTE_PATH}" ]]; then
+    echo "missing matching checked-in event-ready note for validated commit ${validated_commit}" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "${NOTE_PATH}" ]]; then
+  event_ready_filename="$(basename "${NOTE_PATH}")"
+else
+  event_ready_filename="$(basename "${event_ready_artifact_file}")"
+fi
+
 validation_date="${event_ready_filename#event-ready-}"
 validation_date="${validation_date%.md}"
 
@@ -132,10 +150,12 @@ if [[ -n "${attack_map_report_file}" ]]; then
   fi
 fi
 
-EVENT_READY_ARTIFACT_DIR="${ARTIFACT_DIR}" \
-EVENT_READY_NOTE_PATH="${NOTE_PATH}" \
-EVENT_READY_DATE="${validation_date}" \
-  "${ROOT_DIR}/scripts/verify-event-ready-note.sh"
+if [[ "${REQUIRE_EVENT_READY_NOTE}" == "true" ]]; then
+  EVENT_READY_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+  EVENT_READY_NOTE_PATH="${NOTE_PATH}" \
+  EVENT_READY_DATE="${validation_date}" \
+    "${ROOT_DIR}/scripts/verify-event-ready-note.sh"
+fi
 
 current_head="$(git rev-parse HEAD)"
 if [[ "${REQUIRE_HEAD_MATCH}" == "true" && "${current_head}" != "${validated_commit}" ]]; then
@@ -148,5 +168,5 @@ fi
 echo "release-candidate verification passed:"
 printf '  %s\n' \
   "${ARTIFACT_DIR}" \
-  "${NOTE_PATH}" \
+  "${event_ready_artifact_file}" \
   "${go_live_operations_file}"

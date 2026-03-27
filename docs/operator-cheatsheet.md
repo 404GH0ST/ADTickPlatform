@@ -61,7 +61,31 @@ Verify the full release-candidate gate before tagging:
 make verify-release-candidate
 ```
 
-This checks the latest `.runtime/release-candidate-*` evidence set, verifies the checked-in readiness note matches the validated artifacts, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, and by default rejects tagging if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+
+If you also want this command to verify the checked-in readiness note, add:
+
+```bash
+RELEASE_CANDIDATE_REQUIRE_EVENT_READY_NOTE=true \
+make verify-release-candidate
+```
+
+Create the annotated release tag from the validated commit only:
+
+```bash
+RELEASE_TAG=vYYYY.MM.DD \
+make tag-release
+```
+
+Dry-run the tagging flow without creating the git tag:
+
+```bash
+RELEASE_TAG=vYYYY.MM.DD \
+RELEASE_TAG_DRY_RUN=true \
+make tag-release
+```
+
+`make tag-release` stays strict: it requires the checked-in event-ready note to match the validated artifact tree before it will create the annotated tag.
 
 ## Core Commands
 
