@@ -7,6 +7,7 @@ Use this on event day after the host stack and config are already frozen.
 Known-good validation:
 
 ```bash
+make validate-prod-release-candidate
 sudo make go-live-check
 ```
 
@@ -27,6 +28,12 @@ make smoke-prod-host-recovery
 make validate-attack-map-load
 make smoke-prod-db-restore
 make capture-prod-host-baseline
+```
+
+Full release-candidate wrapper:
+
+```bash
+make validate-prod-release-candidate
 ```
 
 ## Core Commands
@@ -127,6 +134,12 @@ Latest go-live run artifacts:
 
 ```bash
 ls -1 .runtime/go-live-check-*
+```
+
+Latest release-candidate validation artifacts:
+
+```bash
+ls -1 .runtime/release-candidate-*
 ```
 
 Latest attack-map load validation artifacts:

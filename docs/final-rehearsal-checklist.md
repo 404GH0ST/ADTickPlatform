@@ -224,6 +224,14 @@ If any section fails:
 - Re-run from section 1
 - Do not partially approve
 
+Release-candidate convenience:
+
+```bash
+make validate-prod-release-candidate
+```
+
+This wraps preflight, compose validation, the database restore drill, and `go-live-check` into one timestamped `.runtime/release-candidate-*` directory.
+
 ---
 
 ## Fast Triage Commands

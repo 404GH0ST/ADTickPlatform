@@ -151,6 +151,13 @@ sudo make go-live-check
 This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
 The artifact directory also records the git revision and a `prod.env` SHA256 fingerprint for the validated run.
 
+### Release-Candidate Validation
+Run the full release-candidate host workflow:
+```bash
+make validate-prod-release-candidate
+```
+This wraps host preflight, compose validation, the database restore drill, and `go-live-check` into a single `.runtime/release-candidate-*` directory so one command yields the full evidence set for a candidate build.
+
 ### Capture Baseline
 After the stack is in a known-good state, capture an incident-response baseline:
 ```bash
