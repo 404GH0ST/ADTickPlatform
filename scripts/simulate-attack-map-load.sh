@@ -35,8 +35,10 @@ ATTACK_MAP_LOAD_MAX_FLAG_FETCH_P95_MS="${ATTACK_MAP_LOAD_MAX_FLAG_FETCH_P95_MS:-
 ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS="${ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS:-}"
 ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS="${ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS:-}"
 ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS="${ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS:-}"
+ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS="${ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS:-}"
 ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS="${ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS:-15000}"
 ATTACK_MAP_LOAD_ATTACK_FEED_POLL_INTERVAL_MS="${ATTACK_MAP_LOAD_ATTACK_FEED_POLL_INTERVAL_MS:-250}"
+ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS="${ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS:-false}"
 BASELINE_IMAGE="${SAMPLE_CHALLENGE_BASELINE_IMAGE:-adplatform/sample-http:baseline}"
 CHECKER_IMAGE="${SAMPLE_CHALLENGE_CHECKER_IMAGE:-adplatform/sample-http-checker:latest}"
 
@@ -59,8 +61,10 @@ Environment overrides:
   ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS
   ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS
   ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS
+  ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS
   ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS
   ATTACK_MAP_LOAD_ATTACK_FEED_POLL_INTERVAL_MS
+  ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS=true|false
   AD_PLATFORM_API_URL
   AD_PLATFORM_PUBLIC_BASE_URL
   ADMIN_API_TOKEN
@@ -108,6 +112,7 @@ validate_optional_integer "ATTACK_MAP_LOAD_MAX_FLAG_FETCH_P95_MS" "${ATTACK_MAP_
 validate_optional_integer "ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS" "${ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS}"
 validate_optional_integer "ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS" "${ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS}"
 validate_optional_integer "ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS" "${ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS}"
+validate_optional_integer "ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS" "${ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS}"
 validate_optional_integer "ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS" "${ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS}"
 validate_optional_integer "ATTACK_MAP_LOAD_ATTACK_FEED_POLL_INTERVAL_MS" "${ATTACK_MAP_LOAD_ATTACK_FEED_POLL_INTERVAL_MS}"
 
@@ -268,6 +273,10 @@ declare -a player_emails=()
 declare -a player_passwords=()
 declare -a participant_tokens=()
 declare -a tick_advance_latencies_ms=()
+declare -a tick_checker_totals=()
+declare -a tick_checker_successes=()
+declare -a tick_checker_failures=()
+declare -a tick_checker_skips=()
 declare -a flag_fetch_latencies_ms=()
 declare -a submission_latencies_ms=()
 declare -a threshold_failures=()
@@ -392,7 +401,35 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
   )"
   tick_advance_latencies_ms+=("${CURL_LAST_TIME_MS}")
   tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.data.id')"
-  printf '%s\n' "${tick_response}" | jq -c '.data | {id,status,total_checker_runs}'
+  tick_status="$(printf '%s\n' "${tick_response}" | jq -er '.data.status')"
+  tick_total_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.total_checker_runs // 0')"
+  tick_successful_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.successful_checker_runs // 0')"
+  tick_failed_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.failed_checker_runs // 0')"
+  tick_skipped_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.skipped_checker_runs // 0')"
+  tick_checker_totals+=("${tick_total_checker_runs}")
+  tick_checker_successes+=("${tick_successful_checker_runs}")
+  tick_checker_failures+=("${tick_failed_checker_runs}")
+  tick_checker_skips+=("${tick_skipped_checker_runs}")
+  printf '%s\n' "${tick_response}" | jq -c '.data | {id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
+
+  if [[ "${ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS}" == "true" ]]; then
+    checker_runs_response="$(
+      curl_json "checker runs for tick ${tick_id}" \
+        "${API_URL}/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=${tick_total_checker_runs}" \
+        -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    )"
+    if ! printf '%s\n' "${checker_runs_response}" | jq -e \
+      --argjson expected_total "${tick_total_checker_runs}" '
+        .data.total_count == $expected_total and
+        .data.has_next == false and
+        (.data.items | length == $expected_total) and
+        all(.data.items[]?; .status == "success")
+      ' >/dev/null; then
+      echo "checker runs validation failed for tick ${tick_id}" >&2
+      printf '%s\n' "${checker_runs_response}" | jq -c '.data.items[]? | {tick_id,team_id,phase,status,message}' >&2
+      exit 1
+    fi
+  fi
 
   echo "submitting ring attacks for tick=${tick_id} shift=${shift_offset}"
   round_submission_started_ms="$(now_ms)"
@@ -481,6 +518,22 @@ submission_max_ms="$(max_value submission_latencies_ms)"
 submission_min_ms="$(min_value submission_latencies_ms)"
 tick_advance_p95_ms="$(percentile_value tick_advance_latencies_ms 95)"
 tick_advance_max_ms="$(max_value tick_advance_latencies_ms)"
+checker_runs_total=0
+checker_runs_successful=0
+checker_runs_failed=0
+checker_runs_skipped=0
+for value in "${tick_checker_totals[@]}"; do
+  checker_runs_total=$((checker_runs_total + value))
+done
+for value in "${tick_checker_successes[@]}"; do
+  checker_runs_successful=$((checker_runs_successful + value))
+done
+for value in "${tick_checker_failures[@]}"; do
+  checker_runs_failed=$((checker_runs_failed + value))
+done
+for value in "${tick_checker_skips[@]}"; do
+  checker_runs_skipped=$((checker_runs_skipped + value))
+done
 submission_window_duration_ms="${attack_execution_duration_ms}"
 scenario_duration_ms=$((scenario_completed_ms - scenario_started_ms))
 submissions_per_second="$(rate_per_second "${total_submissions}" "${submission_window_duration_ms}")"
@@ -510,6 +563,23 @@ assert_optional_max \
   "${attack_feed_lag_ms}" \
   "${ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS}" \
   threshold_failures
+assert_optional_max \
+  "tick advance p95" \
+  "${tick_advance_p95_ms}" \
+  "${ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS}" \
+  threshold_failures
+
+if [[ "${ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS}" == "true" ]]; then
+  if (( checker_runs_failed > 0 )); then
+    threshold_failures+=("checker failures ${checker_runs_failed} exceeded 0")
+  fi
+  if (( checker_runs_skipped > 0 )); then
+    threshold_failures+=("checker skips ${checker_runs_skipped} exceeded 0")
+  fi
+  if (( checker_runs_successful != checker_runs_total )); then
+    threshold_failures+=("checker success count ${checker_runs_successful} did not match total ${checker_runs_total}")
+  fi
+fi
 
 validation_status="passed"
 if (( ${#threshold_failures[@]} > 0 )); then
@@ -542,6 +612,10 @@ summary_json="$(
     --argjson submission_max_ms "${submission_max_ms}" \
     --argjson tick_advance_p95_ms "${tick_advance_p95_ms}" \
     --argjson tick_advance_max_ms "${tick_advance_max_ms}" \
+    --argjson checker_runs_total "${checker_runs_total}" \
+    --argjson checker_runs_successful "${checker_runs_successful}" \
+    --argjson checker_runs_failed "${checker_runs_failed}" \
+    --argjson checker_runs_skipped "${checker_runs_skipped}" \
     --argjson scoreboard_recompute_ms "${scoreboard_recompute_ms}" \
     --argjson attack_feed_lag_ms "${attack_feed_lag_ms}" \
     --argjson attack_feed_timeout_ms "${ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS}" \
@@ -551,6 +625,8 @@ summary_json="$(
     --arg max_submission_p95_ms "${ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS}" \
     --arg max_recompute_ms "${ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS}" \
     --arg max_attack_feed_lag_ms "${ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS}" \
+    --arg max_tick_advance_p95_ms "${ATTACK_MAP_LOAD_MAX_TICK_ADVANCE_P95_MS}" \
+    --arg validate_checker_runs "${ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS}" \
     --argjson threshold_failures "${threshold_failures_json}" \
     '{
       challenge_id: $challenge_id,
@@ -563,6 +639,12 @@ summary_json="$(
       scenario_duration_ms: $scenario_duration_ms,
       submission_window_duration_ms: $submission_window_duration_ms,
       submissions_per_second: ($submissions_per_second | tonumber),
+      checker_runs: {
+        total: $checker_runs_total,
+        successful: $checker_runs_successful,
+        failed: $checker_runs_failed,
+        skipped: $checker_runs_skipped
+      },
       latencies_ms: {
         flag_fetch: {
           min: $flag_fetch_min_ms,
@@ -588,8 +670,10 @@ summary_json="$(
         max_submission_p95_ms: (if $max_submission_p95_ms == "" then null else ($max_submission_p95_ms | tonumber) end),
         max_recompute_ms: (if $max_recompute_ms == "" then null else ($max_recompute_ms | tonumber) end),
         max_attack_feed_lag_ms: (if $max_attack_feed_lag_ms == "" then null else ($max_attack_feed_lag_ms | tonumber) end),
+        max_tick_advance_p95_ms: (if $max_tick_advance_p95_ms == "" then null else ($max_tick_advance_p95_ms | tonumber) end),
         attack_feed_timeout_ms: $attack_feed_timeout_ms,
-        attack_feed_poll_interval_ms: $attack_feed_poll_interval_ms
+        attack_feed_poll_interval_ms: $attack_feed_poll_interval_ms,
+        validate_checker_runs: ($validate_checker_runs == "true")
       },
       threshold_failures: $threshold_failures
     }'
@@ -605,6 +689,12 @@ printf 'attack-map metrics: submissions=%s duration_ms=%s throughput=%s/s submis
   "${scoreboard_recompute_ms}" \
   "${attack_feed_lag_ms}" \
   "${validation_status}"
+printf 'attack-map checker summary: total=%s successful=%s failed=%s skipped=%s tick_advance_p95_ms=%s\n' \
+  "${checker_runs_total}" \
+  "${checker_runs_successful}" \
+  "${checker_runs_failed}" \
+  "${checker_runs_skipped}" \
+  "${tick_advance_p95_ms}"
 printf '%s\n' "${summary_json}" | jq .
 echo "tip: increase organizer attack page size to 96 to see more teams in one slice."
 
@@ -631,6 +721,10 @@ if [[ -n "${ATTACK_MAP_LOAD_ARTIFACT_FILE}" ]]; then
     echo "SIM_SUBMISSION_MAX_MS=${submission_max_ms}"
     echo "SIM_TICK_ADVANCE_P95_MS=${tick_advance_p95_ms}"
     echo "SIM_TICK_ADVANCE_MAX_MS=${tick_advance_max_ms}"
+    echo "SIM_CHECKER_RUNS_TOTAL=${checker_runs_total}"
+    echo "SIM_CHECKER_RUNS_SUCCESSFUL=${checker_runs_successful}"
+    echo "SIM_CHECKER_RUNS_FAILED=${checker_runs_failed}"
+    echo "SIM_CHECKER_RUNS_SKIPPED=${checker_runs_skipped}"
     echo "SIM_SCOREBOARD_RECOMPUTE_MS=${scoreboard_recompute_ms}"
     echo "SIM_ATTACK_FEED_LAG_MS=${attack_feed_lag_ms}"
     for ((i = 0; i < TEAM_COUNT; i++)); do
