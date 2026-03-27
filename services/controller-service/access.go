@@ -1,0 +1,526 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"adplatform/internal/platform/config"
+	"adplatform/internal/services/apigateway"
+)
+
+type serviceAccessExecutor interface {
+	Status() apigateway.ControllerAccessStatus
+	Apply(context.Context, []apigateway.ControllerServiceAccessPolicy, time.Time) (apigateway.ControllerAccessStatus, error)
+	Teardown(ctx context.Context) error
+}
+
+type controllerAccessArtifactPaths struct {
+	rulesPath  string
+	statusPath string
+}
+
+type dryRunServiceAccessExecutor struct{}
+
+type fileServiceAccessExecutor struct {
+	mode            string
+	interfaceName   string
+	firewallBackend string
+	firewallTable   string
+	paths           controllerAccessArtifactPaths
+}
+
+type hostServiceAccessExecutor struct {
+	fileServiceAccessExecutor
+	nftBinary      string
+	iptablesBinary string
+	applyTimeout   time.Duration
+	runner         controllerCommandRunner
+}
+
+type controllerCommandRunner interface {
+	Run(ctx context.Context, binary string, args ...string) error
+}
+
+type execControllerCommandRunner struct{}
+
+func newServiceAccessExecutor() serviceAccessExecutor {
+	base := fileServiceAccessExecutor{
+		mode:            strings.ToLower(config.String("CONTROLLER_ACCESS_MODE", "dry-run")),
+		interfaceName:   strings.TrimSpace(config.String("CONTROLLER_ACCESS_INTERFACE", "wg0")),
+		firewallBackend: strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_ACCESS_FIREWALL_BACKEND", "nftables"))),
+		firewallTable:   sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")),
+		paths: controllerAccessArtifactPaths{
+			rulesPath:  strings.TrimSpace(config.String("CONTROLLER_ACCESS_RULES_PATH", ".runtime/controller/access.nft")),
+			statusPath: strings.TrimSpace(config.String("CONTROLLER_ACCESS_STATUS_PATH", ".runtime/controller/access-status.json")),
+		},
+	}
+	if base.mode == "host" {
+		return &hostServiceAccessExecutor{
+			fileServiceAccessExecutor: base,
+			nftBinary:                 strings.TrimSpace(config.String("CONTROLLER_ACCESS_NFT_BIN", "nft")),
+			iptablesBinary:            strings.TrimSpace(config.String("CONTROLLER_ACCESS_IPTABLES_BIN", "iptables")),
+			applyTimeout:              config.Duration("CONTROLLER_ACCESS_TIMEOUT", 10*time.Second),
+			runner:                    execControllerCommandRunner{},
+		}
+	}
+	if base.mode == "files" {
+		return &base
+	}
+	return dryRunServiceAccessExecutor{}
+}
+
+func (dryRunServiceAccessExecutor) Status() apigateway.ControllerAccessStatus {
+	return apigateway.ControllerAccessStatus{State: "idle", Mode: "dry-run"}
+}
+
+func (dryRunServiceAccessExecutor) Apply(_ context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
+	return buildControllerAccessStatus("dry-run", "", "", "", policies, now), nil
+}
+
+func (dryRunServiceAccessExecutor) Teardown(_ context.Context) error {
+	return nil
+}
+
+func (e *fileServiceAccessExecutor) Status() apigateway.ControllerAccessStatus {
+	status := apigateway.ControllerAccessStatus{
+		State:           "idle",
+		Mode:            e.mode,
+		Interface:       e.interfaceName,
+		FirewallBackend: e.firewallBackend,
+		RulesPath:       e.paths.rulesPath,
+		StatusPath:      e.paths.statusPath,
+	}
+	if strings.TrimSpace(e.paths.statusPath) == "" {
+		return status
+	}
+	payload, err := os.ReadFile(e.paths.statusPath)
+	if err != nil {
+		return status
+	}
+	if err := json.Unmarshal(payload, &status); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+	}
+	if status.Mode == "" {
+		status.Mode = e.mode
+	}
+	if status.Interface == "" {
+		status.Interface = e.interfaceName
+	}
+	if status.FirewallBackend == "" {
+		status.FirewallBackend = e.firewallBackend
+	}
+	if status.RulesPath == "" {
+		status.RulesPath = e.paths.rulesPath
+	}
+	if status.StatusPath == "" {
+		status.StatusPath = e.paths.statusPath
+	}
+	return status
+}
+
+func (e *fileServiceAccessExecutor) Apply(_ context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
+	status := buildControllerAccessStatus(e.mode, e.interfaceName, e.firewallBackend, e.paths.rulesPath, policies, now)
+	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, policies)
+	if err := writeControllerAccessArtifacts(e.paths, rules, status); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
+	return status, nil
+}
+
+func (e *fileServiceAccessExecutor) Teardown(_ context.Context) error {
+	if strings.TrimSpace(e.paths.rulesPath) != "" {
+		_ = os.Remove(e.paths.rulesPath)
+	}
+	if strings.TrimSpace(e.paths.statusPath) != "" {
+		_ = os.Remove(e.paths.statusPath)
+	}
+	return nil
+}
+
+func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
+	log.Printf("applying %d service access policies", len(policies))
+	for _, p := range policies {
+		log.Printf("policy: team=%d (%s), challenge=%d (%s), ip=%s, port=%d, unlocked=%v, peers=%v",
+			p.TeamID, p.TeamName, p.ChallengeID, p.ChallengeName, p.ServiceIP, p.ServicePort, p.SSHUnlocked, p.AllowedPeerAddresses)
+	}
+
+	status := buildControllerAccessStatus("host", e.interfaceName, e.firewallBackend, e.paths.rulesPath, policies, now)
+	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, policies)
+	if err := writeControllerAccessArtifacts(e.paths, rules, status); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
+
+	applyCtx, cancel := context.WithTimeout(ctx, e.applyTimeout)
+	defer cancel()
+	iptablesBinary, err := e.selectIptablesBinary(applyCtx)
+	if err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
+	log.Printf("using iptables binary: %s", iptablesBinary)
+
+	if e.firewallBackend == "nftables" {
+		log.Printf("applying nftables rules from %s", e.paths.rulesPath)
+		_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+		if err := e.runner.Run(applyCtx, e.nftBinary, "-f", e.paths.rulesPath); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+		// Docker traffic still traverses iptables raw/filter hooks on the host.
+		// Keep those jumps and bypass rules aligned even when nftables owns the
+		// service policy table itself.
+		if err := e.applyDockerRawRules(applyCtx, iptablesBinary, policies); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+		if err := e.applyDockerUserRules(applyCtx, iptablesBinary, policies); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+	} else {
+		// When using iptables backend, clean up any orphaned nftables table
+		// to prevent it from silently overriding iptables rules.
+		_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+
+		log.Printf("applying iptables rules")
+		if err := e.applyDockerRawRules(applyCtx, iptablesBinary, policies); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+		if err := e.applyDockerUserRules(applyCtx, iptablesBinary, policies); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+	}
+	log.Printf("access policies applied successfully")
+	if err := writeControllerAccessStatus(e.paths.statusPath, status); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		return status, err
+	}
+	return status, nil
+}
+
+func (e *hostServiceAccessExecutor) Teardown(ctx context.Context) error {
+	applyCtx, cancel := context.WithTimeout(ctx, e.applyTimeout)
+	defer cancel()
+
+	// Always clean up nftables table to prevent orphaned rules from conflicting.
+	_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+
+	iptablesBinary, err := e.selectIptablesBinary(applyCtx)
+	if err == nil {
+		// Clean up User chains
+		const userChain = "ADPLATFORM-WG-SERVICES"
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "filter", "-D", "DOCKER-USER", "-j", userChain)
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "filter", "-D", "FORWARD", "-j", userChain)
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "filter", "-F", userChain)
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "filter", "-X", userChain)
+
+		// Clean up Raw chains
+		const rawChain = "ADPLATFORM-WG-RAW"
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "raw", "-D", "PREROUTING", "-j", rawChain)
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "raw", "-F", rawChain)
+		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "raw", "-X", rawChain)
+	}
+
+	return e.fileServiceAccessExecutor.Teardown(ctx)
+}
+
+func (execControllerCommandRunner) Run(ctx context.Context, binary string, args ...string) error {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s failed: %w: %s", binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, iptablesBinary string, policies []apigateway.ControllerServiceAccessPolicy) error {
+	const chainName = "ADPLATFORM-WG-RAW"
+
+	if err := e.ensureIptablesChain(ctx, iptablesBinary, "raw", chainName); err != nil {
+		return err
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-C", "PREROUTING", "-j", chainName); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-I", "PREROUTING", "1", "-j", chainName); err != nil {
+			return err
+		}
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-F", chainName); err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
+		if strings.TrimSpace(e.interfaceName) != "" {
+			if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, iptablesBinary string, policies []apigateway.ControllerServiceAccessPolicy) error {
+	const chainName = "ADPLATFORM-WG-SERVICES"
+	const dockerUserChain = "DOCKER-USER"
+
+	if err := e.ensureIptablesChain(ctx, iptablesBinary, "filter", dockerUserChain); err != nil {
+		return err
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-C", "FORWARD", "-j", dockerUserChain); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-I", "FORWARD", "1", "-j", dockerUserChain); err != nil {
+			return err
+		}
+	}
+
+	if err := e.ensureIptablesChain(ctx, iptablesBinary, "filter", chainName); err != nil {
+		return err
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-F", chainName); err != nil {
+		return err
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-C", dockerUserChain, "-j", chainName); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-I", dockerUserChain, "1", "-j", chainName); err != nil {
+			return err
+		}
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-C", "FORWARD", "-j", chainName); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-I", "FORWARD", "1", "-j", chainName); err != nil {
+			return err
+		}
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
+		servicePort := fmt.Sprintf("%d", policy.ServicePort)
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.ServicePort), "-j", "ACCEPT"); err != nil {
+			return err
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
+			return err
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-p", "tcp", "--sport", servicePort, "-j", "ACCEPT"); err != nil {
+			return err
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", serviceCIDR, "-p", "tcp", "--sport", servicePort, "-j", "ACCEPT"); err != nil {
+			return err
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
+			return err
+		}
+		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
+			for _, peer := range policy.AllowedPeerAddresses {
+				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "ACCEPT"); err != nil {
+					return err
+				}
+				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "ACCEPT"); err != nil {
+					return err
+				}
+			}
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "DROP"); err != nil {
+			return err
+		}
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "DROP"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *hostServiceAccessExecutor) ensureIptablesChain(ctx context.Context, iptablesBinary, tableName, chainName string) error {
+	createArgs := []string{"-N", chainName}
+	showArgs := []string{"-S", chainName}
+	if strings.TrimSpace(tableName) != "" {
+		createArgs = append([]string{"-t", tableName}, createArgs...)
+		showArgs = append([]string{"-t", tableName}, showArgs...)
+	}
+	if err := e.runner.Run(ctx, iptablesBinary, createArgs...); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, showArgs...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *hostServiceAccessExecutor) selectIptablesBinary(ctx context.Context) (string, error) {
+	candidates := []string{e.iptablesBinary, "iptables", "iptables-legacy", "iptables-nft"}
+	seen := make(map[string]struct{})
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if err := e.runner.Run(ctx, candidate, "-S", "DOCKER"); err == nil {
+			return candidate, nil
+		}
+		if err := e.runner.Run(ctx, candidate, "-S", "DOCKER-USER"); err == nil {
+			return candidate, nil
+		}
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; !ok {
+			continue
+		}
+		if err := e.runner.Run(ctx, candidate, "-S", "FORWARD"); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no usable iptables backend found for controller access enforcement")
+}
+
+func buildControllerAccessStatus(mode, interfaceName, firewallBackend, rulesPath string, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) apigateway.ControllerAccessStatus {
+	sshOpen := 0
+	allowedPeers := make(map[string]struct{})
+	for _, policy := range policies {
+		if policy.SSHUnlocked {
+			sshOpen++
+		}
+		for _, peer := range policy.AllowedPeerAddresses {
+			allowedPeers[peer] = struct{}{}
+		}
+	}
+	rules := renderControllerAccessRules(sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")), interfaceName, policies)
+	return apigateway.ControllerAccessStatus{
+		State:             "applied",
+		Mode:              mode,
+		Interface:         interfaceName,
+		FirewallBackend:   firewallBackend,
+		RulesPath:         rulesPath,
+		PoliciesTotal:     len(policies),
+		SSHOpenServices:   sshOpen,
+		SSHLockedServices: len(policies) - sshOpen,
+		AllowedPeersTotal: len(allowedPeers),
+		Revision:          controllerAccessRevision(rules),
+		AppliedAt:         now.UTC().Format(time.RFC3339),
+	}
+}
+
+func renderControllerAccessRules(tableName, interfaceName string, policies []apigateway.ControllerServiceAccessPolicy) string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
+	builder.WriteString("  chain forward {\n")
+	builder.WriteString("    type filter hook forward priority filter;\n")
+	builder.WriteString("    policy accept;\n")
+	builder.WriteString("    ct state established,related accept\n")
+	for _, policy := range policies {
+		ingressPrefix := ""
+		egressPrefix := ""
+		if strings.TrimSpace(interfaceName) != "" {
+			ingressPrefix = fmt.Sprintf("iifname \"%s\" ", interfaceName)
+			egressPrefix = fmt.Sprintf("oifname \"%s\" ", interfaceName)
+		}
+		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d accept\n", ingressPrefix, policy.ServiceIP, policy.ServicePort))
+		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d accept\n", policy.ServiceIP, policy.ServicePort))
+		builder.WriteString(fmt.Sprintf("    %sip saddr %s tcp sport %d accept\n", egressPrefix, policy.ServiceIP, policy.ServicePort))
+		builder.WriteString(fmt.Sprintf("    ip saddr %s tcp sport %d accept\n", policy.ServiceIP, policy.ServicePort))
+		builder.WriteString(fmt.Sprintf("    %sip saddr %s ct state established,related accept\n", egressPrefix, policy.ServiceIP))
+		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
+			builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(policy.AllowedPeerAddresses, ", ")))
+			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(policy.AllowedPeerAddresses, ", ")))
+		}
+		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
+		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))
+	}
+	builder.WriteString("  }\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
+func controllerAccessRevision(rules string) string {
+	digest := sha256.Sum256([]byte(rules))
+	return hex.EncodeToString(digest[:8])
+}
+
+func sanitizeControllerNftTableName(value string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return "adplatform_service_access"
+	}
+	var builder strings.Builder
+	for _, r := range trimmed {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			builder.WriteRune(r)
+		}
+	}
+	if builder.Len() == 0 {
+		return "adplatform_service_access"
+	}
+	return builder.String()
+}
+
+func writeControllerAccessArtifacts(paths controllerAccessArtifactPaths, rules string, status apigateway.ControllerAccessStatus) error {
+	if err := ensureControllerParentDir(paths.rulesPath); err != nil {
+		return err
+	}
+	if err := ensureControllerParentDir(paths.statusPath); err != nil {
+		return err
+	}
+	if err := os.WriteFile(paths.rulesPath, []byte(rules), 0o600); err != nil {
+		return err
+	}
+	return writeControllerAccessStatus(paths.statusPath, status)
+}
+
+func writeControllerAccessStatus(path string, status apigateway.ControllerAccessStatus) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	payload, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, payload, 0o600)
+}
+
+func ensureControllerParentDir(path string) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return nil
+	}
+	return os.MkdirAll(filepath.Dir(trimmed), 0o755)
+}

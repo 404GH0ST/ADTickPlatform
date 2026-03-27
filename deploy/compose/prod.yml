@@ -1,0 +1,339 @@
+name: ad-platform-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-adplatform}
+      POSTGRES_USER: ${POSTGRES_USER:-adplatform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adplatform}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adplatform} -d ${POSTGRES_DB:-adplatform}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - control
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - redis-data:/data
+    networks:
+      - control
+
+  checker-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: checker-runner
+        EXTRA_APK: docker-cli
+    restart: unless-stopped
+    environment:
+      CHECKER_RUNNER_ADDR: :8083
+      CHECKER_RUNNER_MODE: docker
+      AD_PLATFORM_NETWORK_LAYOUT: ${AD_PLATFORM_NETWORK_LAYOUT:-per-service}
+      CHECKER_RUNNER_DOCKER_BIN: docker
+      CHECKER_RUNNER_DOCKER_NETWORK: ${CHECKER_RUNNER_DOCKER_NETWORK:-adplatform_prod_game}
+      CHECKER_RUNNER_TIMEOUT: 15s
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - control
+
+  game-core:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: game-core
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GAME_CORE_ADDR: :8081
+      GAME_CORE_STATE_BACKEND: postgres
+      GAME_CORE_AUTO_MIGRATE: "true"
+      API_GATEWAY_AUTO_SEED: ${API_GATEWAY_AUTO_SEED:-false}
+      DATABASE_INCLUDE_SEEDS: ${DATABASE_INCLUDE_SEEDS:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      GAME_CORE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      CHECKER_RUNNER_INTERNAL_URL: http://checker-runner:8083
+      CHECKER_RUNNER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      GAME_CORE_FLAG_SECRET: ${GAME_CORE_FLAG_SECRET}
+      GAME_CORE_SCHEDULER_ENABLED: ${GAME_CORE_SCHEDULER_ENABLED:-false}
+      GAME_CORE_SCHEDULER_INTERVAL: ${GAME_CORE_SCHEDULER_INTERVAL:-60s}
+      GAME_CORE_MATCH_START_AT: ${GAME_CORE_MATCH_START_AT:-}
+      GAME_CORE_MATCH_END_AT: ${GAME_CORE_MATCH_END_AT:-}
+      GAME_CORE_CHECKER_PHASES: ${GAME_CORE_CHECKER_PHASES:-put,get,check}
+      GAME_CORE_CHECKER_TIMEOUT_SECONDS: ${GAME_CORE_CHECKER_TIMEOUT_SECONDS:-15}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    networks:
+      - control
+
+  submission-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: submission-service
+    restart: unless-stopped
+    depends_on:
+      game-core:
+        condition: service_started
+    environment:
+      SUBMISSION_SERVICE_ADDR: :8082
+      SUBMISSION_SERVICE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      GAME_CORE_INTERNAL_URL: http://game-core:8081
+      GAME_CORE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    networks:
+      - control
+
+  controller-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/controller-service.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CONTROLLER_SERVICE_ADDR: ${CONTROLLER_SERVICE_ADDR:-:8084}
+      CONTROLLER_STATE_BACKEND: postgres
+      CONTROLLER_AUTO_MIGRATE: "true"
+      API_GATEWAY_AUTO_SEED: ${API_GATEWAY_AUTO_SEED:-false}
+      DATABASE_INCLUDE_SEEDS: ${DATABASE_INCLUDE_SEEDS:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      CONTROLLER_RUNTIME_MODE: docker
+      AD_PLATFORM_NETWORK_LAYOUT: ${AD_PLATFORM_NETWORK_LAYOUT:-per-service}
+      CONTROLLER_DOCKER_BIN: docker
+      CONTROLLER_DOCKER_NETWORK: ${CONTROLLER_DOCKER_NETWORK:-adplatform_prod_game}
+      AD_PLATFORM_GAME_NETWORK_SUBNET: ${AD_PLATFORM_GAME_NETWORK_SUBNET:-10.80.0.0/16}
+      CONTROLLER_STATE_MOUNT_PATH: /opt/ad/state
+      CONTROLLER_RUNTIME_TIMEOUT: 15s
+      CONTROLLER_SSH_PASSWORD_APPLY_MODE: docker-exec
+      CONTROLLER_SSH_CONTRACT_MODE: verify
+      CONTROLLER_ACCESS_MODE: ${CONTROLLER_ACCESS_MODE:-dry-run}
+      CONTROLLER_RECONCILE_DEPLOYMENTS_ON_STARTUP: ${CONTROLLER_RECONCILE_DEPLOYMENTS_ON_STARTUP:-true}
+      CONTROLLER_RECONCILE_ACCESS_ON_STARTUP: ${CONTROLLER_RECONCILE_ACCESS_ON_STARTUP:-true}
+      CONTROLLER_ACCESS_INTERFACE: ${CONTROLLER_ACCESS_INTERFACE:-wg0}
+      CONTROLLER_ACCESS_FIREWALL_BACKEND: ${CONTROLLER_ACCESS_FIREWALL_BACKEND:-nftables}
+      CONTROLLER_ACCESS_NFT_BIN: ${CONTROLLER_ACCESS_NFT_BIN:-nft}
+      CONTROLLER_ACCESS_FIREWALL_TABLE: ${CONTROLLER_ACCESS_FIREWALL_TABLE:-adplatform_service_access}
+      CONTROLLER_ACCESS_RULES_PATH: /runtime/controller/access.nft
+      CONTROLLER_ACCESS_STATUS_PATH: /runtime/controller/access-status.json
+      CONTROLLER_ACCESS_TIMEOUT: ${CONTROLLER_ACCESS_TIMEOUT:-10s}
+      CONTROLLER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      CHECKER_RUNNER_INTERNAL_URL: http://checker-runner:8083
+      CHECKER_RUNNER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      UNLOCK_PROOF_SECRET: ${UNLOCK_PROOF_SECRET}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - controller-artifacts:/runtime/controller
+    networks:
+      - control
+
+  scoring-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: scoring-worker
+    restart: unless-stopped
+    depends_on:
+      game-core:
+        condition: service_started
+    environment:
+      SCORING_WORKER_ADDR: :8085
+      SCORING_WORKER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      GAME_CORE_INTERNAL_URL: http://game-core:8081
+      GAME_CORE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    networks:
+      - control
+
+  realtime-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: realtime-gateway
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_started
+    environment:
+      REALTIME_GATEWAY_ADDR: :8086
+      REALTIME_SOURCE_URL: http://api-gateway:8080
+      REALTIME_SOURCE_ADMIN_TOKEN: ${ADMIN_API_TOKEN}
+      REALTIME_ADMIN_TOKEN: ${ADMIN_API_TOKEN}
+      REALTIME_POLL_INTERVAL: 2s
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    networks:
+      - control
+
+  wireguard-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: wireguard-gateway
+        EXTRA_APK: wireguard-tools nftables
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      WIREGUARD_GATEWAY_ADDR: ${WIREGUARD_GATEWAY_ADDR:-:8087}
+      WIREGUARD_GATEWAY_STATE_BACKEND: postgres
+      WIREGUARD_GATEWAY_AUTO_MIGRATE: "true"
+      API_GATEWAY_AUTO_SEED: ${API_GATEWAY_AUTO_SEED:-false}
+      DATABASE_INCLUDE_SEEDS: ${DATABASE_INCLUDE_SEEDS:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      WIREGUARD_GATEWAY_MODE: ${WIREGUARD_GATEWAY_MODE:-files}
+      WIREGUARD_GATEWAY_RECONCILE_ON_STARTUP: ${WIREGUARD_GATEWAY_RECONCILE_ON_STARTUP:-true}
+      WIREGUARD_GATEWAY_CONFIG_PATH: /runtime/wireguard/wg0.conf
+      WIREGUARD_GATEWAY_PEERS_PATH: /runtime/wireguard/peers.json
+      WIREGUARD_GATEWAY_RULES_PATH: /runtime/wireguard/nftables.conf
+      WIREGUARD_GATEWAY_STATUS_PATH: /runtime/wireguard/status.json
+      WIREGUARD_GATEWAY_INTERFACE: ${WIREGUARD_GATEWAY_INTERFACE:-wg0}
+      WIREGUARD_GATEWAY_WG_BIN: ${WIREGUARD_GATEWAY_WG_BIN:-wg}
+      WIREGUARD_GATEWAY_FIREWALL_BACKEND: ${WIREGUARD_GATEWAY_FIREWALL_BACKEND:-nftables}
+      WIREGUARD_GATEWAY_NFT_BIN: ${WIREGUARD_GATEWAY_NFT_BIN:-nft}
+      WIREGUARD_GATEWAY_FIREWALL_TABLE: ${WIREGUARD_GATEWAY_FIREWALL_TABLE:-adplatform_wireguard}
+      WIREGUARD_GATEWAY_APPLY_TIMEOUT: ${WIREGUARD_GATEWAY_APPLY_TIMEOUT:-10s}
+      WIREGUARD_SERVER_ENDPOINT: ${WIREGUARD_SERVER_ENDPOINT}
+      WIREGUARD_SERVER_ADDRESS: ${WIREGUARD_SERVER_ADDRESS}
+      WIREGUARD_SERVER_LISTEN_PORT: ${WIREGUARD_SERVER_LISTEN_PORT}
+      WIREGUARD_SERVER_ALLOWED_IPS: ${WIREGUARD_SERVER_ALLOWED_IPS}
+      WIREGUARD_SERVER_DNS: ${WIREGUARD_SERVER_DNS}
+      WIREGUARD_SERVER_PRIVATE_KEY: ${WIREGUARD_SERVER_PRIVATE_KEY}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    volumes:
+      - wireguard-artifacts:/runtime/wireguard
+    networks:
+      - control
+
+  api-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/go-service.Dockerfile
+      args:
+        SERVICE_PATH: api-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      game-core:
+        condition: service_started
+      submission-service:
+        condition: service_started
+      scoring-worker:
+        condition: service_started
+      controller-service:
+        condition: service_started
+      wireguard-gateway:
+        condition: service_started
+    environment:
+      API_GATEWAY_ADDR: :8080
+      API_GATEWAY_STATE_BACKEND: postgres
+      API_GATEWAY_AUTO_MIGRATE: "true"
+      API_GATEWAY_AUTO_SEED: ${API_GATEWAY_AUTO_SEED:-false}
+      DATABASE_INCLUDE_SEEDS: ${DATABASE_INCLUDE_SEEDS:-false}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      TEAM_JWT_SECRET: ${TEAM_JWT_SECRET}
+      UNLOCK_PROOF_SECRET: ${UNLOCK_PROOF_SECRET}
+      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
+      WIREGUARD_SERVER_ENDPOINT: ${WIREGUARD_SERVER_ENDPOINT}
+      WIREGUARD_SERVER_LISTEN_PORT: ${WIREGUARD_SERVER_LISTEN_PORT}
+      WIREGUARD_SERVER_ALLOWED_IPS: ${WIREGUARD_SERVER_ALLOWED_IPS}
+      WIREGUARD_SERVER_DNS: ${WIREGUARD_SERVER_DNS}
+      WIREGUARD_SERVER_PRIVATE_KEY: ${WIREGUARD_SERVER_PRIVATE_KEY}
+      WIREGUARD_SERVER_PUBLIC_KEY: ${WIREGUARD_SERVER_PUBLIC_KEY:-}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      GAME_CORE_INTERNAL_URL: http://game-core:8081
+      GAME_CORE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      SUBMISSION_SERVICE_INTERNAL_URL: http://submission-service:8082
+      SUBMISSION_SERVICE_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      SCORING_WORKER_INTERNAL_URL: http://scoring-worker:8085
+      SCORING_WORKER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      CONTROLLER_INTERNAL_URL: http://controller-service:8084
+      CONTROLLER_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      WIREGUARD_GATEWAY_INTERNAL_URL: http://wireguard-gateway:8087
+      WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      API_GATEWAY_TEAM_ID: ${AD_PLATFORM_TEAM_ID:-101}
+    networks:
+      - control
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_started
+      realtime-gateway:
+        condition: service_started
+    environment:
+      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
+      AD_PLATFORM_API_URL: http://api-gateway:8080
+      AD_PLATFORM_REALTIME_URL: http://realtime-gateway:8086
+      AD_PLATFORM_CONTROLLER_URL: http://controller-service:8084
+      AD_PLATFORM_EMAIL: ${AD_PLATFORM_EMAIL:-alpha.captain@example.com}
+      AD_PLATFORM_PASSWORD: ${AD_PLATFORM_PASSWORD:-alpha-secret}
+      AD_PLATFORM_TEAM_ID: ${AD_PLATFORM_TEAM_ID:-101}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    networks:
+      - control
+
+  edge:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+      realtime-gateway:
+        condition: service_started
+    ports:
+      - "${EDGE_HTTP_PUBLIC_PORT:-80}:80"
+      - "${EDGE_HTTPS_PUBLIC_PORT:-443}:443"
+    environment:
+      EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-http://localhost}
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - control
+
+volumes:
+  postgres-data:
+  redis-data:
+  wireguard-artifacts:
+  controller-artifacts:
+  caddy-data:
+  caddy-config:
+
+networks:
+  control:

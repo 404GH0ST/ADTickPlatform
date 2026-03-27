@@ -1,0 +1,4 @@
+ALTER TABLE game_match_state
+    ADD COLUMN IF NOT EXISTS scheduled_start_at TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS scheduled_end_at TIMESTAMPTZ NULL,
+    ADD COLUMN IF NOT EXISTS schedule_configured BOOLEAN NOT NULL DEFAULT FALSE;

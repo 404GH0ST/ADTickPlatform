@@ -1,0 +1,112 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type ServiceInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Addr    string `json:"addr"`
+}
+
+type ErrorEnvelope struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+func NewBaseMux(info ServiceInfo) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		WriteJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"service": info.Name,
+		})
+	})
+
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		WriteJSON(w, http.StatusOK, map[string]string{
+			"status":  "ready",
+			"service": info.Name,
+		})
+	})
+
+	mux.HandleFunc("GET /metadata", func(w http.ResponseWriter, _ *http.Request) {
+		WriteJSON(w, http.StatusOK, info)
+	})
+
+	return mux
+}
+
+func WriteJSON(w http.ResponseWriter, statusCode int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func DecodeJSON(r *http.Request, dst any) error {
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+
+	if decoder.More() {
+		return errors.New("unexpected trailing json")
+	}
+
+	return nil
+}
+
+func BearerToken(r *http.Request) (string, bool) {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if header == "" {
+		return "", false
+	}
+
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", false
+	}
+
+	return token, true
+}
+
+func RunServer(ctx context.Context, info ServiceInfo, handler http.Handler) error {
+	server := &http.Server{
+		Addr:              info.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}

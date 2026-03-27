@@ -1,0 +1,127 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
+import { StatusBanner } from '@/components/ui/status-banner';
+import type {
+  AdminOperationsStatus,
+  AdminOverview,
+} from '@/lib/admin-dashboard-types';
+
+type Props = {
+  overview: AdminOverview;
+};
+
+type SuccessEnvelope<T> = {
+  status: 'success';
+  data: T;
+};
+
+function SummaryItem({
+  label,
+  value,
+  mono = false,
+  testId,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  testId?: string;
+}) {
+  return (
+    <div
+      className="border-b p-3 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0"
+      data-testid={testId}
+    >
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className={mono ? 'mt-1 break-all font-mono text-sm' : 'mt-1 text-sm font-medium'}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export function OrganizerStatusSummary({ overview }: Props) {
+  const [operationsStatus, setOperationsStatus] = useState<
+    AdminOperationsStatus | undefined
+  >(overview.operationsStatus);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshOperationsStatus() {
+      try {
+        const response = await fetch('/api/admin/operations/status', {
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload =
+          (await response.json()) as SuccessEnvelope<AdminOperationsStatus>;
+        if (!cancelled && payload.status === 'success') {
+          setOperationsStatus(payload.data);
+        }
+      } catch {
+        // Keep the last known operations snapshot if one refresh fails.
+      }
+    }
+
+    const interval = window.setInterval(refreshOperationsStatus, 30000);
+    const handleFocus = () => {
+      void refreshOperationsStatus();
+    };
+
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const operationsAlertCount =
+    operationsStatus?.alerts.length ?? overview.operationsAlertCount;
+
+  return (
+    <>
+      <section className="rounded-lg border bg-card" data-testid="organizer-summary">
+        <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-9">
+          <SummaryItem label="Teams" value={String(overview.teamCount)} />
+          <SummaryItem label="Players" value={String(overview.playerCount)} />
+          <SummaryItem
+            label="Challenges"
+            value={String(overview.challengeCount)}
+          />
+          <SummaryItem
+            label="Published Challenges"
+            value={String(overview.publishedChallengeCount)}
+          />
+          <SummaryItem
+            label="Deployments"
+            value={String(overview.deploymentCount)}
+          />
+          <SummaryItem
+            label="Pending Deployments"
+            value={String(overview.pendingDeploymentCount)}
+          />
+          <SummaryItem label="Ops Alerts" value={String(operationsAlertCount)} />
+          <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
+          <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
+        </dl>
+      </section>
+
+      {overview.message ? (
+        <StatusBanner message={overview.message} variant="warning" />
+      ) : null}
+      {operationsStatus?.alerts.map((alert) => (
+        <StatusBanner
+          key={alert.id}
+          message={alert.detail ? `${alert.summary} ${alert.detail}` : alert.summary}
+          variant={alert.severity === 'critical' ? 'error' : 'warning'}
+        />
+      )) ?? null}
+    </>
+  );
+}

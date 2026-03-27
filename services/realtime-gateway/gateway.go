@@ -1,0 +1,358 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"adplatform/internal/platform/httpapi"
+)
+
+type streamKind string
+
+const (
+	streamScoreboard      streamKind = "scoreboard"
+	streamAttacks         streamKind = "attacks"
+	streamGameStatus      streamKind = "game_status"
+	streamSchedulerEvents streamKind = "scheduler_events"
+	streamCheckerRuns     streamKind = "checker_runs"
+)
+
+type realtimeGateway struct {
+	client       publicSnapshotClient
+	pollInterval time.Duration
+	adminToken   string
+
+	mu               sync.RWMutex
+	scoreboard       []byte
+	scoreHash        [32]byte
+	attacks          []byte
+	attackHash       [32]byte
+	gameStatus       []byte
+	gameStatusHash   [32]byte
+	schedulerEvents  []byte
+	schedulerHash    [32]byte
+	checkerRuns      []byte
+	checkerRunsHash  [32]byte
+	subscribers      map[streamKind]map[int]chan []byte
+	nextSubscriberID int
+}
+
+func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration, adminToken string) *realtimeGateway {
+	return &realtimeGateway{
+		client:       client,
+		pollInterval: pollInterval,
+		adminToken:   strings.TrimSpace(adminToken),
+		subscribers: map[streamKind]map[int]chan []byte{
+			streamScoreboard:      make(map[int]chan []byte),
+			streamAttacks:         make(map[int]chan []byte),
+			streamGameStatus:      make(map[int]chan []byte),
+			streamSchedulerEvents: make(map[int]chan []byte),
+			streamCheckerRuns:     make(map[int]chan []byte),
+		},
+	}
+}
+
+func (g *realtimeGateway) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /public/v1/scoreboard/stream", g.handleScoreboardStream)
+	mux.HandleFunc("GET /public/v1/attacks/stream", g.handleAttackStream)
+	mux.HandleFunc("GET /admin/v1/game/scoreboard/stream", g.handleAdminScoreboardStream)
+	mux.HandleFunc("GET /admin/v1/game/status/stream", g.handleAdminGameStatusStream)
+	mux.HandleFunc("GET /admin/v1/game/checker-runs/stream", g.handleAdminCheckerRunsStream)
+	mux.HandleFunc("GET /admin/v1/game/scheduler/events/stream", g.handleAdminSchedulerEventsStream)
+}
+
+func (g *realtimeGateway) Run(ctx context.Context) {
+	_ = g.syncOnce(ctx)
+
+	ticker := time.NewTicker(g.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = g.syncOnce(ctx)
+		}
+	}
+}
+
+func (g *realtimeGateway) syncOnce(ctx context.Context) error {
+	var errs []string
+
+	if err := g.syncKind(ctx, streamScoreboard); err != nil {
+		errs = append(errs, "scoreboard sync failed: "+err.Error())
+	}
+	if err := g.syncKind(ctx, streamAttacks); err != nil {
+		errs = append(errs, "attack sync failed: "+err.Error())
+	}
+	if g.adminToken != "" {
+		if err := g.syncKind(ctx, streamGameStatus); err != nil {
+			errs = append(errs, "game status sync failed: "+err.Error())
+		}
+		if err := g.syncKind(ctx, streamSchedulerEvents); err != nil {
+			errs = append(errs, "scheduler events sync failed: "+err.Error())
+		}
+		if err := g.syncKind(ctx, streamCheckerRuns); err != nil {
+			errs = append(errs, "checker runs sync failed: "+err.Error())
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (g *realtimeGateway) handleScoreboardStream(w http.ResponseWriter, r *http.Request) {
+	g.handleStream(w, r, streamScoreboard)
+}
+
+func (g *realtimeGateway) handleAttackStream(w http.ResponseWriter, r *http.Request) {
+	g.handleStream(w, r, streamAttacks)
+}
+
+func (g *realtimeGateway) handleAdminScoreboardStream(w http.ResponseWriter, r *http.Request) {
+	if !g.requireAdminAuth(w, r) {
+		return
+	}
+	g.handleStream(w, r, streamScoreboard)
+}
+
+func (g *realtimeGateway) handleAdminGameStatusStream(w http.ResponseWriter, r *http.Request) {
+	if !g.requireAdminAuth(w, r) {
+		return
+	}
+	g.handleStream(w, r, streamGameStatus)
+}
+
+func (g *realtimeGateway) handleAdminCheckerRunsStream(w http.ResponseWriter, r *http.Request) {
+	if !g.requireAdminAuth(w, r) {
+		return
+	}
+	g.handleStream(w, r, streamCheckerRuns)
+}
+
+func (g *realtimeGateway) handleAdminSchedulerEventsStream(w http.ResponseWriter, r *http.Request) {
+	if !g.requireAdminAuth(w, r) {
+		return
+	}
+	g.handleStream(w, r, streamSchedulerEvents)
+}
+
+func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, kind streamKind) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	if len(g.current(kind)) == 0 {
+		_ = g.syncKind(r.Context(), kind)
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	_, updates, unsubscribe := g.subscribe(kind)
+	defer unsubscribe()
+
+	if snapshot := g.current(kind); len(snapshot) > 0 {
+		if err := writeSSE(w, snapshot); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case payload := <-updates:
+			if err := writeSSE(w, payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-keepalive.C:
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func writeSSE(w http.ResponseWriter, payload []byte) error {
+	_, err := fmt.Fprintf(w, "data: %s\n\n", payload)
+	return err
+}
+
+func (g *realtimeGateway) publishIfChanged(kind streamKind, payload []byte) {
+	hash := sha256.Sum256(payload)
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	switch kind {
+	case streamScoreboard:
+		if hash == g.scoreHash {
+			return
+		}
+		g.scoreHash = hash
+		g.scoreboard = append([]byte(nil), payload...)
+	case streamAttacks:
+		if hash == g.attackHash {
+			return
+		}
+		g.attackHash = hash
+		g.attacks = append([]byte(nil), payload...)
+	case streamGameStatus:
+		if hash == g.gameStatusHash {
+			return
+		}
+		g.gameStatusHash = hash
+		g.gameStatus = append([]byte(nil), payload...)
+	case streamSchedulerEvents:
+		if hash == g.schedulerHash {
+			return
+		}
+		g.schedulerHash = hash
+		g.schedulerEvents = append([]byte(nil), payload...)
+	case streamCheckerRuns:
+		if hash == g.checkerRunsHash {
+			return
+		}
+		g.checkerRunsHash = hash
+		g.checkerRuns = append([]byte(nil), payload...)
+	default:
+		return
+	}
+
+	for _, subscriber := range g.subscribers[kind] {
+		select {
+		case subscriber <- append([]byte(nil), payload...):
+		default:
+		}
+	}
+}
+
+func (g *realtimeGateway) current(kind streamKind) []byte {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	switch kind {
+	case streamScoreboard:
+		return append([]byte(nil), g.scoreboard...)
+	case streamAttacks:
+		return append([]byte(nil), g.attacks...)
+	case streamGameStatus:
+		return append([]byte(nil), g.gameStatus...)
+	case streamSchedulerEvents:
+		return append([]byte(nil), g.schedulerEvents...)
+	case streamCheckerRuns:
+		return append([]byte(nil), g.checkerRuns...)
+	default:
+		return nil
+	}
+}
+
+func (g *realtimeGateway) subscribe(kind streamKind) (int, <-chan []byte, func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	id := g.nextSubscriberID
+	g.nextSubscriberID++
+	ch := make(chan []byte, 8)
+	g.subscribers[kind][id] = ch
+
+	return id, ch, func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if subscriber, ok := g.subscribers[kind][id]; ok {
+			delete(g.subscribers[kind], id)
+			close(subscriber)
+		}
+	}
+}
+
+func (g *realtimeGateway) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
+	if g.adminToken == "" {
+		httpapi.WriteJSON(w, http.StatusServiceUnavailable, httpapi.ErrorEnvelope{Status: "failed", Message: "admin realtime stream is not configured."})
+		return false
+	}
+	token, ok := httpapi.BearerToken(r)
+	if !ok || token != g.adminToken {
+		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing admin realtime streams."})
+		return false
+	}
+	return true
+}
+
+func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
+	switch kind {
+	case streamScoreboard:
+		rows, err := g.client.Scoreboard(ctx)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(rows)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	case streamAttacks:
+		rows, err := g.client.Attacks(ctx)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(rows)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	case streamGameStatus:
+		status, err := g.client.GameStatus(ctx)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(status)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	case streamSchedulerEvents:
+		events, err := g.client.SchedulerEvents(ctx, 12)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(events)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	case streamCheckerRuns:
+		runs, err := g.client.CheckerRuns(ctx, 18)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(runs)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	}
+	return nil
+}
