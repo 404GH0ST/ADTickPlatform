@@ -6,12 +6,12 @@ Validation date:
 
 Validated git revision:
 
-- `00ab289` `00ab289ab0d751ebf770f943e8238fae4d73dfc7`
+- `8fbdf2e` `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9`
 
 Important:
 
-- the latest March 27 validation was rerun after the host-automation, load-gating, and machine-readable summary commits were checkpointed
-- the release candidate should point at commit `00ab289ab0d751ebf770f943e8238fae4d73dfc7`
+- the latest 2026-03-27 validation was rerun from the release-candidate wrapper with machine-readable summaries
+- the release candidate should point at commit `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9`
 
 Validated host commands:
 
@@ -84,4 +84,4 @@ Expected evidence from the nested attack-map load validation:
 
 Release note:
 
-- create the release tag from commit `00ab289ab0d751ebf770f943e8238fae4d73dfc7` after committing this readiness note update
+- create the release tag from commit `8fbdf2e76272a2e7148f5e23a5d99bf8ee9fa7c9` after committing this readiness note update

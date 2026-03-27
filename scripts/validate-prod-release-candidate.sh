@@ -9,6 +9,9 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 artifact_dir="${RELEASE_CANDIDATE_OUTPUT_DIR:-.runtime/release-candidate-${timestamp}}"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 summary_file="${artifact_dir}/summary.json"
+event_ready_date="${EVENT_READY_DATE:-$(date -u +%F)}"
+event_ready_artifact_note="${artifact_dir}/event-ready-${event_ready_date}.md"
+event_ready_output="${EVENT_READY_OUTPUT:-}"
 
 mkdir -p "${artifact_dir}"
 
@@ -33,6 +36,18 @@ if command -v sha256sum >/dev/null 2>&1 && [[ -f "${prod_env}" ]]; then
   sha256sum "${prod_env}" > "${artifact_dir}/prod-env.sha256"
 fi
 
+EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
+EVENT_READY_OUTPUT="${event_ready_artifact_note}" \
+EVENT_READY_DATE="${event_ready_date}" \
+  "${ROOT_DIR}/scripts/render-event-ready-note.sh"
+
+if [[ -n "${event_ready_output}" ]]; then
+  EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
+  EVENT_READY_OUTPUT="${event_ready_output}" \
+  EVENT_READY_DATE="${event_ready_date}" \
+    "${ROOT_DIR}/scripts/render-event-ready-note.sh"
+fi
+
 cat > "${artifact_dir}/README.txt" <<EOF
 Release-candidate validation completed at ${timestamp}.
 
@@ -54,6 +69,7 @@ Artifacts in this directory:
 - go-live-check/attack-map-load/README.txt
 - go-live-check/attack-map-load/attack-map-load.env
 - go-live-check/attack-map-load/attack-map-load-report.json
+- event-ready-${event_ready_date}.md
 - git-revision.txt
 - prod-env.sha256
 EOF
@@ -63,6 +79,7 @@ jq -nc \
   --arg artifact_dir "${artifact_dir}" \
   --arg git_revision "git-revision.txt" \
   --arg prod_env_sha256 "prod-env.sha256" \
+  --arg event_ready_note "event-ready-${event_ready_date}.md" \
   '{
     validation: "release-candidate",
     generated_at: $generated_at,
@@ -94,7 +111,8 @@ jq -nc \
           report: "go-live-check/attack-map-load/attack-map-load-report.json",
           operations_status: "go-live-check/attack-map-load/operations-status.json"
         }
-      }
+      },
+      event_ready_note: $event_ready_note
     }
   }' > "${summary_file}"
 

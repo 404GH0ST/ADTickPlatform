@@ -233,6 +233,8 @@ make validate-prod-release-candidate
 ```
 
 This wraps preflight, compose validation, `up-prod-host`, the database restore drill, and `go-live-check` into one timestamped `.runtime/release-candidate-*` directory.
+It also renders `event-ready-YYYY-MM-DD.md` into that artifact directory automatically.
+Set `EVENT_READY_OUTPUT=docs/event-ready-YYYY-MM-DD.md` if you want the wrapper to mirror the generated note into the checked-in docs path during the same run.
 
 ---
 

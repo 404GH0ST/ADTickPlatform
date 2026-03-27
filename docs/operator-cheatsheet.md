@@ -36,6 +36,18 @@ Full release-candidate wrapper:
 make validate-prod-release-candidate
 ```
 
+Render an event-ready note from a validated artifact tree:
+
+```bash
+EVENT_READY_OUTPUT=docs/event-ready-YYYY-MM-DD.md \
+EVENT_READY_DATE=YYYY-MM-DD \
+make render-event-ready-note
+```
+
+`make render-event-ready-note` defaults to the latest `.runtime/release-candidate-*` artifact. Set `EVENT_READY_ARTIFACT_DIR=.runtime/release-candidate-<timestamp>` if you want to render from an older validation run.
+
+`make validate-prod-release-candidate` now renders `event-ready-YYYY-MM-DD.md` into the artifact directory automatically. Set `EVENT_READY_OUTPUT=docs/event-ready-YYYY-MM-DD.md` if you want the wrapper to also write the checked-in note in one pass.
+
 ## Core Commands
 
 Bring the host stack up:
