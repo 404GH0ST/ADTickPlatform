@@ -17,6 +17,7 @@ include_attack_map_load="${GO_LIVE_CHECK_INCLUDE_ATTACK_MAP_LOAD:-true}"
 operations_status_file="${artifact_dir}/operations-status.json"
 game_core_metrics_file="${artifact_dir}/game-core-metrics.prom"
 submission_metrics_file="${artifact_dir}/submission-service-metrics.prom"
+controller_metrics_file="${artifact_dir}/controller-service-metrics.prom"
 realtime_metrics_file="${artifact_dir}/realtime-gateway-metrics.prom"
 summary_file="${artifact_dir}/summary.json"
 
@@ -86,6 +87,7 @@ ${attack_map_artifacts}
 - prod-env.sha256
 - game-core-metrics.prom
 - submission-service-metrics.prom
+- controller-service-metrics.prom
 - realtime-gateway-metrics.prom
 - final-iptables-filter.txt
 - final-iptables-raw.txt
@@ -104,6 +106,7 @@ jq -nc \
   --arg prod_env_sha256 "prod-env.sha256" \
   --arg game_core_metrics "game-core-metrics.prom" \
   --arg submission_metrics "submission-service-metrics.prom" \
+  --arg controller_metrics "controller-service-metrics.prom" \
   --arg realtime_metrics "realtime-gateway-metrics.prom" \
   --arg final_iptables_filter "final-iptables-filter.txt" \
   --arg final_iptables_raw "final-iptables-raw.txt" \
@@ -129,6 +132,7 @@ jq -nc \
       prod_env_sha256: $prod_env_sha256,
       game_core_metrics: $game_core_metrics,
       submission_service_metrics: $submission_metrics,
+      controller_service_metrics: $controller_metrics,
       realtime_gateway_metrics: $realtime_metrics,
       final_iptables_filter: $final_iptables_filter,
       final_iptables_raw: $final_iptables_raw,
