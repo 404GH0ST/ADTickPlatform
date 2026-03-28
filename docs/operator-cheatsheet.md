@@ -61,7 +61,7 @@ Verify the full release-candidate gate before tagging:
 make verify-release-candidate
 ```
 
-This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, requires the captured `game-core` and `realtime-gateway` metrics snapshots to exist and contain the expected metric families, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
 
 If you also want this command to verify the checked-in readiness note, add:
 
@@ -125,6 +125,20 @@ Authoritative scoreboard:
 
 ```bash
 curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/scoreboard | jq
+```
+
+Metrics snapshots:
+
+```bash
+curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_http_'
+curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
+```
+
+Backfill metrics snapshots into an existing go-live artifact directory:
+
+```bash
+GO_LIVE_METRICS_OUTPUT_DIR=.runtime/go-live-check-<timestamp> \
+make capture-go-live-metrics
 ```
 
 ## Recovery
@@ -197,6 +211,13 @@ Inspect the machine-readable go-live summary:
 
 ```bash
 jq . .runtime/go-live-check-<timestamp>/summary.json
+```
+
+Inspect the captured metrics snapshots:
+
+```bash
+rg 'adplatform_game_core_|adplatform_http_' .runtime/go-live-check-<timestamp>/game-core-metrics.prom
+rg 'adplatform_realtime_gateway_|adplatform_http_' .runtime/go-live-check-<timestamp>/realtime-gateway-metrics.prom
 ```
 
 Latest release-candidate validation artifacts:

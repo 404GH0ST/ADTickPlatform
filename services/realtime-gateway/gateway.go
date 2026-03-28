@@ -29,19 +29,22 @@ type realtimeGateway struct {
 	pollInterval time.Duration
 	adminToken   string
 
-	mu               sync.RWMutex
-	scoreboard       []byte
-	scoreHash        [32]byte
-	attacks          []byte
-	attackHash       [32]byte
-	gameStatus       []byte
-	gameStatusHash   [32]byte
-	schedulerEvents  []byte
-	schedulerHash    [32]byte
-	checkerRuns      []byte
-	checkerRunsHash  [32]byte
-	subscribers      map[streamKind]map[int]chan []byte
-	nextSubscriberID int
+	mu                 sync.RWMutex
+	scoreboard         []byte
+	scoreHash          [32]byte
+	attacks            []byte
+	attackHash         [32]byte
+	gameStatus         []byte
+	gameStatusHash     [32]byte
+	schedulerEvents    []byte
+	schedulerHash      [32]byte
+	checkerRuns        []byte
+	checkerRunsHash    [32]byte
+	subscribers        map[streamKind]map[int]chan []byte
+	nextSubscriberID   int
+	lastSyncAt         time.Time
+	lastSyncSuccessful bool
+	syncErrorsTotal    uint64
 }
 
 func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration, adminToken string) *realtimeGateway {
@@ -106,8 +109,17 @@ func (g *realtimeGateway) syncOnce(ctx context.Context) error {
 	}
 
 	if len(errs) > 0 {
+		g.mu.Lock()
+		g.lastSyncAt = time.Now().UTC()
+		g.lastSyncSuccessful = false
+		g.syncErrorsTotal++
+		g.mu.Unlock()
 		return errors.New(strings.Join(errs, "; "))
 	}
+	g.mu.Lock()
+	g.lastSyncAt = time.Now().UTC()
+	g.lastSyncSuccessful = true
+	g.mu.Unlock()
 	return nil
 }
 

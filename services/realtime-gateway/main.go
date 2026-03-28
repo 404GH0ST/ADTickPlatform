@@ -21,6 +21,7 @@ func main() {
 		config.Duration("REALTIME_POLL_INTERVAL", 2*time.Second),
 		config.String("REALTIME_ADMIN_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
 	)
+	httpapi.RegisterMetricsSource(info.Name, gateway)
 
 	mux := httpapi.NewBaseMux(info)
 	gateway.RegisterRoutes(mux)

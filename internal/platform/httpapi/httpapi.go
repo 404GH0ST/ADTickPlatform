@@ -22,6 +22,7 @@ type ErrorEnvelope struct {
 
 func NewBaseMux(info ServiceInfo) *http.ServeMux {
 	mux := http.NewServeMux()
+	metrics := lookupServiceMetrics(info)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{
@@ -39,6 +40,11 @@ func NewBaseMux(info ServiceInfo) *http.ServeMux {
 
 	mux.HandleFunc("GET /metadata", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, info)
+	})
+
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		metrics.writePrometheus(w)
 	})
 
 	return mux
@@ -89,7 +95,7 @@ func BearerToken(r *http.Request) (string, bool) {
 func RunServer(ctx context.Context, info ServiceInfo, handler http.Handler) error {
 	server := &http.Server{
 		Addr:              info.Addr,
-		Handler:           handler,
+		Handler:           instrumentHandler(info, handler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

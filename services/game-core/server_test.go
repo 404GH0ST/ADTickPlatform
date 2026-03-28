@@ -288,6 +288,52 @@ func TestCheckerRunsEndpointHonorsLimit(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointIncludesGameCoreMetrics(t *testing.T) {
+	info := httpapi.ServiceInfo{Name: "game-core-metrics-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Version: "test", Addr: ":0"}
+	store := newMemoryGameStore()
+	scheduler := &testGameScheduler{
+		status: apigateway.GameSchedulerStatus{
+			State:           "running",
+			IntervalSeconds: 45,
+			LastRunAt:       "2026-03-10T10:01:00Z",
+			NextRunAt:       "2099-03-10T10:02:00Z",
+			LastTickID:      1,
+		},
+	}
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15)
+	httpapi.RegisterMetricsSource(info.Name, server)
+
+	mux := httpapi.NewBaseMux(info)
+	server.RegisterRoutes(mux)
+	startTestMatch(t, mux)
+
+	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
+	advanceRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	advanceResponse := httptest.NewRecorder()
+	mux.ServeHTTP(advanceResponse, advanceRequest)
+	if advanceResponse.Code != http.StatusOK {
+		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
+	}
+
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResponse := httptest.NewRecorder()
+	mux.ServeHTTP(metricsResponse, metricsRequest)
+
+	body := metricsResponse.Body.String()
+	for _, fragment := range []string{
+		"adplatform_game_core_metrics_collection_success 1",
+		"adplatform_game_core_total_ticks 1",
+		`adplatform_game_core_checker_runs_total{status="all"} 36`,
+		"adplatform_game_core_scheduler_running 1",
+		"adplatform_game_core_match_accepting_submissions 1",
+		"adplatform_game_core_current_tick_id 1",
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected metrics output to contain %q, got:\n%s", fragment, body)
+		}
+	}
+}
+
 func TestCheckerRunsEndpointSupportsFiltersAndOffset(t *testing.T) {
 	mux := newTestGameCoreMux(testCheckerClient{failPhase: "get"})
 	startTestMatch(t, mux)

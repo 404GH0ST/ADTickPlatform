@@ -35,6 +35,7 @@ func main() {
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
 	)
+	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {
 		log.Fatal(err)

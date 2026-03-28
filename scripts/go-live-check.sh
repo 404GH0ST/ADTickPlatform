@@ -15,6 +15,8 @@ attack_map_load_output_dir="${artifact_dir}/attack-map-load"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 include_attack_map_load="${GO_LIVE_CHECK_INCLUDE_ATTACK_MAP_LOAD:-true}"
 operations_status_file="${artifact_dir}/operations-status.json"
+game_core_metrics_file="${artifact_dir}/game-core-metrics.prom"
+realtime_metrics_file="${artifact_dir}/realtime-gateway-metrics.prom"
 summary_file="${artifact_dir}/summary.json"
 
 load_env_file "${prod_env}"
@@ -36,6 +38,7 @@ if [[ "${include_attack_map_load}" == "true" ]]; then
 fi
 
 BASELINE_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-prod-host-baseline.sh"
+GO_LIVE_METRICS_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-go-live-metrics.sh"
 
 curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
   "${edge_base_url}/api/v2/admin/operations/status" | jq '.data' > "${operations_status_file}"
@@ -80,6 +83,8 @@ ${attack_map_artifacts}
 - operations-status.json
 - git-revision.txt
 - prod-env.sha256
+- game-core-metrics.prom
+- realtime-gateway-metrics.prom
 - final-iptables-filter.txt
 - final-iptables-raw.txt
 - final-nft-ruleset.txt
@@ -95,6 +100,8 @@ jq -nc \
   --arg operations_status "operations-status.json" \
   --arg git_revision "git-revision.txt" \
   --arg prod_env_sha256 "prod-env.sha256" \
+  --arg game_core_metrics "game-core-metrics.prom" \
+  --arg realtime_metrics "realtime-gateway-metrics.prom" \
   --arg final_iptables_filter "final-iptables-filter.txt" \
   --arg final_iptables_raw "final-iptables-raw.txt" \
   --arg final_nft_ruleset "final-nft-ruleset.txt" \
@@ -117,6 +124,8 @@ jq -nc \
       operations_status: $operations_status,
       git_revision: $git_revision,
       prod_env_sha256: $prod_env_sha256,
+      game_core_metrics: $game_core_metrics,
+      realtime_gateway_metrics: $realtime_metrics,
       final_iptables_filter: $final_iptables_filter,
       final_iptables_raw: $final_iptables_raw,
       final_nft_ruleset: $final_nft_ruleset,
