@@ -223,7 +223,49 @@ summary_json="$(
     --argjson attack_map_submission_p95_ms "$(json_number_or_null "${attack_map_submission_p95_ms}")" \
     --argjson attack_map_attack_feed_lag_ms "$(json_number_or_null "${attack_map_attack_feed_lag_ms}")" \
     --slurpfile operations_status "${go_live_operations_file}" \
-    '{
+    'def derived_alerts:
+      ( []
+        + (if $attack_map_validation_status != "" and $attack_map_validation_status != "passed" then [{
+            id: "attack-map-load-validation",
+            severity: "critical",
+            summary: "Attack-map load validation did not pass.",
+            detail: ("Status was " + $attack_map_validation_status + ".")
+          }] else [] end)
+        + (if $game_core_checker_runs_failed != null and $game_core_checker_runs_failed > 0 then [{
+            id: "checker-failures",
+            severity: "critical",
+            summary: "Checker failures were recorded in the validated run.",
+            detail: ("Failed checker runs: " + ($game_core_checker_runs_failed | tostring) + ".")
+          }] else [] end)
+        + (if $submission_failures_total != null and $submission_failures_total > 0 then [{
+            id: "submission-failures",
+            severity: "warning",
+            summary: "Submission-service reported failed submit requests.",
+            detail: ("Failed submit requests: " + ($submission_failures_total | tostring) + ".")
+          }] else [] end)
+        + (if $realtime_last_sync_success != null and $realtime_last_sync_success != 1 then [{
+            id: "realtime-last-sync-failed",
+            severity: "warning",
+            summary: "Realtime gateway last sync did not report success."
+          }] else [] end)
+        + (if $realtime_sync_errors_total != null and $realtime_sync_errors_total > 0 then [{
+            id: "realtime-sync-errors",
+            severity: "warning",
+            summary: "Realtime gateway reported sync errors.",
+            detail: ("Sync errors: " + ($realtime_sync_errors_total | tostring) + ".")
+          }] else [] end)
+        + (if $controller_access_last_apply_success != null and $controller_access_last_apply_success != 1 then [{
+            id: "controller-access-apply-failed",
+            severity: "warning",
+            summary: "Controller access status did not report a successful last apply."
+          }] else [] end)
+        + (if $wireguard_last_apply_success != null and $wireguard_last_apply_success != 1 then [{
+            id: "wireguard-last-apply-failed",
+            severity: "warning",
+            summary: "WireGuard gateway status did not report a successful last apply."
+          }] else [] end)
+      );
+    {
       validation: $validation,
       generated_at: $generated_at,
       artifact_dir: $artifact_dir,
@@ -235,14 +277,12 @@ summary_json="$(
       operator_status: (
         if $operations_healthy == "true"
           and $operations_alerts_count == 0
-          and ($attack_map_validation_status == "" or $attack_map_validation_status == "passed")
-          and ($realtime_last_sync_success == null or $realtime_last_sync_success == 1)
-          and ($controller_access_last_apply_success == null or $controller_access_last_apply_success == 1)
-          and ($wireguard_last_apply_success == null or $wireguard_last_apply_success == 1)
+          and ((derived_alerts | length) == 0)
         then "healthy"
         else "attention"
         end
       ),
+      derived_alerts: derived_alerts,
       runtime_alerts: {
         healthy: ($operations_healthy == "true"),
         alerts_count: $operations_alerts_count,

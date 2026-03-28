@@ -258,6 +258,12 @@ For a compact operator-facing view of the latest validated evidence:
 make summarize-validation-artifacts
 ```
 
+To fail immediately when the validated evidence still needs operator attention:
+
+```bash
+make check-validation-alerts
+```
+
 Create the actual annotated release tag only after that passes:
 
 ```bash

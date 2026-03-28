@@ -150,6 +150,12 @@ Summarize the latest validated artifact tree:
 make summarize-validation-artifacts
 ```
 
+Fail fast if the latest validated artifact tree needs operator attention:
+
+```bash
+make check-validation-alerts
+```
+
 ## Recovery
 
 Restart-recovery drill:
@@ -248,6 +254,12 @@ Inspect the operator-facing release-candidate summary:
 
 ```bash
 jq . .runtime/release-candidate-<timestamp>/operator-summary.json
+```
+
+Check the operator-facing release status and print any derived alerts:
+
+```bash
+make check-validation-alerts
 ```
 
 Inspect the machine-readable release-candidate summary:
