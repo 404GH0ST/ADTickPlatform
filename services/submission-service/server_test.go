@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"adplatform/internal/platform/httpapi"
@@ -113,5 +114,55 @@ func TestSubmissionServiceRequiresAdminAuth(t *testing.T) {
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", response.Code)
+	}
+}
+
+func TestSubmissionServiceMetricsEndpoint(t *testing.T) {
+	info := httpapi.ServiceInfo{Name: "submission-service-metrics-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Version: "test", Addr: ":0"}
+	server := newSubmissionServiceServer("dev-admin-token", testSubmissionGameCoreClient{
+		submit: []apigateway.SubmissionVerdictAlias{
+			{Flag: "FLAGv1.ok", Verdict: "flag is correct."},
+			{Flag: "FLAGv1.dupe", Verdict: "flag already submitted."},
+			{Flag: "FLAGv1.bad", Verdict: "flag is wrong or expired."},
+		},
+	})
+	httpapi.RegisterMetricsSource(info.Name, server)
+
+	mux := httpapi.NewBaseMux(info)
+	server.RegisterRoutes(mux)
+
+	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/submissions/submit", bytes.NewBufferString(`{"team_id":101,"flags":["FLAGv1.ok","FLAGv1.dupe","FLAGv1.bad"]}`))
+	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	submitResponse := httptest.NewRecorder()
+	mux.ServeHTTP(submitResponse, submitRequest)
+	if submitResponse.Code != http.StatusOK {
+		t.Fatalf("expected submit 200, got %d", submitResponse.Code)
+	}
+
+	attacksRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/submissions/attacks?service=bank", nil)
+	attacksRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	attacksResponse := httptest.NewRecorder()
+	mux.ServeHTTP(attacksResponse, attacksRequest)
+	if attacksResponse.Code != http.StatusOK {
+		t.Fatalf("expected attacks 200, got %d", attacksResponse.Code)
+	}
+
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResponse := httptest.NewRecorder()
+	mux.ServeHTTP(metricsResponse, metricsRequest)
+
+	body := metricsResponse.Body.String()
+	for _, fragment := range []string{
+		"adplatform_submission_service_submit_requests_total 1",
+		"adplatform_submission_service_submit_flags_total 3",
+		`adplatform_submission_service_submit_verdicts_total{class="correct"} 1`,
+		`adplatform_submission_service_submit_verdicts_total{class="duplicate"} 1`,
+		`adplatform_submission_service_submit_verdicts_total{class="invalid"} 1`,
+		"adplatform_submission_service_attack_feed_requests_total 1",
+		"adplatform_submission_service_attack_feed_items_total 1",
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected metrics output to contain %q, got:\n%s", fragment, body)
+		}
 	}
 }

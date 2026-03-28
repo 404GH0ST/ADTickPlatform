@@ -131,6 +131,7 @@ Metrics snapshots:
 
 ```bash
 curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_http_'
+curl -s http://127.0.0.1:8082/metrics | rg 'adplatform_submission_service_|adplatform_http_'
 curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
 ```
 
@@ -217,6 +218,7 @@ Inspect the captured metrics snapshots:
 
 ```bash
 rg 'adplatform_game_core_|adplatform_http_' .runtime/go-live-check-<timestamp>/game-core-metrics.prom
+rg 'adplatform_submission_service_|adplatform_http_' .runtime/go-live-check-<timestamp>/submission-service-metrics.prom
 rg 'adplatform_realtime_gateway_|adplatform_http_' .runtime/go-live-check-<timestamp>/realtime-gateway-metrics.prom
 ```
 

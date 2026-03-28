@@ -19,6 +19,7 @@ func main() {
 			config.String("GAME_CORE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
 		),
 	)
+	httpapi.RegisterMetricsSource(info.Name, server)
 
 	mux := httpapi.NewBaseMux(info)
 	server.RegisterRoutes(mux)

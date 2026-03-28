@@ -52,9 +52,11 @@ capture_service_metrics() {
 }
 
 capture_service_metrics "game-core" "http://127.0.0.1:8081/metrics" "${output_dir}/game-core-metrics.prom"
+capture_service_metrics "submission-service" "http://127.0.0.1:8082/metrics" "${output_dir}/submission-service-metrics.prom"
 capture_service_metrics "realtime-gateway" "http://127.0.0.1:8086/metrics" "${output_dir}/realtime-gateway-metrics.prom"
 
 echo "go-live metrics captured:"
 printf '  %s\n' \
   "${output_dir}/game-core-metrics.prom" \
+  "${output_dir}/submission-service-metrics.prom" \
   "${output_dir}/realtime-gateway-metrics.prom"

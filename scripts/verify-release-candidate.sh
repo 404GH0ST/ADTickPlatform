@@ -102,6 +102,7 @@ go_live_summary_rel="$(jq -r '.artifacts.go_live_check.summary' "${summary_file}
 go_live_operations_rel="$(jq -r '.artifacts.go_live_check.operations_status' "${summary_file}")"
 attack_map_report_rel="$(jq -r '.artifacts.go_live_check.attack_map_load.report // empty' "${summary_file}")"
 go_live_game_core_metrics_rel="$(jq -r '.artifacts.go_live_check.game_core_metrics // empty' "${summary_file}")"
+go_live_submission_metrics_rel="$(jq -r '.artifacts.go_live_check.submission_service_metrics // empty' "${summary_file}")"
 go_live_realtime_metrics_rel="$(jq -r '.artifacts.go_live_check.realtime_gateway_metrics // empty' "${summary_file}")"
 
 go_live_summary_file="${ARTIFACT_DIR}/${go_live_summary_rel}"
@@ -109,6 +110,7 @@ go_live_operations_file="${ARTIFACT_DIR}/${go_live_operations_rel}"
 attack_map_report_file=""
 go_live_dir="$(dirname "${go_live_summary_file}")"
 go_live_game_core_metrics_file=""
+go_live_submission_metrics_file=""
 go_live_realtime_metrics_file=""
 
 if [[ -n "${attack_map_report_rel}" ]]; then
@@ -117,12 +119,19 @@ fi
 if [[ -n "${go_live_game_core_metrics_rel}" ]]; then
   go_live_game_core_metrics_file="${ARTIFACT_DIR}/${go_live_game_core_metrics_rel}"
 fi
+if [[ -n "${go_live_submission_metrics_rel}" ]]; then
+  go_live_submission_metrics_file="${ARTIFACT_DIR}/${go_live_submission_metrics_rel}"
+fi
 if [[ -n "${go_live_realtime_metrics_rel}" ]]; then
   go_live_realtime_metrics_file="${ARTIFACT_DIR}/${go_live_realtime_metrics_rel}"
 fi
 
 if [[ -z "${go_live_game_core_metrics_file}" ]]; then
   go_live_game_core_metrics_file="${go_live_dir}/game-core-metrics.prom"
+fi
+
+if [[ -z "${go_live_submission_metrics_file}" ]]; then
+  go_live_submission_metrics_file="${go_live_dir}/submission-service-metrics.prom"
 fi
 
 if [[ -z "${go_live_realtime_metrics_file}" ]]; then
@@ -166,6 +175,11 @@ if [[ -z "${go_live_realtime_metrics_file}" || ! -f "${go_live_realtime_metrics_
   exit 1
 fi
 
+if [[ -z "${go_live_submission_metrics_file}" || ! -f "${go_live_submission_metrics_file}" ]]; then
+  echo "missing go-live submission-service metrics snapshot: ${go_live_submission_metrics_file}" >&2
+  exit 1
+fi
+
 if ! grep -q 'adplatform_game_core_scheduler_running' "${go_live_game_core_metrics_file}"; then
   echo "game-core metrics snapshot is missing scheduler metrics: ${go_live_game_core_metrics_file}" >&2
   exit 1
@@ -183,6 +197,16 @@ fi
 
 if ! grep -q 'adplatform_realtime_gateway_last_sync_success' "${go_live_realtime_metrics_file}"; then
   echo "realtime-gateway metrics snapshot is missing sync-health metrics: ${go_live_realtime_metrics_file}" >&2
+  exit 1
+fi
+
+if ! grep -q 'adplatform_submission_service_submit_requests_total' "${go_live_submission_metrics_file}"; then
+  echo "submission-service metrics snapshot is missing submit metrics: ${go_live_submission_metrics_file}" >&2
+  exit 1
+fi
+
+if ! grep -q 'adplatform_submission_service_attack_feed_requests_total' "${go_live_submission_metrics_file}"; then
+  echo "submission-service metrics snapshot is missing attack-feed metrics: ${go_live_submission_metrics_file}" >&2
   exit 1
 fi
 
@@ -220,4 +244,5 @@ printf '  %s\n' \
   "${event_ready_artifact_file}" \
   "${go_live_operations_file}" \
   "${go_live_game_core_metrics_file}" \
+  "${go_live_submission_metrics_file}" \
   "${go_live_realtime_metrics_file}"

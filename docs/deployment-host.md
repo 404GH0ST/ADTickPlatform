@@ -125,9 +125,10 @@ For the condensed event-day command list, see `docs/operator-cheatsheet.md`.
 Every service now exposes a Prometheus-style `/metrics` endpoint. The highest-value runtime snapshots are:
 ```bash
 curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_http_'
+curl -s http://127.0.0.1:8082/metrics | rg 'adplatform_submission_service_|adplatform_http_'
 curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
 ```
-`game-core` exposes match, tick, checker-run, and scheduler gauges. `realtime-gateway` exposes subscriber counts, cached snapshot sizes, and sync-health counters in addition to the shared HTTP request metrics.
+`game-core` exposes match, tick, checker-run, and scheduler gauges. `submission-service` exposes flag-submit counts, verdict classes, and attack-feed request metrics. `realtime-gateway` exposes subscriber counts, cached snapshot sizes, and sync-health counters in addition to the shared HTTP request metrics.
 
 ### Recovery Drill
 Before the event, validate restart recovery with the same host-mode stack:
