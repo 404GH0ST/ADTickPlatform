@@ -78,10 +78,13 @@ capture_service_metrics "submission-service" "http://127.0.0.1:8082/metrics" "${
 controller_metrics_port="$(port_from_addr "${CONTROLLER_SERVICE_ADDR_HOST:-:18084}")"
 capture_host_metrics "controller-service" "http://127.0.0.1:${controller_metrics_port}/metrics" "${output_dir}/controller-service-metrics.prom"
 capture_service_metrics "realtime-gateway" "http://127.0.0.1:8086/metrics" "${output_dir}/realtime-gateway-metrics.prom"
+wireguard_metrics_port="$(port_from_addr "${WIREGUARD_GATEWAY_ADDR_HOST:-:18087}")"
+capture_host_metrics "wireguard-gateway" "http://127.0.0.1:${wireguard_metrics_port}/metrics" "${output_dir}/wireguard-gateway-metrics.prom"
 
 echo "go-live metrics captured:"
 printf '  %s\n' \
   "${output_dir}/game-core-metrics.prom" \
   "${output_dir}/submission-service-metrics.prom" \
   "${output_dir}/controller-service-metrics.prom" \
-  "${output_dir}/realtime-gateway-metrics.prom"
+  "${output_dir}/realtime-gateway-metrics.prom" \
+  "${output_dir}/wireguard-gateway-metrics.prom"

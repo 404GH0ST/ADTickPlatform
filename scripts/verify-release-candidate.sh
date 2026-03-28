@@ -105,6 +105,7 @@ go_live_game_core_metrics_rel="$(jq -r '.artifacts.go_live_check.game_core_metri
 go_live_submission_metrics_rel="$(jq -r '.artifacts.go_live_check.submission_service_metrics // empty' "${summary_file}")"
 go_live_controller_metrics_rel="$(jq -r '.artifacts.go_live_check.controller_service_metrics // empty' "${summary_file}")"
 go_live_realtime_metrics_rel="$(jq -r '.artifacts.go_live_check.realtime_gateway_metrics // empty' "${summary_file}")"
+go_live_wireguard_metrics_rel="$(jq -r '.artifacts.go_live_check.wireguard_gateway_metrics // empty' "${summary_file}")"
 
 go_live_summary_file="${ARTIFACT_DIR}/${go_live_summary_rel}"
 go_live_operations_file="${ARTIFACT_DIR}/${go_live_operations_rel}"
@@ -114,6 +115,7 @@ go_live_game_core_metrics_file=""
 go_live_submission_metrics_file=""
 go_live_controller_metrics_file=""
 go_live_realtime_metrics_file=""
+go_live_wireguard_metrics_file=""
 
 if [[ -n "${attack_map_report_rel}" ]]; then
   attack_map_report_file="${ARTIFACT_DIR}/${attack_map_report_rel}"
@@ -130,6 +132,9 @@ fi
 if [[ -n "${go_live_realtime_metrics_rel}" ]]; then
   go_live_realtime_metrics_file="${ARTIFACT_DIR}/${go_live_realtime_metrics_rel}"
 fi
+if [[ -n "${go_live_wireguard_metrics_rel}" ]]; then
+  go_live_wireguard_metrics_file="${ARTIFACT_DIR}/${go_live_wireguard_metrics_rel}"
+fi
 
 if [[ -z "${go_live_game_core_metrics_file}" ]]; then
   go_live_game_core_metrics_file="${go_live_dir}/game-core-metrics.prom"
@@ -145,6 +150,10 @@ fi
 
 if [[ -z "${go_live_realtime_metrics_file}" ]]; then
   go_live_realtime_metrics_file="${go_live_dir}/realtime-gateway-metrics.prom"
+fi
+
+if [[ -z "${go_live_wireguard_metrics_file}" ]]; then
+  go_live_wireguard_metrics_file="${go_live_dir}/wireguard-gateway-metrics.prom"
 fi
 
 if [[ ! -f "${go_live_summary_file}" ]]; then
@@ -194,6 +203,11 @@ if [[ -z "${go_live_controller_metrics_file}" || ! -f "${go_live_controller_metr
   exit 1
 fi
 
+if [[ -z "${go_live_wireguard_metrics_file}" || ! -f "${go_live_wireguard_metrics_file}" ]]; then
+  echo "missing go-live wireguard-gateway metrics snapshot: ${go_live_wireguard_metrics_file}" >&2
+  exit 1
+fi
+
 if ! grep -q 'adplatform_game_core_scheduler_running' "${go_live_game_core_metrics_file}"; then
   echo "game-core metrics snapshot is missing scheduler metrics: ${go_live_game_core_metrics_file}" >&2
   exit 1
@@ -234,6 +248,16 @@ if ! grep -q 'adplatform_controller_service_access_policies_total' "${go_live_co
   exit 1
 fi
 
+if ! grep -q 'adplatform_wireguard_gateway_operation_requests_total' "${go_live_wireguard_metrics_file}"; then
+  echo "wireguard-gateway metrics snapshot is missing operation metrics: ${go_live_wireguard_metrics_file}" >&2
+  exit 1
+fi
+
+if ! grep -q 'adplatform_wireguard_gateway_peer_counts' "${go_live_wireguard_metrics_file}"; then
+  echo "wireguard-gateway metrics snapshot is missing peer count metrics: ${go_live_wireguard_metrics_file}" >&2
+  exit 1
+fi
+
 if [[ -n "${attack_map_report_file}" ]]; then
   if [[ ! -f "${attack_map_report_file}" ]]; then
     echo "missing attack-map load report: ${attack_map_report_file}" >&2
@@ -270,4 +294,5 @@ printf '  %s\n' \
   "${go_live_game_core_metrics_file}" \
   "${go_live_submission_metrics_file}" \
   "${go_live_controller_metrics_file}" \
-  "${go_live_realtime_metrics_file}"
+  "${go_live_realtime_metrics_file}" \
+  "${go_live_wireguard_metrics_file}"

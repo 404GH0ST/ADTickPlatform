@@ -19,6 +19,7 @@ game_core_metrics_file="${artifact_dir}/game-core-metrics.prom"
 submission_metrics_file="${artifact_dir}/submission-service-metrics.prom"
 controller_metrics_file="${artifact_dir}/controller-service-metrics.prom"
 realtime_metrics_file="${artifact_dir}/realtime-gateway-metrics.prom"
+wireguard_metrics_file="${artifact_dir}/wireguard-gateway-metrics.prom"
 summary_file="${artifact_dir}/summary.json"
 
 load_env_file "${prod_env}"
@@ -89,6 +90,7 @@ ${attack_map_artifacts}
 - submission-service-metrics.prom
 - controller-service-metrics.prom
 - realtime-gateway-metrics.prom
+- wireguard-gateway-metrics.prom
 - final-iptables-filter.txt
 - final-iptables-raw.txt
 - final-nft-ruleset.txt
@@ -108,6 +110,7 @@ jq -nc \
   --arg submission_metrics "submission-service-metrics.prom" \
   --arg controller_metrics "controller-service-metrics.prom" \
   --arg realtime_metrics "realtime-gateway-metrics.prom" \
+  --arg wireguard_metrics "wireguard-gateway-metrics.prom" \
   --arg final_iptables_filter "final-iptables-filter.txt" \
   --arg final_iptables_raw "final-iptables-raw.txt" \
   --arg final_nft_ruleset "final-nft-ruleset.txt" \
@@ -134,6 +137,7 @@ jq -nc \
       submission_service_metrics: $submission_metrics,
       controller_service_metrics: $controller_metrics,
       realtime_gateway_metrics: $realtime_metrics,
+      wireguard_gateway_metrics: $wireguard_metrics,
       final_iptables_filter: $final_iptables_filter,
       final_iptables_raw: $final_iptables_raw,
       final_nft_ruleset: $final_nft_ruleset,

@@ -25,6 +25,7 @@ func main() {
 		store,
 		newWireGuardApplier(),
 	)
+	httpapi.RegisterMetricsSource(info.Name, server)
 	if err := restoreWireGuardState(ctx, store, server); err != nil {
 		log.Fatal(err)
 	}

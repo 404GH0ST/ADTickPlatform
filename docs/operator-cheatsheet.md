@@ -61,7 +61,7 @@ Verify the full release-candidate gate before tagging:
 make verify-release-candidate
 ```
 
-This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, requires the captured `game-core` and `realtime-gateway` metrics snapshots to exist and contain the expected metric families, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, requires the captured `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to exist and contain the expected metric families, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
 
 If you also want this command to verify the checked-in readiness note, add:
 
@@ -134,6 +134,7 @@ curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_htt
 curl -s http://127.0.0.1:8082/metrics | rg 'adplatform_submission_service_|adplatform_http_'
 curl -s http://127.0.0.1:18084/metrics | rg 'adplatform_controller_service_|adplatform_http_'
 curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
+curl -s http://127.0.0.1:18087/metrics | rg 'adplatform_wireguard_gateway_|adplatform_http_'
 ```
 
 Backfill metrics snapshots into an existing go-live artifact directory:
@@ -222,6 +223,7 @@ rg 'adplatform_game_core_|adplatform_http_' .runtime/go-live-check-<timestamp>/g
 rg 'adplatform_submission_service_|adplatform_http_' .runtime/go-live-check-<timestamp>/submission-service-metrics.prom
 rg 'adplatform_controller_service_|adplatform_http_' .runtime/go-live-check-<timestamp>/controller-service-metrics.prom
 rg 'adplatform_realtime_gateway_|adplatform_http_' .runtime/go-live-check-<timestamp>/realtime-gateway-metrics.prom
+rg 'adplatform_wireguard_gateway_|adplatform_http_' .runtime/go-live-check-<timestamp>/wireguard-gateway-metrics.prom
 ```
 
 Latest release-candidate validation artifacts:

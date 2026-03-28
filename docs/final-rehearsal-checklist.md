@@ -220,7 +220,7 @@ By default it also nests the attack-map load validation artifacts under `attack-
 It also captures `operations-status.json` and expects the organizer runtime alert surface to report `healthy: true` with no active alerts at the end of the run.
 It also writes `summary.json` so the final evidence set is machine-readable.
 It also records the git revision and a `prod.env` SHA256 fingerprint for the validated run.
-It also captures `game-core-metrics.prom`, `submission-service-metrics.prom`, `controller-service-metrics.prom`, and `realtime-gateway-metrics.prom` from the live host stack so the validation artifacts include scheduler/checker, submission-path, controller enforcement, and realtime health snapshots.
+It also captures `game-core-metrics.prom`, `submission-service-metrics.prom`, `controller-service-metrics.prom`, `realtime-gateway-metrics.prom`, and `wireguard-gateway-metrics.prom` from the live host stack so the validation artifacts include scheduler/checker, submission-path, controller enforcement, realtime health, and WireGuard peer-state snapshots.
 
 If any section fails:
 - Fix
@@ -249,7 +249,7 @@ Final release gate:
 make verify-release-candidate
 ```
 
-This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, requires the nested `game-core`, `submission-service`, `controller-service`, and `realtime-gateway` metrics snapshots to still exist with the expected metric families, confirms the rendered event-ready note exists inside the artifact tree, and rejects the release if `git HEAD` does not match the validated commit.
+This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, requires the nested `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to still exist with the expected metric families, confirms the rendered event-ready note exists inside the artifact tree, and rejects the release if `git HEAD` does not match the validated commit.
 
 Create the actual annotated release tag only after that passes:
 
