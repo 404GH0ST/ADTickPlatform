@@ -498,6 +498,47 @@ function createInitialState() {
     wireguardStatus: { ...wireguardStatus },
     accessStatus: { ...accessStatus },
     operationsStatus: { ...operationsStatus },
+    serviceMetrics: {
+      game_core: {
+        match: null,
+        scheduler: null,
+        total_ticks: 12,
+        total_checker_runs: 72,
+        failed_checker_runs: 0,
+      },
+      submission_service: {
+        submit_requests_total: 25,
+        submit_failures_total: 0,
+        attack_feed_requests_total: 47,
+        verdicts: {
+          correct: 25,
+          duplicate: 0,
+          invalid: 0,
+          unknown: 0,
+        },
+      },
+      controller_service: {
+        deployment_reconcile_requests: 1,
+        access_reconcile_requests: 3,
+        service_access_reconcile_requests: 1,
+        ssh_credential_requests: 0,
+        access_policies_total: 12,
+        access_last_apply_success: true,
+      },
+      realtime_gateway: {
+        last_sync_success: true,
+        sync_errors_total: 0,
+        subscribers_total: 0,
+        snapshot_bytes_total: 2048,
+      },
+      wireguard_gateway: {
+        reconcile_requests: 2,
+        peers_total: 12,
+        peers_active: 12,
+        peers_revoked: 0,
+        last_apply_success: true,
+      },
+    },
     sshPasswordCounter: 1,
     nextTeamID: 104,
     nextPlayerID: 1003,
@@ -652,6 +693,26 @@ function createStateForScenario(scenario = "default") {
     };
   }
 
+  if (scenario === "metrics-attention") {
+    nextState.gameStatus.match = {
+      ...nextState.gameStatus.match,
+      state: "running",
+      accepting_submissions: true,
+      ended_at: "",
+    };
+    nextState.gameStatus.scheduler = {
+      ...nextState.gameStatus.scheduler,
+      state: "stopped",
+      next_run_at: "",
+    };
+    nextState.serviceMetrics.game_core.failed_checker_runs = 2;
+    nextState.serviceMetrics.submission_service.submit_failures_total = 3;
+    nextState.serviceMetrics.realtime_gateway.last_sync_success = false;
+    nextState.serviceMetrics.realtime_gateway.sync_errors_total = 4;
+    nextState.serviceMetrics.controller_service.access_last_apply_success = false;
+    nextState.serviceMetrics.wireguard_gateway.last_apply_success = false;
+  }
+
   if (scenario === "degraded-admin-attacks") {
     nextState.failedRoutes = [
       "GET /api/v2/attacks",
@@ -697,6 +758,9 @@ function createStateForScenario(scenario = "default") {
     nextState.checkerRuns = [];
     nextState.nextSchedulerEventID = 1;
   }
+
+  nextState.serviceMetrics.game_core.match = nextState.gameStatus.match;
+  nextState.serviceMetrics.game_core.scheduler = nextState.gameStatus.scheduler;
 
   return nextState;
 }
@@ -833,6 +897,89 @@ function filterAuditLogs(items, searchParams) {
 function writeJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(payload);
+}
+
+function writeText(res, statusCode, payload, contentType = "text/plain; charset=utf-8") {
+  res.writeHead(statusCode, { "Content-Type": contentType });
+  res.end(payload);
+}
+
+function metricBool(value) {
+  return value ? 1 : 0;
+}
+
+function renderGameCoreMetrics(snapshot) {
+  const matchState = snapshot.match?.state || "unknown";
+  const states = ["not_started", "running", "finished", "stopped", "unknown"];
+  return `${[
+    "# TYPE adplatform_game_core_match_state gauge",
+    ...states.map((state) =>
+      `adplatform_game_core_match_state{state="${state}"} ${metricBool(matchState === state)}`,
+    ),
+    "# TYPE adplatform_game_core_total_ticks gauge",
+    `adplatform_game_core_total_ticks ${snapshot.total_ticks}`,
+    "# TYPE adplatform_game_core_checker_runs_total counter",
+    `adplatform_game_core_checker_runs_total{status="all"} ${snapshot.total_checker_runs}`,
+    `adplatform_game_core_checker_runs_total{status="failed"} ${snapshot.failed_checker_runs}`,
+    "# TYPE adplatform_game_core_scheduler_running gauge",
+    `adplatform_game_core_scheduler_running ${metricBool(snapshot.scheduler?.state === "running")}`,
+  ].join("\n")}\n`;
+}
+
+function renderSubmissionMetrics(snapshot) {
+  return `${[
+    "# TYPE adplatform_submission_service_submit_requests_total counter",
+    `adplatform_submission_service_submit_requests_total ${snapshot.submit_requests_total}`,
+    "# TYPE adplatform_submission_service_submit_failures_total counter",
+    `adplatform_submission_service_submit_failures_total ${snapshot.submit_failures_total}`,
+    "# TYPE adplatform_submission_service_attack_feed_requests_total counter",
+    `adplatform_submission_service_attack_feed_requests_total ${snapshot.attack_feed_requests_total}`,
+    "# TYPE adplatform_submission_service_submit_verdicts_total counter",
+    `adplatform_submission_service_submit_verdicts_total{class="correct"} ${snapshot.verdicts.correct}`,
+    `adplatform_submission_service_submit_verdicts_total{class="duplicate"} ${snapshot.verdicts.duplicate}`,
+    `adplatform_submission_service_submit_verdicts_total{class="invalid"} ${snapshot.verdicts.invalid}`,
+    `adplatform_submission_service_submit_verdicts_total{class="unknown"} ${snapshot.verdicts.unknown}`,
+  ].join("\n")}\n`;
+}
+
+function renderControllerMetrics(snapshot) {
+  return `${[
+    "# TYPE adplatform_controller_service_operation_requests_total counter",
+    `adplatform_controller_service_operation_requests_total{operation="deployment_reconcile"} ${snapshot.deployment_reconcile_requests}`,
+    `adplatform_controller_service_operation_requests_total{operation="access_reconcile"} ${snapshot.access_reconcile_requests}`,
+    `adplatform_controller_service_operation_requests_total{operation="service_access_reconcile"} ${snapshot.service_access_reconcile_requests}`,
+    `adplatform_controller_service_operation_requests_total{operation="ssh_credential"} ${snapshot.ssh_credential_requests}`,
+    "# TYPE adplatform_controller_service_access_policies_total gauge",
+    `adplatform_controller_service_access_policies_total ${snapshot.access_policies_total}`,
+    "# TYPE adplatform_controller_service_access_last_apply_success gauge",
+    `adplatform_controller_service_access_last_apply_success ${metricBool(snapshot.access_last_apply_success)}`,
+  ].join("\n")}\n`;
+}
+
+function renderRealtimeMetrics(snapshot) {
+  return `${[
+    "# TYPE adplatform_realtime_gateway_last_sync_success gauge",
+    `adplatform_realtime_gateway_last_sync_success ${metricBool(snapshot.last_sync_success)}`,
+    "# TYPE adplatform_realtime_gateway_sync_errors_total counter",
+    `adplatform_realtime_gateway_sync_errors_total ${snapshot.sync_errors_total}`,
+    "# TYPE adplatform_realtime_gateway_subscribers gauge",
+    `adplatform_realtime_gateway_subscribers{stream="scoreboard"} ${snapshot.subscribers_total}`,
+    "# TYPE adplatform_realtime_gateway_snapshot_bytes gauge",
+    `adplatform_realtime_gateway_snapshot_bytes{stream="scoreboard"} ${snapshot.snapshot_bytes_total}`,
+  ].join("\n")}\n`;
+}
+
+function renderWireguardMetrics(snapshot) {
+  return `${[
+    "# TYPE adplatform_wireguard_gateway_operation_requests_total counter",
+    `adplatform_wireguard_gateway_operation_requests_total{operation="reconcile"} ${snapshot.reconcile_requests}`,
+    "# TYPE adplatform_wireguard_gateway_peer_counts gauge",
+    `adplatform_wireguard_gateway_peer_counts{status="total"} ${snapshot.peers_total}`,
+    `adplatform_wireguard_gateway_peer_counts{status="active"} ${snapshot.peers_active}`,
+    `adplatform_wireguard_gateway_peer_counts{status="revoked"} ${snapshot.peers_revoked}`,
+    "# TYPE adplatform_wireguard_gateway_last_apply_success gauge",
+    `adplatform_wireguard_gateway_last_apply_success ${metricBool(snapshot.last_apply_success)}`,
+  ].join("\n")}\n`;
 }
 
 function writeSSE(res, data) {
@@ -1558,6 +1705,42 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/v2/admin/operations/status") {
     return writeJson(res, 200, success(state.operationsStatus));
+  }
+
+  if (req.method === "GET" && url.pathname === "/game-core/metrics") {
+    return writeText(res, 200, renderGameCoreMetrics(state.serviceMetrics.game_core));
+  }
+
+  if (req.method === "GET" && url.pathname === "/submission-service/metrics") {
+    return writeText(
+      res,
+      200,
+      renderSubmissionMetrics(state.serviceMetrics.submission_service),
+    );
+  }
+
+  if (req.method === "GET" && url.pathname === "/controller-service/metrics") {
+    return writeText(
+      res,
+      200,
+      renderControllerMetrics(state.serviceMetrics.controller_service),
+    );
+  }
+
+  if (req.method === "GET" && url.pathname === "/metrics") {
+    return writeText(
+      res,
+      200,
+      renderRealtimeMetrics(state.serviceMetrics.realtime_gateway),
+    );
+  }
+
+  if (req.method === "GET" && url.pathname === "/wireguard-gateway/metrics") {
+    return writeText(
+      res,
+      200,
+      renderWireguardMetrics(state.serviceMetrics.wireguard_gateway),
+    );
   }
 
   if (req.method === "POST" && deploymentReconcileRoute) {

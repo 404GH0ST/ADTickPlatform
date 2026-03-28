@@ -63,7 +63,11 @@ export default defineConfig({
     {
       command: [
         `AD_PLATFORM_API_URL=${mockApiUrl}`,
+        `AD_PLATFORM_GAME_CORE_URL=${mockApiUrl}/game-core`,
+        `AD_PLATFORM_SUBMISSION_SERVICE_URL=${mockApiUrl}/submission-service`,
         `AD_PLATFORM_REALTIME_URL=${mockApiUrl}`,
+        `AD_PLATFORM_CONTROLLER_METRICS_URL=${mockApiUrl}/controller-service`,
+        `AD_PLATFORM_WIREGUARD_GATEWAY_URL=${mockApiUrl}/wireguard-gateway`,
         "ADMIN_API_TOKEN=dev-admin-token",
         "NEXT_TELEMETRY_DISABLED=1",
         `bun run start --hostname 127.0.0.1 --port ${appPort}`,

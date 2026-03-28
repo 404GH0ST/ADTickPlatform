@@ -137,6 +137,49 @@ test("organizer game page refreshes runtime alerts on focus", async ({
   ).toBeVisible();
 });
 
+test("organizer game page shows live service metrics and refreshes derived health", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "default" },
+  });
+  await page.goto("/admin/game");
+
+  const metricsCard = page.getByTestId("operations-metrics-card");
+  await expect(metricsCard).toBeVisible();
+  await expect(
+    metricsCard.getByText("All tracked service metrics currently look healthy."),
+  ).toBeVisible();
+  await expect(metricsCard.getByText("Game Core: healthy")).toBeVisible();
+  await expect(metricsCard.getByText("Submission: healthy")).toBeVisible();
+  await expect(metricsCard.getByText("WireGuard: healthy")).toBeVisible();
+  await expect(metricsCard.getByText("Checker runs")).toBeVisible();
+  await expect(metricsCard.getByText("72")).toBeVisible();
+
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "metrics-attention" },
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+
+  await expect(
+    metricsCard.getByText("service area(s) need operator attention."),
+  ).toBeVisible();
+  await expect(metricsCard.getByText("Game Core: attention")).toBeVisible();
+  await expect(metricsCard.getByText("Submission: attention")).toBeVisible();
+  await expect(metricsCard.getByText("Realtime: attention")).toBeVisible();
+  await expect(metricsCard.getByText("WireGuard: attention")).toBeVisible();
+  await expect(metricsCard.getByText("scheduler stopped")).toBeVisible();
+  await expect(metricsCard.getByText("2 checker failures")).toBeVisible();
+  await expect(metricsCard.getByText("3 submit failures")).toBeVisible();
+  await expect(
+    metricsCard.getByText("last sync failed, 4 sync errors"),
+  ).toBeVisible();
+});
+
 test("organizer scheduler controls can start, update, and stop with visible notes", async ({
   page,
 }) => {
