@@ -16,6 +16,7 @@ import type {
   AdminGameStatus,
   AdminGameTickStatus,
   AdminOperationsStatus,
+  AdminServiceMetricSnapshot,
   AdminPlayer,
   AdminReconcileResult,
   AdminSchedulerEventPage,
@@ -32,6 +33,7 @@ export type OrganizerDashboardOptions = {
   deployments: AdminDeploymentJob[];
   gameStatus: AdminGameStatus;
   operationsStatus?: AdminOperationsStatus;
+  serviceMetrics?: AdminServiceMetricSnapshot | null;
   players: AdminPlayer[];
   schedulerEventPage: AdminSchedulerEventPage;
   scoreboard: AdminGameScoreRow[];
@@ -218,8 +220,10 @@ export type OrganizerDashboardState = {
   wireGuardDialogOpen: boolean;
   wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
   operationsStatus: AdminOperationsStatus | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
   advanceGameTick: () => Promise<void>;
   refreshOperationsStatus: (silent?: boolean) => Promise<void>;
+  refreshServiceMetrics: (silent?: boolean) => Promise<void>;
 };
 
 export function useOrganizerDashboard({
@@ -229,6 +233,7 @@ export function useOrganizerDashboard({
   deployments,
   gameStatus,
   operationsStatus,
+  serviceMetrics,
   players,
   schedulerEventPage,
   scoreboard,
@@ -268,6 +273,8 @@ export function useOrganizerDashboard({
     useState<AdminWireGuardGatewayStatus | null>(null);
   const [operationsStatusState, setOperationsStatusState] =
     useState<AdminOperationsStatus | null>(operationsStatus ?? null);
+  const [serviceMetricsState, setServiceMetricsState] =
+    useState<AdminServiceMetricSnapshot | null>(serviceMetrics ?? null);
   const [wireGuardDialogOpen, setWireGuardDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [formMode, setFormMode] = useState<FormMode>(null);
@@ -350,15 +357,18 @@ export function useOrganizerDashboard({
     void refreshWireGuardGatewayStatus(true);
     void refreshAccessStatus(true);
     void refreshOperationsStatus(true);
+    void refreshServiceMetrics(true);
   }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       void refreshOperationsStatus(true);
+      void refreshServiceMetrics(true);
     }, 30000);
 
     const handleFocus = () => {
       void refreshOperationsStatus(true);
+      void refreshServiceMetrics(true);
     };
 
     window.addEventListener("focus", handleFocus);
@@ -723,6 +733,45 @@ export function useOrganizerDashboard({
       if (!silent) {
         setActionError(
           error instanceof Error ? error.message : "operations status failed",
+        );
+      }
+    } finally {
+      if (!silent) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function refreshServiceMetrics(silent = false): Promise<void> {
+    if (!silent) {
+      setPendingAction("operations:metrics");
+      setActionError(null);
+      setActionNote(null);
+    }
+
+    try {
+      const response = await fetch("/api/admin/operations/metrics", {
+        cache: "no-store",
+      });
+      const payload =
+        (await response.json()) as ActionEnvelope<AdminServiceMetricSnapshot>;
+      if (!response.ok || payload.status !== "success") {
+        throw new Error(
+          "message" in payload
+            ? payload.message
+            : "operations metrics failed",
+        );
+      }
+      setServiceMetricsState(payload.data);
+      if (!silent) {
+        setActionNote("Loaded live service metrics.");
+      }
+    } catch (error) {
+      if (!silent) {
+        setActionError(
+          error instanceof Error
+            ? error.message
+            : "operations metrics failed",
         );
       }
     } finally {
@@ -2322,6 +2371,7 @@ export function useOrganizerDashboard({
     refreshGameScoreboard,
     refreshGameStatus,
     refreshOperationsStatus,
+    refreshServiceMetrics,
     refreshSchedulerEvents,
     refreshWireGuardGatewayStatus,
     teardownAccess,
@@ -2355,6 +2405,7 @@ export function useOrganizerDashboard({
     wireGuardDialogOpen,
     wireGuardGatewayStatus,
     operationsStatus: operationsStatusState,
+    serviceMetrics: serviceMetricsState,
     advanceGameTick,
   };
 }

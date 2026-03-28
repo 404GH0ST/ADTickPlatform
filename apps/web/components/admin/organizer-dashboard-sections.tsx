@@ -25,6 +25,7 @@ import type {
   AdminGameStatus,
   AdminGameTickStatus,
   AdminOperationsStatus,
+  AdminServiceMetricSnapshot,
   AdminPlayer,
   AdminSchedulerEventPage,
   AdminTeam,
@@ -206,6 +207,7 @@ type GameTabProps = {
   focusPanel?: "all" | "attacks";
   gameState: AdminGameStatus;
   operationsStatus: AdminOperationsStatus | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
   pendingAction: string | null;
   schedulerEventPage: AdminSchedulerEventPage;
   schedulerEventsLiveMode: boolean;
@@ -225,6 +227,7 @@ type GameTabProps = {
   onRefreshGameScoreboard: () => void;
   onRefreshGameStatus: () => void;
   onRefreshOperationsStatus: () => void;
+  onRefreshServiceMetrics: () => void;
   onRefreshSchedulerEvents: () => void;
   onResetAttackFilters: () => void;
   onResetCheckerRunFilters: () => void;
@@ -1562,6 +1565,7 @@ export function GameTab({
   focusPanel = "all",
   gameState,
   operationsStatus,
+  serviceMetrics,
   pendingAction,
   schedulerEventPage,
   schedulerEventsLiveMode,
@@ -1581,6 +1585,7 @@ export function GameTab({
   onRefreshGameScoreboard,
   onRefreshGameStatus,
   onRefreshOperationsStatus,
+  onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
   onResetAttackFilters,
   onResetCheckerRunFilters,
@@ -1640,7 +1645,12 @@ export function GameTab({
           pendingAction={pendingAction}
           onRefresh={onRefreshOperationsStatus}
         />
-        <div className="grid items-start gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+        <OperationsMetricsCard
+          pendingAction={pendingAction}
+          serviceMetrics={serviceMetrics}
+          onRefresh={onRefreshServiceMetrics}
+        />
+        <div className="grid gap-4">
           <SchedulerCard
             filters={filters.schedulerEvent}
             pendingAction={pendingAction}
@@ -2274,6 +2284,405 @@ function OperationsAlertsCard({
       </CardContent>
     </Card>
   );
+}
+
+function OperationsMetricsCard({
+  pendingAction,
+  serviceMetrics,
+  onRefresh,
+}: {
+  pendingAction: string | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
+  onRefresh: () => void;
+}): ReactElement {
+  const serviceHealth = serviceMetrics
+    ? buildServiceHealthSummaries(serviceMetrics)
+    : [];
+  const unhealthyCount = serviceHealth.filter(
+    (entry) => entry.status !== "healthy",
+  ).length;
+
+  return (
+    <Card data-testid="operations-metrics-card">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>Service Metrics</CardTitle>
+            <CardDescription>
+              Live counters and gauges from game-core, submission-service,
+              controller-service, realtime-gateway, and wireguard-gateway.
+            </CardDescription>
+          </div>
+          <Button
+            disabled={pendingAction !== null}
+            size="sm"
+            variant="outline"
+            onClick={onRefresh}
+          >
+            {pendingAction === "operations:metrics" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {serviceMetrics === null ? (
+          <StatusBanner
+            message="Live service metrics are currently unavailable."
+            variant="warning"
+          />
+        ) : (
+          <>
+            <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+              <StatusBanner
+                message={
+                  unhealthyCount === 0
+                    ? "All tracked service metrics currently look healthy."
+                    : `${unhealthyCount} service area(s) need operator attention.`
+                }
+                variant={unhealthyCount === 0 ? "success" : "warning"}
+              />
+              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+                <div className="flex flex-wrap gap-2">
+                  {serviceHealth.map((entry) => (
+                    <Badge
+                      key={entry.title}
+                      variant="outline"
+                      className={entry.statusClassName}
+                    >
+                      {entry.title}: {entry.statusLabel}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <InfoPanel tone="surface">
+              <p className="text-sm text-muted-foreground">
+                Metrics snapshot generated at{" "}
+                <span className="font-mono text-foreground">
+                  {formatIndonesianDate(serviceMetrics.generated_at)}
+                </span>
+                .
+              </p>
+            </InfoPanel>
+            <div className="grid gap-4 xl:grid-cols-[1fr_1fr] 2xl:grid-cols-[1fr_1fr_1fr]">
+              <MetricsServicePanel
+                title="Game Core"
+                health={serviceHealth[0]}
+                lines={[
+                  {
+                    label: "Match state",
+                    value: serviceMetrics.game_core.match_state,
+                  },
+                  {
+                    label: "Total ticks",
+                    value: formatMetricNumber(serviceMetrics.game_core.total_ticks),
+                  },
+                  {
+                    label: "Checker runs",
+                    value: formatMetricNumber(
+                      serviceMetrics.game_core.checker_runs_total,
+                    ),
+                  },
+                  {
+                    label: "Checker failures",
+                    value: formatMetricNumber(
+                      serviceMetrics.game_core.checker_runs_failed,
+                    ),
+                  },
+                  {
+                    label: "Scheduler running",
+                    value: formatMetricBool(
+                      serviceMetrics.game_core.scheduler_running,
+                    ),
+                  },
+                ]}
+              />
+              <MetricsServicePanel
+                title="Submission Service"
+                health={serviceHealth[1]}
+                lines={[
+                  {
+                    label: "Submit requests",
+                    value: formatMetricNumber(
+                      serviceMetrics.submission_service.submit_requests_total,
+                    ),
+                  },
+                  {
+                    label: "Submit failures",
+                    value: formatMetricNumber(
+                      serviceMetrics.submission_service.submit_failures_total,
+                    ),
+                  },
+                  {
+                    label: "Attack-feed requests",
+                    value: formatMetricNumber(
+                      serviceMetrics.submission_service.attack_feed_requests_total,
+                    ),
+                  },
+                  {
+                    label: "Correct verdicts",
+                    value: formatMetricNumber(
+                      serviceMetrics.submission_service.verdicts.correct,
+                    ),
+                  },
+                  {
+                    label: "Invalid verdicts",
+                    value: formatMetricNumber(
+                      serviceMetrics.submission_service.verdicts.invalid,
+                    ),
+                  },
+                ]}
+              />
+              <MetricsServicePanel
+                title="Controller Service"
+                health={serviceHealth[2]}
+                lines={[
+                  {
+                    label: "Deployment reconciles",
+                    value: formatMetricNumber(
+                      serviceMetrics.controller_service
+                        .deployment_reconcile_requests,
+                    ),
+                  },
+                  {
+                    label: "Access reconciles",
+                    value: formatMetricNumber(
+                      serviceMetrics.controller_service.access_reconcile_requests,
+                    ),
+                  },
+                  {
+                    label: "Service access reconciles",
+                    value: formatMetricNumber(
+                      serviceMetrics.controller_service
+                        .service_access_reconcile_requests,
+                    ),
+                  },
+                  {
+                    label: "SSH credentials",
+                    value: formatMetricNumber(
+                      serviceMetrics.controller_service.ssh_credential_requests,
+                    ),
+                  },
+                  {
+                    label: "Last apply success",
+                    value: formatMetricBool(
+                      serviceMetrics.controller_service.access_last_apply_success,
+                    ),
+                  },
+                ]}
+              />
+              <MetricsServicePanel
+                title="Realtime Gateway"
+                health={serviceHealth[3]}
+                lines={[
+                  {
+                    label: "Last sync success",
+                    value: formatMetricBool(
+                      serviceMetrics.realtime_gateway.last_sync_success,
+                    ),
+                  },
+                  {
+                    label: "Sync errors",
+                    value: formatMetricNumber(
+                      serviceMetrics.realtime_gateway.sync_errors_total,
+                    ),
+                  },
+                  {
+                    label: "Subscribers",
+                    value: formatMetricNumber(
+                      serviceMetrics.realtime_gateway.subscribers_total,
+                    ),
+                  },
+                  {
+                    label: "Snapshot bytes",
+                    value: formatMetricNumber(
+                      serviceMetrics.realtime_gateway.snapshot_bytes_total,
+                    ),
+                  },
+                ]}
+              />
+              <MetricsServicePanel
+                title="WireGuard Gateway"
+                health={serviceHealth[4]}
+                lines={[
+                  {
+                    label: "Reconcile requests",
+                    value: formatMetricNumber(
+                      serviceMetrics.wireguard_gateway.reconcile_requests,
+                    ),
+                  },
+                  {
+                    label: "Total peers",
+                    value: formatMetricNumber(
+                      serviceMetrics.wireguard_gateway.peers_total,
+                    ),
+                  },
+                  {
+                    label: "Active peers",
+                    value: formatMetricNumber(
+                      serviceMetrics.wireguard_gateway.peers_active,
+                    ),
+                  },
+                  {
+                    label: "Revoked peers",
+                    value: formatMetricNumber(
+                      serviceMetrics.wireguard_gateway.peers_revoked,
+                    ),
+                  },
+                  {
+                    label: "Last apply success",
+                    value: formatMetricBool(
+                      serviceMetrics.wireguard_gateway.last_apply_success,
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MetricsServicePanel({
+  title,
+  health,
+  lines,
+}: {
+  title: string;
+  health?: ServiceHealthSummary;
+  lines: { label: string; value: string }[];
+}): ReactElement {
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {health ? (
+          <Badge variant="outline" className={health.statusClassName}>
+            {health.statusLabel}
+          </Badge>
+        ) : null}
+      </div>
+      {health?.detail ? (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          {health.detail}
+        </p>
+      ) : null}
+      <div className="mt-3 grid gap-2">
+        {lines.map((line) => (
+          <div
+            key={`${title}-${line.label}`}
+            className="flex items-center justify-between gap-3 text-sm"
+          >
+            <span className="text-muted-foreground">{line.label}</span>
+            <span className="font-mono text-foreground">{line.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function formatMetricNumber(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function formatMetricBool(value: boolean | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+  return value ? "yes" : "no";
+}
+
+type ServiceHealthSummary = {
+  title: string;
+  status: "healthy" | "warning";
+  statusLabel: string;
+  statusClassName: string;
+  detail: string;
+};
+
+function buildServiceHealthSummaries(
+  metrics: AdminServiceMetricSnapshot,
+): ServiceHealthSummary[] {
+  const gameCoreWarnings: string[] = [];
+  if (
+    metrics.game_core.match_state === "running" &&
+    metrics.game_core.scheduler_running === false
+  ) {
+    gameCoreWarnings.push("scheduler stopped");
+  }
+  if ((metrics.game_core.checker_runs_failed ?? 0) > 0) {
+    gameCoreWarnings.push(
+      `${formatMetricNumber(metrics.game_core.checker_runs_failed)} checker failures`,
+    );
+  }
+
+  const submissionWarnings: string[] = [];
+  if ((metrics.submission_service.submit_failures_total ?? 0) > 0) {
+    submissionWarnings.push(
+      `${formatMetricNumber(metrics.submission_service.submit_failures_total)} submit failures`,
+    );
+  }
+
+  const controllerWarnings: string[] = [];
+  if (metrics.controller_service.access_last_apply_success === false) {
+    controllerWarnings.push("access apply not successful");
+  }
+
+  const realtimeWarnings: string[] = [];
+  if (metrics.realtime_gateway.last_sync_success === false) {
+    realtimeWarnings.push("last sync failed");
+  }
+  if ((metrics.realtime_gateway.sync_errors_total ?? 0) > 0) {
+    realtimeWarnings.push(
+      `${formatMetricNumber(metrics.realtime_gateway.sync_errors_total)} sync errors`,
+    );
+  }
+
+  const wireguardWarnings: string[] = [];
+  if (metrics.wireguard_gateway.last_apply_success === false) {
+    wireguardWarnings.push("last apply failed");
+  }
+
+  return [
+    summarizeServiceHealth("Game Core", gameCoreWarnings),
+    summarizeServiceHealth("Submission", submissionWarnings),
+    summarizeServiceHealth("Controller", controllerWarnings),
+    summarizeServiceHealth("Realtime", realtimeWarnings),
+    summarizeServiceHealth("WireGuard", wireguardWarnings),
+  ];
+}
+
+function summarizeServiceHealth(
+  title: string,
+  warnings: string[],
+): ServiceHealthSummary {
+  if (warnings.length === 0) {
+    return {
+      title,
+      status: "healthy",
+      statusLabel: "healthy",
+      statusClassName: "tone-success",
+      detail: "No obvious issues in the current metrics snapshot.",
+    };
+  }
+
+  return {
+    title,
+    status: "warning",
+    statusLabel: "attention",
+    statusClassName: "tone-warning",
+    detail: warnings.join(", "),
+  };
 }
 
 function operationsAlertAction(alert: AdminOperationsStatus["alerts"][number]):

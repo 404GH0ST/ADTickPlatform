@@ -294,8 +294,12 @@ services:
     environment:
       AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
       AD_PLATFORM_API_URL: http://api-gateway:8080
+      AD_PLATFORM_GAME_CORE_URL: http://game-core:8081
+      AD_PLATFORM_SUBMISSION_SERVICE_URL: http://submission-service:8082
       AD_PLATFORM_REALTIME_URL: http://realtime-gateway:8086
       AD_PLATFORM_CONTROLLER_URL: http://controller-service:8084
+      AD_PLATFORM_CONTROLLER_METRICS_URL: http://controller-service:8084
+      AD_PLATFORM_WIREGUARD_GATEWAY_URL: http://wireguard-gateway:8087
       AD_PLATFORM_EMAIL: ${AD_PLATFORM_EMAIL:-alpha.captain@example.com}
       AD_PLATFORM_PASSWORD: ${AD_PLATFORM_PASSWORD:-alpha-secret}
       AD_PLATFORM_TEAM_ID: ${AD_PLATFORM_TEAM_ID:-101}

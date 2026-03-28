@@ -15,6 +15,7 @@ import type {
   AdminGameScoreRow,
   AdminGameMatchStatus,
   AdminOperationsStatus,
+  AdminServiceMetricSnapshot,
   AdminSchedulerEventPage,
   AdminSchedulerEventQuery,
   AdminGameSchedulerStatus,
@@ -94,6 +95,38 @@ function controllerBaseUrl() {
   );
 }
 
+function gameCoreBaseUrl() {
+  return trimBaseUrl(
+    process.env.AD_PLATFORM_GAME_CORE_URL ?? "http://127.0.0.1:8081",
+  );
+}
+
+function submissionServiceBaseUrl() {
+  return trimBaseUrl(
+    process.env.AD_PLATFORM_SUBMISSION_SERVICE_URL ?? "http://127.0.0.1:8082",
+  );
+}
+
+function realtimeGatewayBaseUrl() {
+  return trimBaseUrl(
+    process.env.AD_PLATFORM_REALTIME_URL ?? "http://127.0.0.1:8086",
+  );
+}
+
+function controllerMetricsBaseUrl() {
+  return trimBaseUrl(
+    process.env.AD_PLATFORM_CONTROLLER_METRICS_URL ??
+      process.env.AD_PLATFORM_CONTROLLER_URL ??
+      "http://127.0.0.1:8084",
+  );
+}
+
+function wireGuardGatewayBaseUrl() {
+  return trimBaseUrl(
+    process.env.AD_PLATFORM_WIREGUARD_GATEWAY_URL ?? "http://127.0.0.1:8087",
+  );
+}
+
 export function organizerApiBaseUrl() {
   return trimBaseUrl(process.env.AD_PLATFORM_PUBLIC_BASE_URL ?? adminBaseUrl());
 }
@@ -166,6 +199,266 @@ async function publicFetch<T>(path: string): Promise<T> {
   }
 
   return payload.data;
+}
+
+async function fetchText(baseUrl: string, path: string): Promise<string> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`request to ${path} failed`);
+  }
+  return response.text();
+}
+
+type PromLine = {
+  name: string;
+  labels: Record<string, string>;
+  value: number;
+};
+
+function parsePrometheus(text: string): PromLine[] {
+  const rows: PromLine[] = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const match = line.match(
+      /^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+(-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$/,
+    );
+    if (!match) {
+      continue;
+    }
+
+    const [, name, rawLabels = "", rawValue] = match;
+    const value = Number(rawValue);
+    if (Number.isNaN(value)) {
+      continue;
+    }
+
+    const labels: Record<string, string> = {};
+    if (rawLabels) {
+      for (const entry of rawLabels.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
+        const [rawKey, rawLabelValue] = entry.split("=");
+        if (!rawKey || !rawLabelValue) {
+          continue;
+        }
+        labels[rawKey.trim()] = rawLabelValue.trim().replace(/^"|"$/g, "");
+      }
+    }
+
+    rows.push({ name, labels, value });
+  }
+  return rows;
+}
+
+function metricValue(
+  rows: PromLine[],
+  metricName: string,
+  expectedLabels?: Record<string, string>,
+): number | null {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row.name !== metricName) {
+      continue;
+    }
+    if (
+      expectedLabels &&
+      !Object.entries(expectedLabels).every(
+        ([key, value]) => row.labels[key] === value,
+      )
+    ) {
+      continue;
+    }
+    return row.value;
+  }
+  return null;
+}
+
+function metricSum(rows: PromLine[], metricName: string): number | null {
+  const matching = rows.filter((row) => row.name === metricName);
+  if (matching.length === 0) {
+    return null;
+  }
+  return matching.reduce((sum, row) => sum + row.value, 0);
+}
+
+function metricBool(value: number | null): boolean | null {
+  if (value === null) {
+    return null;
+  }
+  return value >= 1;
+}
+
+export async function getAdminOperationsMetrics() {
+  const [
+    gameCoreText,
+    submissionText,
+    controllerText,
+    realtimeText,
+    wireguardText,
+  ] = await Promise.all([
+    fetchText(gameCoreBaseUrl(), "/metrics"),
+    fetchText(submissionServiceBaseUrl(), "/metrics"),
+    fetchText(controllerMetricsBaseUrl(), "/metrics"),
+    fetchText(realtimeGatewayBaseUrl(), "/metrics"),
+    fetchText(wireGuardGatewayBaseUrl(), "/metrics"),
+  ]);
+
+  const gameCore = parsePrometheus(gameCoreText);
+  const submission = parsePrometheus(submissionText);
+  const controller = parsePrometheus(controllerText);
+  const realtime = parsePrometheus(realtimeText);
+  const wireguard = parsePrometheus(wireguardText);
+
+  return {
+    generated_at: new Date().toISOString(),
+    game_core: {
+      match_state:
+        metricValue(gameCore, "adplatform_game_core_match_state", {
+          state: "running",
+        }) === 1
+          ? "running"
+          : metricValue(gameCore, "adplatform_game_core_match_state", {
+                state: "finished",
+              }) === 1
+            ? "finished"
+            : metricValue(gameCore, "adplatform_game_core_match_state", {
+                  state: "not_started",
+                }) === 1
+              ? "not_started"
+              : "unknown",
+      total_ticks: metricValue(gameCore, "adplatform_game_core_total_ticks"),
+      checker_runs_total: metricValue(
+        gameCore,
+        "adplatform_game_core_checker_runs_total",
+        { status: "all" },
+      ),
+      checker_runs_failed: metricValue(
+        gameCore,
+        "adplatform_game_core_checker_runs_total",
+        { status: "failed" },
+      ),
+      scheduler_running: metricBool(
+        metricValue(gameCore, "adplatform_game_core_scheduler_running"),
+      ),
+    },
+    submission_service: {
+      submit_requests_total: metricValue(
+        submission,
+        "adplatform_submission_service_submit_requests_total",
+      ),
+      submit_failures_total: metricValue(
+        submission,
+        "adplatform_submission_service_submit_failures_total",
+      ),
+      attack_feed_requests_total: metricValue(
+        submission,
+        "adplatform_submission_service_attack_feed_requests_total",
+      ),
+      verdicts: {
+        correct: metricValue(
+          submission,
+          "adplatform_submission_service_submit_verdicts_total",
+          { class: "correct" },
+        ),
+        duplicate: metricValue(
+          submission,
+          "adplatform_submission_service_submit_verdicts_total",
+          { class: "duplicate" },
+        ),
+        invalid: metricValue(
+          submission,
+          "adplatform_submission_service_submit_verdicts_total",
+          { class: "invalid" },
+        ),
+        unknown: metricValue(
+          submission,
+          "adplatform_submission_service_submit_verdicts_total",
+          { class: "unknown" },
+        ),
+      },
+    },
+    controller_service: {
+      deployment_reconcile_requests: metricValue(
+        controller,
+        "adplatform_controller_service_operation_requests_total",
+        { operation: "deployment_reconcile" },
+      ),
+      access_reconcile_requests: metricValue(
+        controller,
+        "adplatform_controller_service_operation_requests_total",
+        { operation: "access_reconcile" },
+      ),
+      service_access_reconcile_requests: metricValue(
+        controller,
+        "adplatform_controller_service_operation_requests_total",
+        { operation: "service_access_reconcile" },
+      ),
+      ssh_credential_requests: metricValue(
+        controller,
+        "adplatform_controller_service_operation_requests_total",
+        { operation: "ssh_credential" },
+      ),
+      access_policies_total: metricValue(
+        controller,
+        "adplatform_controller_service_access_policies_total",
+      ),
+      access_last_apply_success: metricBool(
+        metricValue(
+          controller,
+          "adplatform_controller_service_access_last_apply_success",
+        ),
+      ),
+    },
+    realtime_gateway: {
+      last_sync_success: metricBool(
+        metricValue(realtime, "adplatform_realtime_gateway_last_sync_success"),
+      ),
+      sync_errors_total: metricValue(
+        realtime,
+        "adplatform_realtime_gateway_sync_errors_total",
+      ),
+      subscribers_total: metricSum(
+        realtime,
+        "adplatform_realtime_gateway_subscribers",
+      ),
+      snapshot_bytes_total: metricSum(
+        realtime,
+        "adplatform_realtime_gateway_snapshot_bytes",
+      ),
+    },
+    wireguard_gateway: {
+      reconcile_requests: metricValue(
+        wireguard,
+        "adplatform_wireguard_gateway_operation_requests_total",
+        { operation: "reconcile" },
+      ),
+      peers_total: metricValue(
+        wireguard,
+        "adplatform_wireguard_gateway_peer_counts",
+        { status: "total" },
+      ),
+      peers_active: metricValue(
+        wireguard,
+        "adplatform_wireguard_gateway_peer_counts",
+        { status: "active" },
+      ),
+      peers_revoked: metricValue(
+        wireguard,
+        "adplatform_wireguard_gateway_peer_counts",
+        { status: "revoked" },
+      ),
+      last_apply_success: metricBool(
+        metricValue(
+          wireguard,
+          "adplatform_wireguard_gateway_last_apply_success",
+        ),
+      ),
+    },
+  } satisfies AdminServiceMetricSnapshot;
 }
 
 export async function listAdminTeams() {

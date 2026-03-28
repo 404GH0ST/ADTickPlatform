@@ -1,4 +1,12 @@
 services:
+  web:
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      AD_PLATFORM_CONTROLLER_URL: ${CONTROLLER_INTERNAL_URL_HOST:-http://host.docker.internal:18084}
+      AD_PLATFORM_CONTROLLER_METRICS_URL: ${CONTROLLER_INTERNAL_URL_HOST:-http://host.docker.internal:18084}
+      AD_PLATFORM_WIREGUARD_GATEWAY_URL: ${WIREGUARD_GATEWAY_INTERNAL_URL_HOST:-http://host.docker.internal:18087}
+
   postgres:
     ports:
       - 127.0.0.1:${POSTGRES_LOOPBACK_PORT:-15432}:5432

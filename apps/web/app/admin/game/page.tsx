@@ -22,6 +22,7 @@ export default async function AdminGamePage() {
         gameStatus={dashboard.gameStatus}
         operationsStatus={dashboard.overview.operationsStatus}
         players={dashboard.players}
+        serviceMetrics={dashboard.serviceMetrics}
         schedulerEventPage={dashboard.schedulerEventPage}
         scoreboard={dashboard.scoreboard}
         teams={dashboard.teams}

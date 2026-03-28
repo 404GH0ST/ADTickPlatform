@@ -337,3 +337,46 @@ export type AdminOperationsStatus = {
   generated_at: string;
   alerts: AdminOperationsAlert[];
 };
+
+export type AdminServiceMetricSnapshot = {
+  generated_at: string;
+  game_core: {
+    match_state: string;
+    total_ticks: number | null;
+    checker_runs_total: number | null;
+    checker_runs_failed: number | null;
+    scheduler_running: boolean | null;
+  };
+  submission_service: {
+    submit_requests_total: number | null;
+    submit_failures_total: number | null;
+    attack_feed_requests_total: number | null;
+    verdicts: {
+      correct: number | null;
+      duplicate: number | null;
+      invalid: number | null;
+      unknown: number | null;
+    };
+  };
+  controller_service: {
+    deployment_reconcile_requests: number | null;
+    access_reconcile_requests: number | null;
+    service_access_reconcile_requests: number | null;
+    ssh_credential_requests: number | null;
+    access_policies_total: number | null;
+    access_last_apply_success: boolean | null;
+  };
+  realtime_gateway: {
+    last_sync_success: boolean | null;
+    sync_errors_total: number | null;
+    subscribers_total: number | null;
+    snapshot_bytes_total: number | null;
+  };
+  wireguard_gateway: {
+    reconcile_requests: number | null;
+    peers_total: number | null;
+    peers_active: number | null;
+    peers_revoked: number | null;
+    last_apply_success: boolean | null;
+  };
+};

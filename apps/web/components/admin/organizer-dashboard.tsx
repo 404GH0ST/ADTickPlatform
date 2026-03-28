@@ -31,6 +31,7 @@ export function OrganizerDashboard({
   deployments,
   gameStatus,
   operationsStatus,
+  serviceMetrics,
   schedulerEventPage,
   checkerRunPage,
   scoreboard,
@@ -52,6 +53,7 @@ export function OrganizerDashboard({
     deployments,
     gameStatus,
     operationsStatus,
+    serviceMetrics,
     players,
     schedulerEventPage,
     scoreboard,
@@ -77,6 +79,7 @@ export function OrganizerDashboard({
         deploymentRows: state.deploymentRows,
         gameState: state.gameState,
         operationsStatus: state.operationsStatus,
+        serviceMetrics: state.serviceMetrics,
         initialTab,
         pendingAction: state.pendingAction,
         playerRows: state.playerRows,
@@ -154,6 +157,9 @@ export function OrganizerDashboard({
         },
         onRefreshOperationsStatus: () => {
           void state.refreshOperationsStatus();
+        },
+        onRefreshServiceMetrics: () => {
+          void state.refreshServiceMetrics();
         },
         onRefreshSchedulerEvents: () => {
           void state.refreshSchedulerEvents();
@@ -241,6 +247,7 @@ function renderOrganizerPanel({
   deploymentRows,
   gameState,
   operationsStatus,
+  serviceMetrics,
   initialTab,
   pendingAction,
   playerRows,
@@ -279,6 +286,7 @@ function renderOrganizerPanel({
   onRefreshGameScoreboard,
   onRefreshGameStatus,
   onRefreshOperationsStatus,
+  onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
   onRefreshWireGuardGatewayStatus,
   onResetAttackFilters,
@@ -312,6 +320,7 @@ function renderOrganizerPanel({
   deploymentRows: OrganizerDashboardOptions["deployments"];
   gameState: OrganizerDashboardOptions["gameStatus"];
   operationsStatus: OrganizerDashboardState["operationsStatus"];
+  serviceMetrics: OrganizerDashboardState["serviceMetrics"];
   initialTab:
     | "teams"
     | "players"
@@ -364,6 +373,7 @@ function renderOrganizerPanel({
   onRefreshGameScoreboard: () => void;
   onRefreshGameStatus: () => void;
   onRefreshOperationsStatus: () => void;
+  onRefreshServiceMetrics: () => void;
   onRefreshSchedulerEvents: () => void;
   onRefreshWireGuardGatewayStatus: () => void;
   onResetAttackFilters: () => void;
@@ -503,6 +513,7 @@ function renderOrganizerPanel({
         }}
         gameState={gameState}
         operationsStatus={operationsStatus}
+        serviceMetrics={serviceMetrics}
         pendingAction={pendingAction}
         schedulerEventPage={schedulerEventPage}
         schedulerEventsLiveMode={schedulerEventsLiveMode}
@@ -522,6 +533,7 @@ function renderOrganizerPanel({
         onRefreshGameScoreboard={onRefreshGameScoreboard}
         onRefreshGameStatus={onRefreshGameStatus}
         onRefreshOperationsStatus={onRefreshOperationsStatus}
+        onRefreshServiceMetrics={onRefreshServiceMetrics}
         onRefreshSchedulerEvents={onRefreshSchedulerEvents}
       onResetAttackFilters={onResetAttackFilters}
       onResetCheckerRunFilters={onResetCheckerRunFilters}

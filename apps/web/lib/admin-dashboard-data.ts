@@ -6,6 +6,7 @@ import type {
   AdminGameStatus,
   AdminOverview,
   AdminOperationsStatus,
+  AdminServiceMetricSnapshot,
   AdminPlayer,
   AdminSchedulerEventPage,
   AdminTeam,
@@ -13,6 +14,7 @@ import type {
 } from '@/lib/admin-dashboard-types';
 import {
   getAdminGameStatus,
+  getAdminOperationsMetrics,
   getAdminOperationsStatus,
   listAdminChallenges,
   listAdminCheckerRuns,
@@ -35,6 +37,7 @@ export type AdminDashboardData = {
   checkerRunPage: AdminCheckerRunPage;
   attackPage: AdminAttackFeedPage;
   scoreboard: AdminGameScoreRow[];
+  serviceMetrics: AdminServiceMetricSnapshot | null;
   overview: AdminOverview;
 };
 
@@ -107,16 +110,21 @@ function emptyOperationsStatus(): AdminOperationsStatus {
   };
 }
 
+function emptyServiceMetrics(): AdminServiceMetricSnapshot | null {
+  return null;
+}
+
 export async function loadAdminDashboardData(
   options: AdminDashboardDataOptions = {},
 ): Promise<AdminDashboardData> {
-  const [teamsResult, playersResult, challengesResult, deploymentsResult, operationsStatusResult, gameStatusResult, schedulerEventPageResult, checkerRunPageResult, attackPageResult, scoreboardResult] =
+  const [teamsResult, playersResult, challengesResult, deploymentsResult, operationsStatusResult, serviceMetricsResult, gameStatusResult, schedulerEventPageResult, checkerRunPageResult, attackPageResult, scoreboardResult] =
     await Promise.allSettled([
       listAdminTeams(),
       listAdminPlayers(),
       listAdminChallenges(),
       listAdminDeployments(),
       getAdminOperationsStatus(),
+      getAdminOperationsMetrics(),
       getAdminGameStatus(),
       listAdminGameSchedulerEvents({ limit: 12 }),
       listAdminCheckerRuns({ limit: 18 }),
@@ -131,6 +139,9 @@ export async function loadAdminDashboardData(
   const operationsStatus = isFulfilled(operationsStatusResult)
     ? operationsStatusResult.value
     : emptyOperationsStatus();
+  const serviceMetrics = isFulfilled(serviceMetricsResult)
+    ? serviceMetricsResult.value
+    : emptyServiceMetrics();
   const gameStatus = isFulfilled(gameStatusResult)
     ? gameStatusResult.value
     : emptyGameStatus();
@@ -151,6 +162,7 @@ export async function loadAdminDashboardData(
     challengesResult.status === 'fulfilled' &&
     deploymentsResult.status === 'fulfilled' &&
     operationsStatusResult.status === 'fulfilled' &&
+    serviceMetricsResult.status === 'fulfilled' &&
     gameStatusResult.status === 'fulfilled' &&
     schedulerEventPageResult.status === 'fulfilled' &&
     checkerRunPageResult.status === 'fulfilled' &&
@@ -169,6 +181,7 @@ export async function loadAdminDashboardData(
     checkerRunPage,
     attackPage,
     scoreboard,
+    serviceMetrics,
     overview: {
       source,
       message:
