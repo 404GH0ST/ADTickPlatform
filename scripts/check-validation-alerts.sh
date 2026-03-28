@@ -9,6 +9,7 @@ require_bin jq
 
 artifact_dir="${VALIDATION_ALERT_ARTIFACT_DIR:-}"
 summary_file="${VALIDATION_ALERT_SUMMARY_FILE:-}"
+report_file="${VALIDATION_ALERT_REPORT_FILE:-}"
 
 usage() {
   cat <<'EOF'
@@ -18,6 +19,7 @@ Usage:
 Optional:
   VALIDATION_ALERT_ARTIFACT_DIR=.runtime/release-candidate-<timestamp>
   VALIDATION_ALERT_SUMMARY_FILE=.runtime/release-candidate-<timestamp>/operator-summary.json
+  VALIDATION_ALERT_REPORT_FILE=.runtime/release-candidate-<timestamp>/operator-report.html
 EOF
 }
 
@@ -61,14 +63,24 @@ if [[ ! -f "${summary_file}" ]]; then
   exit 1
 fi
 
+if [[ -z "${report_file}" && -n "${artifact_dir}" ]]; then
+  report_file="${artifact_dir}/operator-report.html"
+fi
+
 if [[ "$(jq -r '.operator_status' "${summary_file}")" == "healthy" ]]; then
   echo "validation alerts check passed:"
   printf '  %s\n' "${summary_file}"
+  if [[ -n "${report_file}" && -f "${report_file}" ]]; then
+    printf '  %s\n' "${report_file}"
+  fi
   exit 0
 fi
 
 echo "validation alerts require attention:" >&2
 printf '  %s\n' "${summary_file}" >&2
+if [[ -n "${report_file}" && -f "${report_file}" ]]; then
+  printf '  %s\n' "${report_file}" >&2
+fi
 
 runtime_alert_count="$(jq -r '.runtime_alerts.alerts_count // 0' "${summary_file}")"
 if [[ "${runtime_alert_count}" != "0" ]]; then

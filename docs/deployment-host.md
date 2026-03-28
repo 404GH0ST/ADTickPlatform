@@ -160,7 +160,7 @@ Run the main host validation flow end to end:
 sudo make go-live-check
 ```
 This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
-The artifact directory also records the git revision, a `prod.env` SHA256 fingerprint, and an `operator-summary.json` snapshot for the validated run.
+The artifact directory also records the git revision, a `prod.env` SHA256 fingerprint, an `operator-summary.json` snapshot, and an `operator-report.html` status page for the validated run.
 
 ### Release-Candidate Validation
 Run the full release-candidate host workflow:
@@ -168,7 +168,7 @@ Run the full release-candidate host workflow:
 make validate-prod-release-candidate
 ```
 This wraps host preflight, compose validation, `up-prod-host`, the database restore drill, and `go-live-check` into a single `.runtime/release-candidate-*` directory so one command yields the full evidence set for a candidate build.
-It also writes `operator-summary.json` at the release-candidate root so operators can inspect the consolidated health summary without parsing the nested evidence manually.
+It also writes `operator-summary.json` and `operator-report.html` at the release-candidate root so operators can inspect the consolidated health summary without parsing the nested evidence manually.
 
 ### Capture Baseline
 After the stack is in a known-good state, capture an incident-response baseline:

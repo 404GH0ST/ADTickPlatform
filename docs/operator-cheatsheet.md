@@ -61,7 +61,7 @@ Verify the full release-candidate gate before tagging:
 make verify-release-candidate
 ```
 
-This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, requires the captured `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to exist and contain the expected metric families, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
+This checks the latest `.runtime/release-candidate-*` evidence set, requires the nested go-live runtime alert snapshot to be healthy, requires the attack-map load report to have passed, requires the captured `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to exist and contain the expected metric families, requires the generated `operator-report.html` to exist, confirms the rendered event-ready note exists in the artifact tree, and by default rejects the release if `git HEAD` differs from the validated commit. Set `RELEASE_CANDIDATE_REQUIRE_HEAD_MATCH=false` only when auditing an older artifact tree.
 
 If you also want this command to verify the checked-in readiness note, add:
 
@@ -150,6 +150,12 @@ Summarize the latest validated artifact tree:
 make summarize-validation-artifacts
 ```
 
+Render the lightweight HTML operator report for the latest validated artifact tree:
+
+```bash
+make render-validation-report
+```
+
 Fail fast if the latest validated artifact tree needs operator attention:
 
 ```bash
@@ -232,6 +238,7 @@ Inspect the operator-facing go-live summary:
 
 ```bash
 jq . .runtime/go-live-check-<timestamp>/operator-summary.json
+xdg-open .runtime/go-live-check-<timestamp>/operator-report.html
 ```
 
 Inspect the captured metrics snapshots:
@@ -254,6 +261,7 @@ Inspect the operator-facing release-candidate summary:
 
 ```bash
 jq . .runtime/release-candidate-<timestamp>/operator-summary.json
+xdg-open .runtime/release-candidate-<timestamp>/operator-report.html
 ```
 
 Check the operator-facing release status and print any derived alerts:

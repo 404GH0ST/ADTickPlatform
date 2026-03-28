@@ -10,6 +10,7 @@ artifact_dir="${RELEASE_CANDIDATE_OUTPUT_DIR:-.runtime/release-candidate-${times
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 summary_file="${artifact_dir}/summary.json"
 operator_summary_file="${artifact_dir}/operator-summary.json"
+operator_report_file="${artifact_dir}/operator-report.html"
 event_ready_date="${EVENT_READY_DATE:-$(date -u +%F)}"
 event_ready_artifact_note="${artifact_dir}/event-ready-${event_ready_date}.md"
 event_ready_output="${EVENT_READY_OUTPUT:-}"
@@ -59,6 +60,7 @@ Artifacts in this directory:
 - go-live-check/attack-map-load/attack-map-load.env
 - go-live-check/attack-map-load/attack-map-load-report.json
 - operator-summary.json
+- operator-report.html
 - event-ready-${event_ready_date}.md
 - git-revision.txt
 - prod-env.sha256
@@ -70,6 +72,7 @@ jq -nc \
   --arg git_revision "git-revision.txt" \
   --arg prod_env_sha256 "prod-env.sha256" \
   --arg operator_summary "operator-summary.json" \
+  --arg operator_report "operator-report.html" \
   --arg event_ready_note "event-ready-${event_ready_date}.md" \
   '{
     validation: "release-candidate",
@@ -87,6 +90,7 @@ jq -nc \
       git_revision: $git_revision,
       prod_env_sha256: $prod_env_sha256,
       operator_summary: $operator_summary,
+      operator_report: $operator_report,
       prod_db_restore: {
         readme: "prod-db-restore/README.txt",
         backup_sql: "prod-db-restore/postgres-backup.sql",
@@ -125,9 +129,14 @@ if [[ -n "${event_ready_output}" ]]; then
     "${ROOT_DIR}/scripts/render-event-ready-note.sh"
 fi
 
+VALIDATION_REPORT_ARTIFACT_DIR="${artifact_dir}" \
+VALIDATION_REPORT_OUTPUT="${operator_report_file}" \
+  "${ROOT_DIR}/scripts/render-validation-report.sh"
+
 echo "release-candidate validation passed:"
 printf '  %s\n' \
   "${artifact_dir}" \
   "${artifact_dir}/README.txt" \
   "${summary_file}" \
-  "${operator_summary_file}"
+  "${operator_summary_file}" \
+  "${operator_report_file}"

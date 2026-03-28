@@ -250,12 +250,18 @@ Final release gate:
 make verify-release-candidate
 ```
 
-This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, requires the nested `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to still exist with the expected metric families, confirms the rendered event-ready note exists inside the artifact tree, and rejects the release if `git HEAD` does not match the validated commit.
+This uses the latest `.runtime/release-candidate-*` artifact tree by default, requires the nested go-live runtime alert snapshot to still be healthy, requires the nested attack-map load validation report to still show `passed`, requires the nested `game-core`, `submission-service`, `controller-service`, `realtime-gateway`, and `wireguard-gateway` metrics snapshots to still exist with the expected metric families, requires the generated `operator-report.html` to exist, confirms the rendered event-ready note exists inside the artifact tree, and rejects the release if `git HEAD` does not match the validated commit.
 
 For a compact operator-facing view of the latest validated evidence:
 
 ```bash
 make summarize-validation-artifacts
+```
+
+Render the HTML report for the same artifact tree:
+
+```bash
+make render-validation-report
 ```
 
 To fail immediately when the validated evidence still needs operator attention:

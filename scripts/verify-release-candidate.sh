@@ -62,15 +62,28 @@ if [[ -z "${validated_commit}" || -z "${validated_short_commit}" ]]; then
 fi
 
 event_ready_rel="$(jq -r '.artifacts.event_ready_note // empty' "${summary_file}")"
+operator_report_rel="$(jq -r '.artifacts.operator_report // empty' "${summary_file}")"
 event_ready_artifact_file=""
 event_ready_filename=""
+operator_report_file=""
 if [[ -n "${event_ready_rel}" ]]; then
   event_ready_filename="$(basename "${event_ready_rel}")"
   event_ready_artifact_file="${ARTIFACT_DIR}/${event_ready_rel}"
 fi
+if [[ -n "${operator_report_rel}" ]]; then
+  operator_report_file="${ARTIFACT_DIR}/${operator_report_rel}"
+fi
+if [[ -z "${operator_report_file}" ]]; then
+  operator_report_file="${ARTIFACT_DIR}/operator-report.html"
+fi
 
 if [[ -z "${event_ready_artifact_file}" || ! -f "${event_ready_artifact_file}" ]]; then
   echo "missing rendered event-ready artifact note for validated commit ${validated_commit}" >&2
+  exit 1
+fi
+
+if [[ -z "${operator_report_file}" || ! -f "${operator_report_file}" ]]; then
+  echo "missing operator report for validated commit ${validated_commit}" >&2
   exit 1
 fi
 
@@ -290,6 +303,7 @@ echo "release-candidate verification passed:"
 printf '  %s\n' \
   "${ARTIFACT_DIR}" \
   "${event_ready_artifact_file}" \
+  "${operator_report_file}" \
   "${go_live_operations_file}" \
   "${go_live_game_core_metrics_file}" \
   "${go_live_submission_metrics_file}" \
