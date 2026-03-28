@@ -9,6 +9,7 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 artifact_dir="${RELEASE_CANDIDATE_OUTPUT_DIR:-.runtime/release-candidate-${timestamp}}"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 summary_file="${artifact_dir}/summary.json"
+operator_summary_file="${artifact_dir}/operator-summary.json"
 event_ready_date="${EVENT_READY_DATE:-$(date -u +%F)}"
 event_ready_artifact_note="${artifact_dir}/event-ready-${event_ready_date}.md"
 event_ready_output="${EVENT_READY_OUTPUT:-}"
@@ -57,6 +58,7 @@ Artifacts in this directory:
 - go-live-check/attack-map-load/README.txt
 - go-live-check/attack-map-load/attack-map-load.env
 - go-live-check/attack-map-load/attack-map-load-report.json
+- operator-summary.json
 - event-ready-${event_ready_date}.md
 - git-revision.txt
 - prod-env.sha256
@@ -67,6 +69,7 @@ jq -nc \
   --arg artifact_dir "${artifact_dir}" \
   --arg git_revision "git-revision.txt" \
   --arg prod_env_sha256 "prod-env.sha256" \
+  --arg operator_summary "operator-summary.json" \
   --arg event_ready_note "event-ready-${event_ready_date}.md" \
   '{
     validation: "release-candidate",
@@ -83,6 +86,7 @@ jq -nc \
     artifacts: {
       git_revision: $git_revision,
       prod_env_sha256: $prod_env_sha256,
+      operator_summary: $operator_summary,
       prod_db_restore: {
         readme: "prod-db-restore/README.txt",
         backup_sql: "prod-db-restore/postgres-backup.sql",
@@ -91,6 +95,7 @@ jq -nc \
       go_live_check: {
         readme: "go-live-check/README.txt",
         summary: "go-live-check/summary.json",
+        operator_summary: "go-live-check/operator-summary.json",
         short_match_env: "go-live-check/short-match.env",
         operations_status: "go-live-check/operations-status.json",
         attack_map_load: {
@@ -103,6 +108,10 @@ jq -nc \
       event_ready_note: $event_ready_note
     }
   }' > "${summary_file}"
+
+VALIDATION_SUMMARY_ARTIFACT_DIR="${artifact_dir}" \
+VALIDATION_SUMMARY_OUTPUT="${operator_summary_file}" \
+  "${ROOT_DIR}/scripts/summarize-validation-artifacts.sh"
 
 EVENT_READY_ARTIFACT_DIR="${artifact_dir}" \
 EVENT_READY_OUTPUT="${event_ready_artifact_note}" \
@@ -120,4 +129,5 @@ echo "release-candidate validation passed:"
 printf '  %s\n' \
   "${artifact_dir}" \
   "${artifact_dir}/README.txt" \
-  "${summary_file}"
+  "${summary_file}" \
+  "${operator_summary_file}"

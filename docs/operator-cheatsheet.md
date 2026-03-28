@@ -144,6 +144,12 @@ GO_LIVE_METRICS_OUTPUT_DIR=.runtime/go-live-check-<timestamp> \
 make capture-go-live-metrics
 ```
 
+Summarize the latest validated artifact tree:
+
+```bash
+make summarize-validation-artifacts
+```
+
 ## Recovery
 
 Restart-recovery drill:
@@ -216,6 +222,12 @@ Inspect the machine-readable go-live summary:
 jq . .runtime/go-live-check-<timestamp>/summary.json
 ```
 
+Inspect the operator-facing go-live summary:
+
+```bash
+jq . .runtime/go-live-check-<timestamp>/operator-summary.json
+```
+
 Inspect the captured metrics snapshots:
 
 ```bash
@@ -230,6 +242,12 @@ Latest release-candidate validation artifacts:
 
 ```bash
 ls -1 .runtime/release-candidate-*
+```
+
+Inspect the operator-facing release-candidate summary:
+
+```bash
+jq . .runtime/release-candidate-<timestamp>/operator-summary.json
 ```
 
 Inspect the machine-readable release-candidate summary:

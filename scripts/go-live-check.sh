@@ -21,6 +21,7 @@ controller_metrics_file="${artifact_dir}/controller-service-metrics.prom"
 realtime_metrics_file="${artifact_dir}/realtime-gateway-metrics.prom"
 wireguard_metrics_file="${artifact_dir}/wireguard-gateway-metrics.prom"
 summary_file="${artifact_dir}/summary.json"
+operator_summary_file="${artifact_dir}/operator-summary.json"
 
 load_env_file "${prod_env}"
 edge_base_url="${GO_LIVE_CHECK_BASE_URL:-$(derive_edge_base_url)}"
@@ -91,6 +92,7 @@ ${attack_map_artifacts}
 - controller-service-metrics.prom
 - realtime-gateway-metrics.prom
 - wireguard-gateway-metrics.prom
+- operator-summary.json
 - final-iptables-filter.txt
 - final-iptables-raw.txt
 - final-nft-ruleset.txt
@@ -104,6 +106,7 @@ jq -nc \
   --arg artifact_dir "${artifact_dir}" \
   --arg short_match_env "short-match.env" \
   --arg operations_status "operations-status.json" \
+  --arg operator_summary "operator-summary.json" \
   --arg git_revision "git-revision.txt" \
   --arg prod_env_sha256 "prod-env.sha256" \
   --arg game_core_metrics "game-core-metrics.prom" \
@@ -131,6 +134,7 @@ jq -nc \
     artifacts: {
       short_match_env: $short_match_env,
       operations_status: $operations_status,
+      operator_summary: $operator_summary,
       git_revision: $git_revision,
       prod_env_sha256: $prod_env_sha256,
       game_core_metrics: $game_core_metrics,
@@ -152,8 +156,13 @@ jq -nc \
     }
   }' > "${summary_file}"
 
+VALIDATION_SUMMARY_ARTIFACT_DIR="${artifact_dir}" \
+VALIDATION_SUMMARY_OUTPUT="${operator_summary_file}" \
+  "${ROOT_DIR}/scripts/summarize-validation-artifacts.sh"
+
 echo "go-live check passed:"
 printf '  %s\n' \
   "${artifact_dir}" \
   "${artifact_dir}/README.txt" \
-  "${summary_file}"
+  "${summary_file}" \
+  "${operator_summary_file}"
