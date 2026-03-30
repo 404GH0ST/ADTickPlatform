@@ -129,11 +129,16 @@ jq -nc \
     edge_base_url: $edge_base_url,
     artifact_dir: $artifact_dir,
     include_attack_map_load: $include_attack_map_load,
-    commands: [
+    commands: (if $include_attack_map_load then [
+      "make smoke-prod-short-match",
+      "make smoke-prod-host-recovery",
+      "make capture-prod-host-baseline",
+      "make validate-attack-map-load"
+    ] else [
       "make smoke-prod-short-match",
       "make smoke-prod-host-recovery",
       "make capture-prod-host-baseline"
-    ] + (if $include_attack_map_load then ["make validate-attack-map-load"] else [] end),
+    ] end),
     artifacts: {
       short_match_env: $short_match_env,
       operations_status: $operations_status,

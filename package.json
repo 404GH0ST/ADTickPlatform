@@ -6,9 +6,14 @@
     "apps/*"
   ],
   "scripts": {
+    "release-notes": "./scripts/release-notes.sh",
     "web:dev": "cd apps/web && bun run dev",
     "web:build": "cd apps/web && bun run build",
     "web:typecheck": "cd apps/web && bun run typecheck",
     "web:e2e": "cd apps/web && bun run e2e"
+  },
+  "devDependencies": {
+    "conventional-changelog-angular": "^8.3.0",
+    "conventional-changelog-cli": "^5.0.0"
   }
 }

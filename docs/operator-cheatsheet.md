@@ -77,6 +77,28 @@ RELEASE_TAG=vYYYY.MM.DD \
 make tag-release
 ```
 
+Generate GitHub release notes from Conventional Commits:
+
+```bash
+make release-notes
+```
+
+Write the generated notes to a file instead of stdout:
+
+```bash
+RELEASE_NOTES_OUTPUT=.runtime/release-notes-vX.Y.Z.md \
+make release-notes
+```
+
+Generate the full changelog or an unreleased draft instead of only the latest tagged release section:
+
+```bash
+RELEASE_NOTES_MODE=all make release-notes
+RELEASE_NOTES_MODE=unreleased make release-notes
+```
+
+`make release-notes` uses `conventional-changelog` with the `conventionalcommits` preset, so `feat`, `fix`, and breaking changes are grouped automatically from the tagged git history. The default `latest` mode extracts the most recent tagged release section, which is the best fit for a GitHub release body after tagging.
+
 Dry-run the tagging flow without creating the git tag:
 
 ```bash
