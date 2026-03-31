@@ -104,6 +104,13 @@ Once the platform is running, create your first organizer account:
 make create-admin PASSWORD=your-secure-password
 ```
 
+This now also fetches and writes the organizer WireGuard client config by default to `.runtime/admin-wireguard/`.
+Set a custom output directory with:
+
+```bash
+make create-admin PASSWORD=your-secure-password ADMIN_WIREGUARD_OUTPUT_DIR=/path/to/output
+```
+
 You can now log in at your configured `EDGE_SITE_ADDRESS` / `login` to access the dashboard.
 
 ## 7. Troubleshooting

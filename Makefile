@@ -137,7 +137,7 @@ tag-release:
 	./scripts/tag-release.sh
 
 create-admin:
-	./scripts/create-admin.sh "$(DISPLAY_NAME)" "$(EMAIL)" "$(PASSWORD)"
+	./scripts/create-admin.sh "$(DISPLAY_NAME)" "$(EMAIL)" "$(PASSWORD)" "$(ADMIN_WIREGUARD_OUTPUT_DIR)"
 
 create-teams:
 	./scripts/create-teams.sh "$(TEAM_COUNT)" "$(TEAM_PREFIX)" "$(TEAM_EMAIL_DOMAIN)" "$(TEAM_START_INDEX)"
