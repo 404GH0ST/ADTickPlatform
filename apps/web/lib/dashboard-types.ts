@@ -32,16 +32,6 @@ export type AttackEvent = {
   verdict: string;
 };
 
-export type AttackFeedQuery = {
-  limit?: number;
-  offset?: number;
-  attacker?: string;
-  victim?: string;
-  service?: string;
-  tick_from?: number;
-  tick_to?: number;
-};
-
 export type AttackFeedPage = {
   items: AttackEvent[];
   limit: number;

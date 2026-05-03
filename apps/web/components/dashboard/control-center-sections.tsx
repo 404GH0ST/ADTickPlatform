@@ -63,14 +63,6 @@ type AttackFilters = {
   tickTo: string;
 };
 
-type SummaryProps = {
-  acceptedFlags: number;
-  stableServices: number;
-  totalServices: number;
-  unlockedServices: number;
-  currentTick: number;
-};
-
 type ScoreboardPanelProps = {
   scoreRows: ScoreRow[];
   currentTeamName?: string;
@@ -138,31 +130,6 @@ const serviceStatusTone: Record<ServiceRow["status"], string> = {
   warming: "tone-warning",
   degraded: "tone-danger",
 };
-
-export function ControlCenterSummary({
-  acceptedFlags,
-  stableServices,
-  totalServices,
-  unlockedServices,
-  currentTick,
-}: SummaryProps): ReactElement {
-  return (
-    <section className="rounded-lg border bg-card">
-      <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCell label="Accepted Flags" value={String(acceptedFlags)} />
-        <SummaryCell
-          label="Stable Services"
-          value={`${stableServices}/${totalServices}`}
-        />
-        <SummaryCell
-          label="Unlocked Services"
-          value={`${unlockedServices}/${totalServices}`}
-        />
-        <SummaryCell label="Current Tick" value={`#${currentTick}`} />
-      </dl>
-    </section>
-  );
-}
 
 export function ScoreboardPanel({
   scoreRows,
@@ -620,7 +587,7 @@ export function FactoryResetDialog({
   );
 }
 
-export function ErrorBanner({ message }: { message: string }): ReactElement {
+function ErrorBanner({ message }: { message: string }): ReactElement {
   return <StatusBanner message={message} variant="error" />;
 }
 
@@ -792,21 +759,6 @@ function ResetWarningBlock(): ReactElement {
       message="Unlock remains preserved for this team and service during the same match."
       variant="warning"
     />
-  );
-}
-
-function SummaryCell({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): ReactElement {
-  return (
-    <div className="border-b p-4 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-sm font-medium">{value}</dd>
-    </div>
   );
 }
 

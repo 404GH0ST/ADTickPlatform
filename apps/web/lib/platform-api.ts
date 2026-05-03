@@ -1,16 +1,18 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
 
+import { participantSessionCookieName } from "@/lib/participant-session-cookie";
+
 function trimBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
-export type Challenge = {
+type Challenge = {
   id: number;
   name: string;
 };
 
-export type ScoreRow = {
+type ScoreRow = {
   rank: number;
   team: string;
   attack: number;
@@ -20,7 +22,7 @@ export type ScoreRow = {
   delta: string;
 };
 
-export type AttackEvent = {
+type AttackEvent = {
   id: string;
   attacker: string;
   victim: string;
@@ -29,7 +31,7 @@ export type AttackEvent = {
   verdict: string;
 };
 
-export type AttackFeedQuery = {
+type AttackFeedQuery = {
   limit?: number;
   offset?: number;
   attacker?: string;
@@ -39,7 +41,7 @@ export type AttackFeedQuery = {
   tick_to?: number;
 };
 
-export type AttackFeedPage = {
+type AttackFeedPage = {
   items: AttackEvent[];
   limit: number;
   offset: number;
@@ -94,24 +96,24 @@ export type TeamServiceState = {
 
 export type ServicesResponseData = Record<string, Record<string, string[]>>;
 
-export type SuccessEnvelope<T> = {
+type SuccessEnvelope<T> = {
   status: "success";
   data: T;
 };
 
-export type ErrorEnvelope = {
+type ErrorEnvelope = {
   status: "failed" | "forbidden" | "too many request";
   message: string;
 };
 
-export type UnlockResponseData = {
+type UnlockResponseData = {
   challenge_id: number;
   team_id: number;
   unlocked: boolean;
   ssh_credential_ttl_seconds: number;
 };
 
-export type SSHSessionResponseData = {
+type SSHSessionResponseData = {
   host: string;
   port: number;
   username: "root";
@@ -120,20 +122,20 @@ export type SSHSessionResponseData = {
   connection_hint: string;
 };
 
-export type FactoryResetResponseData = {
+type FactoryResetResponseData = {
   challenge_id: number;
   team_id: number;
   action: "factory_reset";
   unlock_preserved: true;
 };
 
-export type RestartResponseData = {
+type RestartResponseData = {
   challenge_id: number;
   team_id: number;
   action: "restart";
 };
 
-export type ParticipantSession = {
+type ParticipantSession = {
   authenticated: boolean;
   token?: string;
   teamID?: number;
@@ -145,7 +147,16 @@ export type ParticipantSession = {
   source: "cookie" | "env" | "none";
 };
 
-const participantSessionCookieName = "ad_platform_team_jwt";
+type ParticipantSessionClaims = Partial<{
+  team_id: number;
+  player_id: number;
+  team_name: string;
+  display_name: string;
+  email: string;
+  role: string;
+}>;
+
+type AuthenticatedSessionSource = Exclude<ParticipantSession["source"], "none">;
 
 function apiBaseUrl() {
   return trimBaseUrl(
@@ -161,14 +172,7 @@ export function participantRealtimeBaseUrl() {
   return "/api/platform/realtime";
 }
 
-function decodeJWTClaims(token: string): Partial<{
-  team_id: number;
-  player_id: number;
-  team_name: string;
-  display_name: string;
-  email: string;
-  role: string;
-}> | null {
+function decodeJWTClaims(token: string): ParticipantSessionClaims | null {
   const parts = token.split(".");
   if (parts.length !== 3) {
     return null;
@@ -184,68 +188,62 @@ function decodeJWTClaims(token: string): Partial<{
       `${encodedPayload}${padding}`,
       "base64",
     ).toString("utf8");
-    return JSON.parse(payload) as Partial<{
-      team_id: number;
-      player_id: number;
-      team_name: string;
-      display_name: string;
-      email: string;
-      role: string;
-    }>;
+    return JSON.parse(payload) as ParticipantSessionClaims;
   } catch {
     return null;
   }
+}
+
+function claimNumber(
+  claims: ParticipantSessionClaims | null,
+  key: "team_id" | "player_id",
+): number | undefined {
+  const value = claims?.[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function claimString(
+  claims: ParticipantSessionClaims | null,
+  key: "team_name" | "display_name" | "email" | "role",
+): string | undefined {
+  const value = claims?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function authenticatedSession(
+  token: string,
+  source: AuthenticatedSessionSource,
+): ParticipantSession {
+  const claims = decodeJWTClaims(token);
+  return {
+    authenticated: true,
+    token,
+    teamID: claimNumber(claims, "team_id"),
+    playerID: claimNumber(claims, "player_id"),
+    teamName: claimString(claims, "team_name"),
+    displayName: claimString(claims, "display_name"),
+    email: claimString(claims, "email"),
+    role: claimString(claims, "role"),
+    source,
+  };
+}
+
+async function cookieParticipantToken(): Promise<string | undefined> {
+  const cookieStore = await cookies();
+  return cookieStore.get(participantSessionCookieName)?.value?.trim();
 }
 
 export const getParticipantSession = cache(
   async (): Promise<ParticipantSession> => {
     const directToken = process.env.AD_PLATFORM_TEAM_JWT?.trim();
     if (directToken) {
-      const claims = decodeJWTClaims(directToken);
-      return {
-        authenticated: true,
-        token: directToken,
-        teamID:
-          typeof claims?.team_id === "number" ? claims.team_id : undefined,
-        playerID:
-          typeof claims?.player_id === "number" ? claims.player_id : undefined,
-        teamName:
-          typeof claims?.team_name === "string" ? claims.team_name : undefined,
-        displayName:
-          typeof claims?.display_name === "string"
-            ? claims.display_name
-            : undefined,
-        email: typeof claims?.email === "string" ? claims.email : undefined,
-        role: typeof claims?.role === "string" ? claims.role : undefined,
-        source: "env",
-      };
+      return authenticatedSession(directToken, "env");
     }
 
-    const cookieStore = await cookies();
-    const cookieToken = cookieStore
-      .get(participantSessionCookieName)
-      ?.value?.trim();
-    if (!cookieToken) {
-      return { authenticated: false, source: "none" };
-    }
-
-    const claims = decodeJWTClaims(cookieToken);
-    return {
-      authenticated: true,
-      token: cookieToken,
-      teamID: typeof claims?.team_id === "number" ? claims.team_id : undefined,
-      playerID:
-        typeof claims?.player_id === "number" ? claims.player_id : undefined,
-      teamName:
-        typeof claims?.team_name === "string" ? claims.team_name : undefined,
-      displayName:
-        typeof claims?.display_name === "string"
-          ? claims.display_name
-          : undefined,
-      email: typeof claims?.email === "string" ? claims.email : undefined,
-      role: typeof claims?.role === "string" ? claims.role : undefined,
-      source: "cookie",
-    };
+    const cookieToken = await cookieParticipantToken();
+    return cookieToken
+      ? authenticatedSession(cookieToken, "cookie")
+      : { authenticated: false, source: "none" };
   },
 );
 

@@ -93,15 +93,6 @@ type ChallengeDraft = {
   weight: string;
 };
 
-type SummaryProps = {
-  teams: number;
-  players: number;
-  publishedChallenges: number;
-  pendingDrafts: number;
-  pendingDeployments: number;
-  totalTicks: number;
-};
-
 type TeamsTabProps = {
   deleteTarget: DeleteTarget | null;
   pendingAction: string | null;
@@ -353,28 +344,6 @@ function CardActionRow({
   );
 }
 
-export function OrganizerSummary({
-  teams,
-  players,
-  publishedChallenges,
-  pendingDrafts,
-  pendingDeployments,
-  totalTicks,
-}: SummaryProps): ReactElement {
-  return (
-    <section className="rounded-lg border bg-card">
-      <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-6">
-        <SummaryCell label="Teams" value={String(teams)} />
-        <SummaryCell label="Players" value={String(players)} />
-        <SummaryCell label="Published" value={String(publishedChallenges)} />
-        <SummaryCell label="Drafts" value={String(pendingDrafts)} />
-        <SummaryCell label="Pending Jobs" value={String(pendingDeployments)} />
-        <SummaryCell label="Ticks" value={String(totalTicks)} />
-      </dl>
-    </section>
-  );
-}
-
 export function TeamsTab({
   deleteTarget,
   pendingAction,
@@ -609,73 +578,15 @@ function WireGuardGatewayCard({
         <RuntimeStatusBlock
           tone={getGatewayTone(wireGuardGatewayStatus?.state)}
           state={wireGuardGatewayStatus?.state ?? "loading"}
-          rows={[
-            { label: "Mode", value: wireGuardGatewayStatus?.mode ?? "unknown" },
-            { label: "Interface", value: wireGuardGatewayStatus?.interface },
-            {
-              label: "Firewall",
-              value: wireGuardGatewayStatus?.firewall_backend,
-            },
-            {
-              label: "Peers",
-              value: wireGuardGatewayStatus
-                ? `${wireGuardGatewayStatus.peers_active} active / ${wireGuardGatewayStatus.peers_revoked} revoked / ${wireGuardGatewayStatus.peers_total} total`
-                : "not loaded",
-            },
-            {
-              label: "Revision",
-              value: wireGuardGatewayStatus?.revision ?? "not applied yet",
-            },
-            {
-              label: "Applied at",
-              value: formatIndonesianDate(wireGuardGatewayStatus?.applied_at),
-            },
-            { label: "Config", value: wireGuardGatewayStatus?.config_path },
-            { label: "Rules", value: wireGuardGatewayStatus?.rules_path },
-          ]}
+          rows={wireGuardGatewayRows(wireGuardGatewayStatus)}
           error={wireGuardGatewayStatus?.last_error}
         />
-        <CardActionRow>
-          <Button
-            disabled={pendingAction !== null}
-            variant="outline"
-            data-testid="refresh-wireguard-gateway"
-            onClick={onRefreshWireGuardGatewayStatus}
-          >
-            {pendingAction === "wireguard-gateway:status" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh Status
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            data-testid="reconcile-wireguard-gateway"
-            onClick={onReconcileWireGuardGateway}
-          >
-            {pendingAction === "wireguard-gateway:reconcile" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Network className="h-4 w-4" />
-            )}
-            Reconcile Gateway
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            variant="ghost"
-            className="button-danger-subtle ml-auto"
-            data-testid="teardown-wireguard-gateway"
-            onClick={onTeardownWireGuardGateway}
-          >
-            {pendingAction === "wireguard-gateway:teardown" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            Teardown
-          </Button>
-        </CardActionRow>
+        <WireGuardGatewayActions
+          pendingAction={pendingAction}
+          onReconcile={onReconcileWireGuardGateway}
+          onRefresh={onRefreshWireGuardGatewayStatus}
+          onTeardown={onTeardownWireGuardGateway}
+        />
       </CardContent>
     </Card>
   );
@@ -707,78 +618,238 @@ function AccessPolicyCard({
         <RuntimeStatusBlock
           tone={getGatewayTone(accessStatus?.state)}
           state={accessStatus?.state ?? "loading"}
-          rows={[
-            { label: "Mode", value: accessStatus?.mode ?? "unknown" },
-            { label: "Interface", value: accessStatus?.interface },
-            { label: "Firewall", value: accessStatus?.firewall_backend },
-            {
-              label: "Policies",
-              value: accessStatus
-                ? `${accessStatus.policies_total} total / ${accessStatus.ssh_open_services} SSH-open / ${accessStatus.ssh_locked_services} SSH-locked`
-                : "not loaded",
-            },
-            {
-              label: "Allowed peers",
-              value: accessStatus
-                ? String(accessStatus.allowed_peers_total)
-                : "not loaded",
-            },
-            {
-              label: "Revision",
-              value: accessStatus?.revision ?? "not applied yet",
-            },
-            {
-              label: "Applied at",
-              value: formatIndonesianDate(accessStatus?.applied_at),
-            },
-            { label: "Rules", value: accessStatus?.rules_path },
-          ]}
+          rows={accessPolicyRows(accessStatus)}
           error={accessStatus?.last_error}
         />
-        <CardActionRow>
-          <Button
-            disabled={pendingAction !== null}
-            variant="outline"
-            data-testid="refresh-access"
-            onClick={onRefreshAccessStatus}
-          >
-            {pendingAction === "access:status" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh Access
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            data-testid="reconcile-access"
-            onClick={onReconcileAccess}
-          >
-            {pendingAction === "access:reconcile" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Network className="h-4 w-4" />
-            )}
-            Reconcile Access
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            variant="ghost"
-            className="button-danger-subtle ml-auto"
-            data-testid="teardown-access"
-            onClick={onTeardownAccess}
-          >
-            {pendingAction === "access:teardown" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            Teardown
-          </Button>
-        </CardActionRow>
+        <AccessPolicyActions
+          pendingAction={pendingAction}
+          onReconcile={onReconcileAccess}
+          onRefresh={onRefreshAccessStatus}
+          onTeardown={onTeardownAccess}
+        />
       </CardContent>
     </Card>
   );
+}
+
+type RuntimeStatusRow = { label: string; value?: string };
+
+function wireGuardGatewayRows(
+  status: AdminWireGuardGatewayStatus | null,
+): RuntimeStatusRow[] {
+  if (!status) {
+    return runtimeNotLoadedRows(["Interface", "Firewall", "Config", "Rules"], [
+      { label: "Mode", value: "unknown" },
+      { label: "Peers", value: "not loaded" },
+      { label: "Revision", value: "not applied yet" },
+      { label: "Applied at", value: "n/a" },
+    ]);
+  }
+
+  return [
+    { label: "Mode", value: status.mode },
+    { label: "Interface", value: status.interface },
+    { label: "Firewall", value: status.firewall_backend },
+    { label: "Peers", value: formatWireGuardPeerCounts(status) },
+    { label: "Revision", value: status.revision },
+    { label: "Applied at", value: formatIndonesianDate(status.applied_at) },
+    { label: "Config", value: status.config_path },
+    { label: "Rules", value: status.rules_path },
+  ];
+}
+
+function formatWireGuardPeerCounts(
+  status: AdminWireGuardGatewayStatus,
+): string {
+  return `${status.peers_active} active / ${status.peers_revoked} revoked / ${status.peers_total} total`;
+}
+
+function accessPolicyRows(
+  status: AdminControllerAccessStatus | null,
+): RuntimeStatusRow[] {
+  if (!status) {
+    return runtimeNotLoadedRows(["Interface", "Firewall", "Rules"], [
+      { label: "Mode", value: "unknown" },
+      { label: "Policies", value: "not loaded" },
+      { label: "Allowed peers", value: "not loaded" },
+      { label: "Revision", value: "not applied yet" },
+      { label: "Applied at", value: "n/a" },
+    ]);
+  }
+
+  return [
+    { label: "Mode", value: status.mode },
+    { label: "Interface", value: status.interface },
+    { label: "Firewall", value: status.firewall_backend },
+    { label: "Policies", value: formatAccessPolicyCounts(status) },
+    { label: "Allowed peers", value: formatAllowedPeerCount(status) },
+    { label: "Revision", value: status.revision },
+    { label: "Applied at", value: formatIndonesianDate(status.applied_at) },
+    { label: "Rules", value: status.rules_path },
+  ];
+}
+
+function formatAccessPolicyCounts(
+  status: AdminControllerAccessStatus,
+): string {
+  return `${status.policies_total} total / ${status.ssh_open_services} SSH-open / ${status.ssh_locked_services} SSH-locked`;
+}
+
+function formatAllowedPeerCount(
+  status: AdminControllerAccessStatus,
+): string {
+  return String(status.allowed_peers_total);
+}
+
+function runtimeNotLoadedRows(
+  emptyLabels: string[],
+  rows: RuntimeStatusRow[],
+): RuntimeStatusRow[] {
+  return [
+    ...rows,
+    ...emptyLabels.map((label) => ({ label, value: undefined })),
+  ];
+}
+
+function WireGuardGatewayActions({
+  pendingAction,
+  onReconcile,
+  onRefresh,
+  onTeardown,
+}: {
+  pendingAction: string | null;
+  onReconcile: () => void;
+  onRefresh: () => void;
+  onTeardown: () => void;
+}): ReactElement {
+  return (
+    <CardActionRow>
+      <RuntimeActionButton
+        actionID="wireguard-gateway:status"
+        label="Refresh Status"
+        pendingAction={pendingAction}
+        testID="refresh-wireguard-gateway"
+        variant="outline"
+        onClick={onRefresh}
+      />
+      <RuntimeActionButton
+        actionID="wireguard-gateway:reconcile"
+        icon="network"
+        label="Reconcile Gateway"
+        pendingAction={pendingAction}
+        testID="reconcile-wireguard-gateway"
+        onClick={onReconcile}
+      />
+      <RuntimeActionButton
+        actionID="wireguard-gateway:teardown"
+        className="button-danger-subtle ml-auto"
+        icon="trash"
+        label="Teardown"
+        pendingAction={pendingAction}
+        testID="teardown-wireguard-gateway"
+        variant="ghost"
+        onClick={onTeardown}
+      />
+    </CardActionRow>
+  );
+}
+
+function AccessPolicyActions({
+  pendingAction,
+  onReconcile,
+  onRefresh,
+  onTeardown,
+}: {
+  pendingAction: string | null;
+  onReconcile: () => void;
+  onRefresh: () => void;
+  onTeardown: () => void;
+}): ReactElement {
+  return (
+    <CardActionRow>
+      <RuntimeActionButton
+        actionID="access:status"
+        label="Refresh Access"
+        pendingAction={pendingAction}
+        testID="refresh-access"
+        variant="outline"
+        onClick={onRefresh}
+      />
+      <RuntimeActionButton
+        actionID="access:reconcile"
+        icon="network"
+        label="Reconcile Access"
+        pendingAction={pendingAction}
+        testID="reconcile-access"
+        onClick={onReconcile}
+      />
+      <RuntimeActionButton
+        actionID="access:teardown"
+        className="button-danger-subtle ml-auto"
+        icon="trash"
+        label="Teardown"
+        pendingAction={pendingAction}
+        testID="teardown-access"
+        variant="ghost"
+        onClick={onTeardown}
+      />
+    </CardActionRow>
+  );
+}
+
+function RuntimeActionButton({
+  actionID,
+  className,
+  icon = "refresh",
+  label,
+  pendingAction,
+  testID,
+  variant,
+  onClick,
+}: {
+  actionID: string;
+  className?: string;
+  icon?: "network" | "refresh" | "trash";
+  label: string;
+  pendingAction: string | null;
+  testID: string;
+  variant?: "default" | "ghost" | "outline";
+  onClick: () => void;
+}): ReactElement {
+  return (
+    <Button
+      disabled={pendingAction !== null}
+      variant={variant}
+      className={className}
+      data-testid={testID}
+      onClick={onClick}
+    >
+      <RuntimeActionIcon active={pendingAction === actionID} icon={icon} />
+      {label}
+    </Button>
+  );
+}
+
+function RuntimeActionIcon({
+  active,
+  icon,
+}: {
+  active: boolean;
+  icon: "network" | "refresh" | "trash";
+}): ReactElement {
+  if (active) {
+    return <LoaderCircle className="h-4 w-4 animate-spin" />;
+  }
+
+  if (icon === "network") {
+    return <Network className="h-4 w-4" />;
+  }
+
+  if (icon === "trash") {
+    return <Trash2 className="h-4 w-4" />;
+  }
+
+  return <RefreshCw className="h-4 w-4" />;
 }
 
 function CreatePlayerCard({
@@ -2703,6 +2774,22 @@ function operationsAlertAction(alert: AdminOperationsStatus["alerts"][number]):
   }
 }
 
+type SchedulerCardProps = {
+  filters: GameFilters["schedulerEvent"];
+  pendingAction: string | null;
+  scheduler: AdminGameStatus["scheduler"];
+  schedulerEventPage: AdminSchedulerEventPage;
+  schedulerEventsLiveMode: boolean;
+  onApplyFilters: () => void;
+  onFilterChange: (next: GameFilters["schedulerEvent"]) => void;
+  onPage: (direction: "prev" | "next") => void;
+  onRefresh: () => void;
+  onResetFilters: () => void;
+  onStartScheduler: () => void;
+  onStopScheduler: () => void;
+  onUpdateScheduler: (intervalSeconds: number) => void;
+};
+
 function SchedulerCard({
   filters,
   pendingAction,
@@ -2717,23 +2804,7 @@ function SchedulerCard({
   onStartScheduler,
   onStopScheduler,
   onUpdateScheduler,
-}: {
-  filters: GameFilters["schedulerEvent"];
-  pendingAction: string | null;
-  scheduler: AdminGameStatus["scheduler"];
-  schedulerEventPage: AdminSchedulerEventPage;
-  schedulerEventsLiveMode: boolean;
-  onApplyFilters: () => void;
-  onFilterChange: (next: GameFilters["schedulerEvent"]) => void;
-  onPage: (direction: "prev" | "next") => void;
-  onRefresh: () => void;
-  onResetFilters: () => void;
-  onStartScheduler: () => void;
-  onStopScheduler: () => void;
-  onUpdateScheduler: (intervalSeconds: number) => void;
-}): ReactElement {
-  const schedulerEventRows = schedulerEventPage.items;
-
+}: SchedulerCardProps): ReactElement {
   const [draftInterval, setDraftInterval] = useState<string>(
     String(scheduler?.interval_seconds ?? 60),
   );
@@ -2742,9 +2813,9 @@ function SchedulerCard({
     setDraftInterval(String(scheduler?.interval_seconds ?? 60));
   }, [scheduler?.interval_seconds]);
 
+  const parsedInterval = Number.parseInt(draftInterval, 10);
   const intervalChanged =
-    parseInt(draftInterval) !== scheduler?.interval_seconds &&
-    parseInt(draftInterval) > 0;
+    parsedInterval !== scheduler?.interval_seconds && parsedInterval > 0;
 
   return (
     <Card data-testid="scheduler-card" id="scheduler-card">
@@ -2774,256 +2845,429 @@ function SchedulerCard({
       </CardHeader>
       <CardContent>
         <div className="grid gap-4">
-          <InfoPanel layout="grid" tone="surface">
-            <div className="flex items-center justify-between gap-3">
-              <span>State</span>
-              <Badge
-                className={
-                  scheduler?.state === "running"
-                    ? challengeTone.ready
-                    : challengeTone.draft
-                }
-                variant="outline"
-              >
-                {scheduler?.state ?? "unknown"}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">Interval</span>
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 items-center rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-12 bg-transparent outline-none font-mono"
-                    value={draftInterval}
-                    onChange={(e) => setDraftInterval(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && intervalChanged) {
-                        onUpdateScheduler(parseInt(draftInterval));
-                      }
-                    }}
-                  />
-                  <span className="ml-1 text-[10px] text-muted-foreground uppercase font-bold">
-                    Sec
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  variant={intervalChanged ? "default" : "outline"}
-                  className="h-8 px-2 text-xs"
-                  disabled={
-                    pendingAction !== null ||
-                    !intervalChanged ||
-                    isNaN(parseInt(draftInterval))
-                  }
-                  onClick={() => onUpdateScheduler(parseInt(draftInterval))}
-                >
-                  {pendingAction === "game:scheduler:update" ? (
-                    <LoaderCircle className="h-3 w-3 animate-spin" />
-                  ) : (
-                    "Update"
-                  )}
-                </Button>
-              </div>
-            </div>
-            <InfoLine
-              label="Last run"
-              value={formatIndonesianDate(scheduler?.last_run_at)}
-              valueClassName="font-mono"
-            />
-            <InfoLine
-              label="Next run"
-              value={formatIndonesianDate(scheduler?.next_run_at)}
-              valueClassName="font-mono"
-            />
-            <InfoLine
-              label="Last tick id"
-              value={scheduler?.last_tick_id ?? 0}
-              valueClassName="font-mono"
-            />
-            {scheduler?.last_error ? (
-              <p className="text-danger">
-                Last error: {scheduler.last_error}
-              </p>
-            ) : null}
-          </InfoPanel>
-          <CardActionRow>
-            <Button
-              disabled={
-                pendingAction !== null || scheduler?.state === "running"
-              }
-              variant="outline"
-              onClick={onStartScheduler}
-            >
-              {pendingAction === "game:scheduler:start" ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              Resume Scheduler
-            </Button>
-            <Button
-              disabled={
-                pendingAction !== null || scheduler?.state !== "running"
-              }
-              variant="outline"
-              onClick={onStopScheduler}
-            >
-              {pendingAction === "game:scheduler:stop" ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              Stop Scheduler
-            </Button>
-          </CardActionRow>
-          <InfoPanel tone="surface">
-            <div className="mb-3 flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
-              <div>
-                <p className="text-base font-semibold text-foreground">
-                  Scheduler Audit Trail
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Saved across restarts. Filtered results stop live refresh.
-                </p>
-              </div>
-              <div className="shrink-0 self-start">
-                <SliceCountBadge
-                  suffix="event(s)"
-                  totalCount={schedulerEventPage.total_count}
-                  visibleCount={schedulerEventRows.length}
-                  offset={schedulerEventPage.offset}
-                />
-              </div>
-            </div>
-            <div
-              data-testid="scheduler-audit-filters"
-              className="mb-4 flex flex-wrap gap-3 rounded-md border border-border/70 bg-muted/20 p-3"
-            >
-              <Field
-                label="Page Size"
-                htmlFor="scheduler-limit"
-                className="w-full sm:w-auto sm:min-w-[9rem] sm:max-w-[9rem] sm:flex-none"
-              >
-                <select
-                  id="scheduler-limit"
-                  className={selectClassName}
-                  value={filters.limit}
-                  onChange={(event) =>
-                    onFilterChange({ ...filters, limit: event.target.value })
-                  }
-                >
-                  <option value="12">12 per page</option>
-                  <option value="24">24 per page</option>
-                  <option value="48">48 per page</option>
-                  <option value="96">96 per page</option>
-                </select>
-              </Field>
-              <Field
-                label="Event Type"
-                htmlFor="scheduler-event-type"
-                className="min-w-[11rem] flex-1"
-              >
-                <Input
-                  id="scheduler-event-type"
-                  placeholder="started"
-                  value={filters.eventType}
-                  onChange={(event) =>
-                    onFilterChange({
-                      ...filters,
-                      eventType: event.target.value,
-                    })
-                  }
-                />
-              </Field>
-              <Field
-                label="Source"
-                htmlFor="scheduler-source"
-                className="min-w-[11rem] flex-1"
-              >
-                <Input
-                  id="scheduler-source"
-                  placeholder="organizer"
-                  value={filters.source}
-                  onChange={(event) =>
-                    onFilterChange({ ...filters, source: event.target.value })
-                  }
-                />
-              </Field>
-              <Field
-                label="State"
-                htmlFor="scheduler-state"
-                className="min-w-[11rem] flex-1"
-              >
-                <Input
-                  id="scheduler-state"
-                  placeholder="running"
-                  value={filters.state}
-                  onChange={(event) =>
-                    onFilterChange({ ...filters, state: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap gap-2">
-                <LiveModeBadge
-                  filteredLabel="Filtered"
-                  liveLabel="Live"
-                  liveMode={schedulerEventsLiveMode}
-                />
-              </div>
-              <PagedFilterActions
-                applyLabel="Apply Event Filters"
-                canPageNext={schedulerEventPage.has_next}
-                canPagePrev={schedulerEventPage.has_prev}
-                disabled={pendingAction !== null}
-                liveMode={schedulerEventsLiveMode}
-                onApply={onApplyFilters}
-                onPage={onPage}
-                onReset={onResetFilters}
-                resetLabel="Reset Event Filters"
-                showLiveModeBadge={false}
-              />
-            </div>
-            <div className="space-y-3">
-              {schedulerEventRows.length === 0 ? (
-                <EmptyStateText message="No scheduler events recorded yet." />
-              ) : (
-                schedulerEventRows.map((event) => (
-                  <div
-                    key={event.id}
-                    className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{event.event_type}</Badge>
-                        <Badge variant="secondary">{event.source}</Badge>
-                        <span className="font-mono text-xs text-foreground">
-                          {formatIndonesianDate(event.created_at)}
-                        </span>
-                      </div>
-                      <span className="font-mono text-xs text-foreground">
-                        {event.state}
-                      </span>
-                    </div>
-                    <p className="mt-2">
-                      {event.message ?? "no message recorded"}
-                    </p>
-                    {event.tick_id ? (
-                      <p className="mt-1 font-mono text-xs text-foreground">
-                        tick #{event.tick_id}
-                      </p>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </InfoPanel>
+          <SchedulerStatusPanel
+            draftInterval={draftInterval}
+            intervalChanged={intervalChanged}
+            parsedInterval={parsedInterval}
+            pendingAction={pendingAction}
+            scheduler={scheduler}
+            onDraftIntervalChange={setDraftInterval}
+            onUpdateScheduler={onUpdateScheduler}
+          />
+          <SchedulerActionRow
+            pendingAction={pendingAction}
+            schedulerState={scheduler?.state}
+            onStartScheduler={onStartScheduler}
+            onStopScheduler={onStopScheduler}
+          />
+          <SchedulerAuditPanel
+            filters={filters}
+            pendingAction={pendingAction}
+            schedulerEventPage={schedulerEventPage}
+            schedulerEventsLiveMode={schedulerEventsLiveMode}
+            onApplyFilters={onApplyFilters}
+            onFilterChange={onFilterChange}
+            onPage={onPage}
+            onResetFilters={onResetFilters}
+          />
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SchedulerStatusPanel({
+  draftInterval,
+  intervalChanged,
+  parsedInterval,
+  pendingAction,
+  scheduler,
+  onDraftIntervalChange,
+  onUpdateScheduler,
+}: {
+  draftInterval: string;
+  intervalChanged: boolean;
+  parsedInterval: number;
+  pendingAction: string | null;
+  scheduler: AdminGameStatus["scheduler"];
+  onDraftIntervalChange: (value: string) => void;
+  onUpdateScheduler: (intervalSeconds: number) => void;
+}): ReactElement {
+  return (
+    <InfoPanel layout="grid" tone="surface">
+      <SchedulerStateBadge state={scheduler?.state} />
+      <SchedulerIntervalControl
+        draftInterval={draftInterval}
+        intervalChanged={intervalChanged}
+        parsedInterval={parsedInterval}
+        pendingAction={pendingAction}
+        onDraftIntervalChange={onDraftIntervalChange}
+        onUpdateScheduler={onUpdateScheduler}
+      />
+      <InfoLine
+        label="Last run"
+        value={formatIndonesianDate(scheduler?.last_run_at)}
+        valueClassName="font-mono"
+      />
+      <InfoLine
+        label="Next run"
+        value={formatIndonesianDate(scheduler?.next_run_at)}
+        valueClassName="font-mono"
+      />
+      <InfoLine
+        label="Last tick id"
+        value={scheduler?.last_tick_id ?? 0}
+        valueClassName="font-mono"
+      />
+      {scheduler?.last_error ? (
+        <p className="text-danger">Last error: {scheduler.last_error}</p>
+      ) : null}
+    </InfoPanel>
+  );
+}
+
+function SchedulerStateBadge({
+  state,
+}: {
+  state?: string;
+}): ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span>State</span>
+      <Badge
+        className={state === "running" ? challengeTone.ready : challengeTone.draft}
+        variant="outline"
+      >
+        {state ?? "unknown"}
+      </Badge>
+    </div>
+  );
+}
+
+function SchedulerIntervalControl({
+  draftInterval,
+  intervalChanged,
+  parsedInterval,
+  pendingAction,
+  onDraftIntervalChange,
+  onUpdateScheduler,
+}: {
+  draftInterval: string;
+  intervalChanged: boolean;
+  parsedInterval: number;
+  pendingAction: string | null;
+  onDraftIntervalChange: (value: string) => void;
+  onUpdateScheduler: (intervalSeconds: number) => void;
+}): ReactElement {
+  const updateDisabled =
+    pendingAction !== null || !intervalChanged || Number.isNaN(parsedInterval);
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm text-muted-foreground">Interval</span>
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 items-center rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
+          <input
+            type="number"
+            min="1"
+            className="w-12 bg-transparent outline-none font-mono"
+            value={draftInterval}
+            onChange={(event) => onDraftIntervalChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && intervalChanged) {
+                onUpdateScheduler(parsedInterval);
+              }
+            }}
+          />
+          <span className="ml-1 text-[10px] text-muted-foreground uppercase font-bold">
+            Sec
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant={intervalChanged ? "default" : "outline"}
+          className="h-8 px-2 text-xs"
+          disabled={updateDisabled}
+          onClick={() => onUpdateScheduler(parsedInterval)}
+        >
+          {pendingAction === "game:scheduler:update" ? (
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+          ) : (
+            "Update"
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SchedulerActionRow({
+  pendingAction,
+  schedulerState,
+  onStartScheduler,
+  onStopScheduler,
+}: {
+  pendingAction: string | null;
+  schedulerState?: string;
+  onStartScheduler: () => void;
+  onStopScheduler: () => void;
+}): ReactElement {
+  return (
+    <CardActionRow>
+      <Button
+        disabled={pendingAction !== null || schedulerState === "running"}
+        variant="outline"
+        onClick={onStartScheduler}
+      >
+        {pendingAction === "game:scheduler:start" ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="h-4 w-4" />
+        )}
+        Resume Scheduler
+      </Button>
+      <Button
+        disabled={pendingAction !== null || schedulerState !== "running"}
+        variant="outline"
+        onClick={onStopScheduler}
+      >
+        {pendingAction === "game:scheduler:stop" ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="h-4 w-4" />
+        )}
+        Stop Scheduler
+      </Button>
+    </CardActionRow>
+  );
+}
+
+function SchedulerAuditPanel({
+  filters,
+  pendingAction,
+  schedulerEventPage,
+  schedulerEventsLiveMode,
+  onApplyFilters,
+  onFilterChange,
+  onPage,
+  onResetFilters,
+}: Pick<
+  SchedulerCardProps,
+  | "filters"
+  | "pendingAction"
+  | "schedulerEventPage"
+  | "schedulerEventsLiveMode"
+  | "onApplyFilters"
+  | "onFilterChange"
+  | "onPage"
+  | "onResetFilters"
+>): ReactElement {
+  return (
+    <InfoPanel tone="surface">
+      <SchedulerAuditHeader schedulerEventPage={schedulerEventPage} />
+      <SchedulerAuditFilters filters={filters} onFilterChange={onFilterChange} />
+      <SchedulerAuditActions
+        pendingAction={pendingAction}
+        schedulerEventPage={schedulerEventPage}
+        schedulerEventsLiveMode={schedulerEventsLiveMode}
+        onApplyFilters={onApplyFilters}
+        onPage={onPage}
+        onResetFilters={onResetFilters}
+      />
+      <SchedulerEventList events={schedulerEventPage.items} />
+    </InfoPanel>
+  );
+}
+
+function SchedulerAuditHeader({
+  schedulerEventPage,
+}: {
+  schedulerEventPage: AdminSchedulerEventPage;
+}): ReactElement {
+  return (
+    <div className="mb-3 flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+      <div>
+        <p className="text-base font-semibold text-foreground">
+          Scheduler Audit Trail
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Saved across restarts. Filtered results stop live refresh.
+        </p>
+      </div>
+      <div className="shrink-0 self-start">
+        <SliceCountBadge
+          suffix="event(s)"
+          totalCount={schedulerEventPage.total_count}
+          visibleCount={schedulerEventPage.items.length}
+          offset={schedulerEventPage.offset}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SchedulerAuditFilters({
+  filters,
+  onFilterChange,
+}: {
+  filters: GameFilters["schedulerEvent"];
+  onFilterChange: (next: GameFilters["schedulerEvent"]) => void;
+}): ReactElement {
+  return (
+    <div
+      data-testid="scheduler-audit-filters"
+      className="mb-4 flex flex-wrap gap-3 rounded-md border border-border/70 bg-muted/20 p-3"
+    >
+      <Field
+        label="Page Size"
+        htmlFor="scheduler-limit"
+        className="w-full sm:w-auto sm:min-w-[9rem] sm:max-w-[9rem] sm:flex-none"
+      >
+        <select
+          id="scheduler-limit"
+          className={selectClassName}
+          value={filters.limit}
+          onChange={(event) =>
+            onFilterChange({ ...filters, limit: event.target.value })
+          }
+        >
+          <option value="12">12 per page</option>
+          <option value="24">24 per page</option>
+          <option value="48">48 per page</option>
+          <option value="96">96 per page</option>
+        </select>
+      </Field>
+      <SchedulerAuditInput
+        id="scheduler-event-type"
+        label="Event Type"
+        placeholder="started"
+        value={filters.eventType}
+        onChange={(eventType) => onFilterChange({ ...filters, eventType })}
+      />
+      <SchedulerAuditInput
+        id="scheduler-source"
+        label="Source"
+        placeholder="organizer"
+        value={filters.source}
+        onChange={(source) => onFilterChange({ ...filters, source })}
+      />
+      <SchedulerAuditInput
+        id="scheduler-state"
+        label="State"
+        placeholder="running"
+        value={filters.state}
+        onChange={(state) => onFilterChange({ ...filters, state })}
+      />
+    </div>
+  );
+}
+
+function SchedulerAuditInput({
+  id,
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}): ReactElement {
+  return (
+    <Field label={label} htmlFor={id} className="min-w-[11rem] flex-1">
+      <Input
+        id={id}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </Field>
+  );
+}
+
+function SchedulerAuditActions({
+  pendingAction,
+  schedulerEventPage,
+  schedulerEventsLiveMode,
+  onApplyFilters,
+  onPage,
+  onResetFilters,
+}: Pick<
+  SchedulerCardProps,
+  | "pendingAction"
+  | "schedulerEventPage"
+  | "schedulerEventsLiveMode"
+  | "onApplyFilters"
+  | "onPage"
+  | "onResetFilters"
+>): ReactElement {
+  return (
+    <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-wrap gap-2">
+        <LiveModeBadge
+          filteredLabel="Filtered"
+          liveLabel="Live"
+          liveMode={schedulerEventsLiveMode}
+        />
+      </div>
+      <PagedFilterActions
+        applyLabel="Apply Event Filters"
+        canPageNext={schedulerEventPage.has_next}
+        canPagePrev={schedulerEventPage.has_prev}
+        disabled={pendingAction !== null}
+        liveMode={schedulerEventsLiveMode}
+        onApply={onApplyFilters}
+        onPage={onPage}
+        onReset={onResetFilters}
+        resetLabel="Reset Event Filters"
+        showLiveModeBadge={false}
+      />
+    </div>
+  );
+}
+
+function SchedulerEventList({
+  events,
+}: {
+  events: AdminSchedulerEventPage["items"];
+}): ReactElement {
+  return (
+    <div className="space-y-3">
+      {events.length === 0 ? (
+        <EmptyStateText message="No scheduler events recorded yet." />
+      ) : (
+        events.map((event) => <SchedulerEventRow key={event.id} event={event} />)
+      )}
+    </div>
+  );
+}
+
+function SchedulerEventRow({
+  event,
+}: {
+  event: AdminSchedulerEventPage["items"][number];
+}): ReactElement {
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{event.event_type}</Badge>
+          <Badge variant="secondary">{event.source}</Badge>
+          <span className="font-mono text-xs text-foreground">
+            {formatIndonesianDate(event.created_at)}
+          </span>
+        </div>
+        <span className="font-mono text-xs text-foreground">{event.state}</span>
+      </div>
+      <p className="mt-2">{event.message ?? "no message recorded"}</p>
+      {event.tick_id ? (
+        <p className="mt-1 font-mono text-xs text-foreground">
+          tick #{event.tick_id}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -3646,21 +3890,6 @@ function RuntimeStatusBlock({
       })}
       {error ? <p className="text-danger">Last error: {error}</p> : null}
     </InfoPanel>
-  );
-}
-
-function SummaryCell({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): ReactElement {
-  return (
-    <div className="border-b p-4 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-sm font-medium">{value}</dd>
-    </div>
   );
 }
 

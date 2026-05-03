@@ -1113,251 +1113,271 @@ function shouldFailRoute(method, pathname) {
   return state.failedRoutes.includes(`${method} ${pathname}`);
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
-  const schedulerStartMatch = url.pathname.match(/^\/api\/v2\/admin\/game\/match\/start$/);
-  const schedulerStopMatch = url.pathname.match(/^\/api\/v2\/admin\/game\/match\/stop$/);
-  const matchScheduleRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/game\/match\/schedule$/,
-  );
-  const deploymentReconcileRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/deployments\/reconcile$/,
-  );
-  const playerWireGuardRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard$/,
-  );
-  const playerWireGuardRotateRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard\/rotate$/,
-  );
-  const playerWireGuardRevokeRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard\/revoke$/,
-  );
-  const validateChallengeRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/challenges\/(\d+)\/validate$/,
-  );
-  const deployChallengeRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/challenges\/(\d+)\/deploy$/,
-  );
-  const schedulerStart = url.pathname.match(/^\/api\/v2\/admin\/game\/scheduler\/start$/);
-  const schedulerStop = url.pathname.match(/^\/api\/v2\/admin\/game\/scheduler\/stop$/);
-  const schedulerInterval = url.pathname.match(/^\/api\/v2\/admin\/game\/scheduler\/interval$/);
-  const advanceTickRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/game\/ticks\/advance$/,
-  );
-  const recomputeScoringRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/game\/scoring\/recompute$/,
-  );
-  const deleteDeploymentRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/deployments\/(\d+)$/,
-  );
-  const unlockRoute = url.pathname.match(/^\/api\/v2\/services\/(\d+)\/unlock$/);
-  const sshRoute = url.pathname.match(/^\/api\/v2\/services\/(\d+)\/ssh-session$/);
-  const restartRoute = url.pathname.match(/^\/api\/v2\/services\/(\d+)\/reset\/restart$/);
-  const factoryResetRoute = url.pathname.match(/^\/api\/v2\/services\/(\d+)\/reset\/factory$/);
+function writeSuccess(res, data) {
+  writeJson(res, 200, success(data));
+  return true;
+}
 
-  if (req.method === "POST" && url.pathname === "/__reset") {
+function writeFailure(res, statusCode, message, status = "failed") {
+  writeJson(res, statusCode, JSON.stringify({ status, message }));
+  return true;
+}
+
+function routeID(pathname, pattern) {
+  const match = pathname.match(pattern);
+  return match ? Number(match[1]) : null;
+}
+
+function writeGetRoute(res, method, pathname, routes) {
+  if (method !== "GET") {
+    return false;
+  }
+  const handler = routes[pathname];
+  if (!handler) {
+    return false;
+  }
+  return writeSuccess(res, handler());
+}
+
+function writeTextRoute(res, method, pathname, routes) {
+  if (method !== "GET") {
+    return false;
+  }
+  const handler = routes[pathname];
+  if (!handler) {
+    return false;
+  }
+  writeText(res, 200, handler());
+  return true;
+}
+
+function writeStreamRoute(res, method, pathname, routes) {
+  if (method !== "GET") {
+    return false;
+  }
+  const handler = routes[pathname];
+  if (!handler) {
+    return false;
+  }
+  handler(res, pathname);
+  return true;
+}
+
+const requestHandlers = [
+  handleSystemRoutes,
+  handleAuthenticationRoutes,
+  handleParticipantRoutes,
+  handleAdminTeamRoutes,
+  handleAdminPlayerRoutes,
+  handleAdminChallengeRoutes,
+  handleAdminDeploymentRoutes,
+  handleAdminMetricsRoutes,
+  handleAdminGameRoutes,
+  handleAdminNetworkRoutes,
+  handleStreamRoutes,
+];
+
+const server = http.createServer((req, res) => {
+  void handleRequest(req, res);
+});
+
+async function handleRequest(req, res) {
+  const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
+  const ctx = { req, res, url, method: req.method ?? "GET" };
+
+  for (const handler of requestHandlers) {
+    if (await handler(ctx)) {
+      return;
+    }
+  }
+
+  return writeFailure(res, 404, `mock route not found: ${url.pathname}`);
+}
+
+async function handleSystemRoutes({ req, res, url, method }) {
+  if (method === "POST" && url.pathname === "/__reset") {
     const body = await readJsonBody(req);
     state = createStateForScenario(body?.scenario);
-    return writeJson(res, 200, success({ reset: true }));
+    return writeSuccess(res, { reset: true });
   }
 
-  if (shouldFailRoute(req.method ?? "GET", url.pathname)) {
-    return writeJson(
-      res,
-      503,
-      JSON.stringify({
-        status: "failed",
-        message: `mock degraded route: ${url.pathname}`,
-      }),
-    );
+  if (shouldFailRoute(method, url.pathname)) {
+    return writeFailure(res, 503, `mock degraded route: ${url.pathname}`);
   }
 
-  if (req.method === "POST" && url.pathname === "/api/v2/authenticate") {
-    const body = await readJsonBody(req);
-    const email = body?.email?.trim();
-    const password = body?.password?.trim();
-    const knownPasswords = {
-      "alpha.captain@college.local": "alpha-password",
-      "beta.member@college.local": "beta-password",
-    };
-    const player = state.players.find((item) => item.email === email);
+  return false;
+}
 
-    if (
-      !player ||
-      !password ||
-      knownPasswords[email] !== password
-    ) {
-      return writeJson(
-        res,
-        403,
-        JSON.stringify({
-          status: "forbidden",
-          message: "email or password is wrong.",
-        }),
-      );
-    }
-
-    return writeJson(res, 200, success(buildParticipantToken(player)));
+async function handleAuthenticationRoutes({ req, res, url, method }) {
+  if (method !== "POST" || url.pathname !== "/api/v2/authenticate") {
+    return false;
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/challenges") {
-    return writeJson(res, 200, success(challenges));
+  const body = await readJsonBody(req);
+  const email = body?.email?.trim();
+  const password = body?.password?.trim();
+  const knownPasswords = {
+    "alpha.captain@college.local": "alpha-password",
+    "beta.member@college.local": "beta-password",
+  };
+  const player = state.players.find((item) => item.email === email);
+
+  if (!player || !password || knownPasswords[email] !== password) {
+    return writeFailure(res, 403, "email or password is wrong.", "forbidden");
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/scoreboard") {
-    return writeJson(res, 200, success(state.scoreboard));
+  return writeSuccess(res, buildParticipantToken(player));
+}
+
+async function handleParticipantRoutes(ctx) {
+  const { res, url, method } = ctx;
+
+  const handled = writeGetRoute(res, method, url.pathname, {
+    "/api/v2/challenges": () => challenges,
+    "/api/v2/scoreboard": () => state.scoreboard,
+    "/api/v2/game/status": () => state.gameStatus,
+    "/api/v2/services": () => state.serviceMap,
+    "/api/v2/team/services": () => state.teamServiceStates,
+  });
+  if (handled) {
+    return true;
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/game/status") {
-    return writeJson(res, 200, success(state.gameStatus));
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/v2/attacks") {
+  if (method === "GET" && url.pathname === "/api/v2/attacks") {
     const filtered = filterAttackItems(state.attackItems, url.searchParams);
-    return writeJson(res, 200, success(paginate(filtered, url.searchParams)));
+    return writeSuccess(res, paginate(filtered, url.searchParams));
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/services") {
-    return writeJson(res, 200, success(state.serviceMap));
+  return (
+    (await handleServiceUnlock(ctx)) ||
+    handleSSHSession(ctx) ||
+    handleServiceRestart(ctx) ||
+    handleFactoryReset(ctx)
+  );
+}
+
+async function handleServiceUnlock({ req, res, url, method }) {
+  const challengeID = routeID(url.pathname, /^\/api\/v2\/services\/(\d+)\/unlock$/);
+  if (method !== "POST" || challengeID === null) {
+    return false;
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/team/services") {
-    return writeJson(res, 200, success(state.teamServiceStates));
+  const serviceState = findServiceState(challengeID);
+  const body = await readJsonBody(req);
+  if (!serviceState || !body?.proof) {
+    return writeFailure(res, 400, "unlock proof is invalid.");
   }
 
-  if (req.method === "POST" && unlockRoute) {
-    const challengeID = Number(unlockRoute[1]);
-    const serviceState = findServiceState(challengeID);
-    const body = await readJsonBody(req);
-    if (!serviceState || !body?.proof) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({ status: "failed", message: "unlock proof is invalid." }),
-      );
+  serviceState.unlocked = true;
+  serviceState.ssh_hint =
+    "unlock accepted; request a one-time root password to get the current credential";
+  serviceState.last_event = "unlock granted via participant API";
+
+  return writeSuccess(res, {
+    challenge_id: challengeID,
+    team_id: serviceState.team_id,
+    unlocked: true,
+    ssh_credential_ttl_seconds: 900,
+  });
+}
+
+function handleSSHSession({ res, url, method }) {
+  const challengeID = routeID(url.pathname, /^\/api\/v2\/services\/(\d+)\/ssh-session$/);
+  if (method !== "POST" || challengeID === null) {
+    return false;
+  }
+
+  const serviceState = findServiceState(challengeID);
+  if (!serviceState) {
+    return writeFailure(res, 404, "service not found.");
+  }
+
+  const password = `root-pass-${state.sshPasswordCounter}`;
+  state.sshPasswordCounter += 1;
+  serviceState.unlocked = true;
+  serviceState.ssh_hint = "ssh root@10.80.50.11 -p 22";
+  serviceState.last_event = "ssh access active";
+
+  return writeSuccess(res, {
+    host: "10.80.50.11",
+    port: 22,
+    username: "root",
+    password,
+    expires_at: "2026-03-20T10:30:00Z",
+    connection_hint: "ssh root@10.80.50.11 -p 22",
+  });
+}
+
+function handleServiceRestart({ res, url, method }) {
+  const challengeID = routeID(
+    url.pathname,
+    /^\/api\/v2\/services\/(\d+)\/reset\/restart$/,
+  );
+  if (method !== "POST" || challengeID === null) {
+    return false;
+  }
+
+  const serviceState = findServiceState(challengeID);
+  if (!serviceState) {
+    return writeFailure(res, 404, "service not found.");
+  }
+
+  serviceState.status = "warming";
+  serviceState.checker = "warning";
+  serviceState.last_event = "service restart triggered via participant API";
+  serviceState.reset_cooldown = "restart requested";
+
+  return writeSuccess(res, {
+    challenge_id: challengeID,
+    team_id: serviceState.team_id,
+    action: "restart",
+  });
+}
+
+function handleFactoryReset({ res, url, method }) {
+  const challengeID = routeID(
+    url.pathname,
+    /^\/api\/v2\/services\/(\d+)\/reset\/factory$/,
+  );
+  if (method !== "POST" || challengeID === null) {
+    return false;
+  }
+
+  const serviceState = findServiceState(challengeID);
+  if (!serviceState) {
+    return writeFailure(res, 404, "service not found.");
+  }
+
+  serviceState.status = "warming";
+  serviceState.checker = "warning";
+  serviceState.unlocked = true;
+  serviceState.ssh_hint =
+    "unlock preserved; request a fresh one-time root password to rotate the credential";
+  serviceState.last_event = "factory reset triggered via participant API";
+  serviceState.reset_cooldown = "cooldown: 90s";
+
+  return writeSuccess(res, {
+    challenge_id: challengeID,
+    team_id: serviceState.team_id,
+    action: "factory_reset",
+    unlock_preserved: true,
+  });
+}
+
+async function handleAdminTeamRoutes({ req, res, url, method }) {
+  if (url.pathname === "/api/v2/admin/teams") {
+    if (method === "GET") {
+      return writeSuccess(res, state.teams);
     }
-
-    serviceState.unlocked = true;
-    serviceState.ssh_hint =
-      "unlock accepted; request a one-time root password to get the current credential";
-    serviceState.last_event = "unlock granted via participant API";
-
-    return writeJson(
-      res,
-      200,
-      success({
-        challenge_id: challengeID,
-        team_id: serviceState.team_id,
-        unlocked: true,
-        ssh_credential_ttl_seconds: 900,
-      }),
-    );
-  }
-
-  if (req.method === "POST" && sshRoute) {
-    const challengeID = Number(sshRoute[1]);
-    const serviceState = findServiceState(challengeID);
-    if (!serviceState) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "service not found." }),
-      );
+    if (method !== "POST") {
+      return false;
     }
-
-    const password = `root-pass-${state.sshPasswordCounter}`;
-    state.sshPasswordCounter += 1;
-    serviceState.unlocked = true;
-    serviceState.ssh_hint = "ssh root@10.80.50.11 -p 22";
-    serviceState.last_event = "ssh access active";
-
-    return writeJson(
-      res,
-      200,
-      success({
-        host: "10.80.50.11",
-        port: 22,
-        username: "root",
-        password,
-        expires_at: "2026-03-20T10:30:00Z",
-        connection_hint: "ssh root@10.80.50.11 -p 22",
-      }),
-    );
-  }
-
-  if (req.method === "POST" && restartRoute) {
-    const challengeID = Number(restartRoute[1]);
-    const serviceState = findServiceState(challengeID);
-    if (!serviceState) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "service not found." }),
-      );
-    }
-
-    serviceState.status = "warming";
-    serviceState.checker = "warning";
-    serviceState.last_event = "service restart triggered via participant API";
-    serviceState.reset_cooldown = "restart requested";
-
-    return writeJson(
-      res,
-      200,
-      success({
-        challenge_id: challengeID,
-        team_id: serviceState.team_id,
-        action: "restart",
-      }),
-    );
-  }
-
-  if (req.method === "POST" && factoryResetRoute) {
-    const challengeID = Number(factoryResetRoute[1]);
-    const serviceState = findServiceState(challengeID);
-    if (!serviceState) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "service not found." }),
-      );
-    }
-
-    serviceState.status = "warming";
-    serviceState.checker = "warning";
-    serviceState.unlocked = true;
-    serviceState.ssh_hint =
-      "unlock preserved; request a fresh one-time root password to rotate the credential";
-    serviceState.last_event = "factory reset triggered via participant API";
-    serviceState.reset_cooldown = "cooldown: 90s";
-
-    return writeJson(
-      res,
-      200,
-      success({
-        challenge_id: challengeID,
-        team_id: serviceState.team_id,
-        action: "factory_reset",
-        unlock_preserved: true,
-      }),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/teams") {
-    return writeJson(res, 200, success(state.teams));
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/teams") {
     const body = await readJsonBody(req);
     const name = body?.name?.trim();
     const contactEmail = body?.contact_email?.trim();
 
     if (!name || !contactEmail) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({ status: "failed", message: "team request is invalid." }),
-      );
+      return writeFailure(res, 400, "team request is invalid.");
     }
 
     const publishedChallenges = state.challenges.filter(
@@ -1373,33 +1393,24 @@ const server = http.createServer(async (req, res) => {
     state.nextTeamID += 1;
     state.teams.push(team);
 
-    return writeJson(res, 200, success(team));
+    return writeSuccess(res, team);
   }
 
-  const teamRoute = url.pathname.match(/^\/api\/v2\/admin\/teams\/(\d+)$/);
-  if (req.method === "PUT" && teamRoute) {
-    const teamID = Number(teamRoute[1]);
+  const teamID = routeID(url.pathname, /^\/api\/v2\/admin\/teams\/(\d+)$/);
+  if (teamID === null) {
+    return false;
+  }
+  if (method === "PUT") {
     const team = state.teams.find((item) => item.id === teamID);
     if (!team) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "team not found." }),
-      );
+      return writeFailure(res, 404, "team not found.");
     }
 
     const body = await readJsonBody(req);
     const name = body?.name?.trim();
     const contactEmail = body?.contact_email?.trim();
     if (!name || !contactEmail) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({
-          status: "failed",
-          message: "team update request is invalid.",
-        }),
-      );
+      return writeFailure(res, 400, "team update request is invalid.");
     }
 
     team.name = name;
@@ -1408,111 +1419,79 @@ const server = http.createServer(async (req, res) => {
       player.team_id === teamID ? { ...player, team_name: name } : player,
     );
 
-    return writeJson(res, 200, success(team));
+    return writeSuccess(res, team);
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/players") {
-    return writeJson(res, 200, success(state.players));
+  if (method === "DELETE") {
+    state.teams = state.teams.filter((team) => team.id !== teamID);
+    state.players = state.players.filter((player) => player.team_id !== teamID);
+    return writeSuccess(res, {});
   }
 
-  if (req.method === "GET" && playerWireGuardRoute) {
-    const playerID = Number(playerWireGuardRoute[1]);
+  return false;
+}
+
+async function handleAdminPlayerRoutes(ctx) {
+  return (
+    handlePlayerWireGuardRoutes(ctx) ||
+    (await handlePlayerCollectionRoutes(ctx)) ||
+    (await handlePlayerItemRoutes(ctx))
+  );
+}
+
+async function handlePlayerCollectionRoutes({ req, res, url, method }) {
+  if (url.pathname !== "/api/v2/admin/players") {
+    return false;
+  }
+
+  if (method === "GET") {
+    return writeSuccess(res, state.players);
+  }
+  if (method !== "POST") {
+    return false;
+  }
+
+  const body = await readJsonBody(req);
+  const teamID = Number(body?.team_id);
+  const team = state.teams.find((item) => item.id === teamID);
+  const displayName = body?.display_name?.trim();
+  const email = body?.email?.trim();
+  const password = body?.password?.trim();
+  const role = body?.role?.trim() || "member";
+
+  if (!team || !displayName || !email || !password) {
+    return writeFailure(res, 400, "player request is invalid.");
+  }
+
+  const playerID = state.nextPlayerID;
+  const player = {
+    id: playerID,
+    team_id: team.id,
+    team_name: team.name,
+    display_name: displayName,
+    email,
+    role,
+    wireguard_peer: `wg-${playerID}`,
+    wireguard_address: `10.70.12.${playerID - 980}/32`,
+    wireguard_status: "active",
+    wireguard_issued_at: nowIso(),
+    created_at: nowIso(),
+  };
+  state.nextPlayerID += 1;
+  state.players.push(player);
+
+  return writeSuccess(res, player);
+}
+
+async function handlePlayerItemRoutes({ req, res, url, method }) {
+  const playerID = routeID(url.pathname, /^\/api\/v2\/admin\/players\/(\d+)$/);
+  if (playerID === null) {
+    return false;
+  }
+  if (method === "PUT") {
     const player = state.players.find((item) => item.id === playerID);
     if (!player) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "player not found." }),
-      );
-    }
-
-    return writeJson(res, 200, success(buildWireGuardPeer(player)));
-  }
-
-  if (req.method === "POST" && playerWireGuardRotateRoute) {
-    const playerID = Number(playerWireGuardRotateRoute[1]);
-    const player = state.players.find((item) => item.id === playerID);
-    if (!player) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "player not found." }),
-      );
-    }
-
-    player.wireguard_peer = `${player.wireguard_peer}-rotated`;
-    player.wireguard_address = `10.70.15.${playerID - 980}/32`;
-    player.wireguard_status = "active";
-    player.wireguard_issued_at = nowIso();
-    delete player.wireguard_revoked_at;
-
-    return writeJson(res, 200, success(buildWireGuardPeer(player)));
-  }
-
-  if (req.method === "POST" && playerWireGuardRevokeRoute) {
-    const playerID = Number(playerWireGuardRevokeRoute[1]);
-    const player = state.players.find((item) => item.id === playerID);
-    if (!player) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "player not found." }),
-      );
-    }
-
-    player.wireguard_status = "revoked";
-    player.wireguard_revoked_at = nowIso();
-
-    return writeJson(res, 200, success(buildWireGuardPeer(player)));
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/players") {
-    const body = await readJsonBody(req);
-    const teamID = Number(body?.team_id);
-    const team = state.teams.find((item) => item.id === teamID);
-    const displayName = body?.display_name?.trim();
-    const email = body?.email?.trim();
-    const password = body?.password?.trim();
-    const role = body?.role?.trim() || "member";
-
-    if (!team || !displayName || !email || !password) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({ status: "failed", message: "player request is invalid." }),
-      );
-    }
-
-    const playerID = state.nextPlayerID;
-    const player = {
-      id: playerID,
-      team_id: team.id,
-      team_name: team.name,
-      display_name: displayName,
-      email,
-      role,
-      wireguard_peer: `wg-${playerID}`,
-      wireguard_address: `10.70.12.${playerID - 980}/32`,
-      wireguard_status: "active",
-      wireguard_issued_at: nowIso(),
-      created_at: nowIso(),
-    };
-    state.nextPlayerID += 1;
-    state.players.push(player);
-
-    return writeJson(res, 200, success(player));
-  }
-
-  const playerRoute = url.pathname.match(/^\/api\/v2\/admin\/players\/(\d+)$/);
-  if (req.method === "PUT" && playerRoute) {
-    const playerID = Number(playerRoute[1]);
-    const player = state.players.find((item) => item.id === playerID);
-    if (!player) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "player not found." }),
-      );
+      return writeFailure(res, 404, "player not found.");
     }
 
     const body = await readJsonBody(req);
@@ -1520,413 +1499,527 @@ const server = http.createServer(async (req, res) => {
     const email = body?.email?.trim();
     const role = body?.role?.trim();
     if (!displayName || !email || !role) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({
-          status: "failed",
-          message: "player update request is invalid.",
-        }),
-      );
+      return writeFailure(res, 400, "player update request is invalid.");
     }
 
     player.display_name = displayName;
     player.email = email;
     player.role = role;
 
-    return writeJson(res, 200, success(player));
+    return writeSuccess(res, player);
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/challenges") {
-    return writeJson(res, 200, success(state.challenges));
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/challenges") {
-    const body = await readJsonBody(req);
-    const name = body?.name?.trim();
-    if (!name) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({ status: "failed", message: "challenge request is invalid." }),
-      );
-    }
-
-    const challenge = {
-      id: state.nextChallengeID,
-      name,
-      baseline_image: body?.baseline_image?.trim() || "",
-      checker_image: body?.checker_image?.trim() || "",
-      weight: Number(body?.weight) || 1,
-      service_port: Number(body?.service_port) || 30051,
-      service_subnet_octet: Number(body?.service_subnet_octet) || 51,
-      published: false,
-      deployed_teams: 0,
-      total_teams: state.teams.length,
-      runtime_status: "draft",
-      queued_teams: 0,
-      ready_teams: 0,
-      created_at: nowIso(),
-    };
-    state.nextChallengeID += 1;
-    state.challenges.push(challenge);
-
-    return writeJson(res, 200, success(challenge));
-  }
-
-  const challengeRoute = url.pathname.match(/^\/api\/v2\/admin\/challenges\/(\d+)$/);
-  if (req.method === "PUT" && challengeRoute) {
-    const challengeID = Number(challengeRoute[1]);
-    const challenge = state.challenges.find((item) => item.id === challengeID);
-    if (!challenge) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "challenge not found." }),
-      );
-    }
-
-    const body = await readJsonBody(req);
-    const name = body?.name?.trim();
-    if (!name) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({
-          status: "failed",
-          message: "challenge update request is invalid.",
-        }),
-      );
-    }
-
-    challenge.name = name;
-    challenge.baseline_image = body?.baseline_image?.trim() || "";
-    challenge.checker_image = body?.checker_image?.trim() || "";
-    challenge.weight = Number(body?.weight) || 1;
-    state.deployments = state.deployments.map((deployment) =>
-      deployment.challenge_id === challengeID
-        ? { ...deployment, challenge_name: challenge.name }
-        : deployment,
-    );
-
-    return writeJson(res, 200, success(challenge));
-  }
-
-  if (req.method === "POST" && validateChallengeRoute) {
-    const challengeID = Number(validateChallengeRoute[1]);
-    return writeJson(
-      res,
-      200,
-      success({ ...challengeValidationResult, challenge_id: challengeID }),
-    );
-  }
-
-  if (req.method === "POST" && deployChallengeRoute) {
-    const challengeID = Number(deployChallengeRoute[1]);
-    const challenge = state.challenges.find((item) => item.id === challengeID);
-    if (!challenge) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({ status: "failed", message: "challenge not found." }),
-      );
-    }
-
-    const newJobID = state.nextDeploymentJobID;
-    state.nextDeploymentJobID += 1;
-
-    state.deployments = [
-      {
-        id: newJobID,
-        challenge_id: challengeID,
-        challenge_name: challenge.name,
-        status: "queued",
-        target_team_count: 3,
-        queued_team_count: 3,
-        ready_team_count: 0,
-        failed_team_count: 0,
-        created_at: nowIso(),
-        completed_at: "",
-      },
-      ...state.deployments.map((deployment) =>
-        deployment.challenge_id === challengeID &&
-        (deployment.status === "queued" || deployment.status === "running")
-          ? {
-              ...deployment,
-              status: "superseded",
-              queued_team_count: 0,
-              completed_at: nowIso(),
-            }
-          : deployment,
-      ),
-    ];
-
-    state.challenges = state.challenges.map((item) =>
-      item.id === challengeID
-        ? {
-            ...item,
-            published: true,
-            deployed_teams: 3,
-            total_teams: 3,
-            runtime_status: "deploying",
-            queued_teams: 3,
-            ready_teams: 0,
-          }
-        : item,
-    );
-
-    return writeJson(
-      res,
-      200,
-      success({
-        job_id: newJobID,
-        challenge_id: challengeID,
-        challenge_name: challenge.name,
-        status: "queued",
-        published: true,
-        deployed_team_count: 3,
-        total_team_count: 3,
-        queued_team_count: 3,
-        ready_team_count: 0,
-        created_at: nowIso(),
-        completed_at: "",
-      }),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/audit-logs") {
-    const filtered = filterAuditLogs(auditLogs, url.searchParams);
-    return writeJson(res, 200, success(paginate(filtered, url.searchParams)));
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/deployments") {
-    return writeJson(res, 200, success(state.deployments));
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/operations/status") {
-    return writeJson(res, 200, success(state.operationsStatus));
-  }
-
-  if (req.method === "GET" && url.pathname === "/game-core/metrics") {
-    return writeText(res, 200, renderGameCoreMetrics(state.serviceMetrics.game_core));
-  }
-
-  if (req.method === "GET" && url.pathname === "/submission-service/metrics") {
-    return writeText(
-      res,
-      200,
-      renderSubmissionMetrics(state.serviceMetrics.submission_service),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/controller-service/metrics") {
-    return writeText(
-      res,
-      200,
-      renderControllerMetrics(state.serviceMetrics.controller_service),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/metrics") {
-    return writeText(
-      res,
-      200,
-      renderRealtimeMetrics(state.serviceMetrics.realtime_gateway),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/wireguard-gateway/metrics") {
-    return writeText(
-      res,
-      200,
-      renderWireguardMetrics(state.serviceMetrics.wireguard_gateway),
-    );
-  }
-
-  if (req.method === "POST" && deploymentReconcileRoute) {
-    let processedJobs = 0;
-    let processedInstances = 0;
-    let completedJobs = 0;
-
-    state.deployments = state.deployments.map((deployment) => {
-      if (
-        deployment.status !== "queued" &&
-        deployment.status !== "provisioning"
-      ) {
-        return deployment;
-      }
-
-      processedJobs += 1;
-      processedInstances += deployment.queued_team_count;
-      completedJobs += 1;
-
-      return {
-        ...deployment,
-        status: "completed",
-        ready_team_count: deployment.target_team_count,
-        queued_team_count: 0,
-        completed_at: nowIso(),
-      };
-    });
-
-    return writeJson(
-      res,
-      200,
-      success({
-        processed_jobs: processedJobs,
-        processed_instances: processedInstances,
-        completed_jobs: completedJobs,
-      }),
-    );
-  }
-
-  if (req.method === "DELETE" && deleteDeploymentRoute) {
-    const deploymentID = Number(deleteDeploymentRoute[1]);
-    const deployment = state.deployments.find((item) => item.id === deploymentID);
-
-    if (!deployment) {
-      return writeJson(
-        res,
-        404,
-        JSON.stringify({
-          status: "failed",
-          message: "deployment job not found.",
-        }),
-      );
-    }
-
-    if (deployment.status === "queued" || deployment.status === "provisioning") {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({
-          status: "failed",
-          message: "deployment job is still active.",
-        }),
-      );
-    }
-
-    state.deployments = state.deployments.filter((item) => item.id !== deploymentID);
-    return writeJson(res, 200, success({}));
-  }
-
-  const deleteTeamRoute = url.pathname.match(/^\/api\/v2\/admin\/teams\/(\d+)$/);
-  if (req.method === "DELETE" && deleteTeamRoute) {
-    const teamID = Number(deleteTeamRoute[1]);
-    state.teams = state.teams.filter((team) => team.id !== teamID);
-    state.players = state.players.filter((player) => player.team_id !== teamID);
-    return writeJson(res, 200, success({}));
-  }
-
-  const deletePlayerRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/players\/(\d+)$/,
-  );
-  if (req.method === "DELETE" && deletePlayerRoute) {
-    const playerID = Number(deletePlayerRoute[1]);
+  if (method === "DELETE") {
     state.players = state.players.filter((player) => player.id !== playerID);
-    return writeJson(res, 200, success({}));
+    return writeSuccess(res, {});
   }
 
-  const deleteChallengeRoute = url.pathname.match(
-    /^\/api\/v2\/admin\/challenges\/(\d+)$/,
+  return false;
+}
+
+function handlePlayerWireGuardRoutes({ res, url, method }) {
+  const playerID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard$/,
   );
-  if (req.method === "DELETE" && deleteChallengeRoute) {
-    const challengeID = Number(deleteChallengeRoute[1]);
-    state.challenges = state.challenges.filter(
-      (challenge) => challenge.id !== challengeID,
-    );
+  const rotatePlayerID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard\/rotate$/,
+  );
+  const revokePlayerID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/players\/(\d+)\/wireguard\/revoke$/,
+  );
+
+  if (method === "GET" && playerID !== null) {
+    return writeWireGuardPeer(res, playerID);
+  }
+
+  if (method === "POST" && rotatePlayerID !== null) {
+    const player = state.players.find((item) => item.id === rotatePlayerID);
+    if (!player) {
+      return writeFailure(res, 404, "player not found.");
+    }
+    player.wireguard_peer = `${player.wireguard_peer}-rotated`;
+    player.wireguard_address = `10.70.15.${rotatePlayerID - 980}/32`;
+    player.wireguard_status = "active";
+    player.wireguard_issued_at = nowIso();
+    delete player.wireguard_revoked_at;
+    return writeSuccess(res, buildWireGuardPeer(player));
+  }
+
+  if (method === "POST" && revokePlayerID !== null) {
+    const player = state.players.find((item) => item.id === revokePlayerID);
+    if (!player) {
+      return writeFailure(res, 404, "player not found.");
+    }
+    player.wireguard_status = "revoked";
+    player.wireguard_revoked_at = nowIso();
+    return writeSuccess(res, buildWireGuardPeer(player));
+  }
+
+  return false;
+}
+
+function writeWireGuardPeer(res, playerID) {
+  const player = state.players.find((item) => item.id === playerID);
+  if (!player) {
+    return writeFailure(res, 404, "player not found.");
+  }
+  return writeSuccess(res, buildWireGuardPeer(player));
+}
+
+async function handleAdminChallengeRoutes({ req, res, url, method }) {
+  if (url.pathname === "/api/v2/admin/challenges") {
+    if (method === "GET") {
+      return writeSuccess(res, state.challenges);
+    }
+    return method === "POST" ? handleCreateChallenge(req, res) : false;
+  }
+
+  const challengeID = routeID(url.pathname, /^\/api\/v2\/admin\/challenges\/(\d+)$/);
+  if (challengeID !== null && method === "PUT") {
+    return handleUpdateChallenge(req, res, challengeID);
+  }
+  if (challengeID !== null && method === "DELETE") {
+    state.challenges = state.challenges.filter((challenge) => challenge.id !== challengeID);
     state.deployments = state.deployments.filter(
       (deployment) => deployment.challenge_id !== challengeID,
     );
-    return writeJson(res, 200, success({}));
+    return writeSuccess(res, {});
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/game/status") {
-    return writeJson(res, 200, success(state.gameStatus));
+  const validateID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/challenges\/(\d+)\/validate$/,
+  );
+  if (method === "POST" && validateID !== null) {
+    return writeSuccess(res, { ...challengeValidationResult, challenge_id: validateID });
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/game/scoreboard") {
-    return writeJson(res, 200, success(state.scoreboard));
+  const deployID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/challenges\/(\d+)\/deploy$/,
+  );
+  if (method === "POST" && deployID !== null) {
+    return handleDeployChallenge(res, deployID);
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/game/attacks") {
-    const filtered = filterAttackItems(state.attackItems, url.searchParams);
-    return writeJson(res, 200, success(paginate(filtered, url.searchParams)));
+  return false;
+}
+
+async function handleCreateChallenge(req, res) {
+  const body = await readJsonBody(req);
+  const name = body?.name?.trim();
+  if (!name) {
+    return writeFailure(res, 400, "challenge request is invalid.");
   }
 
-  if (
-    req.method === "GET" &&
-    url.pathname === "/api/v2/admin/game/scheduler/events"
-  ) {
-    const filtered = filterSchedulerEvents(state.schedulerEvents, url.searchParams);
-    return writeJson(res, 200, success(paginate(filtered, url.searchParams)));
+  const challenge = {
+    id: state.nextChallengeID,
+    name,
+    baseline_image: body?.baseline_image?.trim() || "",
+    checker_image: body?.checker_image?.trim() || "",
+    weight: Number(body?.weight) || 1,
+    service_port: Number(body?.service_port) || 30051,
+    service_subnet_octet: Number(body?.service_subnet_octet) || 51,
+    published: false,
+    deployed_teams: 0,
+    total_teams: state.teams.length,
+    runtime_status: "draft",
+    queued_teams: 0,
+    ready_teams: 0,
+    created_at: nowIso(),
+  };
+  state.nextChallengeID += 1;
+  state.challenges.push(challenge);
+  return writeSuccess(res, challenge);
+}
+
+async function handleUpdateChallenge(req, res, challengeID) {
+  const challenge = state.challenges.find((item) => item.id === challengeID);
+  if (!challenge) {
+    return writeFailure(res, 404, "challenge not found.");
   }
 
-  if (
-    req.method === "GET" &&
-    url.pathname === "/api/v2/admin/game/checker-runs"
-  ) {
-    const filtered = filterCheckerRuns(state.checkerRuns, url.searchParams);
-    return writeJson(res, 200, success(paginate(filtered, url.searchParams)));
+  const body = await readJsonBody(req);
+  const name = body?.name?.trim();
+  if (!name) {
+    return writeFailure(res, 400, "challenge update request is invalid.");
   }
 
-  if (req.method === "POST" && advanceTickRoute) {
-    const nextTickID =
-      (state.gameStatus.current_tick?.id ?? state.gameStatus.total_ticks) + 1;
-    const tick = {
-      id: nextTickID,
-      status: "completed",
-      total_checker_runs: 6,
-      successful_checker_runs: 6,
-      failed_checker_runs: 0,
-      skipped_checker_runs: 0,
-      started_at: nowIso(),
-      completed_at: nowIso(),
-      message: `tick #${nextTickID} completed`,
-    };
+  challenge.name = name;
+  challenge.baseline_image = body?.baseline_image?.trim() || "";
+  challenge.checker_image = body?.checker_image?.trim() || "";
+  challenge.weight = Number(body?.weight) || 1;
+  state.deployments = state.deployments.map((deployment) =>
+    deployment.challenge_id === challengeID
+      ? { ...deployment, challenge_name: challenge.name }
+      : deployment,
+  );
 
-    state.gameStatus = {
-      ...state.gameStatus,
-      current_tick: tick,
-      total_ticks: nextTickID,
-      total_checker_runs: state.gameStatus.total_checker_runs + tick.total_checker_runs,
-      successful_checker_runs:
-        state.gameStatus.successful_checker_runs + tick.successful_checker_runs,
-      failed_checker_runs:
-        state.gameStatus.failed_checker_runs + tick.failed_checker_runs,
-      skipped_checker_runs:
-        state.gameStatus.skipped_checker_runs + tick.skipped_checker_runs,
-      scheduler: state.gameStatus.scheduler
+  return writeSuccess(res, challenge);
+}
+
+function handleDeployChallenge(res, challengeID) {
+  const challenge = state.challenges.find((item) => item.id === challengeID);
+  if (!challenge) {
+    return writeFailure(res, 404, "challenge not found.");
+  }
+
+  const newJobID = state.nextDeploymentJobID;
+  state.nextDeploymentJobID += 1;
+
+  state.deployments = [
+    {
+      id: newJobID,
+      challenge_id: challengeID,
+      challenge_name: challenge.name,
+      status: "queued",
+      target_team_count: 3,
+      queued_team_count: 3,
+      ready_team_count: 0,
+      failed_team_count: 0,
+      created_at: nowIso(),
+      completed_at: "",
+    },
+    ...state.deployments.map((deployment) =>
+      deployment.challenge_id === challengeID &&
+      (deployment.status === "queued" || deployment.status === "running")
         ? {
-            ...state.gameStatus.scheduler,
-            last_tick_id: nextTickID,
-            last_run_at: tick.completed_at,
+            ...deployment,
+            status: "superseded",
+            queued_team_count: 0,
+            completed_at: nowIso(),
           }
-        : state.gameStatus.scheduler,
+        : deployment,
+    ),
+  ];
+
+  state.challenges = state.challenges.map((item) =>
+    item.id === challengeID
+      ? {
+          ...item,
+          published: true,
+          deployed_teams: 3,
+          total_teams: 3,
+          runtime_status: "deploying",
+          queued_teams: 3,
+          ready_teams: 0,
+        }
+      : item,
+  );
+
+  return writeSuccess(res, {
+    job_id: newJobID,
+    challenge_id: challengeID,
+    challenge_name: challenge.name,
+    status: "queued",
+    published: true,
+    deployed_team_count: 3,
+    total_team_count: 3,
+    queued_team_count: 3,
+    ready_team_count: 0,
+    created_at: nowIso(),
+    completed_at: "",
+  });
+}
+
+function handleAdminDeploymentRoutes({ res, url, method }) {
+  const handled = writeGetRoute(res, method, url.pathname, {
+    "/api/v2/admin/deployments": () => state.deployments,
+    "/api/v2/admin/operations/status": () => state.operationsStatus,
+  });
+  if (handled) {
+    return true;
+  }
+
+  if (method === "GET" && url.pathname === "/api/v2/admin/audit-logs") {
+    const filtered = filterAuditLogs(auditLogs, url.searchParams);
+    return writeSuccess(res, paginate(filtered, url.searchParams));
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/admin/deployments/reconcile") {
+    return reconcileDeployments(res);
+  }
+
+  const deploymentID = routeID(url.pathname, /^\/api\/v2\/admin\/deployments\/(\d+)$/);
+  if (method === "DELETE" && deploymentID !== null) {
+    return deleteDeployment(res, deploymentID);
+  }
+
+  return false;
+}
+
+function handleAdminMetricsRoutes({ res, url, method }) {
+  return writeTextRoute(res, method, url.pathname, {
+    "/game-core/metrics": () => renderGameCoreMetrics(state.serviceMetrics.game_core),
+    "/submission-service/metrics": () =>
+      renderSubmissionMetrics(state.serviceMetrics.submission_service),
+    "/controller-service/metrics": () =>
+      renderControllerMetrics(state.serviceMetrics.controller_service),
+    "/metrics": () => renderRealtimeMetrics(state.serviceMetrics.realtime_gateway),
+    "/wireguard-gateway/metrics": () =>
+      renderWireguardMetrics(state.serviceMetrics.wireguard_gateway),
+  });
+}
+
+function reconcileDeployments(res) {
+  let processedJobs = 0;
+  let processedInstances = 0;
+  let completedJobs = 0;
+
+  state.deployments = state.deployments.map((deployment) => {
+    if (deployment.status !== "queued" && deployment.status !== "provisioning") {
+      return deployment;
+    }
+
+    processedJobs += 1;
+    processedInstances += deployment.queued_team_count;
+    completedJobs += 1;
+
+    return {
+      ...deployment,
+      status: "completed",
+      ready_team_count: deployment.target_team_count,
+      queued_team_count: 0,
+      completed_at: nowIso(),
+    };
+  });
+
+  return writeSuccess(res, {
+    processed_jobs: processedJobs,
+    processed_instances: processedInstances,
+    completed_jobs: completedJobs,
+  });
+}
+
+function deleteDeployment(res, deploymentID) {
+  const deployment = state.deployments.find((item) => item.id === deploymentID);
+  if (!deployment) {
+    return writeFailure(res, 404, "deployment job not found.");
+  }
+  if (deployment.status === "queued" || deployment.status === "provisioning") {
+    return writeFailure(res, 400, "deployment job is still active.");
+  }
+
+  state.deployments = state.deployments.filter((item) => item.id !== deploymentID);
+  return writeSuccess(res, {});
+}
+
+async function handleAdminGameRoutes(ctx) {
+  const { res, url, method } = ctx;
+
+  const handled = writeGetRoute(res, method, url.pathname, {
+    "/api/v2/admin/game/status": () => state.gameStatus,
+    "/api/v2/admin/game/scoreboard": () => state.scoreboard,
+  });
+  if (handled) {
+    return true;
+  }
+
+  if (method === "GET" && url.pathname === "/api/v2/admin/game/attacks") {
+    const filtered = filterAttackItems(state.attackItems, url.searchParams);
+    return writeSuccess(res, paginate(filtered, url.searchParams));
+  }
+
+  if (method === "GET" && url.pathname === "/api/v2/admin/game/scheduler/events") {
+    const filtered = filterSchedulerEvents(state.schedulerEvents, url.searchParams);
+    return writeSuccess(res, paginate(filtered, url.searchParams));
+  }
+
+  if (method === "GET" && url.pathname === "/api/v2/admin/game/checker-runs") {
+    const filtered = filterCheckerRuns(state.checkerRuns, url.searchParams);
+    return writeSuccess(res, paginate(filtered, url.searchParams));
+  }
+
+  return (
+    handleAdvanceTick(ctx) ||
+    handleRecomputeScoring(ctx) ||
+    (await handleMatchControlRoutes(ctx)) ||
+    (await handleSchedulerControlRoutes(ctx))
+  );
+}
+
+function handleAdvanceTick({ res, url, method }) {
+  if (method !== "POST" || url.pathname !== "/api/v2/admin/game/ticks/advance") {
+    return false;
+  }
+
+  const nextTickID =
+    (state.gameStatus.current_tick?.id ?? state.gameStatus.total_ticks) + 1;
+  const tick = {
+    id: nextTickID,
+    status: "completed",
+    total_checker_runs: 6,
+    successful_checker_runs: 6,
+    failed_checker_runs: 0,
+    skipped_checker_runs: 0,
+    started_at: nowIso(),
+    completed_at: nowIso(),
+    message: `tick #${nextTickID} completed`,
+  };
+
+  state.gameStatus = {
+    ...state.gameStatus,
+    current_tick: tick,
+    total_ticks: nextTickID,
+    total_checker_runs: state.gameStatus.total_checker_runs + tick.total_checker_runs,
+    successful_checker_runs:
+      state.gameStatus.successful_checker_runs + tick.successful_checker_runs,
+    failed_checker_runs:
+      state.gameStatus.failed_checker_runs + tick.failed_checker_runs,
+    skipped_checker_runs:
+      state.gameStatus.skipped_checker_runs + tick.skipped_checker_runs,
+    scheduler: state.gameStatus.scheduler
+      ? {
+          ...state.gameStatus.scheduler,
+          last_tick_id: nextTickID,
+          last_run_at: tick.completed_at,
+        }
+      : state.gameStatus.scheduler,
+  };
+  addSchedulerEvent(
+    "tick_completed",
+    "organizer",
+    state.gameStatus.scheduler?.state ?? "stopped",
+    `tick #${nextTickID} completed`,
+    nextTickID,
+  );
+
+  return writeSuccess(res, tick);
+}
+
+function handleRecomputeScoring({ res, url, method }) {
+  if (method !== "POST" || url.pathname !== "/api/v2/admin/game/scoring/recompute") {
+    return false;
+  }
+
+  state.scoreboard = state.scoreboard.map((row, index) =>
+    index === 0 ? { ...row, total: row.total + 5, delta: "+1" } : row,
+  );
+  return writeSuccess(res, state.scoreboard);
+}
+
+async function handleMatchControlRoutes({ req, res, url, method }) {
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/match/start") {
+    state.gameStatus.match = {
+      ...state.gameStatus.match,
+      state: "running",
+      started_at: nowIso(),
+      ended_at: "",
+      accepting_submissions: true,
+    };
+    return writeSuccess(res, state.gameStatus.match);
+  }
+
+  if (method === "PUT" && url.pathname === "/api/v2/admin/game/match/schedule") {
+    const body = await readJsonBody(req);
+    const scheduledStartAt = body?.scheduled_start_at ?? undefined;
+    const scheduledEndAt = body?.scheduled_end_at ?? undefined;
+
+    state.gameStatus.match = {
+      ...state.gameStatus.match,
+      scheduled_start_at: scheduledStartAt,
+      scheduled_end_at: scheduledEndAt,
+      schedule_configured: Boolean(scheduledStartAt || scheduledEndAt),
     };
     addSchedulerEvent(
-      "tick_completed",
+      "schedule_updated",
       "organizer",
-      state.gameStatus.scheduler?.state ?? "stopped",
-      `tick #${nextTickID} completed`,
-      nextTickID,
+      state.gameStatus.scheduler.state,
+      "match schedule updated",
     );
-
-    return writeJson(res, 200, success(tick));
+    return writeSuccess(res, state.gameStatus.match);
   }
 
-  if (req.method === "POST" && recomputeScoringRoute) {
-    state.scoreboard = state.scoreboard.map((row, index) =>
-      index === 0 ? { ...row, total: row.total + 5, delta: "+1" } : row,
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/match/stop") {
+    state.gameStatus.match = {
+      ...state.gameStatus.match,
+      state: "finished",
+      ended_at: nowIso(),
+      accepting_submissions: false,
+    };
+    state.gameStatus.scheduler = {
+      ...state.gameStatus.scheduler,
+      state: "stopped",
+      next_run_at: "",
+    };
+    addSchedulerEvent("match_stopped", "organizer", "stopped", "match stopped");
+    return writeSuccess(res, state.gameStatus.match);
+  }
+
+  return false;
+}
+
+async function handleSchedulerControlRoutes({ req, res, url, method }) {
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/scheduler/start") {
+    state.gameStatus.scheduler = {
+      ...state.gameStatus.scheduler,
+      state: "running",
+      next_run_at: nextRunAt(state.gameStatus.scheduler.interval_seconds),
+      last_error: "",
+    };
+    addSchedulerEvent(
+      "started",
+      "organizer",
+      "running",
+      "scheduler started via organizer control",
     );
-    return writeJson(res, 200, success(state.scoreboard));
+    return writeSuccess(res, state.gameStatus.scheduler);
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/wireguard/status") {
-    return writeJson(res, 200, success(state.wireguardStatus));
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/scheduler/stop") {
+    state.gameStatus.scheduler = {
+      ...state.gameStatus.scheduler,
+      state: "stopped",
+      next_run_at: "",
+      last_error: "",
+    };
+    addSchedulerEvent(
+      "stopped",
+      "organizer",
+      "stopped",
+      "scheduler stopped via organizer control",
+    );
+    return writeSuccess(res, state.gameStatus.scheduler);
   }
 
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/wireguard/reconcile") {
+  if (method === "PUT" && url.pathname === "/api/v2/admin/game/scheduler/interval") {
+    const body = await readJsonBody(req);
+    const intervalSeconds = Number(body?.interval_seconds);
+    if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+      return writeFailure(res, 400, "interval_seconds must be positive.");
+    }
+
+    state.gameStatus.scheduler = {
+      ...state.gameStatus.scheduler,
+      interval_seconds: intervalSeconds,
+      next_run_at:
+        state.gameStatus.scheduler.state === "running"
+          ? nextRunAt(intervalSeconds)
+          : state.gameStatus.scheduler.next_run_at,
+    };
+    addSchedulerEvent(
+      "interval_updated",
+      "organizer",
+      state.gameStatus.scheduler.state,
+      `scheduler interval set to ${intervalSeconds} seconds`,
+    );
+    return writeSuccess(res, state.gameStatus.scheduler);
+  }
+
+  return false;
+}
+
+function handleAdminNetworkRoutes({ res, url, method }) {
+  const handled = writeGetRoute(res, method, url.pathname, {
+    "/api/v2/admin/wireguard/status": () => state.wireguardStatus,
+    "/api/v2/admin/access/status": () => state.accessStatus,
+  });
+  if (handled) return true;
+
+  if (method === "POST" && url.pathname === "/api/v2/admin/wireguard/reconcile") {
     const peersTotal = state.players.length;
     const peersRevoked = state.players.filter(
       (player) => player.wireguard_status === "revoked",
@@ -1945,11 +2038,10 @@ const server = http.createServer(async (req, res) => {
       revision: `mock-wireguard-revision-${peersActive}-${peersRevoked}`,
       applied_at: nowIso(),
     };
-
-    return writeJson(res, 200, success(state.wireguardStatus));
+    return writeSuccess(res, state.wireguardStatus);
   }
 
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/wireguard/teardown") {
+  if (method === "POST" && url.pathname === "/api/v2/admin/wireguard/teardown") {
     state.wireguardStatus = {
       ...state.wireguardStatus,
       state: "stopped",
@@ -1959,14 +2051,10 @@ const server = http.createServer(async (req, res) => {
       revision: "mock-wireguard-teardown",
       applied_at: nowIso(),
     };
-    return writeJson(res, 200, success({ status: "success" }));
+    return writeSuccess(res, { status: "success" });
   }
 
-  if (req.method === "GET" && url.pathname === "/api/v2/admin/access/status") {
-    return writeJson(res, 200, success(state.accessStatus));
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/access/reconcile") {
+  if (method === "POST" && url.pathname === "/api/v2/admin/access/reconcile") {
     const activePeers = state.players.filter(
       (player) => player.wireguard_status === "active",
     ).length;
@@ -1983,10 +2071,10 @@ const server = http.createServer(async (req, res) => {
       revision: `mock-access-revision-${activePeers}`,
       applied_at: nowIso(),
     };
-    return writeJson(res, 200, success(state.accessStatus));
+    return writeSuccess(res, state.accessStatus);
   }
 
-  if (req.method === "POST" && url.pathname === "/api/v2/admin/access/teardown") {
+  if (method === "POST" && url.pathname === "/api/v2/admin/access/teardown") {
     state.accessStatus = {
       ...state.accessStatus,
       state: "stopped",
@@ -1997,179 +2085,43 @@ const server = http.createServer(async (req, res) => {
       revision: "mock-access-teardown",
       applied_at: nowIso(),
     };
-    return writeJson(res, 200, success({ status: "success" }));
+    return writeSuccess(res, { status: "success" });
   }
 
-  if (req.method === "POST" && schedulerStartMatch) {
-    state.gameStatus.match = {
-      ...state.gameStatus.match,
-      state: "running",
-      started_at: nowIso(),
-      ended_at: "",
-      accepting_submissions: true,
-    };
-    return writeJson(res, 200, success(state.gameStatus.match));
-  }
+  return false;
+}
 
-  if (req.method === "PUT" && matchScheduleRoute) {
-    const body = await readJsonBody(req);
-    const scheduledStartAt = body?.scheduled_start_at ?? undefined;
-    const scheduledEndAt = body?.scheduled_end_at ?? undefined;
-
-    state.gameStatus.match = {
-      ...state.gameStatus.match,
-      scheduled_start_at: scheduledStartAt,
-      scheduled_end_at: scheduledEndAt,
-      schedule_configured: Boolean(scheduledStartAt || scheduledEndAt),
-    };
-
-    addSchedulerEvent(
-      "schedule_updated",
-      "organizer",
-      state.gameStatus.scheduler.state,
-      "match schedule updated",
-    );
-    return writeJson(res, 200, success(state.gameStatus.match));
-  }
-
-  if (req.method === "POST" && schedulerStopMatch) {
-    state.gameStatus.match = {
-      ...state.gameStatus.match,
-      state: "finished",
-      ended_at: nowIso(),
-      accepting_submissions: false,
-    };
-    state.gameStatus.scheduler = {
-      ...state.gameStatus.scheduler,
-      state: "stopped",
-      next_run_at: "",
-    };
-    addSchedulerEvent("match_stopped", "organizer", "stopped", "match stopped");
-    return writeJson(res, 200, success(state.gameStatus.match));
-  }
-
-  if (req.method === "POST" && schedulerStart) {
-    state.gameStatus.scheduler = {
-      ...state.gameStatus.scheduler,
-      state: "running",
-      next_run_at: nextRunAt(state.gameStatus.scheduler.interval_seconds),
-      last_error: "",
-    };
-    addSchedulerEvent(
-      "started",
-      "organizer",
-      "running",
-      "scheduler started via organizer control",
-    );
-    return writeJson(res, 200, success(state.gameStatus.scheduler));
-  }
-
-  if (req.method === "POST" && schedulerStop) {
-    state.gameStatus.scheduler = {
-      ...state.gameStatus.scheduler,
-      state: "stopped",
-      next_run_at: "",
-      last_error: "",
-    };
-    addSchedulerEvent(
-      "stopped",
-      "organizer",
-      "stopped",
-      "scheduler stopped via organizer control",
-    );
-    return writeJson(res, 200, success(state.gameStatus.scheduler));
-  }
-
-  if (req.method === "PUT" && schedulerInterval) {
-    const body = await readJsonBody(req);
-    const intervalSeconds = Number(body?.interval_seconds);
-    if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
-      return writeJson(
-        res,
-        400,
-        JSON.stringify({
-          status: "failed",
-          message: "interval_seconds must be positive.",
-        }),
-      );
-    }
-
-    state.gameStatus.scheduler = {
-      ...state.gameStatus.scheduler,
-      interval_seconds: intervalSeconds,
-      next_run_at:
-        state.gameStatus.scheduler.state === "running"
-          ? nextRunAt(intervalSeconds)
-          : state.gameStatus.scheduler.next_run_at,
-    };
-    addSchedulerEvent(
-      "interval_updated",
-      "organizer",
-      state.gameStatus.scheduler.state,
-      `scheduler interval set to ${intervalSeconds} seconds`,
-    );
-    return writeJson(res, 200, success(state.gameStatus.scheduler));
-  }
-
-  if (req.method === "GET" && url.pathname === "/public/v1/scoreboard/stream") {
-    return writeScenarioSSE(res, url.pathname, state.scoreboard);
-  }
-
-  if (req.method === "GET" && url.pathname === "/public/v1/attacks/stream") {
-    return writeScenarioSSE(
-      res,
-      url.pathname,
-      paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
-    );
-  }
-
-  if (req.method === "GET" && url.pathname === "/admin/v1/game/status/stream") {
-    return writeScenarioSSE(res, url.pathname, state.gameStatus);
-  }
-
-  if (
-    req.method === "GET" &&
-    url.pathname === "/admin/v1/game/scoreboard/stream"
-  ) {
-    return writeScenarioSSE(res, url.pathname, state.scoreboard);
-  }
-
-  if (req.method === "GET" && url.pathname === "/admin/v1/game/attacks/stream") {
-    return writeSSE(
-      res,
-      paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
-    );
-  }
-
-  if (
-    req.method === "GET" &&
-    url.pathname === "/admin/v1/game/checker-runs/stream"
-  ) {
-    return writeSSE(
-      res,
-      paginate(state.checkerRuns, new URLSearchParams("limit=18&offset=0")),
-    );
-  }
-
-  if (
-    req.method === "GET" &&
-    url.pathname === "/admin/v1/game/scheduler/events/stream"
-  ) {
-    return writeSSE(
-      res,
-      paginate(state.schedulerEvents, new URLSearchParams("limit=12&offset=0")),
-    );
-  }
-
-  return writeJson(
-    res,
-    404,
-    JSON.stringify({
-      status: "failed",
-      message: `mock route not found: ${url.pathname}`,
-    }),
-  );
-});
+function handleStreamRoutes({ res, url, method }) {
+  return writeStreamRoute(res, method, url.pathname, {
+    "/public/v1/scoreboard/stream": (response, pathname) =>
+      writeScenarioSSE(response, pathname, state.scoreboard),
+    "/public/v1/attacks/stream": (response, pathname) =>
+      writeScenarioSSE(
+        response,
+        pathname,
+        paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
+      ),
+    "/admin/v1/game/status/stream": (response, pathname) =>
+      writeScenarioSSE(response, pathname, state.gameStatus),
+    "/admin/v1/game/scoreboard/stream": (response, pathname) =>
+      writeScenarioSSE(response, pathname, state.scoreboard),
+    "/admin/v1/game/attacks/stream": (response) =>
+      writeSSE(
+        response,
+        paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
+      ),
+    "/admin/v1/game/checker-runs/stream": (response) =>
+      writeSSE(
+        response,
+        paginate(state.checkerRuns, new URLSearchParams("limit=18&offset=0")),
+      ),
+    "/admin/v1/game/scheduler/events/stream": (response) =>
+      writeSSE(
+        response,
+        paginate(state.schedulerEvents, new URLSearchParams("limit=12&offset=0")),
+      ),
+  });
+}
 
 server.listen(port, "127.0.0.1", () => {
   process.stdout.write(

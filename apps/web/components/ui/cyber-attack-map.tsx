@@ -60,6 +60,14 @@ type LandPlacementResources = {
   slots: LandSlot[];
 };
 
+type TeamNodeMarkerProps = {
+  node: TeamNode;
+  showLabel: boolean;
+  pulseClassName: string;
+  onHoverChange: (teamId: string | null) => void;
+  onSelectTeam?: (teamId: string | null) => void;
+};
+
 const FALLBACK_LAND_SLOTS: LandSlot[] = [
   { x: 156, y: 128 }, { x: 236, y: 144 }, { x: 212, y: 104 }, { x: 196, y: 188 },
   { x: 304, y: 286 }, { x: 314, y: 382 }, { x: 292, y: 304 }, { x: 472, y: 126 },
@@ -323,81 +331,16 @@ export function CyberAttackMap({
           );
         })}
 
-        {nodes.map((node) => {
-          const showLabel =
-            node.highlighted ||
-            node.selected ||
-            hoveredTeamId === node.id ||
-            focusedTeamSet.has(node.id);
-
-          return (
-            <g
-              key={node.id}
-              transform={`translate(${node.x}, ${node.y})`}
-              className="cursor-pointer"
-              onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
-              onMouseEnter={() => setHoveredTeamId(node.id)}
-              onMouseLeave={() =>
-                setHoveredTeamId((current) => (current === node.id ? null : current))
-              }
-            >
-              <circle
-                r={node.selected ? 12 : node.highlighted ? 10 : 4}
-                fill="var(--attack-map-node-highlight-halo)"
-                fillOpacity={showLabel ? 0.2 : node.highlighted ? 0.12 : 0.04}
-                className={node.highlighted || node.selected ? pulseClassName : ''}
-              />
-              <circle
-                r={showLabel ? 3.8 : node.highlighted || node.selected ? 4 : 2.5}
-                fill={
-                  showLabel
-                    ? 'var(--attack-map-node-highlight)'
-                    : 'var(--attack-map-node)'
-                }
-                style={
-                  showLabel
-                    ? {
-                        filter:
-                          'drop-shadow(0 0 8px var(--attack-map-node-highlight))',
-                      }
-                    : undefined
-                }
-              />
-              {showLabel ? (
-                <line
-                  x1="0"
-                  y1="-1"
-                  x2={node.labelLineX}
-                  y2={node.labelLineY}
-                  stroke="var(--attack-map-node-label)"
-                  strokeOpacity={node.selected || node.highlighted ? '0.95' : '0.58'}
-                  strokeWidth={node.selected ? '1.35' : '0.9'}
-                />
-              ) : null}
-              {showLabel ? (
-                <text
-                  x={node.labelDx}
-                  y={node.selected || node.highlighted ? node.labelDy - 2 : node.labelDy}
-                  textAnchor={node.labelAnchor}
-                  fill={
-                    node.selected || node.highlighted
-                      ? 'var(--foreground)'
-                      : 'var(--attack-map-node-label)'
-                  }
-                  stroke="var(--attack-map-node-label-halo)"
-                  strokeWidth={node.selected || node.highlighted ? '3' : '2.25'}
-                  paintOrder="stroke"
-                  strokeLinejoin="round"
-                  fontSize={node.selected ? '12.5' : node.highlighted ? '12' : '10'}
-                  fontWeight={node.selected || node.highlighted ? '600' : '500'}
-                  className="pointer-events-none select-none drop-shadow-lg font-sans"
-                >
-                  {node.name}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
+        {nodes.map((node) => (
+          <TeamNodeMarker
+            key={node.id}
+            node={node}
+            showLabel={shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet)}
+            pulseClassName={pulseClassName}
+            onHoverChange={setHoveredTeamId}
+            onSelectTeam={onSelectTeam}
+          />
+        ))}
       </svg>
 
       <div className="pointer-events-none absolute bottom-4 left-4 flex flex-wrap gap-2">
@@ -459,6 +402,134 @@ export function CyberAttackMap({
       />
     </div>
   );
+}
+
+function TeamNodeMarker({
+  node,
+  showLabel,
+  pulseClassName,
+  onHoverChange,
+  onSelectTeam,
+}: TeamNodeMarkerProps): ReactElement {
+  const emphasized = node.selected || node.highlighted;
+
+  return (
+    <g
+      transform={`translate(${node.x}, ${node.y})`}
+      className="cursor-pointer"
+      onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
+      onMouseEnter={() => onHoverChange(node.id)}
+      onMouseLeave={() => onHoverChange(null)}
+    >
+      <circle
+        r={getNodeHaloRadius(node)}
+        fill="var(--attack-map-node-highlight-halo)"
+        fillOpacity={getNodeHaloOpacity(node, showLabel)}
+        className={emphasized ? pulseClassName : ''}
+      />
+      <circle
+        r={getNodeCoreRadius(node, showLabel)}
+        fill={showLabel ? 'var(--attack-map-node-highlight)' : 'var(--attack-map-node)'}
+        style={getNodeCoreStyle(showLabel)}
+      />
+      {showLabel ? <TeamNodeLabelLine node={node} emphasized={emphasized} /> : null}
+      {showLabel ? <TeamNodeLabel node={node} emphasized={emphasized} /> : null}
+    </g>
+  );
+}
+
+function TeamNodeLabelLine({
+  node,
+  emphasized,
+}: {
+  node: TeamNode;
+  emphasized: boolean;
+}): ReactElement {
+  return (
+    <line
+      x1="0"
+      y1="-1"
+      x2={node.labelLineX}
+      y2={node.labelLineY}
+      stroke="var(--attack-map-node-label)"
+      strokeOpacity={emphasized ? '0.95' : '0.58'}
+      strokeWidth={node.selected ? '1.35' : '0.9'}
+    />
+  );
+}
+
+function TeamNodeLabel({
+  node,
+  emphasized,
+}: {
+  node: TeamNode;
+  emphasized: boolean;
+}): ReactElement {
+  return (
+    <text
+      x={node.labelDx}
+      y={emphasized ? node.labelDy - 2 : node.labelDy}
+      textAnchor={node.labelAnchor}
+      fill={emphasized ? 'var(--foreground)' : 'var(--attack-map-node-label)'}
+      stroke="var(--attack-map-node-label-halo)"
+      strokeWidth={emphasized ? '3' : '2.25'}
+      paintOrder="stroke"
+      strokeLinejoin="round"
+      fontSize={getNodeLabelFontSize(node)}
+      fontWeight={emphasized ? '600' : '500'}
+      className="pointer-events-none select-none drop-shadow-lg font-sans"
+    >
+      {node.name}
+    </text>
+  );
+}
+
+function shouldShowTeamLabel(
+  node: TeamNode,
+  hoveredTeamId: string | null,
+  focusedTeamSet: Set<string>,
+): boolean {
+  return (
+    node.highlighted ||
+    node.selected ||
+    hoveredTeamId === node.id ||
+    focusedTeamSet.has(node.id)
+  );
+}
+
+function getNodeHaloRadius(node: TeamNode): number {
+  if (node.selected) {
+    return 12;
+  }
+  return node.highlighted ? 10 : 4;
+}
+
+function getNodeHaloOpacity(node: TeamNode, showLabel: boolean): number {
+  if (showLabel) {
+    return 0.2;
+  }
+  return node.highlighted ? 0.12 : 0.04;
+}
+
+function getNodeCoreRadius(node: TeamNode, showLabel: boolean): number {
+  if (showLabel) {
+    return 3.8;
+  }
+  return node.highlighted || node.selected ? 4 : 2.5;
+}
+
+function getNodeCoreStyle(showLabel: boolean): { filter: string } | undefined {
+  if (!showLabel) {
+    return undefined;
+  }
+  return { filter: 'drop-shadow(0 0 8px var(--attack-map-node-highlight))' };
+}
+
+function getNodeLabelFontSize(node: TeamNode): string {
+  if (node.selected) {
+    return '12.5';
+  }
+  return node.highlighted ? '12' : '10';
 }
 
 const attackPalette = [

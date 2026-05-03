@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/config-schema.json",
+  "dynamicallyLoaded": [
+    "apps/web/e2e/mock-platform-api.mjs"
+  ],
+  "ignoreDependencies": [
+    "conventional-changelog-angular",
+    "conventional-changelog-cli"
+  ]
+}
