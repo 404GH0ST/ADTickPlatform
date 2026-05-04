@@ -3,8 +3,9 @@
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { LoaderCircle, Star } from "lucide-react";
-import { ScoreboardRank } from "@/components/ui/scoreboard-rank";
+import { LoaderCircle } from "lucide-react";
+import { ScoreboardTable } from "@/components/ui/scoreboard-table";
+import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
 import type {
   AttackFeedPage,
@@ -24,7 +25,6 @@ import {
 } from "@/components/ui/card";
 import { AppDialog } from "@/components/ui/app-dialog";
 import { EmptyStateText } from "@/components/ui/empty-state";
-import { EmptyTableRow } from "@/components/ui/empty-state";
 import { InfoLine, InfoPanel } from "@/components/ui/info-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,16 +34,6 @@ import {
   SliceCountBadge,
 } from "@/components/ui/paged-filter-controls";
 import { StatusBanner } from "@/components/ui/status-banner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
-
 export type SSHSessionData = {
   host: string;
   port: number;
@@ -142,50 +132,11 @@ export function ScoreboardPanel({
         <CardDescription>Attack, defense, SLA, and total score.</CardDescription>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[180px]">Rank</TableHead>
-              <TableHead>Team</TableHead>
-              <TableHead>Attack</TableHead>
-              <TableHead>Defense</TableHead>
-              <TableHead>SLA</TableHead>
-              <TableHead>Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {scoreRows.length === 0 ? (
-              <EmptyTableRow
-                colSpan={6}
-                message="No score rows are available yet."
-              />
-            ) : (
-              scoreRows.map((score) => (
-                <TableRow key={score.team}>
-                  <TableCell>
-                    <ScoreboardRank
-                      rank={score.rank}
-                      delta={score.delta}
-                      isCurrentTeam={score.team === currentTeamName}
-                    />
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "font-semibold",
-                      score.team === currentTeamName && "text-primary",
-                    )}
-                  >
-                    {score.team}
-                  </TableCell>
-                  <TableCell>{score.attack}</TableCell>
-                  <TableCell>{score.defense}</TableCell>
-                  <TableCell>{score.sla}</TableCell>
-                  <TableCell className="font-semibold">{score.total}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <ScoreboardTable
+          scoreRows={scoreRows}
+          emptyMessage="No score rows are available yet."
+          currentTeamName={currentTeamName}
+        />
       </CardContent>
     </Card>
   );
@@ -402,30 +353,7 @@ export function AttacksPanel({
                 </p>
               </div>
             ) : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tick</TableHead>
-                  <TableHead>Attacker</TableHead>
-                  <TableHead>Victim</TableHead>
-                  <TableHead>Service</TableHead>
-                  <TableHead>Verdict</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {attackRows.map((attack) => (
-                  <TableRow key={attack.id}>
-                    <TableCell className="font-mono text-xs">
-                      #{attack.tick}
-                    </TableCell>
-                    <TableCell>{attack.attacker}</TableCell>
-                    <TableCell>{attack.victim}</TableCell>
-                    <TableCell>{attack.service}</TableCell>
-                    <TableCell>{attack.verdict}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <AttackFeedTable attackRows={attackRows} />
           </div>
         )}
       </CardContent>
@@ -485,7 +413,7 @@ export function SSHSessionDialog({
   issuedSession,
   open,
   pendingAction,
-  target,
+
   onClose,
   onConfirm,
 }: SSHSessionDialogProps): ReactElement {
@@ -717,21 +645,6 @@ function ServiceTargetBlock({
   );
 }
 
-function SSHSessionTargetBlock({
-  target,
-}: {
-  target: ServiceRow | null;
-}): ReactElement {
-  return (
-    <InfoPanel compact>
-      <InfoLine
-        label="Service"
-        value={target?.name ?? "unknown"}
-        valueClassName="font-semibold"
-      />
-    </InfoPanel>
-  );
-}
 
 function IssuedRootCredentialBlock({
   issuedSession,

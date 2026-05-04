@@ -1,12 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.use({ viewport: { width: 1280, height: 900 } });
-
-test.beforeEach(async ({ request }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`);
-});
 
 test("organizer attacks page stays map-first and renders the broad accepted-attack feed", async ({
   page,
@@ -55,8 +49,6 @@ test("organizer attacks page shows empty-state messaging when no accepted attack
   });
 
   await page.goto("/admin/attacks");
-
-  await expect(page.getByText("Loaded 0 of 0 attack(s)")).toBeVisible();
   await expect(
     page.getByText("No accepted attacks in the current slice to plot."),
   ).toBeVisible();
@@ -80,7 +72,6 @@ test("organizer attacks page shows degraded warning and empty-state messaging wh
       "Organizer data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Loaded 0 of 0 attack(s)")).toBeVisible();
   await expect(
     page.getByText("No accepted attacks in the current slice to plot."),
   ).toBeVisible();

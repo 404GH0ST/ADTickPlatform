@@ -766,6 +766,8 @@ function createStateForScenario(scenario = "default") {
 }
 
 let state = createStateForScenario();
+/** @type {Set<import("http").ServerResponse>} */
+const activeSSEConnections = new Set();
 
 function success(data) {
   return JSON.stringify({ status: "success", data });
@@ -993,8 +995,10 @@ function writeSSE(res, data) {
     res.write(": keep-alive\n\n");
   }, 15_000);
 
+  activeSSEConnections.add(res);
   res.on("close", () => {
     clearInterval(heartbeat);
+    activeSSEConnections.delete(res);
   });
 }
 
@@ -1198,6 +1202,11 @@ async function handleSystemRoutes({ req, res, url, method }) {
   if (method === "POST" && url.pathname === "/__reset") {
     const body = await readJsonBody(req);
     state = createStateForScenario(body?.scenario);
+    // Close all active SSE connections so Next.js re-fetches fresh data
+    for (const conn of activeSSEConnections) {
+      conn.end();
+    }
+    activeSSEConnections.clear();
     return writeSuccess(res, { reset: true });
   }
 
@@ -1281,88 +1290,75 @@ async function handleServiceUnlock({ req, res, url, method }) {
   });
 }
 
-function handleSSHSession({ res, url, method }) {
-  const challengeID = routeID(url.pathname, /^\/api\/v2\/services\/(\d+)\/ssh-session$/);
-  if (method !== "POST" || challengeID === null) {
-    return false;
-  }
-
-  const serviceState = findServiceState(challengeID);
-  if (!serviceState) {
-    return writeFailure(res, 404, "service not found.");
-  }
-
-  const password = `root-pass-${state.sshPasswordCounter}`;
-  state.sshPasswordCounter += 1;
-  serviceState.unlocked = true;
-  serviceState.ssh_hint = "ssh root@10.80.50.11 -p 22";
-  serviceState.last_event = "ssh access active";
-
-  return writeSuccess(res, {
-    host: "10.80.50.11",
-    port: 22,
-    username: "root",
-    password,
-    expires_at: "2026-03-20T10:30:00Z",
-    connection_hint: "ssh root@10.80.50.11 -p 22",
-  });
+function serviceActionRoute(pattern, handler) {
+  return function ({ req, res, url, method }) {
+    const challengeID = routeID(url.pathname, pattern);
+    if (method !== "POST" || challengeID === null) {
+      return false;
+    }
+    const serviceState = findServiceState(challengeID);
+    if (!serviceState) {
+      return writeFailure(res, 404, "service not found.");
+    }
+    return handler({ res, req, challengeID, serviceState });
+  };
 }
 
-function handleServiceRestart({ res, url, method }) {
-  const challengeID = routeID(
-    url.pathname,
-    /^\/api\/v2\/services\/(\d+)\/reset\/restart$/,
-  );
-  if (method !== "POST" || challengeID === null) {
-    return false;
-  }
+const handleSSHSession = serviceActionRoute(
+  /^\/api\/v2\/services\/(\d+)\/ssh-session$/,
+  ({ res, _challengeID, serviceState }) => {
+    const password = `root-pass-${state.sshPasswordCounter}`;
+    state.sshPasswordCounter += 1;
+    serviceState.unlocked = true;
+    serviceState.ssh_hint = "ssh root@10.80.50.11 -p 22";
+    serviceState.last_event = "ssh access active";
 
-  const serviceState = findServiceState(challengeID);
-  if (!serviceState) {
-    return writeFailure(res, 404, "service not found.");
-  }
+    return writeSuccess(res, {
+      host: "10.80.50.11",
+      port: 22,
+      username: "root",
+      password,
+      expires_at: "2026-03-20T10:30:00Z",
+      connection_hint: "ssh root@10.80.50.11 -p 22",
+    });
+  },
+);
 
-  serviceState.status = "warming";
-  serviceState.checker = "warning";
-  serviceState.last_event = "service restart triggered via participant API";
-  serviceState.reset_cooldown = "restart requested";
+const handleServiceRestart = serviceActionRoute(
+  /^\/api\/v2\/services\/(\d+)\/reset\/restart$/,
+  ({ res, challengeID, serviceState }) => {
+    serviceState.status = "warming";
+    serviceState.checker = "warning";
+    serviceState.last_event = "service restart triggered via participant API";
+    serviceState.reset_cooldown = "restart requested";
 
-  return writeSuccess(res, {
-    challenge_id: challengeID,
-    team_id: serviceState.team_id,
-    action: "restart",
-  });
-}
+    return writeSuccess(res, {
+      challenge_id: challengeID,
+      team_id: serviceState.team_id,
+      action: "restart",
+    });
+  },
+);
 
-function handleFactoryReset({ res, url, method }) {
-  const challengeID = routeID(
-    url.pathname,
-    /^\/api\/v2\/services\/(\d+)\/reset\/factory$/,
-  );
-  if (method !== "POST" || challengeID === null) {
-    return false;
-  }
+const handleFactoryReset = serviceActionRoute(
+  /^\/api\/v2\/services\/(\d+)\/reset\/factory$/,
+  ({ res, challengeID, serviceState }) => {
+    serviceState.status = "warming";
+    serviceState.checker = "warning";
+    serviceState.unlocked = true;
+    serviceState.ssh_hint =
+      "unlock preserved; request a fresh one-time root password to rotate the credential";
+    serviceState.last_event = "factory reset triggered via participant API";
+    serviceState.reset_cooldown = "cooldown: 90s";
 
-  const serviceState = findServiceState(challengeID);
-  if (!serviceState) {
-    return writeFailure(res, 404, "service not found.");
-  }
-
-  serviceState.status = "warming";
-  serviceState.checker = "warning";
-  serviceState.unlocked = true;
-  serviceState.ssh_hint =
-    "unlock preserved; request a fresh one-time root password to rotate the credential";
-  serviceState.last_event = "factory reset triggered via participant API";
-  serviceState.reset_cooldown = "cooldown: 90s";
-
-  return writeSuccess(res, {
-    challenge_id: challengeID,
-    team_id: serviceState.team_id,
-    action: "factory_reset",
-    unlock_preserved: true,
-  });
-}
+    return writeSuccess(res, {
+      challenge_id: challengeID,
+      team_id: serviceState.team_id,
+      action: "factory_reset",
+      unlock_preserved: true,
+    });
+  },
+);
 
 async function handleAdminTeamRoutes({ req, res, url, method }) {
   if (url.pathname === "/api/v2/admin/teams") {

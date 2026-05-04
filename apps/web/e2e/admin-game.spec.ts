@@ -1,12 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { expectNoHorizontalOverflow, expectSchedulerFiltersVisible } from "./test-layout-utils";
+import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.use({ viewport: { width: 1024, height: 900 } });
-
-test.beforeEach(async ({ request }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`);
-});
 
 test("organizer game page keeps scheduler audit filters inside the card width", async ({
   page,
@@ -16,19 +11,9 @@ test("organizer game page keeps scheduler audit filters inside the card width", 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
   await expect(page.getByText("Scheduler Audit Trail")).toBeVisible();
   const schedulerFilters = page.getByTestId("scheduler-audit-filters");
-  await expect(schedulerFilters.getByLabel("Page Size")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("Event Type")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("Source")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("State")).toBeVisible();
+  await expectSchedulerFiltersVisible(schedulerFilters);
 
-  const filterLayout = await schedulerFilters.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-
-  expect(filterLayout.scrollWidth).toBeLessThanOrEqual(
-    filterLayout.clientWidth + 1,
-  );
+  await expectNoHorizontalOverflow(schedulerFilters);
 });
 
 test("organizer game page renders mocked scheduler audit data", async ({
@@ -212,14 +197,18 @@ test("organizer scheduler controls can start, update, and stop with visible note
   ).toBeEnabled();
 });
 
+async function setupGameTest(page: any, request: any, scenario: string) {
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario },
+  });
+  await page.goto("/admin/game");
+}
+
 test("organizer match controls start the game and auto-start the scheduler", async ({
   page,
   request,
 }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "prestart" },
-  });
-  await page.goto("/admin/game");
+  await setupGameTest(page, request, "prestart");
 
   const matchCard = page.getByTestId("match-card");
   const schedulerCard = page.getByTestId("scheduler-card");
@@ -236,14 +225,11 @@ test("organizer match controls start the game and auto-start the scheduler", asy
   ).toBeEnabled();
 });
 
-test("organizer schedule window can be updated and cleared", async ({
+test("organizer match controls schedule a game window", async ({
   page,
   request,
 }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "prestart" },
-  });
-  await page.goto("/admin/game");
+  await setupGameTest(page, request, "prestart");
 
   await expect(page.getByText("Schedule Window")).toBeVisible();
   const startDate = page.getByLabel("Scheduled Start Date");
@@ -322,14 +308,11 @@ test("organizer deployments reconcile completes queued jobs", async ({
   await expect(queuedCountCell).toHaveText("0");
 });
 
-test("organizer game controls can stop the match, advance a tick, and recompute scores", async ({
+test("organizer match controls handle manual match operations and recompute logic", async ({
   page,
   request,
 }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "prestart" },
-  });
-  await page.goto("/admin/game");
+  await setupGameTest(page, request, "prestart");
 
   const matchCard = page.getByTestId("match-card");
   const quickActionsCard = page.getByTestId("quick-actions-card");

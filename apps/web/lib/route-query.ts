@@ -1,33 +1,6 @@
-export function parsePositiveInteger(
-  raw: string | null,
-  fallback?: number,
-  max = 0,
-): number | undefined {
-  if (!raw) {
-    return fallback;
-  }
+import { parsePositiveInteger, parseNonNegativeInteger } from "@/lib/dashboard-utils";
+export { parsePositiveInteger, parseNonNegativeInteger };
 
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  if (max > 0 && parsed > max) {
-    return max;
-  }
-  return parsed;
-}
-
-export function parseNonNegativeInteger(raw: string | null): number | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return undefined;
-  }
-  return parsed;
-}
 
 function parseTextFilter(raw: string | null): string | undefined {
   if (!raw) {

@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
-
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-const organizerSessionToken =
-  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ0ZWFtX2lkIjoxMDEsInBsYXllcl9pZCI6MSwidGVhbV9uYW1lIjoiQ29sbGVnZSBBbHBoYSIsImRpc3BsYXlfbmFtZSI6Ik9yZ2FuaXplciIsImVtYWlsIjoib3JnYW5pemVyQGNvbGxlZ2UubG9jYWwiLCJyb2xlIjoib3JnYW5pemVyIn0.";
+import { mockApiBaseUrl, loginAsOrganizer } from "./test-utils";
 
 test.use({
   viewport: { width: 1280, height: 900 },
@@ -38,18 +35,7 @@ test("organizer overview shows degraded-data warning when admin feeds fail", asy
     data: { scenario: "degraded-admin" },
   });
 
-  await page.context().addCookies([
-    {
-      name: "ad_platform_team_jwt",
-      value: organizerSessionToken,
-      domain: "127.0.0.1",
-      path: "/",
-      expires: -1,
-      httpOnly: true,
-      secure: false,
-      sameSite: "Lax",
-    },
-  ]);
+  await loginAsOrganizer(page.context());
 
   await page.goto("/admin", {
     waitUntil: "networkidle",
@@ -72,18 +58,7 @@ test("organizer overview refreshes runtime alerts on focus", async ({
     data: { scenario: "default" },
   });
 
-  await page.context().addCookies([
-    {
-      name: "ad_platform_team_jwt",
-      value: organizerSessionToken,
-      domain: "127.0.0.1",
-      path: "/",
-      expires: -1,
-      httpOnly: true,
-      secure: false,
-      sameSite: "Lax",
-    },
-  ]);
+  await loginAsOrganizer(page.context());
 
   await page.goto("/admin", {
     waitUntil: "networkidle",

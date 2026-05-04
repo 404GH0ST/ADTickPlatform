@@ -56,7 +56,6 @@ test("participant API page shows a fallback warning when Swagger CDN assets are 
 });
 
 test("raw OpenAPI YAML route serves the participant spec", async ({
-  page,
   request,
 }) => {
   const response = await request.get("/docs/platform-api-v2.openapi.yaml");

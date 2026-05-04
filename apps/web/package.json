@@ -8,7 +8,9 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "e2e": "bun run build && playwright test",
-    "ui:add": "bunx --bun shadcn@latest add"
+    "ui:add": "bunx --bun shadcn@latest add",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -28,6 +30,7 @@
     "@types/node": "^25.3.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "oxlint": "^1.62.0",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3"
   }

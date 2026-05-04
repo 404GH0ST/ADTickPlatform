@@ -96,15 +96,7 @@ export type TeamServiceState = {
 
 export type ServicesResponseData = Record<string, Record<string, string[]>>;
 
-type SuccessEnvelope<T> = {
-  status: "success";
-  data: T;
-};
-
-type ErrorEnvelope = {
-  status: "failed" | "forbidden" | "too many request";
-  message: string;
-};
+import { authenticatedFetch, buildQueryString, SuccessEnvelope, ErrorEnvelope } from "./api-utils";
 
 type UnlockResponseData = {
   challenge_id: number;
@@ -285,36 +277,11 @@ async function participantFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const token = await getParticipantToken();
-
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-
-  const payload = (await response.json()) as SuccessEnvelope<T> | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload ? payload.message : `request to ${path} failed`,
-    );
-  }
-
-  return payload.data;
+  return authenticatedFetch<T>(apiBaseUrl(), path, token, init);
 }
 
 async function publicFetch<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path}`, { cache: "no-store" });
-  const payload = (await response.json()) as SuccessEnvelope<T> | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload ? payload.message : `request to ${path} failed`,
-    );
-  }
-  return payload.data;
+  return authenticatedFetch<T>(apiBaseUrl(), path, null);
 }
 
 export async function listChallenges() {
@@ -333,17 +300,7 @@ export async function getGameStatus() {
   return publicFetch<GameStatus>("/api/v2/game/status");
 }
 
-function buildQueryString(query: Record<string, string | number | undefined>) {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === "" || Number.isNaN(value)) {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const encoded = params.toString();
-  return encoded ? `?${encoded}` : "";
-}
+
 
 export async function listAttackFeed(query: AttackFeedQuery = { limit: 12 }) {
   return publicFetch<AttackFeedPage>(

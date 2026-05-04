@@ -1,14 +1,5 @@
-import { expect, test } from "@playwright/test";
-
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.use({ viewport: { width: 1280, height: 900 } });
-
-test.beforeEach(async ({ request }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "realtime-updates" },
-  });
-});
+import { expect } from "@playwright/test";
+import { realtimeTest as test } from "./test-utils";
 
 test("participant attacks table applies realtime attack updates to the live slice count", async ({
   page,

@@ -1,8 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { ChevronDown, ChevronUp, Minus, Star } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ChevronDown, ChevronUp, Star } from "lucide-react";
 
 type Props = {
   rank: number;

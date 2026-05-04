@@ -1,12 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { adminTest as test } from "./test-utils";
 
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.use({ viewport: { width: 1280, height: 900 } });
-
-test.beforeEach(async ({ request }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`);
-});
 
 test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard access", async ({
   page,

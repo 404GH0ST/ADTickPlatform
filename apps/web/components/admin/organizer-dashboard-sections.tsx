@@ -9,7 +9,6 @@ import {
   LoaderCircle,
   Network,
   Pencil,
-  Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -39,7 +38,10 @@ import type {
 } from "@/components/admin/use-organizer-dashboard";
 import { AttackMapPanel } from "@/components/ui/attack-map-panel";
 import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
+import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
+import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
 import { Badge } from "@/components/ui/badge";
+import { AdminTable, AdminTableHeader } from "@/components/ui/admin-table";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -69,7 +71,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatIndonesianDate } from "@/lib/date-format";
-import { ScoreboardRank } from "@/components/ui/scoreboard-rank";
+import { ScoreboardTable } from "@/components/ui/scoreboard-table";
+import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
 type TeamDraft = {
   name: string;
@@ -356,22 +359,13 @@ export function TeamsTab({
 }: TeamsTabProps): ReactElement {
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Team Registry</CardTitle>
-            <CardDescription>
-              Teams, player counts, and how many published services each team
-              currently owns.
-            </CardDescription>
-          </div>
-          <Button size="sm" onClick={onOpenCreateDialog}>
-            <Plus className="h-4 w-4" />
-            Create Team
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <Table>
+    <AdminRegistryCard
+      title="Team Registry"
+      description="Teams, player counts, and how many published services each team currently owns."
+      createLabel="Create Team"
+      onCreate={onOpenCreateDialog}
+    >
+      <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
@@ -429,8 +423,7 @@ export function TeamsTab({
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+    </AdminRegistryCard>
       <DeleteConfirmDialog
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
@@ -566,15 +559,10 @@ function WireGuardGatewayCard({
   onTeardownWireGuardGateway: () => void;
 }): ReactElement {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>WireGuard Gateway</CardTitle>
-        <CardDescription>
-          Apply player peer changes to the gateway runtime config after create,
-          rotate, and revoke operations.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <AdminRuntimeCard
+      title="WireGuard Gateway"
+      description="Apply player peer changes to the gateway runtime config after create, rotate, and revoke operations."
+    >
         <RuntimeStatusBlock
           tone={getGatewayTone(wireGuardGatewayStatus?.state)}
           state={wireGuardGatewayStatus?.state ?? "loading"}
@@ -587,8 +575,7 @@ function WireGuardGatewayCard({
           onRefresh={onRefreshWireGuardGatewayStatus}
           onTeardown={onTeardownWireGuardGateway}
         />
-      </CardContent>
-    </Card>
+    </AdminRuntimeCard>
   );
 }
 
@@ -606,15 +593,10 @@ function AccessPolicyCard({
   onTeardownAccess: () => void;
 }): ReactElement {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Service Access Policy</CardTitle>
-        <CardDescription>
-          Controller-side SSH allowlists are rendered from unlock state plus
-          active team peer addresses.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <AdminRuntimeCard
+      title="Service Access Policy"
+      description="Controller-side SSH allowlists are rendered from unlock state plus active team peer addresses."
+    >
         <RuntimeStatusBlock
           tone={getGatewayTone(accessStatus?.state)}
           state={accessStatus?.state ?? "loading"}
@@ -627,8 +609,7 @@ function AccessPolicyCard({
           onRefresh={onRefreshAccessStatus}
           onTeardown={onTeardownAccess}
         />
-      </CardContent>
-    </Card>
+    </AdminRuntimeCard>
   );
 }
 
@@ -852,123 +833,6 @@ function RuntimeActionIcon({
   return <RefreshCw className="h-4 w-4" />;
 }
 
-function CreatePlayerCard({
-  pendingAction,
-  playerDraft,
-  teamRows,
-  onCreatePlayer,
-  onPlayerDraftChange,
-}: {
-  pendingAction: string | null;
-  playerDraft: PlayerDraft;
-  teamRows: AdminTeam[];
-  onCreatePlayer: () => void;
-  onPlayerDraftChange: (next: PlayerDraft) => void;
-}): ReactElement {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Create Player</CardTitle>
-        <CardDescription>
-          Organizer-managed player accounts pair with unique WireGuard peer
-          identities.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Field label="Team" htmlFor="player-team">
-            <select
-              id="player-team"
-              className={selectClassName}
-              value={playerDraft.teamId}
-              onChange={(event) =>
-                onPlayerDraftChange({
-                  ...playerDraft,
-                  teamId: Number(event.target.value),
-                })
-              }
-            >
-              <option value={0}>No Team (Admin Only)</option>
-              {teamRows.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Role" htmlFor="player-role">
-            <select
-              id="player-role"
-              className={selectClassName}
-              value={playerDraft.role}
-              onChange={(event) =>
-                onPlayerDraftChange({
-                  ...playerDraft,
-                  role: event.target.value,
-                })
-              }
-            >
-              <option value="member">Member</option>
-              <option value="captain">Captain</option>
-              <option value="organizer">Organizer</option>
-            </select>
-          </Field>
-        </div>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Field label="Display name" htmlFor="player-name">
-            <Input
-              id="player-name"
-              value={playerDraft.displayName}
-              onChange={(event) =>
-                onPlayerDraftChange({
-                  ...playerDraft,
-                  displayName: event.target.value,
-                })
-              }
-            />
-          </Field>
-          <Field label="Email" htmlFor="player-email">
-            <Input
-              id="player-email"
-              type="email"
-              value={playerDraft.email}
-              onChange={(event) =>
-                onPlayerDraftChange({
-                  ...playerDraft,
-                  email: event.target.value,
-                })
-              }
-            />
-          </Field>
-        </div>
-        <Field label="Bootstrap password" htmlFor="player-password">
-          <Input
-            id="player-password"
-            type="password"
-            value={playerDraft.password}
-            onChange={(event) =>
-              onPlayerDraftChange({
-                ...playerDraft,
-                password: event.target.value,
-              })
-            }
-          />
-        </Field>
-        <CardActionRow>
-          <Button
-            disabled={pendingAction !== null || teamRows.length === 0}
-            onClick={onCreatePlayer}
-          >
-            {pendingAction === "player:create" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            Create Player
-          </Button>
-        </CardActionRow>
-      </CardContent>
-    </Card>
-  );
-}
 
 function PlayerRegistryCard({
   pendingAction,
@@ -990,38 +854,27 @@ function PlayerRegistryCard({
   onSelectDeleteTarget: (target: DeleteTarget) => void;
 }): ReactElement {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Player Registry</CardTitle>
-          <CardDescription>
-            Each player gets a generated peer config, status tracking, organizer
-            download/rotate/revoke actions, and a gateway reconcile path.
-          </CardDescription>
-        </div>
-        <Button size="sm" onClick={onOpenCreateDialog}>
-          <Plus className="h-4 w-4" />
-          Create Player
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <Table className="[&_td]:px-3 [&_td]:py-2.5 [&_th]:h-10 [&_th]:px-3">
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Team</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Peer</TableHead>
-              <TableHead>Address</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Action</TableHead>
-            </TableRow>
-          </TableHeader>
+    <AdminRegistryCard
+      title="Player Registry"
+      description="Each player gets a generated peer config, status tracking, organizer download/rotate/revoke actions, and a gateway reconcile path."
+      createLabel="Create Player"
+      onCreate={onOpenCreateDialog}
+    >
+      <AdminTable>
+          <AdminTableHeader columns={[
+            { label: "ID", className: "w-[60px]" },
+            { label: "Name" },
+            { label: "Team" },
+            { label: "Role" },
+            { label: "Peer" },
+            { label: "Address" },
+            { label: "Status" },
+            { label: "Action" },
+          ]} />
           <TableBody>
             {playerRows.map((player) => (
               <TableRow key={player.id} data-testid={`player-row-${player.id}`}>
-                <TableCell className="font-semibold">#{player.id}</TableCell>
+                <TableCell className="font-semibold text-muted-foreground">#{player.id}</TableCell>
                 <TableCell>
                   <div>
                     <p>{player.display_name}</p>
@@ -1125,148 +978,11 @@ function PlayerRegistryCard({
               </TableRow>
             ))}
           </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          </AdminTable>
+    </AdminRegistryCard>
   );
 }
 
-function CreateChallengeCard({
-  challengeDraft,
-  pendingAction,
-  onChallengeDraftChange,
-  onCreateChallenge,
-}: {
-  challengeDraft: ChallengeDraft;
-  pendingAction: string | null;
-  onChallengeDraftChange: (next: ChallengeDraft) => void;
-  onCreateChallenge: () => void;
-}): ReactElement {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Create Challenge</CardTitle>
-        <CardDescription>
-          Draft challenge definitions stay private until you deploy them across
-          every team runtime.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-          <Field label="Challenge name" htmlFor="challenge-name">
-            <Input
-              id="challenge-name"
-              value={challengeDraft.name}
-              onChange={(event) =>
-                onChallengeDraftChange({
-                  ...challengeDraft,
-                  name: event.target.value,
-                })
-              }
-            />
-          </Field>
-          <Field label="Weight" htmlFor="challenge-weight">
-            <Input
-              id="challenge-weight"
-              type="number"
-              min="1"
-              value={challengeDraft.weight}
-              onChange={(event) =>
-                onChallengeDraftChange({
-                  ...challengeDraft,
-                  weight: event.target.value,
-                })
-              }
-            />
-          </Field>
-        </div>
-        <Field label="Baseline image" htmlFor="baseline-image">
-          <Input
-            id="baseline-image"
-            value={challengeDraft.baselineImage}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                baselineImage: event.target.value,
-              })
-            }
-          />
-        </Field>
-        <Field label="Checker image" htmlFor="checker-image">
-          <Input
-            id="checker-image"
-            value={challengeDraft.checkerImage}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                checkerImage: event.target.value,
-              })
-            }
-          />
-        </Field>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Service port" htmlFor="challenge-service-port">
-            <Input
-              id="challenge-service-port"
-              type="number"
-              min="1"
-              max="65535"
-              placeholder="10007"
-              value={challengeDraft.servicePort}
-              onChange={(event) =>
-                onChallengeDraftChange({
-                  ...challengeDraft,
-                  servicePort: event.target.value,
-                })
-              }
-            />
-          </Field>
-          <Field
-            label="Service subnet octet"
-            htmlFor="challenge-service-subnet"
-          >
-            <Input
-              id="challenge-service-subnet"
-              type="number"
-              min="1"
-              max="254"
-              placeholder="7"
-              value={challengeDraft.serviceSubnetOctet}
-              onChange={(event) =>
-                onChallengeDraftChange({
-                  ...challengeDraft,
-                  serviceSubnetOctet: event.target.value,
-                })
-              }
-            />
-          </Field>
-        </div>
-        <InfoPanel>
-          <InfoLine
-            label="Addressing rule"
-            value="10.80.<service_subnet_octet>.<team_id-90>:<service_port>"
-          />
-          <InfoLine
-            label="Defaults"
-            value="service_port = 10000 + challenge_id, service_subnet_octet = challenge_id"
-          />
-        </InfoPanel>
-        <CardActionRow>
-          <Button
-            disabled={pendingAction !== null}
-            data-testid="create-challenge"
-            onClick={onCreateChallenge}
-          >
-            {pendingAction === "challenge:create" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            Create Challenge
-          </Button>
-        </CardActionRow>
-      </CardContent>
-    </Card>
-  );
-}
 
 function ChallengeCatalogCard({
   challengeRows,
@@ -1288,40 +1004,29 @@ function ChallengeCatalogCard({
   onValidateChallenge: (challenge: AdminChallenge) => void;
 }): ReactElement {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Challenge Catalog</CardTitle>
-          <CardDescription>
-            Validate the service and checker images first, then deploy to
-            replicate one service instance per team.
-          </CardDescription>
-        </div>
-        <Button size="sm" onClick={onOpenCreateDialog}>
-          <Plus className="h-4 w-4" />
-          Create Challenge
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <Table className="[&_td]:px-3 [&_td]:py-2.5 [&_th]:h-10 [&_th]:px-3">
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Images</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Validation</TableHead>
-              <TableHead>Weight</TableHead>
-              <TableHead>Network</TableHead>
-              <TableHead>Replication</TableHead>
-              <TableHead>Runtime</TableHead>
-              <TableHead>Action</TableHead>
-            </TableRow>
-          </TableHeader>
+    <AdminRegistryCard
+      title="Challenge Catalog"
+      description="Validate the service and checker images first, then deploy to replicate one service instance per team."
+      createLabel="Create Challenge"
+      onCreate={onOpenCreateDialog}
+    >
+      <AdminTable>
+          <AdminTableHeader columns={[
+            { label: "ID", className: "w-[80px]" },
+            { label: "Name" },
+            { label: "Images" },
+            { label: "Status" },
+            { label: "Validation" },
+            { label: "Weight" },
+            { label: "Network" },
+            { label: "Replication" },
+            { label: "Runtime" },
+            { label: "Action" },
+          ]} />
           <TableBody>
             {challengeRows.map((challenge) => (
               <ChallengeCatalogRow
-                key={challenge.id}
+                key={`challenge-row-${challenge.id}`}
                 challenge={challenge}
                 pendingAction={pendingAction}
                 validation={validationRows[challenge.id]}
@@ -1332,9 +1037,8 @@ function ChallengeCatalogCard({
               />
             ))}
           </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+        </AdminTable>
+      </AdminRegistryCard>
   );
 }
 
@@ -1642,12 +1346,12 @@ export function GameTab({
   schedulerEventsLiveMode,
   scoreRows,
   onAdvanceTick,
-  onApplyAttackFilters,
+
   onApplyCheckerRunFilters,
   onApplySchedulerEventFilters,
-  onAttackFilterChange,
+
   onCheckerRunFilterChange,
-  onPageAttacks,
+
   onPageCheckerRuns,
   onPageSchedulerEvents,
   onRecomputeScores,
@@ -1658,7 +1362,7 @@ export function GameTab({
   onRefreshOperationsStatus,
   onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
-  onResetAttackFilters,
+
   onResetCheckerRunFilters,
   onResetSchedulerEventFilters,
   onSchedulerEventFilterChange,
@@ -3449,37 +3153,10 @@ export function GameAttacksCard({
           title="Organizer attack map"
         />
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Tick</TableHead>
-              <TableHead>Attacker</TableHead>
-              <TableHead>Victim</TableHead>
-              <TableHead>Service</TableHead>
-              <TableHead>Verdict</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {attackRows.length === 0 ? (
-              <EmptyTableRow
-                colSpan={5}
-                message="No accepted attacks match the current organizer slice."
-              />
-            ) : (
-              attackRows.map((attack) => (
-                <TableRow key={attack.id}>
-                  <TableCell className="font-mono text-xs">
-                    #{attack.tick}
-                  </TableCell>
-                  <TableCell>{attack.attacker}</TableCell>
-                  <TableCell>{attack.victim}</TableCell>
-                  <TableCell>{attack.service}</TableCell>
-                  <TableCell>{attack.verdict}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <AttackFeedTable
+          attackRows={attackRows}
+          emptyMessage="No accepted attacks match the current organizer slice."
+        />
       </CardContent>
     </Card>
   );
@@ -3521,39 +3198,10 @@ function GameScoreboardCard({
         </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[180px]">Rank</TableHead>
-              <TableHead>Team</TableHead>
-              <TableHead>Attack</TableHead>
-              <TableHead>Defense</TableHead>
-              <TableHead>SLA</TableHead>
-              <TableHead>Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {scoreRows.length === 0 ? (
-              <EmptyTableRow
-                colSpan={7}
-                message="No score rows persisted yet."
-              />
-            ) : (
-              scoreRows.map((row) => (
-                <TableRow key={row.team}>
-                  <TableCell>
-                    <ScoreboardRank rank={row.rank} delta={row.delta} />
-                  </TableCell>
-                  <TableCell>{row.team}</TableCell>
-                  <TableCell>{row.attack}</TableCell>
-                  <TableCell>{row.defense}</TableCell>
-                  <TableCell>{row.sla}</TableCell>
-                  <TableCell className="font-semibold">{row.total}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <ScoreboardTable
+          scoreRows={scoreRows}
+          emptyMessage="No score rows persisted yet."
+        />
       </CardContent>
     </Card>
   );
@@ -3714,7 +3362,7 @@ function CheckerRunsCard({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Tick</TableHead>
+              <TableHead className="w-[100px]">Tick</TableHead>
               <TableHead>Team</TableHead>
               <TableHead>Challenge</TableHead>
               <TableHead>Phase</TableHead>
@@ -3976,7 +3624,7 @@ function getCheckerRunStatusTone(status: string): string {
 export function EntityFormDialog({
   formMode,
   formEntity,
-  editingId,
+
   pendingAction,
   teamDraft,
   playerDraft,
@@ -3990,7 +3638,7 @@ export function EntityFormDialog({
 }: {
   formMode: FormMode;
   formEntity: FormEntity;
-  editingId: number | null;
+
   pendingAction: string | null;
   teamDraft: TeamDraft;
   playerDraft: PlayerDraft;

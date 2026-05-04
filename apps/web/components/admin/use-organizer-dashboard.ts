@@ -25,6 +25,18 @@ import type {
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
+import { buildQueryString } from "@/lib/api-utils";
+
+import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
+
+import {
+  computePageOffset,
+  handleRealtimeAttackMessage,
+  parsePositiveInteger,
+  parseNonNegativeInteger,
+  isDefaultAttackFilters,
+  type AttackFilters,
+} from "@/lib/dashboard-utils";
 
 export type OrganizerDashboardOptions = {
   attackPage: AdminAttackFeedPage;
@@ -108,7 +120,6 @@ export type DeleteTarget = {
 };
 
 type CheckerRunFilters = typeof defaultCheckerRunFilters;
-type AttackFilters = typeof baseAttackFilters;
 type SchedulerEventFilters = typeof defaultSchedulerEventFilters;
 
 type OrganizerSummary = {
@@ -258,9 +269,7 @@ export function useOrganizerDashboard({
     useState<AdminCheckerRunPage>(checkerRunPage);
   const [attackPageState, setAttackPageState] =
     useState<AdminAttackFeedPage>(attackPage);
-  const [highlightedAttackIDs, setHighlightedAttackIDs] = useState<string[]>(
-    [],
-  );
+
   const [scoreRows, setScoreRows] = useState(scoreboard);
   const [challengeValidationRows, setChallengeValidationRows] = useState<
     Record<number, AdminChallengeValidationResult>
@@ -287,6 +296,7 @@ export function useOrganizerDashboard({
     name: "",
     contactEmail: "",
   });
+  const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
   const [playerDraft, setPlayerDraft] = useState<PlayerDraft>({
     teamId: 0,
     displayName: "",
@@ -311,7 +321,6 @@ export function useOrganizerDashboard({
     useState<SchedulerEventFilters>(defaultSchedulerEventFilters);
   const attacksLiveRef = useRef(true);
   const attackPageRef = useRef<AdminAttackFeedPage>(attackPage);
-  const attackHighlightTimeoutRef = useRef<number | null>(null);
   const checkerRunsLiveRef = useRef(true);
   const schedulerEventsLiveRef = useRef(true);
 
@@ -386,13 +395,6 @@ export function useOrganizerDashboard({
     attackPageRef.current = attackPageState;
   }, [attackPageState]);
 
-  useEffect(() => {
-    return () => {
-      if (attackHighlightTimeoutRef.current !== null) {
-        window.clearTimeout(attackHighlightTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     checkerRunsLiveRef.current = checkerRunsLiveMode;
@@ -435,30 +437,13 @@ export function useOrganizerDashboard({
       }
     };
 
-    attacksSource.onmessage = (event) => {
-      if (!attacksLiveRef.current) {
-        return;
-      }
-
-      try {
-        const nextPage = JSON.parse(event.data) as AdminAttackFeedPage;
-        const mergedPage = mergeRealtimeAdminAttackPage(
-          attackPageRef.current,
-          nextPage,
-          attackFilters.limit,
-        );
-        const nextHighlights = collectNewAdminAttackIDs(
-          attackPageRef.current,
-          mergedPage,
-        );
-        setAttackPageState(mergedPage);
-        if (nextHighlights.length > 0) {
-          scheduleAttackHighlights(nextHighlights);
-        }
-      } catch {
-        // Keep the last good organizer snapshot if one frame is malformed.
-      }
-    };
+    attacksSource.onmessage = handleRealtimeAttackMessage({
+      isLive: () => attacksLiveRef.current,
+      currentPage: () => attackPageRef.current,
+      limitStr: attackFilters.limit,
+      setPage: setAttackPageState,
+      scheduleHighlights: scheduleAttackHighlights,
+    });
 
     checkerRunsSource.onmessage = (event) => {
       if (!checkerRunsLiveRef.current) {
@@ -493,7 +478,29 @@ export function useOrganizerDashboard({
       checkerRunsSource.close();
       schedulerEventsSource.close();
     };
-  }, [attackFilters.limit]);
+  }, []);
+
+  async function persistEntity<T>(
+    url: string,
+    method: "POST" | "PUT",
+    body: object,
+    typeLabel: string,
+  ): Promise<T> {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json()) as ActionEnvelope<T>;
+    if (!response.ok || payload.status !== "success") {
+      throw new Error(
+        "message" in payload
+          ? payload.message
+          : `${typeLabel} ${method === "POST" ? "create" : "update"} failed`,
+      );
+    }
+    return payload.data;
+  }
 
   async function createTeam(): Promise<void> {
     setPendingAction("team:create");
@@ -501,22 +508,14 @@ export function useOrganizerDashboard({
     setActionNote(null);
 
     try {
-      const response = await fetch("/api/admin/teams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: teamDraft.name,
-          contact_email: teamDraft.contactEmail,
-        }),
-      });
-      const payload = (await response.json()) as ActionEnvelope<AdminTeam>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "team create failed",
-        );
-      }
+      const data = await persistEntity<AdminTeam>(
+        "/api/admin/teams",
+        "POST",
+        { name: teamDraft.name, contact_email: teamDraft.contactEmail },
+        "team",
+      );
 
-      setTeamRows((current) => [...current, payload.data]);
+      setTeamRows((current) => [...current, data]);
       setChallengeRows((current) =>
         current.map((challenge) =>
           challenge.published
@@ -533,10 +532,10 @@ export function useOrganizerDashboard({
       setTeamDraft({ name: "", contactEmail: "" });
       setPlayerDraft((current) => ({
         ...current,
-        teamId: current.teamId || payload.data.id,
+        teamId: current.teamId || data.id,
       }));
       setActionNote(
-        `Created ${payload.data.name} and seeded deployed services for published challenges.`,
+        `Created ${data.name} and seeded deployed services for published challenges.`,
       );
     } catch (error) {
       setActionError(
@@ -558,28 +557,23 @@ export function useOrganizerDashboard({
     setActionNote(null);
 
     try {
-      const response = await fetch("/api/admin/players", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await persistEntity<AdminPlayer>(
+        "/api/admin/players",
+        "POST",
+        {
           team_id: playerDraft.teamId,
           display_name: playerDraft.displayName,
           email: playerDraft.email,
           password: playerDraft.password,
           role: playerDraft.role,
-        }),
-      });
-      const payload = (await response.json()) as ActionEnvelope<AdminPlayer>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "player create failed",
-        );
-      }
+        },
+        "player",
+      );
 
-      setPlayerRows((current) => [...current, payload.data]);
+      setPlayerRows((current) => [...current, data]);
       setTeamRows((current) =>
         current.map((team) =>
-          team.id === payload.data.team_id
+          team.id === data.team_id
             ? { ...team, player_count: team.player_count + 1 }
             : team,
         ),
@@ -591,7 +585,7 @@ export function useOrganizerDashboard({
         password: "",
       }));
       setActionNote(
-        `Created player ${payload.data.display_name} with peer ${payload.data.wireguard_peer}. Reconcile the WireGuard gateway and service access policy if that team already has unlocked services.`,
+        `Created player ${data.display_name} with peer ${data.wireguard_peer}. Reconcile the WireGuard gateway and service access policy if that team already has unlocked services.`,
       );
     } catch (error) {
       setActionError(
@@ -623,82 +617,27 @@ export function useOrganizerDashboard({
   }
 
   async function refreshWireGuardGatewayStatus(silent = false): Promise<void> {
-    if (!silent) {
-      setPendingAction("wireguard-gateway:status");
-      setActionError(null);
-      setActionNote(null);
-    }
-
-    try {
-      const response = await fetch("/api/admin/wireguard/status");
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminWireGuardGatewayStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "wireguard gateway status failed",
-        );
-      }
-
-      setWireGuardGatewayStatus(payload.data);
-      if (!silent) {
-        setActionNote(
-          `WireGuard gateway is ${payload.data.state} in ${payload.data.mode} mode.`,
-        );
-      }
-    } catch (error) {
-      if (!silent) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "wireguard gateway status failed",
-        );
-      }
-    } finally {
-      if (!silent) {
-        setPendingAction(null);
-      }
-    }
+    return refreshPagedFeed<AdminWireGuardGatewayStatus>({
+      silent,
+      actionKey: "wireguard-gateway:status",
+      url: "/api/admin/wireguard/status",
+      errorLabel: "wireguard gateway status failed",
+      setPage: setWireGuardGatewayStatus,
+      formatNote: (data) =>
+        `WireGuard gateway is ${data.state} in ${data.mode} mode.`,
+    });
   }
 
   async function refreshAccessStatus(silent = false): Promise<void> {
-    if (!silent) {
-      setPendingAction("access:status");
-      setActionError(null);
-      setActionNote(null);
-    }
-
-    try {
-      const response = await fetch("/api/admin/access/status");
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminControllerAccessStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "controller access status failed",
-        );
-      }
-      setAccessStatus(payload.data);
-      if (!silent) {
-        setActionNote(
-          `Controller access policy is ${payload.data.state} in ${payload.data.mode} mode.`,
-        );
-      }
-    } catch (error) {
-      if (!silent) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "controller access status failed",
-        );
-      }
-    } finally {
-      if (!silent) {
-        setPendingAction(null);
-      }
-    }
+    return refreshPagedFeed<AdminControllerAccessStatus>({
+      silent,
+      actionKey: "access:status",
+      url: "/api/admin/access/status",
+      errorLabel: "controller access status failed",
+      setPage: setAccessStatus,
+      formatNote: (data) =>
+        `Controller access policy is ${data.state} in ${data.mode} mode.`,
+    });
   }
 
   async function refreshOperationsStatus(silent = false): Promise<void> {
@@ -823,73 +762,58 @@ export function useOrganizerDashboard({
     }
   }
 
-  async function rotateWireGuard(player: AdminPlayer): Promise<void> {
-    setPendingAction(`wireguard:rotate:${player.id}`);
+  async function wireGuardAction(
+    player: AdminPlayer,
+    action: "rotate" | "revoke",
+    successMessage: string,
+    openDialog: boolean,
+  ): Promise<void> {
+    setPendingAction(`wireguard:${action}:${player.id}`);
     setActionError(null);
     setActionNote(null);
 
     try {
       const response = await fetch(
-        `/api/admin/players/${player.id}/wireguard/rotate`,
-        {
-          method: "POST",
-        },
+        `/api/admin/players/${player.id}/wireguard/${action}`,
+        { method: "POST" },
       );
       const payload =
         (await response.json()) as ActionEnvelope<AdminWireGuardPeer>;
       if (!response.ok || payload.status !== "success") {
         throw new Error(
-          "message" in payload ? payload.message : "wireguard rotate failed",
+          "message" in payload ? payload.message : `wireguard ${action} failed`,
         );
       }
 
       applyWireGuardUpdate(payload.data);
       setSelectedWireGuardPeer(payload.data);
-      setWireGuardDialogOpen(true);
-      setActionNote(
-        `Rotated WireGuard config for ${player.display_name}. Reconcile the WireGuard gateway so the old peer material stops working.`,
-      );
+      if (openDialog) setWireGuardDialogOpen(true);
+      setActionNote(successMessage);
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "wireguard rotate failed",
+        error instanceof Error ? error.message : `wireguard ${action} failed`,
       );
     } finally {
       setPendingAction(null);
     }
   }
 
+  async function rotateWireGuard(player: AdminPlayer): Promise<void> {
+    return wireGuardAction(
+      player,
+      "rotate",
+      `Rotated WireGuard config for ${player.display_name}. Reconcile the WireGuard gateway so the old peer material stops working.`,
+      true,
+    );
+  }
+
   async function revokeWireGuard(player: AdminPlayer): Promise<void> {
-    setPendingAction(`wireguard:revoke:${player.id}`);
-    setActionError(null);
-    setActionNote(null);
-
-    try {
-      const response = await fetch(
-        `/api/admin/players/${player.id}/wireguard/revoke`,
-        {
-          method: "POST",
-        },
-      );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminWireGuardPeer>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "wireguard revoke failed",
-        );
-      }
-
-      applyWireGuardUpdate(payload.data);
-      setSelectedWireGuardPeer(payload.data);
-      setActionNote(
-        `Revoked WireGuard config for ${player.display_name}. Reconcile the WireGuard gateway and service access policy to remove the peer from runtime access.`,
-      );
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "wireguard revoke failed",
-      );
-    } finally {
-      setPendingAction(null);
-    }
+    return wireGuardAction(
+      player,
+      "revoke",
+      `Revoked WireGuard config for ${player.display_name}. Reconcile the WireGuard gateway and service access policy to remove the peer from runtime access.`,
+      false,
+    );
   }
 
   async function reconcileWireGuardGateway(): Promise<void> {
@@ -1037,121 +961,92 @@ export function useOrganizerDashboard({
     }
   }
 
-  async function deleteTeam(team: AdminTeam): Promise<void> {
-    setPendingAction(`team:delete:${team.id}`);
+  async function deleteEntity(opts: {
+    actionKey: string;
+    url: string;
+    errorLabel: string;
+    onSuccess: () => void;
+    successNote: string;
+  }): Promise<void> {
+    setPendingAction(opts.actionKey);
     setActionError(null);
     setActionNote(null);
 
     try {
-      const response = await fetch(`/api/admin/teams/${team.id}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(opts.url, { method: "DELETE" });
       const payload = (await response.json()) as ActionEnvelope<void>;
       if (!response.ok || payload.status !== "success") {
         throw new Error(
-          "message" in payload ? payload.message : "team delete failed",
+          "message" in payload ? payload.message : opts.errorLabel,
         );
       }
 
-      setTeamRows((current) => current.filter((item) => item.id !== team.id));
-      setPlayerRows((current) =>
-        current.filter((item) => item.team_id !== team.id),
-      );
-      setActionNote(`Team "${team.name}" deleted.`);
+      opts.onSuccess();
+      setActionNote(opts.successNote);
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "team delete failed",
+        error instanceof Error ? error.message : opts.errorLabel,
       );
     } finally {
       setPendingAction(null);
     }
+  }
+
+  async function deleteTeam(team: AdminTeam): Promise<void> {
+    return deleteEntity({
+      actionKey: `team:delete:${team.id}`,
+      url: `/api/admin/teams/${team.id}`,
+      errorLabel: "team delete failed",
+      onSuccess: () => {
+        setTeamRows((current) => current.filter((item) => item.id !== team.id));
+        setPlayerRows((current) =>
+          current.filter((item) => item.team_id !== team.id),
+        );
+      },
+      successNote: `Team "${team.name}" deleted.`,
+    });
   }
 
   async function deletePlayer(player: AdminPlayer): Promise<void> {
-    setPendingAction(`player:delete:${player.id}`);
-    setActionError(null);
-    setActionNote(null);
-
-    try {
-      const response = await fetch(`/api/admin/players/${player.id}`, {
-        method: "DELETE",
-      });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "player delete failed",
+    return deleteEntity({
+      actionKey: `player:delete:${player.id}`,
+      url: `/api/admin/players/${player.id}`,
+      errorLabel: "player delete failed",
+      onSuccess: () => {
+        setPlayerRows((current) =>
+          current.filter((item) => item.id !== player.id),
         );
-      }
-
-      setPlayerRows((current) =>
-        current.filter((item) => item.id !== player.id),
-      );
-      setActionNote(`Player "${player.display_name}" deleted.`);
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "player delete failed",
-      );
-    } finally {
-      setPendingAction(null);
-    }
+      },
+      successNote: `Player "${player.display_name}" deleted.`,
+    });
   }
 
   async function deleteChallenge(challenge: AdminChallenge): Promise<void> {
-    setPendingAction(`challenge:delete:${challenge.id}`);
-    setActionError(null);
-    setActionNote(null);
-
-    try {
-      const response = await fetch(`/api/admin/challenges/${challenge.id}`, {
-        method: "DELETE",
-      });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "challenge delete failed",
+    return deleteEntity({
+      actionKey: `challenge:delete:${challenge.id}`,
+      url: `/api/admin/challenges/${challenge.id}`,
+      errorLabel: "challenge delete failed",
+      onSuccess: () => {
+        setChallengeRows((current) =>
+          current.filter((item) => item.id !== challenge.id),
         );
-      }
-
-      setChallengeRows((current) =>
-        current.filter((item) => item.id !== challenge.id),
-      );
-      setActionNote(`Challenge "${challenge.name}" deleted.`);
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "challenge delete failed",
-      );
-    } finally {
-      setPendingAction(null);
-    }
+      },
+      successNote: `Challenge "${challenge.name}" deleted.`,
+    });
   }
 
   async function deleteDeployment(deployment: AdminDeploymentJob): Promise<void> {
-    setPendingAction(`deployment:delete:${deployment.id}`);
-    setActionError(null);
-    setActionNote(null);
-
-    try {
-      const response = await fetch(`/api/admin/deployments/${deployment.id}`, {
-        method: "DELETE",
-      });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "deployment delete failed",
+    return deleteEntity({
+      actionKey: `deployment:delete:${deployment.id}`,
+      url: `/api/admin/deployments/${deployment.id}`,
+      errorLabel: "deployment delete failed",
+      onSuccess: () => {
+        setDeploymentRows((current) =>
+          current.filter((item) => item.id !== deployment.id),
         );
-      }
-
-      setDeploymentRows((current) =>
-        current.filter((item) => item.id !== deployment.id),
-      );
-      setActionNote(`Deployment job #${deployment.id} deleted.`);
-    } catch (error) {
-      setActionError(
-        error instanceof Error ? error.message : "deployment delete failed",
-      );
-    } finally {
-      setPendingAction(null);
-    }
+      },
+      successNote: `Deployment job #${deployment.id} deleted.`,
+    });
   }
 
   async function createChallenge(): Promise<void> {
@@ -1724,152 +1619,95 @@ export function useOrganizerDashboard({
     }
   }
 
-  function scheduleAttackHighlights(ids: string[]): void {
-    if (attackHighlightTimeoutRef.current !== null) {
-      window.clearTimeout(attackHighlightTimeoutRef.current);
+
+
+  async function refreshPagedFeed<T>(opts: {
+    silent: boolean;
+    actionKey: string;
+    url: string;
+    errorLabel: string;
+    setPage: (page: T) => void;
+    formatNote: (page: T) => string;
+    beforeSet?: () => void;
+  }): Promise<void> {
+    if (!opts.silent) {
+      setPendingAction(opts.actionKey);
+      setActionError(null);
+      setActionNote(null);
     }
 
-    setHighlightedAttackIDs(ids);
-    attackHighlightTimeoutRef.current = window.setTimeout(() => {
-      setHighlightedAttackIDs([]);
-      attackHighlightTimeoutRef.current = null;
-    }, 4000);
-  }
+    try {
+      const response = await fetch(opts.url);
+      const payload =
+        (await response.json()) as ActionEnvelope<T>;
+      if (!response.ok || payload.status !== "success") {
+        throw new Error(
+          "message" in payload ? payload.message : opts.errorLabel,
+        );
+      }
 
-  function clearAttackHighlights(): void {
-    if (attackHighlightTimeoutRef.current !== null) {
-      window.clearTimeout(attackHighlightTimeoutRef.current);
-      attackHighlightTimeoutRef.current = null;
+      opts.beforeSet?.();
+      opts.setPage(payload.data);
+      if (!opts.silent) {
+        setActionNote(opts.formatNote(payload.data));
+      }
+    } catch (error) {
+      if (!opts.silent) {
+        setActionError(
+          error instanceof Error ? error.message : opts.errorLabel,
+        );
+      }
+    } finally {
+      if (!opts.silent) {
+        setPendingAction(null);
+      }
     }
-    setHighlightedAttackIDs([]);
   }
 
   async function refreshAttacks(
     silent = false,
     filters: AttackFilters = attackFilters,
   ): Promise<void> {
-    if (!silent) {
-      setPendingAction("game:attacks");
-      setActionError(null);
-      setActionNote(null);
-    }
-
-    try {
-      const response = await fetch(
-        `/api/admin/game/attacks${buildAttackQueryString(filters)}`,
-      );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminAttackFeedPage>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "attack feed fetch failed",
-        );
-      }
-
-      clearAttackHighlights();
-      setAttackPageState(payload.data);
-      if (!silent) {
-        setActionNote(
-          `Loaded ${payload.data.items.length} accepted attack row(s) (${payload.data.offset + 1}-${payload.data.offset + payload.data.items.length} of ${payload.data.total_count}).`,
-        );
-      }
-    } catch (error) {
-      if (!silent) {
-        setActionError(
-          error instanceof Error ? error.message : "attack feed fetch failed",
-        );
-      }
-    } finally {
-      if (!silent) {
-        setPendingAction(null);
-      }
-    }
+    return refreshPagedFeed<AdminAttackFeedPage>({
+      silent,
+      actionKey: "game:attacks",
+      url: `/api/admin/game/attacks${buildAttackQueryString(filters)}`,
+      errorLabel: "attack feed fetch failed",
+      setPage: setAttackPageState,
+      beforeSet: clearAttackHighlights,
+      formatNote: (page) =>
+        `Loaded ${page.items.length} accepted attack row(s) (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+    });
   }
 
   async function refreshCheckerRuns(
     silent = false,
     filters: CheckerRunFilters = checkerRunFilters,
   ): Promise<void> {
-    if (!silent) {
-      setPendingAction("game:checker-runs");
-      setActionError(null);
-      setActionNote(null);
-    }
-
-    try {
-      const response = await fetch(
-        `/api/admin/game/checker-runs${buildCheckerRunQueryString(filters)}`,
-      );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminCheckerRunPage>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "checker runs fetch failed",
-        );
-      }
-
-      setCheckerRunPageState(payload.data);
-      if (!silent) {
-        setActionNote(
-          `Loaded ${payload.data.items.length} checker run row(s) from game-core (${payload.data.offset + 1}-${payload.data.offset + payload.data.items.length} of ${payload.data.total_count}).`,
-        );
-      }
-    } catch (error) {
-      if (!silent) {
-        setActionError(
-          error instanceof Error ? error.message : "checker runs fetch failed",
-        );
-      }
-    } finally {
-      if (!silent) {
-        setPendingAction(null);
-      }
-    }
+    return refreshPagedFeed<AdminCheckerRunPage>({
+      silent,
+      actionKey: "game:checker-runs",
+      url: `/api/admin/game/checker-runs${buildCheckerRunQueryString(filters)}`,
+      errorLabel: "checker runs fetch failed",
+      setPage: setCheckerRunPageState,
+      formatNote: (page) =>
+        `Loaded ${page.items.length} checker run row(s) from game-core (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+    });
   }
 
   async function refreshSchedulerEvents(
     silent = false,
     filters: SchedulerEventFilters = schedulerEventFilters,
   ): Promise<void> {
-    if (!silent) {
-      setPendingAction("game:scheduler-events");
-      setActionError(null);
-      setActionNote(null);
-    }
-
-    try {
-      const response = await fetch(
-        `/api/admin/game/scheduler/events${buildSchedulerEventQueryString(filters)}`,
-      );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminSchedulerEventPage>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "scheduler events fetch failed",
-        );
-      }
-
-      setSchedulerEventPageState(payload.data);
-      if (!silent) {
-        setActionNote(
-          `Loaded ${payload.data.items.length} scheduler event row(s) from game-core (${payload.data.offset + 1}-${payload.data.offset + payload.data.items.length} of ${payload.data.total_count}).`,
-        );
-      }
-    } catch (error) {
-      if (!silent) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "scheduler events fetch failed",
-        );
-      }
-    } finally {
-      if (!silent) {
-        setPendingAction(null);
-      }
-    }
+    return refreshPagedFeed<AdminSchedulerEventPage>({
+      silent,
+      actionKey: "game:scheduler-events",
+      url: `/api/admin/game/scheduler/events${buildSchedulerEventQueryString(filters)}`,
+      errorLabel: "scheduler events fetch failed",
+      setPage: setSchedulerEventPageState,
+      formatNote: (page) =>
+        `Loaded ${page.items.length} scheduler event row(s) from game-core (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+    });
   }
 
   async function applyCheckerRunFilters(): Promise<void> {
@@ -1885,7 +1723,7 @@ export function useOrganizerDashboard({
 
   async function pageCheckerRuns(direction: "prev" | "next"): Promise<void> {
     const limit = parsePositiveInteger(checkerRunFilters.limit, 18, 200) ?? 18;
-    const currentOffset = parseNonNegativeInteger(checkerRunFilters.offset);
+    const currentOffset = parseNonNegativeInteger(checkerRunFilters.offset) ?? 0;
     const nextOffset =
       direction === "prev"
         ? Math.max(0, currentOffset - limit)
@@ -1907,13 +1745,7 @@ export function useOrganizerDashboard({
   }
 
   async function pageAttacks(direction: "prev" | "next"): Promise<void> {
-    const limit = parsePositiveInteger(attackFilters.limit, 12, 200) ?? 12;
-    const currentOffset = parseNonNegativeInteger(attackFilters.offset);
-    const nextOffset =
-      direction === "prev"
-        ? Math.max(0, currentOffset - limit)
-        : currentOffset + limit;
-    const next = { ...attackFilters, offset: String(nextOffset) };
+    const next = computePageOffset(attackFilters, direction);
     setAttackFilters(next);
     await refreshAttacks(false, next);
   }
@@ -1934,7 +1766,7 @@ export function useOrganizerDashboard({
   ): Promise<void> {
     const limit =
       parsePositiveInteger(schedulerEventFilters.limit, 12, 200) ?? 12;
-    const currentOffset = parseNonNegativeInteger(schedulerEventFilters.offset);
+    const currentOffset = parseNonNegativeInteger(schedulerEventFilters.offset) ?? 0;
     const nextOffset =
       direction === "prev"
         ? Math.max(0, currentOffset - limit)
@@ -2206,25 +2038,17 @@ export function useOrganizerDashboard({
     setActionError(null);
     setActionNote(null);
     try {
-      const response = await fetch(`/api/admin/teams/${editingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: teamDraft.name,
-          contact_email: teamDraft.contactEmail,
-        }),
-      });
-      const payload = (await response.json()) as ActionEnvelope<AdminTeam>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "team update failed",
-        );
-      }
+      const data = await persistEntity<AdminTeam>(
+        `/api/admin/teams/${editingId}`,
+        "PUT",
+        { name: teamDraft.name, contact_email: teamDraft.contactEmail },
+        "team",
+      );
       setTeamRows((current) =>
-        current.map((t) => (t.id === editingId ? payload.data : t)),
+        current.map((t) => (t.id === editingId ? data : t)),
       );
       closeFormDialog();
-      setActionNote(`Updated team ${payload.data.name}.`);
+      setActionNote(`Updated team ${data.name}.`);
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "team update failed",
@@ -2240,26 +2064,21 @@ export function useOrganizerDashboard({
     setActionError(null);
     setActionNote(null);
     try {
-      const response = await fetch(`/api/admin/players/${editingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await persistEntity<AdminPlayer>(
+        `/api/admin/players/${editingId}`,
+        "PUT",
+        {
           display_name: playerDraft.displayName,
           email: playerDraft.email,
           role: playerDraft.role,
-        }),
-      });
-      const payload = (await response.json()) as ActionEnvelope<AdminPlayer>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "player update failed",
-        );
-      }
+        },
+        "player",
+      );
       setPlayerRows((current) =>
-        current.map((p) => (p.id === editingId ? payload.data : p)),
+        current.map((p) => (p.id === editingId ? data : p)),
       );
       closeFormDialog();
-      setActionNote(`Updated player ${payload.data.display_name}.`);
+      setActionNote(`Updated player ${data.display_name}.`);
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "player update failed",
@@ -2440,49 +2259,7 @@ function buildAttackQuery(filters: AttackFilters): AdminAttackFeedQuery {
   };
 }
 
-function collectNewAdminAttackIDs(
-  currentPage: AdminAttackFeedPage,
-  nextPage: AdminAttackFeedPage,
-): string[] {
-  const currentIDs = new Set(currentPage.items.map((item) => item.id));
-  return nextPage.items
-    .filter((item) => !currentIDs.has(item.id))
-    .map((item) => item.id)
-    .slice(0, 4);
-}
 
-function mergeRealtimeAdminAttackPage(
-  currentPage: AdminAttackFeedPage,
-  streamedPage: AdminAttackFeedPage,
-  requestedLimit: string,
-): AdminAttackFeedPage {
-  const limit =
-    parsePositiveInteger(requestedLimit, streamedPage.limit) ??
-    streamedPage.limit;
-  if (limit <= streamedPage.limit) {
-    return streamedPage;
-  }
-
-  const mergedItems = [...streamedPage.items];
-  const seenIDs = new Set(mergedItems.map((item) => item.id));
-  for (const item of currentPage.items) {
-    if (seenIDs.has(item.id)) {
-      continue;
-    }
-    mergedItems.push(item);
-    seenIDs.add(item.id);
-    if (mergedItems.length >= limit) {
-      break;
-    }
-  }
-
-  return {
-    ...streamedPage,
-    items: mergedItems,
-    limit,
-    has_next: streamedPage.total_count > mergedItems.length,
-  };
-}
 
 function buildAttackQueryString(filters: AttackFilters): string {
   return buildQueryString(buildAttackQuery(filters));
@@ -2506,57 +2283,7 @@ function buildSchedulerEventQueryString(
   return buildQueryString(buildSchedulerEventQuery(filters));
 }
 
-function buildQueryString(
-  query: Record<string, string | number | undefined>,
-): string {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === "") {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const encoded = params.toString();
-  return encoded ? `?${encoded}` : "";
-}
 
-function isDefaultAttackFilters(
-  filters: AttackFilters,
-  defaults: AttackFilters,
-): boolean {
-  return (
-    filters.limit === defaults.limit &&
-    filters.offset === defaults.offset &&
-    filters.attacker === defaults.attacker &&
-    filters.victim === defaults.victim &&
-    filters.service === defaults.service &&
-    filters.tickFrom === defaults.tickFrom &&
-    filters.tickTo === defaults.tickTo
-  );
-}
-
-function parsePositiveInteger(
-  raw: string,
-  fallback?: number,
-  max = 0,
-): number | undefined {
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  if (max > 0 && parsed > max) {
-    return max;
-  }
-  return parsed;
-}
-
-function parseNonNegativeInteger(raw: string): number {
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
-  }
-  return parsed;
-}
 
 function isDefaultCheckerRunFilters(filters: CheckerRunFilters): boolean {
   return (

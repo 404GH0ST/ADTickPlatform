@@ -59,15 +59,7 @@ type DashboardLiveData = {
   attackPage: AttackFeedPage;
 };
 
-function isFulfilled<T>(
-  result: PromiseSettledResult<T>,
-): result is PromiseFulfilledResult<T> {
-  return result.status === "fulfilled";
-}
-
-function fulfilledValue<T>(result: PromiseSettledResult<T>, fallback: T): T {
-  return isFulfilled(result) ? result.value : fallback;
-}
+import { fulfilledValue } from "./promise-utils";
 
 function emptyAttackPage(limit: number): AttackFeedPage {
   return {

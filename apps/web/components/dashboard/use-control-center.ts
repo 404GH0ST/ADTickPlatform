@@ -4,6 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttackFeedPage, ScoreRow, ServiceRow } from '@/lib/dashboard-types';
 import type { SSHSessionData } from '@/components/dashboard/control-center-sections';
+import { useAttackHighlights } from '@/components/hooks/use-attack-highlights';
+import {
+  computePageOffset,
+  handleRealtimeAttackMessage,
+  parsePositiveInteger,
+  parseNonNegativeInteger,
+  isDefaultAttackFilters,
+  type AttackFilters,
+} from '@/lib/dashboard-utils';
 
 export type ControlCenterOptions = {
   attackPage: AttackFeedPage;
@@ -32,7 +41,6 @@ const baseAttackFilters = {
   tickTo: '',
 };
 
-type AttackFilters = typeof baseAttackFilters;
 
 type ControlCenterSummary = {
   acceptedFlags: number;
@@ -103,9 +111,8 @@ export function useControlCenter({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [attackFilters, setAttackFilters] = useState<AttackFilters>(initialAttackFilters);
-  const [highlightedAttackIDs, setHighlightedAttackIDs] = useState<string[]>([]);
   const attackPageRef = useRef<AttackFeedPage>(attackPage);
-  const attackHighlightTimeoutRef = useRef<number | null>(null);
+  const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
   const attackRealtimeEnabled = initialAttackFilters.offset === '0';
   const attackLiveMode = useMemo(
     () => attackRealtimeEnabled && isDefaultAttackFilters(attackFilters, initialAttackFilters),
@@ -130,13 +137,6 @@ export function useControlCenter({
     attackPageRef.current = attackPageState;
   }, [attackPageState]);
 
-  useEffect(() => {
-    return () => {
-      if (attackHighlightTimeoutRef.current !== null) {
-        window.clearTimeout(attackHighlightTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!realtimeBaseUrl) {
@@ -154,33 +154,36 @@ export function useControlCenter({
       }
     };
 
-    attacksSource.onmessage = (event) => {
-      if (!attackLiveMode) {
-        return;
-      }
-
-      try {
-        const nextPage = JSON.parse(event.data) as AttackFeedPage;
-        const mergedPage = mergeRealtimeAttackPage(
-          attackPageRef.current,
-          nextPage,
-          attackFilters.limit,
-        );
-        const nextHighlights = collectNewAttackIDs(attackPageRef.current, mergedPage);
-        setAttackPageState(mergedPage);
-        if (nextHighlights.length > 0) {
-          scheduleAttackHighlights(nextHighlights);
-        }
-      } catch {
-        // Keep the last good snapshot if one event is malformed.
-      }
-    };
+    attacksSource.onmessage = handleRealtimeAttackMessage({
+      isLive: () => attackLiveMode,
+      currentPage: () => attackPageRef.current,
+      limitStr: attackFilters.limit,
+      setPage: setAttackPageState,
+      scheduleHighlights: scheduleAttackHighlights,
+    });
 
     return () => {
       scoreboardSource.close();
       attacksSource.close();
     };
   }, [attackFilters.limit, attackLiveMode, realtimeBaseUrl]);
+
+  function buildAttackQuery(filters: AttackFilters): string {
+    const params = new URLSearchParams();
+    const limit = parsePositiveInteger(filters.limit, 12, 200);
+    if (limit !== undefined) params.set('limit', String(limit));
+    const offset = parseNonNegativeInteger(filters.offset) ?? 0;
+    if (offset > 0) params.set('offset', String(offset));
+    if (filters.attacker.trim() !== '') params.set('attacker', filters.attacker.trim());
+    if (filters.victim.trim() !== '') params.set('victim', filters.victim.trim());
+    if (filters.service.trim() !== '') params.set('service', filters.service.trim());
+    const tickFrom = parseNonNegativeInteger(filters.tickFrom) ?? 0;
+    if (tickFrom > 0) params.set('tick_from', String(tickFrom));
+    const tickTo = parseNonNegativeInteger(filters.tickTo) ?? 0;
+    if (tickTo > 0) params.set('tick_to', String(tickTo));
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  }
 
   async function refreshAttackFeed(
     silent = false,
@@ -192,36 +195,7 @@ export function useControlCenter({
     }
 
     try {
-      const params = new URLSearchParams();
-      const limit = parsePositiveInteger(filters.limit, 12, 200);
-      if (limit !== undefined) {
-        params.set('limit', String(limit));
-      }
-
-      const offset = parseNonNegativeInteger(filters.offset);
-      if (offset > 0) {
-        params.set('offset', String(offset));
-      }
-      if (filters.attacker.trim() !== '') {
-        params.set('attacker', filters.attacker.trim());
-      }
-      if (filters.victim.trim() !== '') {
-        params.set('victim', filters.victim.trim());
-      }
-      if (filters.service.trim() !== '') {
-        params.set('service', filters.service.trim());
-      }
-      const tickFrom = parseNonNegativeInteger(filters.tickFrom);
-      if (tickFrom > 0) {
-        params.set('tick_from', String(tickFrom));
-      }
-      const tickTo = parseNonNegativeInteger(filters.tickTo);
-      if (tickTo > 0) {
-        params.set('tick_to', String(tickTo));
-      }
-
-      const query = params.toString();
-      const response = await fetch(`/api/platform/attacks${query ? `?${query}` : ''}`);
+      const response = await fetch(`/api/platform/attacks${buildAttackQuery(filters)}`);
       const payload = (await response.json()) as ActionEnvelope<AttackFeedPage>;
       if (!response.ok || payload.status !== 'success') {
         throw new Error('message' in payload ? payload.message : 'attack feed fetch failed');
@@ -252,11 +226,7 @@ export function useControlCenter({
   }
 
   async function pageAttackFeed(direction: 'prev' | 'next'): Promise<void> {
-    const limit = parsePositiveInteger(attackFilters.limit, 12, 200) ?? 12;
-    const currentOffset = parseNonNegativeInteger(attackFilters.offset);
-    const nextOffset =
-      direction === 'prev' ? Math.max(0, currentOffset - limit) : currentOffset + limit;
-    const next = { ...attackFilters, offset: String(nextOffset) };
+    const next = computePageOffset(attackFilters, direction);
     setAttackFilters(next);
     await refreshAttackFeed(false, next);
   }
@@ -474,25 +444,7 @@ export function useControlCenter({
     setResetTarget(null);
   }
 
-  function scheduleAttackHighlights(ids: string[]): void {
-    if (attackHighlightTimeoutRef.current !== null) {
-      window.clearTimeout(attackHighlightTimeoutRef.current);
-    }
 
-    setHighlightedAttackIDs(ids);
-    attackHighlightTimeoutRef.current = window.setTimeout(() => {
-      setHighlightedAttackIDs([]);
-      attackHighlightTimeoutRef.current = null;
-    }, 4000);
-  }
-
-  function clearAttackHighlights(): void {
-    if (attackHighlightTimeoutRef.current !== null) {
-      window.clearTimeout(attackHighlightTimeoutRef.current);
-      attackHighlightTimeoutRef.current = null;
-    }
-    setHighlightedAttackIDs([]);
-  }
 
   return {
     actionError,
@@ -530,77 +482,4 @@ export function useControlCenter({
     summary,
     unlockTarget,
   };
-}
-
-function collectNewAttackIDs(currentPage: AttackFeedPage, nextPage: AttackFeedPage): string[] {
-  const currentIDs = new Set(currentPage.items.map((item) => item.id));
-  return nextPage.items
-    .filter((item) => !currentIDs.has(item.id))
-    .map((item) => item.id)
-    .slice(0, 4);
-}
-
-function mergeRealtimeAttackPage(
-  currentPage: AttackFeedPage,
-  streamedPage: AttackFeedPage,
-  requestedLimit: string,
-): AttackFeedPage {
-  const limit = parsePositiveInteger(requestedLimit, streamedPage.limit) ?? streamedPage.limit;
-  if (limit <= streamedPage.limit) {
-    return streamedPage;
-  }
-
-  const mergedItems = [...streamedPage.items];
-  const seenIDs = new Set(mergedItems.map((item) => item.id));
-  for (const item of currentPage.items) {
-    if (seenIDs.has(item.id)) {
-      continue;
-    }
-    mergedItems.push(item);
-    seenIDs.add(item.id);
-    if (mergedItems.length >= limit) {
-      break;
-    }
-  }
-
-  return {
-    ...streamedPage,
-    items: mergedItems,
-    limit,
-    has_next: streamedPage.total_count > mergedItems.length,
-  };
-}
-
-function isDefaultAttackFilters(
-  filters: AttackFilters,
-  defaults: AttackFilters,
-): boolean {
-  return (
-    filters.limit === defaults.limit &&
-    filters.offset === defaults.offset &&
-    filters.attacker === defaults.attacker &&
-    filters.victim === defaults.victim &&
-    filters.service === defaults.service &&
-    filters.tickFrom === defaults.tickFrom &&
-    filters.tickTo === defaults.tickTo
-  );
-}
-
-function parsePositiveInteger(raw: string, fallback?: number, max = 0): number | undefined {
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  if (max > 0 && parsed > max) {
-    return max;
-  }
-  return parsed;
-}
-
-function parseNonNegativeInteger(raw: string): number {
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
-  }
-  return parsed;
 }

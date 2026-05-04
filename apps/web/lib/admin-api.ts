@@ -28,15 +28,7 @@ import type {
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
 
-type SuccessEnvelope<T> = {
-  status: "success";
-  data: T;
-};
-
-type ErrorEnvelope = {
-  status: "failed" | "forbidden";
-  message: string;
-};
+import { authenticatedFetch, buildQueryString } from "./api-utils";
 
 export type CreateTeamInput = {
   name: string;
@@ -141,24 +133,7 @@ const getAdminToken = cache(async () => {
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getAdminToken();
-  const response = await fetch(`${adminBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-
-  const payload = (await response.json()) as SuccessEnvelope<T> | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload ? payload.message : `request to ${path} failed`,
-    );
-  }
-
-  return payload.data;
+  return authenticatedFetch<T>(adminBaseUrl(), path, token, init);
 }
 
 async function controllerFetch<T>(
@@ -166,39 +141,11 @@ async function controllerFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const token = await getAdminToken();
-  const response = await fetch(`${controllerBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-
-  const payload = (await response.json()) as SuccessEnvelope<T> | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload ? payload.message : `request to ${path} failed`,
-    );
-  }
-
-  return payload.data;
+  return authenticatedFetch<T>(controllerBaseUrl(), path, token, init);
 }
 
 async function publicFetch<T>(path: string): Promise<T> {
-  const response = await fetch(`${adminBaseUrl()}${path}`, {
-    cache: "no-store",
-  });
-
-  const payload = (await response.json()) as SuccessEnvelope<T> | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload ? payload.message : `request to ${path} failed`,
-    );
-  }
-
-  return payload.data;
+  return authenticatedFetch<T>(adminBaseUrl(), path, null);
 }
 
 async function fetchText(baseUrl: string, path: string): Promise<string> {
@@ -705,17 +652,7 @@ export async function advanceAdminGameTick() {
   });
 }
 
-function buildQueryString(query: Record<string, string | number | undefined>) {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === "" || Number.isNaN(value)) {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const encoded = params.toString();
-  return encoded ? `?${encoded}` : "";
-}
+
 
 export async function listAdminCheckerRuns(
   query: AdminCheckerRunQuery = { limit: 25 },

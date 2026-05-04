@@ -18,8 +18,6 @@ import {
   type OrganizerDashboardOptions,
   type OrganizerDashboardState,
   type DeleteTarget,
-  type FormMode,
-  type FormEntity,
   useOrganizerDashboard,
 } from "@/components/admin/use-organizer-dashboard";
 
@@ -215,7 +213,7 @@ export function OrganizerDashboard({
       <EntityFormDialog
         formMode={state.formMode}
         formEntity={state.formEntity}
-        editingId={state.editingId}
+
         pendingAction={state.pendingAction}
         teamDraft={state.teamDraft}
         playerDraft={state.playerDraft}

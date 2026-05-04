@@ -1,19 +1,12 @@
-import { NextResponse } from 'next/server';
-
+import { handleAdminIdRoute } from '@/lib/api-handler';
 import { rotateAdminPlayerWireGuard } from '@/lib/admin-api';
 
 export async function POST(_request: Request, context: { params: Promise<{ playerId: string }> }) {
-  const { playerId } = await context.params;
-  const playerID = Number(playerId);
-  if (!Number.isInteger(playerID) || playerID <= 0) {
-    return NextResponse.json({ status: 'failed', message: 'player id is invalid.' }, { status: 400 });
-  }
-
-  try {
-    const data = await rotateAdminPlayerWireGuard(playerID);
-    return NextResponse.json({ status: 'success', data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'wireguard rotate failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
-  }
+  return handleAdminIdRoute(
+    context as unknown as { params: Promise<Record<string, string>> },
+    'playerId',
+    'player id',
+    'wireguard rotate',
+    rotateAdminPlayerWireGuard
+  );
 }

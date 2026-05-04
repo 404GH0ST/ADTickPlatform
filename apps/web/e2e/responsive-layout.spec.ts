@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectNoHorizontalOverflow, expectSchedulerFiltersVisible } from "./test-layout-utils";
 
 const mockApiBaseUrl = "http://127.0.0.1:4010";
 
@@ -16,23 +17,13 @@ test("participant services page stays readable without horizontal overflow on mo
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
   await expect(page.getByTestId("service-card-svc-1")).toBeVisible();
 
-  const pageLayout = await page.locator("body").evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(pageLayout.scrollWidth).toBeLessThanOrEqual(pageLayout.clientWidth + 1);
+  await expectNoHorizontalOverflow(page.locator("body"));
 
   const actionBar = page
     .getByTestId("service-card-svc-1")
     .getByRole("button", { name: "Unlock Service" })
     .locator("..");
-  const actionLayout = await actionBar.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(actionLayout.scrollWidth).toBeLessThanOrEqual(
-    actionLayout.clientWidth + 1,
-  );
+  await expectNoHorizontalOverflow(actionBar);
 });
 
 test("organizer game scheduler filters stay inside the page width on mobile", async ({
@@ -42,22 +33,8 @@ test("organizer game scheduler filters stay inside the page width on mobile", as
 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
   const schedulerFilters = page.getByTestId("scheduler-audit-filters");
-  await expect(schedulerFilters.getByLabel("Page Size")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("Event Type")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("Source")).toBeVisible();
-  await expect(schedulerFilters.getByLabel("State")).toBeVisible();
+  await expectSchedulerFiltersVisible(schedulerFilters);
 
-  const pageLayout = await page.locator("body").evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(pageLayout.scrollWidth).toBeLessThanOrEqual(pageLayout.clientWidth + 1);
-
-  const filterLayout = await schedulerFilters.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(filterLayout.scrollWidth).toBeLessThanOrEqual(
-    filterLayout.clientWidth + 1,
-  );
+  await expectNoHorizontalOverflow(page.locator("body"));
+  await expectNoHorizontalOverflow(schedulerFilters);
 });

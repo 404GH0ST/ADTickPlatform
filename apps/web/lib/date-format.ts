@@ -24,7 +24,7 @@ export function formatIndonesianDate(
     const getPart = (type: string) => parts.find((p) => p.type === type)?.value;
 
     return `${getPart("year")}-${getPart("month")}-${getPart("day")} ${getPart("hour")}:${getPart("minute")}:${getPart("second")} WIB`;
-  } catch (e) {
+  } catch {
     return isoString;
   }
 }
