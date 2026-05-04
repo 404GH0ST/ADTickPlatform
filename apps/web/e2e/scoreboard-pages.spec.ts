@@ -1,12 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { adminTest as test, resetMockApi } from "./test-utils";
 
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.use({ viewport: { width: 1280, height: 900 } });
-
-test.beforeEach(async ({ request }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`);
-});
 
 test("participant scoreboard page shows the finished-match banner and ranking rows", async ({
   page,
@@ -28,9 +22,7 @@ test("participant scoreboard page shows an explicit empty state when no scores e
   page,
   request,
 }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "empty-scoreboard" },
-  });
+  await resetMockApi(request, "empty-scoreboard");
 
   await page.goto("/scoreboard");
 
@@ -40,11 +32,15 @@ test("participant scoreboard page shows an explicit empty state when no scores e
 
 test("organizer scoreboard page filters and sorts authoritative rankings", async ({
   page,
+  request,
 }) => {
+  await resetMockApi(request);
+
   await page.goto("/admin/scoreboard");
 
   await expect(page.locator("h1", { hasText: "Scoreboard" })).toBeVisible();
   await expect(page.getByText("Authoritative Scoreboard")).toBeVisible();
+  await expect(page.getByText("Showing 3 of 3 team row(s).")).toBeVisible();
 
   await page.getByLabel("Team Filter").fill("beta");
   await expect(page.getByText("Showing 1 of 3 team row(s).")).toBeVisible();
@@ -67,9 +63,7 @@ test("organizer scoreboard page shows degraded warning and empty state when the 
   page,
   request,
 }) => {
-  await request.post(`${mockApiBaseUrl}/__reset`, {
-    data: { scenario: "degraded-admin" },
-  });
+  await resetMockApi(request, "degraded-admin");
 
   await page.goto("/admin/scoreboard");
 
