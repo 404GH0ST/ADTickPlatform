@@ -54,7 +54,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
+        working-directory: apps/web
+        run: bun run playwright install --with-deps chromium
 
       - name: Run browser regression suite
         run: bun run web:e2e
