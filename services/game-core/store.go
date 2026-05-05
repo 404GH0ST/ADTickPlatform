@@ -22,6 +22,11 @@ var (
 )
 
 const serviceScoreUnit = 10
+const defenseMaxPoints = 1000
+const defenseMinPoints = 100
+const slaPutPoints = 3
+const slaGetPoints = 5
+const slaCheckPoints = 3
 
 type checkerTarget struct {
 	TeamID        int
@@ -287,10 +292,11 @@ func (s *memoryGameStore) LookupIssuedFlag(_ context.Context, flag string) (issu
 func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acceptedFlagSubmission) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.accepted[submission.Flag]; ok {
+	key := acceptedSubmissionKey(submission.Flag, submission.SubmittingTeam)
+	if _, ok := s.accepted[key]; ok {
 		return false, nil
 	}
-	s.accepted[submission.Flag] = submission
+	s.accepted[key] = submission
 	s.attackFeed = append([]apigateway.AttackEventAlias{{
 		ID:        fmt.Sprintf("atk-submit-%d", submission.SubmittedAt.UTC().UnixNano()),
 		Attacker:  submission.AttackerName,
@@ -325,20 +331,32 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 
 	scores := make(map[int]*teamScore, len(s.teamNames))
 	for teamID, teamName := range s.teamNames {
-		scores[teamID] = &teamScore{Name: teamName}
+		scores[teamID] = &teamScore{Name: teamName, Defense: defenseMaxPoints}
 	}
 
+	acceptedByFlag := make(map[string][]acceptedFlagSubmission)
 	for _, submission := range s.accepted {
-		flag := s.flags[submission.Flag]
+		acceptedByFlag[submission.Flag] = append(acceptedByFlag[submission.Flag], submission)
+	}
+	for flagValue, submissions := range acceptedByFlag {
+		sortAcceptedSubmissions(submissions)
+		flag := s.flags[flagValue]
 		weight := s.challenges[flag.ChallengeID].Weight
-		scores[submission.SubmittingTeam].Attack += weight * serviceScoreUnit
+		for index, submission := range submissions {
+			scores[submission.SubmittingTeam].Attack += attackSubmissionValue(weight, index+1)
+		}
 	}
 
+	issuedByTeam := make(map[int]int)
+	stolenByTeam := make(map[int]int)
 	for _, flag := range s.flags {
-		if _, stolen := s.accepted[flag.Flag]; !stolen {
-			weight := s.challenges[flag.ChallengeID].Weight
-			scores[flag.OwnerTeamID].Defense += weight * serviceScoreUnit
+		issuedByTeam[flag.OwnerTeamID]++
+		if len(acceptedByFlag[flag.Flag]) > 0 {
+			stolenByTeam[flag.OwnerTeamID]++
 		}
+	}
+	for teamID, score := range scores {
+		score.Defense = boundedDefenseScore(issuedByTeam[teamID], stolenByTeam[teamID])
 	}
 
 	type checkerGroup struct {
@@ -370,7 +388,7 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 		var tickID, teamID, challengeID int
 		fmt.Sscanf(key, "%d:%d:%d", &tickID, &teamID, &challengeID)
 		weight := s.challenges[challengeID].Weight
-		scores[teamID].SLA += weight * (boolToInt(group.PutOK)*3 + boolToInt(group.GetOK)*5 + boolToInt(group.CheckOK)*2)
+		scores[teamID].SLA += weight * (boolToInt(group.PutOK)*slaPutPoints + boolToInt(group.GetOK)*slaGetPoints + boolToInt(group.CheckOK)*slaCheckPoints)
 	}
 
 	rows := make([]apigateway.ScoreRowAlias, 0, len(scores))
@@ -816,7 +834,7 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO submitted_flags (flag, team_id, submitted_at)
 		VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING
+		ON CONFLICT (flag, team_id) DO NOTHING
 		RETURNING flag
 	`, submission.Flag, submission.SubmittingTeam, submission.SubmittedAt.UTC()).Scan(&inserted)
 	switch {
@@ -1230,29 +1248,35 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 	prevRows.Close()
 
 	attackByTeam, err := s.sumIntByTeam(ctx, `
-		SELECT sf.team_id, COALESCE(SUM(c.weight * $1), 0)
-		FROM submitted_flags sf
-		JOIN issued_flags f ON f.flag = sf.flag
+		SELECT ranked.team_id,
+		       COALESCE(SUM(
+			       CASE
+			           WHEN c.weight * $1 <= 0 THEN 0
+			           ELSE GREATEST(1, ((c.weight * $1) + (ranked.capture_index / 2)) / ranked.capture_index)
+			       END
+		       ), 0)
+		FROM (
+			SELECT
+				sf.flag,
+				sf.team_id,
+				ROW_NUMBER() OVER (PARTITION BY sf.flag ORDER BY sf.submitted_at, sf.team_id) AS capture_index
+			FROM submitted_flags sf
+		) ranked
+		JOIN issued_flags f ON f.flag = ranked.flag
 		JOIN challenges c ON c.id = f.challenge_id
-		GROUP BY sf.team_id
+		GROUP BY ranked.team_id
 	`, serviceScoreUnit)
 	if err != nil {
 		return nil, err
 	}
 
-	defenseByTeam, err := s.sumIntByTeam(ctx, `
-		SELECT f.owner_team_id, COALESCE(SUM(CASE WHEN sf.flag IS NULL THEN c.weight * $1 ELSE 0 END), 0)
-		FROM issued_flags f
-		JOIN challenges c ON c.id = f.challenge_id
-		LEFT JOIN submitted_flags sf ON sf.flag = f.flag
-		GROUP BY f.owner_team_id
-	`, serviceScoreUnit)
+	defenseInputs, err := s.defenseCountsByTeam(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	slaByTeam, err := s.sumIntByTeam(ctx, `
-		SELECT runs.team_id, COALESCE(SUM(c.weight * (3 * runs.put_ok + 5 * runs.get_ok + 2 * runs.check_ok)), 0)
+		SELECT runs.team_id, COALESCE(SUM(c.weight * ($1 * runs.put_ok + $2 * runs.get_ok + $3 * runs.check_ok)), 0)
 		FROM (
 			SELECT
 				tick_id,
@@ -1266,7 +1290,7 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 		) runs
 		JOIN challenges c ON c.id = runs.challenge_id
 		GROUP BY runs.team_id
-	`)
+	`, slaPutPoints, slaGetPoints, slaCheckPoints)
 	if err != nil {
 		return nil, err
 	}
@@ -1277,7 +1301,7 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 			TeamID:  team.ID,
 			Team:    team.Name,
 			Attack:  attackByTeam[team.ID],
-			Defense: defenseByTeam[team.ID],
+			Defense: boundedDefenseScore(defenseInputs[team.ID].Issued, defenseInputs[team.ID].Stolen),
 			SLA:     slaByTeam[team.ID],
 		})
 	}
@@ -1582,6 +1606,11 @@ type teamScoreSnapshot struct {
 	SLA     int
 }
 
+type defenseScoreInput struct {
+	Issued int
+	Stolen int
+}
+
 func (s teamScoreSnapshot) Total() int {
 	return s.Attack + s.Defense + s.SLA
 }
@@ -1603,6 +1632,80 @@ func (s *postgresGameStore) sumIntByTeam(ctx context.Context, query string, args
 		result[teamID] = value
 	}
 	return result, rows.Err()
+}
+
+func (s *postgresGameStore) defenseCountsByTeam(ctx context.Context) (map[int]defenseScoreInput, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			f.owner_team_id,
+			COUNT(DISTINCT f.flag) AS issued_count,
+			COUNT(DISTINCT CASE WHEN sf.flag IS NOT NULL THEN f.flag END) AS stolen_count
+		FROM issued_flags f
+		LEFT JOIN submitted_flags sf ON sf.flag = f.flag
+		GROUP BY f.owner_team_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int]defenseScoreInput)
+	for rows.Next() {
+		var teamID int
+		var input defenseScoreInput
+		if err := rows.Scan(&teamID, &input.Issued, &input.Stolen); err != nil {
+			return nil, err
+		}
+		result[teamID] = input
+	}
+	return result, rows.Err()
+}
+
+func boundedDefenseScore(issued, stolen int) int {
+	if issued <= 0 || stolen <= 0 {
+		return defenseMaxPoints
+	}
+	if stolen >= issued {
+		return defenseMinPoints
+	}
+	lossRange := defenseMaxPoints - defenseMinPoints
+	loss := (lossRange*stolen + issued/2) / issued
+	score := defenseMaxPoints - loss
+	if score < defenseMinPoints {
+		return defenseMinPoints
+	}
+	return score
+}
+
+func acceptedSubmissionKey(flag string, teamID int) string {
+	return fmt.Sprintf("%s:%d", flag, teamID)
+}
+
+func sortAcceptedSubmissions(submissions []acceptedFlagSubmission) {
+	sort.Slice(submissions, func(i, j int) bool {
+		if !submissions[i].SubmittedAt.Equal(submissions[j].SubmittedAt) {
+			return submissions[i].SubmittedAt.Before(submissions[j].SubmittedAt)
+		}
+		if submissions[i].SubmittingTeam != submissions[j].SubmittingTeam {
+			return submissions[i].SubmittingTeam < submissions[j].SubmittingTeam
+		}
+		return submissions[i].Flag < submissions[j].Flag
+	})
+}
+
+func attackSubmissionValue(challengeWeight, captureIndex int) int {
+	base := challengeWeight * serviceScoreUnit
+	if base <= 0 {
+		return 0
+	}
+	if captureIndex <= 1 {
+		return base
+	}
+	value := (base + captureIndex/2) / captureIndex
+	if value < 1 {
+		return 1
+	}
+	return value
 }
 
 func boolToInt(value bool) int {

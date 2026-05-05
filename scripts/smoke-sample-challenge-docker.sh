@@ -221,7 +221,7 @@ scoreboard_response="$(
 )"
 printf '%s\n' "${scoreboard_response}" | jq -c '.data[] | {rank,team,attack,defense,sla,total,delta}'
 
-if ! printf '%s\n' "${scoreboard_response}" | jq -e '.data | length == 4 and all(.[]; .attack == 0 and .defense == 10 and .sla == 10 and .total == 20)' >/dev/null; then
+if ! printf '%s\n' "${scoreboard_response}" | jq -e '.data | length == 4 and all(.[]; .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)' >/dev/null; then
   echo "unexpected scoreboard after clean sample tick" >&2
   exit 1
 fi
@@ -300,10 +300,10 @@ printf '%s\n' "${post_submit_scoreboard}" | jq -c '.data[] | {rank,team,attack,d
 
 if ! printf '%s\n' "${post_submit_scoreboard}" | jq -e '
   .data | length == 4 and
-  any(.[]; .team == "Team Alpha" and .attack == 10 and .defense == 10 and .sla == 10 and .total == 30) and
-  any(.[]; .team == "Team Delta" and .attack == 0 and .defense == 0 and .sla == 10 and .total == 10) and
-  any(.[]; .team == "Team Orchid" and .attack == 0 and .defense == 10 and .sla == 10 and .total == 20) and
-  any(.[]; .team == "Team Sigma" and .attack == 0 and .defense == 10 and .sla == 10 and .total == 20)
+  any(.[]; .team == "Team Alpha" and .attack == 10 and .defense == 1000 and .sla == 11 and .total == 1021) and
+  any(.[]; .team == "Team Delta" and .attack == 0 and .defense == 100 and .sla == 11 and .total == 111) and
+  any(.[]; .team == "Team Orchid" and .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011) and
+  any(.[]; .team == "Team Sigma" and .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)
 ' >/dev/null; then
   echo "scoreboard did not reflect the accepted enemy-flag attack" >&2
   exit 1
