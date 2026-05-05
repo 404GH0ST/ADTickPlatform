@@ -2,7 +2,7 @@ import http from "node:http";
 
 const port = Number(process.env.MOCK_PLATFORM_API_PORT || "4010");
 
-const challenges = [{ id: 1, name: "college-http" }];
+const challenges = [{ id: 1, name: "college-http", has_source_download: true }];
 
 const scoreboard = [
   {
@@ -192,6 +192,7 @@ const adminChallenges = [
     name: "college-http",
     baseline_image: "adplatform/sample-http:baseline",
     checker_image: "adplatform/sample-http-checker:latest",
+    source_bundle_path: "examples/sample-lfi-challenge",
     weight: 10,
     service_port: 30050,
     service_subnet_octet: 50,
@@ -487,6 +488,10 @@ function createInitialState() {
         ssh_hint: "unlock required before requesting root access",
         last_event: "service stable",
         reset_cooldown: "ready",
+        sla_status: "passing",
+        sla_phase: "check",
+        sla_tick_id: 12,
+        sla_message: "latest SLA cycle passed",
       },
     ],
     teams: teams.map((team) => ({ ...team })),
@@ -770,7 +775,7 @@ let state = createStateForScenario();
 const activeSSEConnections = new Set();
 
 function success(data) {
-  return JSON.stringify({ status: "success", data });
+  return JSON.stringify(data);
 }
 
 function nowIso() {
@@ -1123,7 +1128,17 @@ function writeSuccess(res, data) {
 }
 
 function writeFailure(res, statusCode, message, status = "failed") {
-  writeJson(res, statusCode, JSON.stringify({ status, message }));
+  const title =
+    status === "forbidden"
+      ? "Forbidden"
+      : status === "too many request"
+        ? "Too many requests"
+        : "Request failed";
+  writeJson(
+    res,
+    statusCode,
+    JSON.stringify({ title, status: statusCode, detail: message }),
+  );
   return true;
 }
 
@@ -1235,7 +1250,10 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
     return writeFailure(res, 403, "email or password is wrong.", "forbidden");
   }
 
-  return writeSuccess(res, buildParticipantToken(player));
+  return writeSuccess(res, {
+    token: buildParticipantToken(player),
+    token_type: "Bearer",
+  });
 }
 
 async function handleParticipantRoutes(ctx) {
@@ -1258,11 +1276,28 @@ async function handleParticipantRoutes(ctx) {
   }
 
   return (
+    handleChallengeSourceDownload(ctx) ||
     (await handleServiceUnlock(ctx)) ||
     handleSSHSession(ctx) ||
     handleServiceRestart(ctx) ||
     handleFactoryReset(ctx)
   );
+}
+
+function handleChallengeSourceDownload({ res, url, method }) {
+  const challengeID = routeID(
+    url.pathname,
+    /^\/api\/v2\/challenges\/(\d+)\/source$/,
+  );
+  if (method !== "GET" || challengeID === null) {
+    return false;
+  }
+  res.writeHead(200, {
+    "Content-Type": "application/gzip",
+    "Content-Disposition": 'attachment; filename="college-http-source.tar.gz"',
+  });
+  res.end("mock-source-bundle");
+  return true;
 }
 
 async function handleServiceUnlock({ req, res, url, method }) {
@@ -1279,14 +1314,13 @@ async function handleServiceUnlock({ req, res, url, method }) {
 
   serviceState.unlocked = true;
   serviceState.ssh_hint =
-    "unlock accepted; request a one-time root password to get the current credential";
+    "unlock accepted; use SSH Access to view the team credential";
   serviceState.last_event = "unlock granted via participant API";
 
   return writeSuccess(res, {
     challenge_id: challengeID,
     team_id: serviceState.team_id,
     unlocked: true,
-    ssh_credential_ttl_seconds: 900,
   });
 }
 
@@ -1306,19 +1340,19 @@ function serviceActionRoute(pattern, handler) {
 
 const handleSSHSession = serviceActionRoute(
   /^\/api\/v2\/services\/(\d+)\/ssh-session$/,
-  ({ res, _challengeID, serviceState }) => {
-    const password = `root-pass-${state.sshPasswordCounter}`;
-    state.sshPasswordCounter += 1;
+  ({ res, challengeID, serviceState }) => {
+    const password = "Adp-team-credential-Aa1!";
     serviceState.unlocked = true;
     serviceState.ssh_hint = "ssh root@10.80.50.11 -p 22";
-    serviceState.last_event = "ssh access active";
+    serviceState.last_event = "team ssh credential retrieved";
 
     return writeSuccess(res, {
+      challenge_id: challengeID,
       host: "10.80.50.11",
       port: 22,
       username: "root",
       password,
-      expires_at: "2026-03-20T10:30:00Z",
+      password_mode: "stable",
       connection_hint: "ssh root@10.80.50.11 -p 22",
     });
   },
@@ -1347,7 +1381,7 @@ const handleFactoryReset = serviceActionRoute(
     serviceState.checker = "warning";
     serviceState.unlocked = true;
     serviceState.ssh_hint =
-      "unlock preserved; request a fresh one-time root password to rotate the credential";
+      "unlock preserved; open SSH Access to reapply the team credential";
     serviceState.last_event = "factory reset triggered via participant API";
     serviceState.reset_cooldown = "cooldown: 90s";
 
@@ -2047,7 +2081,7 @@ function handleAdminNetworkRoutes({ res, url, method }) {
       revision: "mock-wireguard-teardown",
       applied_at: nowIso(),
     };
-    return writeSuccess(res, { status: "success" });
+    return writeSuccess(res, {});
   }
 
   if (method === "POST" && url.pathname === "/api/v2/admin/access/reconcile") {
@@ -2081,7 +2115,7 @@ function handleAdminNetworkRoutes({ res, url, method }) {
       revision: "mock-access-teardown",
       applied_at: nowIso(),
     };
-    return writeSuccess(res, { status: "success" });
+    return writeSuccess(res, {});
   }
 
   return false;

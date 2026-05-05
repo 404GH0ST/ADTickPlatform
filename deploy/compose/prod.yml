@@ -278,6 +278,9 @@ services:
       WIREGUARD_GATEWAY_INTERNAL_URL: http://wireguard-gateway:8087
       WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
       API_GATEWAY_TEAM_ID: ${AD_PLATFORM_TEAM_ID:-101}
+      AD_CHALLENGE_SOURCE_ROOT: ${AD_CHALLENGE_SOURCE_ROOT:-/challenge-sources}
+    volumes:
+      - ${CHALLENGE_SOURCE_HOST_PATH:-/srv/adplatform/challenge-sources}:${AD_CHALLENGE_SOURCE_ROOT:-/challenge-sources}:ro
     networks:
       - control
 

@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"adplatform/internal/platform/httpapi"
 )
 
 const (
@@ -21,10 +19,7 @@ func (s *Server) handleAdminOperationsStatus(w http.ResponseWriter, r *http.Requ
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[AdminOperationsStatus]{
-		Status: "success",
-		Data:   s.buildAdminOperationsStatus(r.Context()),
-	})
+	writeData(w, http.StatusOK, s.buildAdminOperationsStatus(r.Context()))
 }
 
 func (s *Server) buildAdminOperationsStatus(ctx context.Context) AdminOperationsStatus {

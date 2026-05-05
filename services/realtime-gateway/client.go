@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -24,11 +26,6 @@ type httpPublicSnapshotClient struct {
 	baseURL    string
 	adminToken string
 	client     *http.Client
-}
-
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
 }
 
 func newHTTPPublicSnapshotClient(baseURL, adminToken string) publicSnapshotClient {
@@ -91,12 +88,24 @@ func fetchSnapshotWithToken[T any](ctx context.Context, client *http.Client, url
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return zero, fmt.Errorf("snapshot request failed with status %d", resp.StatusCode)
+		}
+		var problem httpapi.ProblemDetails
+		if err := json.Unmarshal(data, &problem); err == nil {
+			if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+				return zero, fmt.Errorf("snapshot request failed: %s", trimmed)
+			}
+			if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+				return zero, fmt.Errorf("snapshot request failed: %s", trimmed)
+			}
+		}
 		return zero, fmt.Errorf("snapshot request failed with status %d", resp.StatusCode)
 	}
 
-	var payload successEnvelope[T]
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
 		return zero, err
 	}
-	return payload.Data, nil
+	return zero, nil
 }

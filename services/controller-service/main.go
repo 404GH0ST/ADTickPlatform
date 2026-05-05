@@ -14,11 +14,6 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type controllerServer struct {
 	adminToken string
 	store      apigateway.Store
@@ -103,10 +98,10 @@ func (s *controllerServer) handleListDeployments(w http.ResponseWriter, r *http.
 	}
 	deployments, err := s.store.ListAdminDeployments(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: deployments})
+	writeData(w, http.StatusOK, deployments)
 }
 
 func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *http.Request) {
@@ -117,14 +112,14 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 	tasks, err := s.store.ListControllerRuntimeTasks(r.Context())
 	if err != nil {
 		s.metrics.recordDeploymentReconcile(time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	ensured := 0
 	for _, task := range tasks {
 		if err := s.executor.EnsureService(r.Context(), task); err != nil {
 			s.metrics.recordDeploymentReconcile(time.Since(started), ensured, true)
-			httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+			writeProblem(w, http.StatusInternalServerError, "Runtime reconcile failed", err.Error())
 			return
 		}
 		ensured++
@@ -132,11 +127,11 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 	result, err := s.store.ReconcileAdminDeployments(r.Context(), s.now())
 	if err != nil {
 		s.metrics.recordDeploymentReconcile(time.Since(started), ensured, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	s.metrics.recordDeploymentReconcile(time.Since(started), ensured, false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: result})
+	writeData(w, http.StatusOK, result)
 }
 
 func (s *controllerServer) handleValidateChallengeRuntime(w http.ResponseWriter, r *http.Request) {
@@ -147,24 +142,24 @@ func (s *controllerServer) handleValidateChallengeRuntime(w http.ResponseWriter,
 	var request apigateway.ChallengeValidationRequest
 	if err := httpapi.DecodeJSON(r, &request); err != nil || request.ChallengeID <= 0 || request.BaselineImage == "" {
 		s.metrics.recordOperation(controllerOperationChallengeValidate, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge validation request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge validation request is invalid.")
 		return
 	}
 	result, err := s.executor.ValidateChallengeRuntime(r.Context(), request)
 	if err != nil {
 		s.metrics.recordOperation(controllerOperationChallengeValidate, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Challenge validation failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationChallengeValidate, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.ChallengeValidationResult]{Status: "success", Data: result})
+	writeData(w, http.StatusOK, result)
 }
 
 func (s *controllerServer) handleAccessStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: s.access.Status()})
+	writeData(w, http.StatusOK, s.access.Status())
 }
 
 func (s *controllerServer) handleReconcileAccessPolicies(w http.ResponseWriter, r *http.Request) {
@@ -175,17 +170,17 @@ func (s *controllerServer) handleReconcileAccessPolicies(w http.ResponseWriter, 
 	policies, err := s.store.ListControllerServiceAccessPolicies(r.Context())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	status, err := s.access.Apply(r.Context(), policies, s.now())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: status.LastError})
+		writeProblem(w, http.StatusInternalServerError, "Access reconcile failed", status.LastError)
 		return
 	}
 	s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), status.PoliciesTotal, false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *controllerServer) handleTeardownAccessPolicies(w http.ResponseWriter, r *http.Request) {
@@ -195,11 +190,11 @@ func (s *controllerServer) handleTeardownAccessPolicies(w http.ResponseWriter, r
 	started := time.Now()
 	if err := s.access.Teardown(r.Context()); err != nil {
 		s.metrics.recordOperation(controllerOperationAccessTeardown, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Access teardown failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationAccessTeardown, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *controllerServer) handleReconcileServiceAccess(w http.ResponseWriter, r *http.Request) {
@@ -210,13 +205,13 @@ func (s *controllerServer) handleReconcileServiceAccess(w http.ResponseWriter, r
 	teamID, err := strconv.Atoi(r.PathValue("team_id"))
 	if err != nil || teamID <= 0 {
 		s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return
 	}
 	challengeID, err := strconv.Atoi(r.PathValue("challenge_id"))
 	if err != nil || challengeID <= 0 {
 		s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 		return
 	}
 	if _, err := s.store.GetControllerServiceAccessPolicy(r.Context(), teamID, challengeID); err != nil {
@@ -227,23 +222,23 @@ func (s *controllerServer) handleReconcileServiceAccess(w http.ResponseWriter, r
 			status = http.StatusNotFound
 			message = "service access policy was not found."
 		}
-		httpapi.WriteJSON(w, status, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+		writeProblem(w, status, "Request failed", message)
 		return
 	}
 	policies, err := s.store.ListControllerServiceAccessPolicies(r.Context())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	status, err := s.access.Apply(r.Context(), policies, s.now())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: status.LastError})
+		writeProblem(w, http.StatusInternalServerError, "Access reconcile failed", status.LastError)
 		return
 	}
 	s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), status.PoliciesTotal, false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *controllerServer) handleApplySSHCredential(w http.ResponseWriter, r *http.Request) {
@@ -257,20 +252,20 @@ func (s *controllerServer) handleApplySSHCredential(w http.ResponseWriter, r *ht
 		return
 	}
 	var credential apigateway.ControllerSSHCredential
-	if err := httpapi.DecodeJSON(r, &credential); err != nil || credential.Password == "" || credential.ExpiresAt == "" {
+	if err := httpapi.DecodeJSON(r, &credential); err != nil || credential.Password == "" {
 		s.metrics.recordOperation(controllerOperationSSHCredential, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "ssh credential request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "ssh credential request is invalid.")
 		return
 	}
 	if err := s.executor.ApplySSHCredential(r.Context(), task, credential); err != nil {
 		s.metrics.recordOperation(controllerOperationSSHCredential, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "SSH credential apply failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationSSHCredential, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"team_id": task.TeamID, "challenge_id": task.ChallengeID, "action": "apply_ssh_credential_runtime",
-	}})
+	})
 }
 
 func (s *controllerServer) handleFactoryResetService(w http.ResponseWriter, r *http.Request) {
@@ -285,13 +280,13 @@ func (s *controllerServer) handleFactoryResetService(w http.ResponseWriter, r *h
 	}
 	if err := s.executor.FactoryResetService(r.Context(), task); err != nil {
 		s.metrics.recordOperation(controllerOperationFactoryReset, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Factory reset failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationFactoryReset, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"team_id": task.TeamID, "challenge_id": task.ChallengeID, "action": "factory_reset_runtime",
-	}})
+	})
 }
 
 func (s *controllerServer) handleRestartService(w http.ResponseWriter, r *http.Request) {
@@ -306,13 +301,13 @@ func (s *controllerServer) handleRestartService(w http.ResponseWriter, r *http.R
 	}
 	if err := s.executor.RestartService(r.Context(), task); err != nil {
 		s.metrics.recordOperation(controllerOperationRestart, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Restart failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationRestart, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"team_id": task.TeamID, "challenge_id": task.ChallengeID, "action": "restart_runtime",
-	}})
+	})
 }
 
 func (s *controllerServer) handleRemoveService(w http.ResponseWriter, r *http.Request) {
@@ -323,24 +318,24 @@ func (s *controllerServer) handleRemoveService(w http.ResponseWriter, r *http.Re
 	teamID, err := strconv.Atoi(r.PathValue("team_id"))
 	if err != nil || teamID <= 0 {
 		s.metrics.recordOperation(controllerOperationRemoveService, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return
 	}
 	challengeID, err := strconv.Atoi(r.PathValue("challenge_id"))
 	if err != nil || challengeID <= 0 {
 		s.metrics.recordOperation(controllerOperationRemoveService, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 		return
 	}
 	if err := s.executor.RemoveService(r.Context(), teamID, challengeID); err != nil {
 		s.metrics.recordOperation(controllerOperationRemoveService, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Remove service failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationRemoveService, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"team_id": teamID, "challenge_id": challengeID, "action": "remove_runtime",
-	}})
+	})
 }
 
 func (s *controllerServer) handleRemoveTeamServices(w http.ResponseWriter, r *http.Request) {
@@ -351,18 +346,18 @@ func (s *controllerServer) handleRemoveTeamServices(w http.ResponseWriter, r *ht
 	teamID, err := strconv.Atoi(r.PathValue("team_id"))
 	if err != nil || teamID <= 0 {
 		s.metrics.recordOperation(controllerOperationRemoveTeam, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return
 	}
 	if err := s.executor.RemoveTeamServices(r.Context(), teamID); err != nil {
 		s.metrics.recordOperation(controllerOperationRemoveTeam, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Remove team services failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationRemoveTeam, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"team_id": teamID, "action": "remove_team_runtimes",
-	}})
+	})
 }
 
 func (s *controllerServer) handleRemoveChallengeServices(w http.ResponseWriter, r *http.Request) {
@@ -373,29 +368,29 @@ func (s *controllerServer) handleRemoveChallengeServices(w http.ResponseWriter, 
 	challengeID, err := strconv.Atoi(r.PathValue("challenge_id"))
 	if err != nil || challengeID <= 0 {
 		s.metrics.recordOperation(controllerOperationRemoveChallenge, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 		return
 	}
 	if err := s.executor.RemoveChallengeServices(r.Context(), challengeID); err != nil {
 		s.metrics.recordOperation(controllerOperationRemoveChallenge, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Remove challenge services failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(controllerOperationRemoveChallenge, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[any]{Status: "success", Data: map[string]any{
+	writeData(w, http.StatusOK, map[string]any{
 		"challenge_id": challengeID, "action": "remove_challenge_runtimes",
-	}})
+	})
 }
 
 func (s *controllerServer) parseRuntimeTask(w http.ResponseWriter, r *http.Request) (apigateway.ControllerRuntimeTask, bool) {
 	teamID, err := strconv.Atoi(r.PathValue("team_id"))
 	if err != nil || teamID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return apigateway.ControllerRuntimeTask{}, false
 	}
 	challengeID, err := strconv.Atoi(r.PathValue("challenge_id"))
 	if err != nil || challengeID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 		return apigateway.ControllerRuntimeTask{}, false
 	}
 	task, err := s.store.GetControllerRuntimeTask(r.Context(), teamID, challengeID)
@@ -406,7 +401,7 @@ func (s *controllerServer) parseRuntimeTask(w http.ResponseWriter, r *http.Reque
 			status = http.StatusNotFound
 			message = "service runtime was not found."
 		}
-		httpapi.WriteJSON(w, status, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+		writeProblem(w, status, "Request failed", message)
 		return apigateway.ControllerRuntimeTask{}, false
 	}
 	return task, true
@@ -415,8 +410,20 @@ func (s *controllerServer) parseRuntimeTask(w http.ResponseWriter, r *http.Reque
 func (s *controllerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing controller endpoints."})
+		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing controller endpoints.")
 		return false
 	}
 	return true
+}
+
+func writeData(w http.ResponseWriter, statusCode int, value any) {
+	httpapi.WriteJSON(w, statusCode, value)
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, title, detail string) {
+	httpapi.WriteProblem(w, statusCode, httpapi.ProblemDetails{
+		Title:  title,
+		Status: statusCode,
+		Detail: detail,
+	})
 }

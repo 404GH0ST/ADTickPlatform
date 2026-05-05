@@ -13,11 +13,6 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type gameCoreServer struct {
 	adminToken     string
 	store          gameStore
@@ -142,7 +137,7 @@ func (s *gameCoreServer) handleGameStatus(w http.ResponseWriter, r *http.Request
 	}
 	status, err := s.store.GameStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	if s.scheduler != nil {
@@ -151,11 +146,11 @@ func (s *gameCoreServer) handleGameStatus(w http.ResponseWriter, r *http.Request
 	}
 	matchStatus, err := s.matchStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	status.Match = &matchStatus
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleAdvanceTick(w http.ResponseWriter, r *http.Request) {
@@ -171,10 +166,10 @@ func (s *gameCoreServer) handleAdvanceTick(w http.ResponseWriter, r *http.Reques
 		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
 			statusCode = http.StatusBadRequest
 		}
-		httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, statusCode, "Tick advance failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameTickStatus]{Status: "success", Data: tick})
+	writeData(w, http.StatusOK, tick)
 }
 
 func (s *gameCoreServer) handleMatchStatus(w http.ResponseWriter, r *http.Request) {
@@ -183,10 +178,10 @@ func (s *gameCoreServer) handleMatchStatus(w http.ResponseWriter, r *http.Reques
 	}
 	status, err := s.matchStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request) {
@@ -195,15 +190,15 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 	}
 	current, err := s.matchStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	if current.State == "running" {
-		httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameMatchStatus]{Status: "success", Data: current})
+		writeData(w, http.StatusOK, current)
 		return
 	}
 	if current.State == "finished" {
-		httpapi.WriteJSON(w, http.StatusConflict, httpapi.ErrorEnvelope{Status: "failed", Message: errContestOver.Error()})
+		writeProblem(w, http.StatusConflict, "Request rejected", errContestOver.Error())
 		return
 	}
 
@@ -213,11 +208,11 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		if errors.Is(err, errContestOver) {
 			statusCode = http.StatusConflict
 		}
-		httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, statusCode, "Match start failed", err.Error())
 		return
 	}
 	status = s.applyMatchWindow(status)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request) {
@@ -226,13 +221,13 @@ func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request)
 	}
 	current, err := s.matchStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 	if current.State != "finished" {
 		status, err := s.store.StopMatch(r.Context(), s.now())
 		if err != nil {
-			httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+			writeProblem(w, http.StatusInternalServerError, "Match stop failed", err.Error())
 			return
 		}
 		current = s.applyMatchWindow(status)
@@ -240,7 +235,7 @@ func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request)
 	if s.scheduler != nil && s.scheduler.Status().State == "running" {
 		_, _ = s.scheduler.Stop()
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameMatchStatus]{Status: "success", Data: current})
+	writeData(w, http.StatusOK, current)
 }
 
 func (s *gameCoreServer) handleUpdateMatchSchedule(w http.ResponseWriter, r *http.Request) {
@@ -250,32 +245,32 @@ func (s *gameCoreServer) handleUpdateMatchSchedule(w http.ResponseWriter, r *htt
 
 	var req apigateway.UpdateMatchScheduleRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "could not parse match schedule payload."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse match schedule payload.")
 		return
 	}
 
 	startAt, err := parseScheduleValue(req.ScheduledStartAt)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "scheduled_start_at must be RFC3339."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "scheduled_start_at must be RFC3339.")
 		return
 	}
 	endAt, err := parseScheduleValue(req.ScheduledEndAt)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "scheduled_end_at must be RFC3339."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "scheduled_end_at must be RFC3339.")
 		return
 	}
 	if startAt != nil && endAt != nil && endAt.Before(*startAt) {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "scheduled_end_at must not be earlier than scheduled_start_at."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "scheduled_end_at must not be earlier than scheduled_start_at.")
 		return
 	}
 
 	status, err := s.store.UpdateMatchSchedule(r.Context(), startAt, endAt)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Match schedule update failed", err.Error())
 		return
 	}
 	status = s.applyMatchWindow(status)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleCheckerRuns(w http.ResponseWriter, r *http.Request) {
@@ -285,10 +280,10 @@ func (s *gameCoreServer) handleCheckerRuns(w http.ResponseWriter, r *http.Reques
 	query := parseCheckerRunQuery(r)
 	runs, err := s.store.ListCheckerRuns(r.Context(), query)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameCheckerRunPage]{Status: "success", Data: runs})
+	writeData(w, http.StatusOK, runs)
 }
 
 func (s *gameCoreServer) handleScoreboard(w http.ResponseWriter, r *http.Request) {
@@ -297,10 +292,10 @@ func (s *gameCoreServer) handleScoreboard(w http.ResponseWriter, r *http.Request
 	}
 	rows, err := s.store.ListScoreboard(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Scoreboard unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.ScoreRowAlias]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func (s *gameCoreServer) handleAttackFeed(w http.ResponseWriter, r *http.Request) {
@@ -318,10 +313,10 @@ func (s *gameCoreServer) handleAttackFeed(w http.ResponseWriter, r *http.Request
 	}
 	rows, err := s.store.ListAttackFeed(r.Context(), query)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Attack feed unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.AttackFeedPage]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func (s *gameCoreServer) handleRecomputeScoring(w http.ResponseWriter, r *http.Request) {
@@ -330,10 +325,10 @@ func (s *gameCoreServer) handleRecomputeScoring(w http.ResponseWriter, r *http.R
 	}
 	rows, err := s.store.RecomputeScoreboard(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Scoring recompute failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.ScoreRowAlias]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func (s *gameCoreServer) handleSchedulerStatus(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +336,7 @@ func (s *gameCoreServer) handleSchedulerStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	status := s.scheduler.Status()
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleStartScheduler(w http.ResponseWriter, r *http.Request) {
@@ -355,10 +350,10 @@ func (s *gameCoreServer) handleStartScheduler(w http.ResponseWriter, r *http.Req
 		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
 			statusCode = http.StatusBadRequest
 		}
-		httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, statusCode, "Scheduler start failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleSchedulerEvents(w http.ResponseWriter, r *http.Request) {
@@ -368,10 +363,10 @@ func (s *gameCoreServer) handleSchedulerEvents(w http.ResponseWriter, r *http.Re
 	query := parseSchedulerEventQuery(r)
 	events, err := s.scheduler.Events(r.Context(), query)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Scheduler events unavailable", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameSchedulerEventPage]{Status: "success", Data: events})
+	writeData(w, http.StatusOK, events)
 }
 
 func (s *gameCoreServer) handleStopScheduler(w http.ResponseWriter, r *http.Request) {
@@ -380,10 +375,10 @@ func (s *gameCoreServer) handleStopScheduler(w http.ResponseWriter, r *http.Requ
 	}
 	status, err := s.scheduler.Stop()
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "error", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Scheduler stop failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleUpdateScheduler(w http.ResponseWriter, r *http.Request) {
@@ -393,21 +388,21 @@ func (s *gameCoreServer) handleUpdateScheduler(w http.ResponseWriter, r *http.Re
 
 	var req apigateway.UpdateSchedulerRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "could not parse interval payload."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse interval payload.")
 		return
 	}
 
 	if req.IntervalSeconds < 1 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "interval must be at least 1 second."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "interval must be at least 1 second.")
 		return
 	}
 
 	status, err := s.scheduler.Update(time.Duration(req.IntervalSeconds) * time.Second)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "error", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Scheduler update failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +411,7 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 	}
 	var request apigateway.GameSubmitFlagsRequest
 	if err := httpapi.DecodeJSON(r, &request); err != nil || request.TeamID <= 0 || len(request.Flags) == 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "flag submission request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag submission request is invalid.")
 		return
 	}
 	results, err := s.submitFlags(r.Context(), request.TeamID, request.Flags)
@@ -426,19 +421,31 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
 			statusCode = http.StatusBadRequest
 		}
-		httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, statusCode, "Flag submission failed", err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.SubmissionVerdictAlias]{Status: "success", Data: toSubmissionVerdictAliases(results)})
+	writeData(w, http.StatusOK, toSubmissionVerdictAliases(results))
 }
 
 func (s *gameCoreServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing game-core endpoints."})
+		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing game-core endpoints.")
 		return false
 	}
 	return true
+}
+
+func writeData(w http.ResponseWriter, statusCode int, value any) {
+	httpapi.WriteJSON(w, statusCode, value)
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, title, detail string) {
+	httpapi.WriteProblem(w, statusCode, httpapi.ProblemDetails{
+		Title:  title,
+		Status: statusCode,
+		Detail: detail,
+	})
 }
 
 func parseCheckerRunQuery(r *http.Request) apigateway.GameCheckerRunQuery {
@@ -682,24 +689,24 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 	for _, flagValue := range flags {
 		trimmed := strings.TrimSpace(flagValue)
 		if trimmed == "" {
-			results = append(results, submissionVerdictAlias{Flag: flagValue, Verdict: "flag is wrong or expired."})
+			results = append(results, submissionVerdictAlias{Flag: flagValue, Status: "invalid", Detail: "flag is wrong or expired."})
 			continue
 		}
 		if _, ok := seen[trimmed]; ok {
-			results = append(results, submissionVerdictAlias{Flag: trimmed, Verdict: "flag already submitted."})
+			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "duplicate", Detail: "flag already submitted."})
 			continue
 		}
 		seen[trimmed] = struct{}{}
 
 		claims, ok := s.flags.Parse(trimmed)
 		if !ok || currentTick == 0 || currentTick > claims.ExpiresTick || claims.OwnerTeamID == teamID {
-			results = append(results, submissionVerdictAlias{Flag: trimmed, Verdict: "flag is wrong or expired."})
+			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "invalid", Detail: "flag is wrong or expired."})
 			continue
 		}
 
 		issued, err := s.store.LookupIssuedFlag(ctx, trimmed)
 		if err != nil || issued.OwnerTeamID != claims.OwnerTeamID || issued.ChallengeID != claims.ChallengeID || issued.IssuedTick != claims.IssuedTick || issued.ExpiresTick != claims.ExpiresTick {
-			results = append(results, submissionVerdictAlias{Flag: trimmed, Verdict: "flag is wrong or expired."})
+			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "invalid", Detail: "flag is wrong or expired."})
 			continue
 		}
 
@@ -716,11 +723,11 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			return nil, err
 		}
 		if !accepted {
-			results = append(results, submissionVerdictAlias{Flag: trimmed, Verdict: "flag already submitted."})
+			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "duplicate", Detail: "flag already submitted."})
 			continue
 		}
 
-		results = append(results, submissionVerdictAlias{Flag: trimmed, Verdict: "flag is correct."})
+		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct."})
 	}
 	return results, nil
 }
@@ -737,14 +744,15 @@ func normalizedCheckerRunStatus(status string) string {
 }
 
 type submissionVerdictAlias struct {
-	Flag    string `json:"flag"`
-	Verdict string `json:"verdict"`
+	Flag   string `json:"flag"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
 }
 
 func toSubmissionVerdictAliases(values []submissionVerdictAlias) []apigateway.SubmissionVerdictAlias {
 	result := make([]apigateway.SubmissionVerdictAlias, 0, len(values))
 	for _, value := range values {
-		result = append(result, apigateway.SubmissionVerdictAlias{Flag: value.Flag, Verdict: value.Verdict})
+		result = append(result, apigateway.SubmissionVerdictAlias{Flag: value.Flag, Status: value.Status, Detail: value.Detail})
 	}
 	return result
 }

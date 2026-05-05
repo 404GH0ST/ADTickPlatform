@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 
 import { teardownAdminAccess } from '@/lib/admin-api';
+import { problemResponse } from '@/lib/api-handler';
 
 export async function POST() {
   try {
     const data = await teardownAdminAccess();
-    return NextResponse.json({ status: 'success', data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'controller access teardown failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
+    return problemResponse(502, 'Upstream request failed', message);
   }
 }

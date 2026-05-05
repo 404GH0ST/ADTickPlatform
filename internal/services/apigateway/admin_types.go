@@ -17,6 +17,7 @@ type adminCreateChallengeRequest struct {
 	Name               string `json:"name"`
 	BaselineImage      string `json:"baseline_image"`
 	CheckerImage       string `json:"checker_image"`
+	SourceBundlePath   string `json:"source_bundle_path"`
 	Weight             int    `json:"weight"`
 	ServicePort        int    `json:"service_port,omitempty"`
 	ServiceSubnetOctet int    `json:"service_subnet_octet,omitempty"`
@@ -34,10 +35,11 @@ type adminUpdatePlayerRequest struct {
 }
 
 type adminUpdateChallengeRequest struct {
-	Name          string `json:"name"`
-	BaselineImage string `json:"baseline_image"`
-	CheckerImage  string `json:"checker_image"`
-	Weight        int    `json:"weight"`
+	Name             string `json:"name"`
+	BaselineImage    string `json:"baseline_image"`
+	CheckerImage     string `json:"checker_image"`
+	SourceBundlePath string `json:"source_bundle_path"`
+	Weight           int    `json:"weight"`
 }
 
 type adminTeam struct {
@@ -116,6 +118,7 @@ type adminChallenge struct {
 	Name               string `json:"name"`
 	BaselineImage      string `json:"baseline_image"`
 	CheckerImage       string `json:"checker_image"`
+	SourceBundlePath   string `json:"source_bundle_path"`
 	Weight             int    `json:"weight"`
 	ServicePort        int    `json:"service_port"`
 	ServiceSubnetOctet int    `json:"service_subnet_octet"`

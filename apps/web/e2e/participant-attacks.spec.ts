@@ -1,11 +1,19 @@
 import { expect, test } from "@playwright/test";
 import { assertEmptyAttacksState } from "./test-layout-utils";
+import {
+  mockApiBaseUrl,
+  participantStorageState,
+  resetMockApi,
+} from "./test-utils";
 
-const mockApiBaseUrl = "http://127.0.0.1:4010";
-
-test.beforeEach(async () => {
+test.use({
+  viewport: { width: 1280, height: 900 },
+  storageState: participantStorageState,
 });
 
+test.beforeEach(async ({ request }) => {
+  await resetMockApi(request);
+});
 
 test("participant attacks defaults to the map view and shows finished-match status", async ({
   page,
@@ -83,7 +91,7 @@ test("participant services page falls back to endpoint-only rows when service-st
   await expect(serviceCard.getByText("warning")).toBeVisible();
   await expect(
     serviceCard.getByText("service state endpoint unavailable"),
-  ).toHaveCount(2);
+  ).toHaveCount(3);
 });
 
 test("participant attack map maximize dialog expands beyond the inline panel and stays scrollable", async ({
@@ -186,6 +194,11 @@ test("participant service actions update the service card through unlock, ssh, r
   await expect(
     serviceCard.getByText("unlock required before requesting root access"),
   ).toBeVisible();
+  await expect(serviceCard.getByText("check passed on tick #12")).toBeVisible();
+  await expect(serviceCard.getByText("latest SLA cycle passed")).toBeVisible();
+  await expect(
+    serviceCard.getByRole("link", { name: "Download Source" }),
+  ).toHaveAttribute("href", "/api/platform/challenges/1/source");
 
   await serviceCard.getByRole("button", { name: "Unlock Service" }).click();
   const unlockDialog = page.getByRole("dialog", { name: "Unlock Service" });
@@ -195,17 +208,12 @@ test("participant service actions update the service card through unlock, ssh, r
   await expect(
     serviceCard.getByText("unlock granted via participant API"),
   ).toBeVisible();
-  await expect(
-    serviceCard.getByText(
-      "unlock accepted; request a one-time root password to get the current credential",
-    ),
-  ).toBeVisible();
   await expect(serviceCard.getByText("unlocked")).toBeVisible();
 
   await serviceCard.getByRole("button", { name: "SSH Access" }).click();
   const sshDialog = page.getByRole("dialog", { name: "SSH Access" });
   await expect(sshDialog.getByText("ssh root@10.80.50.11 -p 22")).toBeVisible();
-  await expect(sshDialog.getByText("root-pass-1")).toBeVisible();
+  await expect(sshDialog.getByText("Adp-team-credential-Aa1!")).toBeVisible();
   await sshDialog.getByRole("button", { name: "Close" }).first().click();
 
   await serviceCard.getByRole("button", { name: "Restart" }).click();
@@ -224,9 +232,5 @@ test("participant service actions update the service card through unlock, ssh, r
     serviceCard.getByText("factory reset triggered via participant API"),
   ).toBeVisible();
   await expect(serviceCard.getByText("cooldown: 90s")).toBeVisible();
-  await expect(
-    serviceCard.getByText(
-      "unlock preserved; request a fresh one-time root password to rotate the credential",
-    ),
-  ).toBeVisible();
+  await expect(serviceCard.getByText("unlocked")).toBeVisible();
 });

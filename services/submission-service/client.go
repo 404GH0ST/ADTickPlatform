@@ -114,22 +114,28 @@ func requestGameCoreSubmissionJSON[T any](ctx context.Context, c *httpGameCoreSu
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[T]
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
 			return zero, err
 		}
-		return payload.Data, nil
+		return zero, nil
 	}
 
 	var payload struct {
-		Status  string `json:"status"`
+		Detail  string `json:"detail"`
+		Title   string `json:"title"`
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return zero, fmt.Errorf("game-core request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
+	if strings.TrimSpace(payload.Detail) != "" {
+		return zero, fmt.Errorf("game-core request failed: %s", payload.Detail)
+	}
+	if strings.TrimSpace(payload.Message) != "" {
 		return zero, fmt.Errorf("game-core request failed: %s", payload.Message)
+	}
+	if strings.TrimSpace(payload.Title) != "" {
+		return zero, fmt.Errorf("game-core request failed: %s", payload.Title)
 	}
 	return zero, fmt.Errorf("game-core request failed with status %d", resp.StatusCode)
 }

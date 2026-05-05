@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { problemResponse } from '@/lib/api-handler';
 import { listAttackFeed } from '@/lib/platform-api';
 import { parseAttackFeedQuery } from '@/lib/route-query';
 
@@ -8,9 +9,9 @@ export async function GET(request: NextRequest) {
     const data = await listAttackFeed(
       parseAttackFeedQuery(request.nextUrl.searchParams),
     );
-    return NextResponse.json({ status: 'success', data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'attack feed failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
+    return problemResponse(502, 'Upstream request failed', message);
   }
 }

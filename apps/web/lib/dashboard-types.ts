@@ -17,10 +17,15 @@ export type ServiceRow = {
   port: number;
   status: 'stable' | 'warming' | 'degraded';
   checker: 'passing' | 'warning';
+  hasSourceDownload: boolean;
   unlocked: boolean;
   sshHint: string;
   lastEvent: string;
   resetCooldown: string;
+  slaStatus: "passing" | "failing" | "unknown";
+  slaPhase: string;
+  slaTickId: number | null;
+  slaMessage: string;
 };
 
 export type AttackEvent = {

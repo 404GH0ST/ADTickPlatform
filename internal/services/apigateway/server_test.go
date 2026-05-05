@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -495,7 +497,7 @@ func (c testGameCoreClient) SubmitFlags(_ context.Context, _ int, flags []string
 	if len(c.submit) == 0 {
 		result := make([]submissionVerdict, 0, len(flags))
 		for _, flag := range flags {
-			result = append(result, submissionVerdict{Flag: flag, Verdict: "flag is correct."})
+			result = append(result, submissionVerdict{Flag: flag, Status: "accepted", Detail: "flag is correct."})
 		}
 		return result, nil
 	}
@@ -563,7 +565,7 @@ func (c testSubmissionClient) SubmitFlags(_ context.Context, _ int, flags []stri
 	if len(c.submit) == 0 {
 		result := make([]submissionVerdict, 0, len(flags))
 		for _, flag := range flags {
-			result = append(result, submissionVerdict{Flag: flag, Verdict: "submission-service accepted the flag."})
+			result = append(result, submissionVerdict{Flag: flag, Status: "accepted", Detail: "submission-service accepted the flag."})
 		}
 		return result, nil
 	}
@@ -653,6 +655,31 @@ func testUnlockProof(teamID, challengeID int) string {
 	return unlockproof.Issue("dev-team-token", teamID, challengeID)
 }
 
+func decodeCompat[T any](t *testing.T, body []byte) T {
+	t.Helper()
+
+	var value T
+	if err := json.Unmarshal(body, &value); err == nil {
+		return value
+	}
+
+	t.Fatalf("failed to decode response body %s", string(body))
+	var zero T
+	return zero
+}
+
+func decodeProblemCompat(t *testing.T, body []byte) httpapi.ProblemDetails {
+	t.Helper()
+
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(body, &problem); err == nil && (problem.Detail != "" || problem.Title != "") {
+		return problem
+	}
+
+	t.Fatalf("failed to decode problem body %s", string(body))
+	return httpapi.ProblemDetails{}
+}
+
 func TestAuthenticate(t *testing.T) {
 	mux := newTestMux()
 	body := bytes.NewBufferString(`{"email":"alpha.captain@example.com","password":"alpha-secret"}`)
@@ -666,14 +693,17 @@ func TestAuthenticate(t *testing.T) {
 	}
 
 	var payload struct {
-		Status string `json:"status"`
-		Data   string `json:"data"`
+		Token     string `json:"token"`
+		TokenType string `json:"token_type"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode auth response: %v", err)
 	}
-	if payload.Data == "" || bytes.Count([]byte(payload.Data), []byte(".")) != 2 {
-		t.Fatalf("expected jwt-like token, got %q", payload.Data)
+	if payload.TokenType != "Bearer" {
+		t.Fatalf("expected bearer token type, got %q", payload.TokenType)
+	}
+	if payload.Token == "" || bytes.Count([]byte(payload.Token), []byte(".")) != 2 {
+		t.Fatalf("expected jwt-like token, got %q", payload.Token)
 	}
 }
 
@@ -698,15 +728,15 @@ func TestAuthenticateReturnsRateLimit429(t *testing.T) {
 		t.Fatalf("expected Retry-After 4, got %q", got)
 	}
 
-	var payload httpapi.ErrorEnvelope
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode 429 response: %v", err)
+	payload := decodeProblemCompat(t, response.Body.Bytes())
+	if payload.Status != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status %d", payload.Status)
 	}
-	if payload.Status != "too many request" {
-		t.Fatalf("unexpected status %q", payload.Status)
+	if payload.Title != "Too many requests" {
+		t.Fatalf("unexpected title %q", payload.Title)
 	}
-	if payload.Message != defaultRateLimit429Message {
-		t.Fatalf("unexpected rate-limit message %q", payload.Message)
+	if payload.Detail != defaultRateLimit429Message {
+		t.Fatalf("unexpected rate-limit message %q", payload.Detail)
 	}
 }
 
@@ -744,24 +774,24 @@ func TestSubmitReturnsRateLimit429(t *testing.T) {
 		t.Fatalf("expected Retry-After 3, got %q", got)
 	}
 
-	var payload httpapi.ErrorEnvelope
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode 429 response: %v", err)
+	payload := decodeProblemCompat(t, response.Body.Bytes())
+	if payload.Status != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status %d", payload.Status)
 	}
-	if payload.Status != "too many request" {
-		t.Fatalf("unexpected status %q", payload.Status)
+	if payload.Title != "Too many requests" {
+		t.Fatalf("unexpected title %q", payload.Title)
 	}
-	if payload.Message != defaultRateLimit429Message {
-		t.Fatalf("unexpected rate-limit message %q", payload.Message)
+	if payload.Detail != defaultRateLimit429Message {
+		t.Fatalf("unexpected rate-limit message %q", payload.Detail)
 	}
 }
 
 func TestSubmitReturnsDuplicateVerdict(t *testing.T) {
 	mux := newTestMuxWithGameCore(testGameCoreClient{
 		submit: []SubmissionVerdictAlias{
-			{Flag: "FLAGv1.demo", Verdict: "flag is correct."},
-			{Flag: "FLAGv1.demo", Verdict: "flag already submitted."},
-			{Flag: "bad", Verdict: "flag is wrong or expired."},
+			{Flag: "FLAGv1.demo", Status: "accepted", Detail: "flag is correct."},
+			{Flag: "FLAGv1.demo", Status: "duplicate", Detail: "flag already submitted."},
+			{Flag: "bad", Status: "invalid", Detail: "flag is wrong or expired."},
 		},
 	})
 	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo","FLAGv1.demo","bad"]}`)
@@ -775,25 +805,25 @@ func TestSubmitReturnsDuplicateVerdict(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string `json:"status"`
-		Data   []struct {
-			Flag    string `json:"flag"`
-			Verdict string `json:"verdict"`
-		} `json:"data"`
-	}
+	var payload submissionResult
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(payload.Data) != 3 {
-		t.Fatalf("expected 3 verdicts, got %d", len(payload.Data))
+	if len(payload.Results) != 3 {
+		t.Fatalf("expected 3 verdicts, got %d", len(payload.Results))
 	}
-	if payload.Data[0].Verdict != "flag is correct." {
-		t.Fatalf("unexpected first verdict: %s", payload.Data[0].Verdict)
+	if payload.AcceptedCount != 1 || payload.RejectedCount != 2 {
+		t.Fatalf("unexpected counts %+v", payload)
 	}
-	if payload.Data[1].Verdict != "flag already submitted." {
-		t.Fatalf("unexpected duplicate verdict: %s", payload.Data[1].Verdict)
+	if payload.Results[0].Status != "accepted" || payload.Results[0].Detail != "flag is correct." {
+		t.Fatalf("unexpected first verdict: %+v", payload.Results[0])
+	}
+	if payload.Results[1].Status != "duplicate" || payload.Results[1].Detail != "flag already submitted." {
+		t.Fatalf("unexpected duplicate verdict: %+v", payload.Results[1])
+	}
+	if payload.Results[2].Status != "invalid" || payload.Results[2].Detail != "flag is wrong or expired." {
+		t.Fatalf("unexpected invalid verdict: %+v", payload.Results[2])
 	}
 }
 
@@ -822,14 +852,11 @@ func TestScoreboardEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string     `json:"status"`
-		Data   []scoreRow `json:"data"`
-	}
+	var payload []scoreRow
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(payload.Data) == 0 {
+	if len(payload) == 0 {
 		t.Fatal("expected non-empty scoreboard")
 	}
 }
@@ -912,15 +939,12 @@ func TestScoreboardPrefersGameCoreWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string     `json:"status"`
-		Data   []scoreRow `json:"data"`
-	}
+	var payload []scoreRow
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode scoreboard response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].Team != "Team Omega" {
-		t.Fatalf("expected authoritative game-core scoreboard, got %+v", payload.Data)
+	if len(payload) != 1 || payload[0].Team != "Team Omega" {
+		t.Fatalf("expected authoritative game-core scoreboard, got %+v", payload)
 	}
 }
 
@@ -947,15 +971,12 @@ func TestScoreboardPrefersScoringWorkerWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string     `json:"status"`
-		Data   []scoreRow `json:"data"`
-	}
+	var payload []scoreRow
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode scoreboard response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].Team != "Team Worker" {
-		t.Fatalf("expected scoring-worker scoreboard, got %+v", payload.Data)
+	if len(payload) != 1 || payload[0].Team != "Team Worker" {
+		t.Fatalf("expected scoring-worker scoreboard, got %+v", payload)
 	}
 }
 
@@ -974,18 +995,15 @@ func TestAttacksPrefersGameCoreWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   AttackFeedPage `json:"data"`
-	}
+	var payload AttackFeedPage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode attack feed response: %v", err)
 	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].ID != "atk-core-1" {
-		t.Fatalf("expected authoritative game-core attack feed, got %+v", payload.Data)
+	if len(payload.Items) != 1 || payload.Items[0].ID != "atk-core-1" {
+		t.Fatalf("expected authoritative game-core attack feed, got %+v", payload)
 	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasNext || payload.Data.HasPrev {
-		t.Fatalf("unexpected attack feed page metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasNext || payload.HasPrev {
+		t.Fatalf("unexpected attack feed page metadata %+v", payload)
 	}
 }
 
@@ -1012,15 +1030,12 @@ func TestAttacksPrefersSubmissionServiceWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   AttackFeedPage `json:"data"`
-	}
+	var payload AttackFeedPage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode attack feed response: %v", err)
 	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].ID != "atk-sub-1" {
-		t.Fatalf("expected submission-service attack feed, got %+v", payload.Data)
+	if len(payload.Items) != 1 || payload.Items[0].ID != "atk-sub-1" {
+		t.Fatalf("expected submission-service attack feed, got %+v", payload)
 	}
 }
 
@@ -1040,18 +1055,15 @@ func TestAttacksSupportsTextFilters(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   AttackFeedPage `json:"data"`
-	}
+	var payload AttackFeedPage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode filtered attack feed response: %v", err)
 	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].ID != "atk-core-2" {
-		t.Fatalf("expected filtered attack feed, got %+v", payload.Data)
+	if len(payload.Items) != 1 || payload.Items[0].ID != "atk-core-2" {
+		t.Fatalf("expected filtered attack feed, got %+v", payload)
 	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasNext || payload.Data.HasPrev {
-		t.Fatalf("unexpected filtered attack feed page metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasNext || payload.HasPrev {
+		t.Fatalf("unexpected filtered attack feed page metadata %+v", payload)
 	}
 }
 
@@ -1092,18 +1104,15 @@ func TestAttacksSupportsTickRangeFilters(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   AttackFeedPage `json:"data"`
-	}
+	var payload AttackFeedPage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode tick-filtered attack feed response: %v", err)
 	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].ID != "atk-core-1" {
-		t.Fatalf("expected tick-filtered attack feed, got %+v", payload.Data)
+	if len(payload.Items) != 1 || payload.Items[0].ID != "atk-core-1" {
+		t.Fatalf("expected tick-filtered attack feed, got %+v", payload)
 	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasNext || payload.Data.HasPrev {
-		t.Fatalf("unexpected tick-filtered attack feed page metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasNext || payload.HasPrev {
+		t.Fatalf("unexpected tick-filtered attack feed page metadata %+v", payload)
 	}
 }
 
@@ -1119,15 +1128,12 @@ func TestUnlockRejectsInvalidProof(t *testing.T) {
 		t.Fatalf("expected 400, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
+	var payload httpapi.ProblemDetails
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode unlock response: %v", err)
 	}
-	if payload.Message != "unlock proof is invalid." {
-		t.Fatalf("unexpected unlock message %q", payload.Message)
+	if payload.Detail != "unlock proof is invalid." {
+		t.Fatalf("unexpected unlock message %q", payload.Detail)
 	}
 }
 
@@ -1158,18 +1164,15 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 		t.Fatalf("expected services 200, got %d", servicesResponse.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   []serviceState `json:"data"`
-	}
+	var payload []serviceState
 	if err := json.Unmarshal(servicesResponse.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode services response: %v", err)
 	}
 
 	var chatState *serviceState
-	for idx := range payload.Data {
-		if payload.Data[idx].ChallengeID == 2 {
-			chatState = &payload.Data[idx]
+	for idx := range payload {
+		if payload[idx].ChallengeID == 2 {
+			chatState = &payload[idx]
 			break
 		}
 	}
@@ -1181,6 +1184,75 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	}
 	if chatState.Status != "warming" {
 		t.Fatalf("expected warming status after reset, got %s", chatState.Status)
+	}
+}
+
+func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
+	mux := newTestMuxWithGameCore(testGameCoreClient{
+		runs: []GameCheckerRun{
+			{ID: 33, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "check", Status: "skipped", Message: "phase skipped after previous checker failure", CheckedAt: "2026-03-10T10:12:03Z"},
+			{ID: 32, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "get", Status: "failed", Message: "flag retrieval failed from service endpoint", CheckedAt: "2026-03-10T10:12:02Z"},
+			{ID: 31, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "put", Status: "success", CheckedAt: "2026-03-10T10:12:01Z"},
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	request.Header.Set("Authorization", "Bearer dev-team-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected services 200, got %d", response.Code)
+	}
+
+	var payload []serviceState
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode services response: %v", err)
+	}
+
+	for _, state := range payload {
+		if state.ChallengeID != 1 {
+			continue
+		}
+		if state.SLAStatus != "failing" {
+			t.Fatalf("expected failing SLA status, got %q", state.SLAStatus)
+		}
+		if state.SLAPhase != "get" {
+			t.Fatalf("expected get SLA phase, got %q", state.SLAPhase)
+		}
+		if state.SLATickID != 12 {
+			t.Fatalf("expected SLA tick 12, got %d", state.SLATickID)
+		}
+		if state.SLAMessage != "flag retrieval failed from service endpoint" {
+			t.Fatalf("unexpected SLA message %q", state.SLAMessage)
+		}
+		return
+	}
+	t.Fatal("expected service state for challenge 1")
+}
+
+func TestParticipantCanDownloadChallengeSourceBundle(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", filepath.Clean(filepath.Join(wd, "..", "..", "..")))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/challenges/1/source", nil)
+	request.Header.Set("Authorization", "Bearer dev-team-token")
+	response := httptest.NewRecorder()
+
+	newTestMux().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected source download 200, got %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, "banking-source.tar.gz") {
+		t.Fatalf("unexpected content disposition %q", got)
+	}
+	if got := response.Header().Get("Content-Type"); !strings.Contains(got, "application/gzip") {
+		t.Fatalf("unexpected content type %q", got)
+	}
+	if response.Body.Len() == 0 {
+		t.Fatal("expected non-empty source bundle response body")
 	}
 }
 
@@ -1231,24 +1303,24 @@ func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 		t.Fatalf("expected ssh session 200 after reset, got %d", sshResponse.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   sshSessionData `json:"data"`
-	}
+	var payload sshSessionData
 	if err := json.Unmarshal(sshResponse.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode ssh response: %v", err)
 	}
-	if payload.Data.Host != "10.80.1.11" {
-		t.Fatalf("expected same service ip host, got %s", payload.Data.Host)
+	if payload.Host != "10.80.1.11" {
+		t.Fatalf("expected same service ip host, got %s", payload.Host)
 	}
-	if payload.Data.Username != "root" {
-		t.Fatalf("expected root user, got %s", payload.Data.Username)
+	if payload.Username != "root" {
+		t.Fatalf("expected root user, got %s", payload.Username)
 	}
-	if payload.Data.Password == "" {
-		t.Fatal("expected one-time root password to be issued")
+	if payload.Password == "" {
+		t.Fatal("expected stable root password to be returned")
 	}
-	if payload.Data.ConnectionHint != "ssh root@10.80.1.11" {
-		t.Fatalf("unexpected connection hint: %s", payload.Data.ConnectionHint)
+	if payload.PasswordMode != "stable" {
+		t.Fatalf("expected stable password mode, got %q", payload.PasswordMode)
+	}
+	if payload.ConnectionHint != "ssh root@10.80.1.11" {
+		t.Fatalf("unexpected connection hint: %s", payload.ConnectionHint)
 	}
 }
 
@@ -1281,16 +1353,13 @@ func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 		t.Fatalf("expected services 200, got %d", servicesResponse.Code)
 	}
 
-	var payload struct {
-		Status string         `json:"status"`
-		Data   []serviceState `json:"data"`
-	}
+	var payload []serviceState
 	if err := json.Unmarshal(servicesResponse.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode services response: %v", err)
 	}
-	for _, state := range payload.Data {
+	for _, state := range payload {
 		if state.ChallengeID == 1 {
-			if state.SSHHint != "credential apply failed; request a fresh one-time root password to retry" {
+			if state.SSHHint != "credential apply failed; open SSH Access to retry applying the team credential" {
 				t.Fatalf("unexpected ssh hint %q", state.SSHHint)
 			}
 			if state.LastEvent != "ssh credential apply failed" {
@@ -1337,19 +1406,13 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 		t.Fatalf("expected audit 200, got %d", auditResponse.Code)
 	}
 
-	var payload struct {
-		Status string            `json:"status"`
-		Data   adminAuditLogPage `json:"data"`
-	}
-	if err := json.Unmarshal(auditResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode audit response: %v", err)
-	}
-	if payload.Data.TotalCount < 3 {
-		t.Fatalf("expected at least 3 audit entries, got %d", payload.Data.TotalCount)
+	payload := decodeCompat[adminAuditLogPage](t, auditResponse.Body.Bytes())
+	if payload.TotalCount < 3 {
+		t.Fatalf("expected at least 3 audit entries, got %d", payload.TotalCount)
 	}
 
-	joinedActions := make([]string, 0, len(payload.Data.Items))
-	for _, item := range payload.Data.Items {
+	joinedActions := make([]string, 0, len(payload.Items))
+	for _, item := range payload.Items {
 		joinedActions = append(joinedActions, item.Action)
 	}
 	actionSet := strings.Join(joinedActions, ",")
@@ -1384,18 +1447,12 @@ func TestAdminAuditLogCanFilterChallengeCreate(t *testing.T) {
 		t.Fatalf("expected audit 200, got %d", auditResponse.Code)
 	}
 
-	var payload struct {
-		Status string            `json:"status"`
-		Data   adminAuditLogPage `json:"data"`
-	}
-	if err := json.Unmarshal(auditResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode audit response: %v", err)
-	}
-	if payload.Data.TotalCount == 0 {
+	payload := decodeCompat[adminAuditLogPage](t, auditResponse.Body.Bytes())
+	if payload.TotalCount == 0 {
 		t.Fatal("expected at least one challenge.create audit entry")
 	}
-	if payload.Data.Items[0].Action != "challenge.create" {
-		t.Fatalf("expected challenge.create action, got %s", payload.Data.Items[0].Action)
+	if payload.Items[0].Action != "challenge.create" {
+		t.Fatalf("expected challenge.create action, got %s", payload.Items[0].Action)
 	}
 }
 
@@ -1423,15 +1480,9 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 		t.Fatalf("expected team create 200, got %d", teamResponse.Code)
 	}
 
-	var teamPayload struct {
-		Status string    `json:"status"`
-		Data   adminTeam `json:"data"`
-	}
-	if err := json.Unmarshal(teamResponse.Body.Bytes(), &teamPayload); err != nil {
-		t.Fatalf("failed to decode team response: %v", err)
-	}
+	teamPayload := decodeCompat[adminTeam](t, teamResponse.Body.Bytes())
 
-	playerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/players", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"display_name":"Nova Captain","email":"nova.captain@example.com","password":"nova-secret","role":"captain"}`, teamPayload.Data.ID)))
+	playerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/players", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"display_name":"Nova Captain","email":"nova.captain@example.com","password":"nova-secret","role":"captain"}`, teamPayload.ID)))
 	playerRequest.Header.Set("Authorization", adminAuth)
 	playerResponse := httptest.NewRecorder()
 	mux.ServeHTTP(playerResponse, playerRequest)
@@ -1447,32 +1498,20 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
 	}
 
-	var challengePayload struct {
-		Status string         `json:"status"`
-		Data   adminChallenge `json:"data"`
-	}
-	if err := json.Unmarshal(challengeResponse.Body.Bytes(), &challengePayload); err != nil {
-		t.Fatalf("failed to decode challenge response: %v", err)
-	}
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
 
-	deployRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/"+fmt.Sprintf("%d", challengePayload.Data.ID)+"/deploy", nil)
+	deployRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/"+fmt.Sprintf("%d", challengePayload.ID)+"/deploy", nil)
 	deployRequest.Header.Set("Authorization", adminAuth)
 	deployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deployResponse, deployRequest)
 	if deployResponse.Code != http.StatusOK {
 		t.Fatalf("expected deploy 200, got %d", deployResponse.Code)
 	}
-	var deployPayload struct {
-		Status string          `json:"status"`
-		Data   adminDeployment `json:"data"`
+	deployPayload := decodeCompat[adminDeployment](t, deployResponse.Body.Bytes())
+	if deployPayload.Status != "queued" {
+		t.Fatalf("expected queued deploy status, got %s", deployPayload.Status)
 	}
-	if err := json.Unmarshal(deployResponse.Body.Bytes(), &deployPayload); err != nil {
-		t.Fatalf("failed to decode deploy response: %v", err)
-	}
-	if deployPayload.Data.Status != "queued" {
-		t.Fatalf("expected queued deploy status, got %s", deployPayload.Data.Status)
-	}
-	if deployPayload.Data.JobID == 0 {
+	if deployPayload.JobID == 0 {
 		t.Fatal("expected deployment job id")
 	}
 
@@ -1484,15 +1523,12 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 		t.Fatalf("expected services 200, got %d", servicesResponse.Code)
 	}
 
-	var servicesPayload struct {
-		Status string                         `json:"status"`
-		Data   map[string]map[string][]string `json:"data"`
-	}
+	var servicesPayload map[string]map[string][]string
 	if err := json.Unmarshal(servicesResponse.Body.Bytes(), &servicesPayload); err != nil {
 		t.Fatalf("failed to decode services response: %v", err)
 	}
-	challengeKey := fmt.Sprintf("%d", challengePayload.Data.ID)
-	if _, ok := servicesPayload.Data[challengeKey]; !ok {
+	challengeKey := fmt.Sprintf("%d", challengePayload.ID)
+	if _, ok := servicesPayload[challengeKey]; !ok {
 		t.Fatalf("expected deployed challenge %s in public service map", challengeKey)
 	}
 
@@ -1520,16 +1556,13 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 		t.Fatalf("expected team services 200, got %d", teamServicesResponse.Code)
 	}
 
-	var teamServicesPayload struct {
-		Status string         `json:"status"`
-		Data   []serviceState `json:"data"`
-	}
+	var teamServicesPayload []serviceState
 	if err := json.Unmarshal(teamServicesResponse.Body.Bytes(), &teamServicesPayload); err != nil {
 		t.Fatalf("failed to decode team services response: %v", err)
 	}
 	foundReady := false
-	for _, service := range teamServicesPayload.Data {
-		if service.ChallengeID == challengePayload.Data.ID {
+	for _, service := range teamServicesPayload {
+		if service.ChallengeID == challengePayload.ID {
 			foundReady = service.Status == "stable"
 			break
 		}
@@ -1551,18 +1584,12 @@ func TestAdminDeployUsesConfiguredServiceSubnetAndPort(t *testing.T) {
 		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
 	}
 
-	var challengePayload struct {
-		Status string         `json:"status"`
-		Data   adminChallenge `json:"data"`
-	}
-	if err := json.Unmarshal(challengeResponse.Body.Bytes(), &challengePayload); err != nil {
-		t.Fatalf("failed to decode challenge response: %v", err)
-	}
-	if challengePayload.Data.ServicePort != 31337 || challengePayload.Data.ServiceSubnetOctet != 77 {
-		t.Fatalf("unexpected runtime spec %+v", challengePayload.Data)
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
+	if challengePayload.ServicePort != 31337 || challengePayload.ServiceSubnetOctet != 77 {
+		t.Fatalf("unexpected runtime spec %+v", challengePayload)
 	}
 
-	deployRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/"+fmt.Sprintf("%d", challengePayload.Data.ID)+"/deploy", nil)
+	deployRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/"+fmt.Sprintf("%d", challengePayload.ID)+"/deploy", nil)
 	deployRequest.Header.Set("Authorization", adminAuth)
 	deployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deployResponse, deployRequest)
@@ -1586,24 +1613,21 @@ func TestAdminDeployUsesConfiguredServiceSubnetAndPort(t *testing.T) {
 		t.Fatalf("expected team services 200, got %d", teamServicesResponse.Code)
 	}
 
-	var teamServicesPayload struct {
-		Status string         `json:"status"`
-		Data   []serviceState `json:"data"`
-	}
+	var teamServicesPayload []serviceState
 	if err := json.Unmarshal(teamServicesResponse.Body.Bytes(), &teamServicesPayload); err != nil {
 		t.Fatalf("failed to decode team services response: %v", err)
 	}
 
 	expectedEndpoint := "10.80.77.11:31337"
-	for _, service := range teamServicesPayload.Data {
-		if service.ChallengeID == challengePayload.Data.ID {
+	for _, service := range teamServicesPayload {
+		if service.ChallengeID == challengePayload.ID {
 			if service.Endpoint != expectedEndpoint {
 				t.Fatalf("expected endpoint %s, got %s", expectedEndpoint, service.Endpoint)
 			}
 			return
 		}
 	}
-	t.Fatalf("expected deployed service for challenge %d", challengePayload.Data.ID)
+	t.Fatalf("expected deployed service for challenge %d", challengePayload.ID)
 }
 
 func TestAdminReconcileDeploymentsUsesControllerWhenConfigured(t *testing.T) {
@@ -1631,15 +1655,9 @@ func TestAdminReconcileDeploymentsUsesControllerWhenConfigured(t *testing.T) {
 		t.Fatalf("expected reconcile 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string               `json:"status"`
-		Data   adminReconcileResult `json:"data"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode reconcile response: %v", err)
-	}
-	if payload.Data.ProcessedJobs != 7 || payload.Data.ProcessedInstances != 21 || payload.Data.CompletedJobs != 3 {
-		t.Fatalf("unexpected reconcile payload %+v", payload.Data)
+	payload := decodeCompat[adminReconcileResult](t, response.Body.Bytes())
+	if payload.ProcessedJobs != 7 || payload.ProcessedInstances != 21 || payload.CompletedJobs != 3 {
+		t.Fatalf("unexpected reconcile payload %+v", payload)
 	}
 }
 
@@ -1655,15 +1673,9 @@ func TestAdminCanDeleteCompletedDeploymentJob(t *testing.T) {
 		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
 	}
 
-	var challengePayload struct {
-		Status string         `json:"status"`
-		Data   adminChallenge `json:"data"`
-	}
-	if err := json.Unmarshal(challengeResponse.Body.Bytes(), &challengePayload); err != nil {
-		t.Fatalf("failed to decode challenge response: %v", err)
-	}
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
 
-	deployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.Data.ID), nil)
+	deployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
 	deployRequest.Header.Set("Authorization", adminAuth)
 	deployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deployResponse, deployRequest)
@@ -1671,13 +1683,7 @@ func TestAdminCanDeleteCompletedDeploymentJob(t *testing.T) {
 		t.Fatalf("expected deploy 200, got %d", deployResponse.Code)
 	}
 
-	var deployPayload struct {
-		Status string          `json:"status"`
-		Data   adminDeployment `json:"data"`
-	}
-	if err := json.Unmarshal(deployResponse.Body.Bytes(), &deployPayload); err != nil {
-		t.Fatalf("failed to decode deploy response: %v", err)
-	}
+	deployPayload := decodeCompat[adminDeployment](t, deployResponse.Body.Bytes())
 
 	reconcileRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/deployments/reconcile", nil)
 	reconcileRequest.Header.Set("Authorization", adminAuth)
@@ -1687,12 +1693,12 @@ func TestAdminCanDeleteCompletedDeploymentJob(t *testing.T) {
 		t.Fatalf("expected reconcile 200, got %d", reconcileResponse.Code)
 	}
 
-	deleteRequest := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v2/admin/deployments/%d", deployPayload.Data.JobID), nil)
+	deleteRequest := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v2/admin/deployments/%d", deployPayload.JobID), nil)
 	deleteRequest.Header.Set("Authorization", adminAuth)
 	deleteResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deleteResponse, deleteRequest)
-	if deleteResponse.Code != http.StatusOK {
-		t.Fatalf("expected deployment delete 200, got %d", deleteResponse.Code)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("expected deployment delete 204, got %d", deleteResponse.Code)
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/deployments", nil)
@@ -1703,15 +1709,9 @@ func TestAdminCanDeleteCompletedDeploymentJob(t *testing.T) {
 		t.Fatalf("expected deployment list 200, got %d", listResponse.Code)
 	}
 
-	var listPayload struct {
-		Status string               `json:"status"`
-		Data   []adminDeploymentJob `json:"data"`
-	}
-	if err := json.Unmarshal(listResponse.Body.Bytes(), &listPayload); err != nil {
-		t.Fatalf("failed to decode deployment list: %v", err)
-	}
-	if len(listPayload.Data) != 0 {
-		t.Fatalf("expected deleted deployment job to be removed, got %+v", listPayload.Data)
+	listPayload := decodeCompat[[]adminDeploymentJob](t, listResponse.Body.Bytes())
+	if len(listPayload) != 0 {
+		t.Fatalf("expected deleted deployment job to be removed, got %+v", listPayload)
 	}
 }
 
@@ -1727,15 +1727,9 @@ func TestAdminRedeploySupersedesOlderQueuedJob(t *testing.T) {
 		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
 	}
 
-	var challengePayload struct {
-		Status string         `json:"status"`
-		Data   adminChallenge `json:"data"`
-	}
-	if err := json.Unmarshal(challengeResponse.Body.Bytes(), &challengePayload); err != nil {
-		t.Fatalf("failed to decode challenge response: %v", err)
-	}
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
 
-	firstDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.Data.ID), nil)
+	firstDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
 	firstDeployRequest.Header.Set("Authorization", adminAuth)
 	firstDeployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(firstDeployResponse, firstDeployRequest)
@@ -1743,7 +1737,7 @@ func TestAdminRedeploySupersedesOlderQueuedJob(t *testing.T) {
 		t.Fatalf("expected first deploy 200, got %d", firstDeployResponse.Code)
 	}
 
-	secondDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.Data.ID), nil)
+	secondDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
 	secondDeployRequest.Header.Set("Authorization", adminAuth)
 	secondDeployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(secondDeployResponse, secondDeployRequest)
@@ -1759,27 +1753,21 @@ func TestAdminRedeploySupersedesOlderQueuedJob(t *testing.T) {
 		t.Fatalf("expected deployment list 200, got %d", listResponse.Code)
 	}
 
-	var listPayload struct {
-		Status string               `json:"status"`
-		Data   []adminDeploymentJob `json:"data"`
+	listPayload := decodeCompat[[]adminDeploymentJob](t, listResponse.Body.Bytes())
+	if len(listPayload) != 2 {
+		t.Fatalf("expected two deployment jobs after redeploy, got %+v", listPayload)
 	}
-	if err := json.Unmarshal(listResponse.Body.Bytes(), &listPayload); err != nil {
-		t.Fatalf("failed to decode deployment list: %v", err)
+	if listPayload[0].Status != "queued" {
+		t.Fatalf("expected newest deployment job to stay queued, got %+v", listPayload[0])
 	}
-	if len(listPayload.Data) != 2 {
-		t.Fatalf("expected two deployment jobs after redeploy, got %+v", listPayload.Data)
+	if listPayload[1].Status != "superseded" {
+		t.Fatalf("expected older deployment job to be superseded, got %+v", listPayload[1])
 	}
-	if listPayload.Data[0].Status != "queued" {
-		t.Fatalf("expected newest deployment job to stay queued, got %+v", listPayload.Data[0])
+	if listPayload[1].QueuedTeamCount != 0 {
+		t.Fatalf("expected superseded deployment job queue to be cleared, got %+v", listPayload[1])
 	}
-	if listPayload.Data[1].Status != "superseded" {
-		t.Fatalf("expected older deployment job to be superseded, got %+v", listPayload.Data[1])
-	}
-	if listPayload.Data[1].QueuedTeamCount != 0 {
-		t.Fatalf("expected superseded deployment job queue to be cleared, got %+v", listPayload.Data[1])
-	}
-	if listPayload.Data[1].CompletedAt == "" {
-		t.Fatalf("expected superseded deployment job completion time, got %+v", listPayload.Data[1])
+	if listPayload[1].CompletedAt == "" {
+		t.Fatalf("expected superseded deployment job completion time, got %+v", listPayload[1])
 	}
 }
 
@@ -1795,15 +1783,9 @@ func TestAdminCannotDeleteActiveDeploymentJob(t *testing.T) {
 		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
 	}
 
-	var challengePayload struct {
-		Status string         `json:"status"`
-		Data   adminChallenge `json:"data"`
-	}
-	if err := json.Unmarshal(challengeResponse.Body.Bytes(), &challengePayload); err != nil {
-		t.Fatalf("failed to decode challenge response: %v", err)
-	}
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
 
-	deployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.Data.ID), nil)
+	deployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
 	deployRequest.Header.Set("Authorization", adminAuth)
 	deployResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deployResponse, deployRequest)
@@ -1811,15 +1793,9 @@ func TestAdminCannotDeleteActiveDeploymentJob(t *testing.T) {
 		t.Fatalf("expected deploy 200, got %d", deployResponse.Code)
 	}
 
-	var deployPayload struct {
-		Status string          `json:"status"`
-		Data   adminDeployment `json:"data"`
-	}
-	if err := json.Unmarshal(deployResponse.Body.Bytes(), &deployPayload); err != nil {
-		t.Fatalf("failed to decode deploy response: %v", err)
-	}
+	deployPayload := decodeCompat[adminDeployment](t, deployResponse.Body.Bytes())
 
-	deleteRequest := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v2/admin/deployments/%d", deployPayload.Data.JobID), nil)
+	deleteRequest := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v2/admin/deployments/%d", deployPayload.JobID), nil)
 	deleteRequest.Header.Set("Authorization", adminAuth)
 	deleteResponse := httptest.NewRecorder()
 	mux.ServeHTTP(deleteResponse, deleteRequest)
@@ -1846,15 +1822,9 @@ func TestAdminCanValidateChallengeBeforeDeploy(t *testing.T) {
 		t.Fatalf("expected validate 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   ChallengeValidationResult `json:"data"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode validation response: %v", err)
-	}
-	if payload.Data.Status != "valid" || !payload.Data.BaselineSSHContractOK || !payload.Data.CheckerContractOK {
-		t.Fatalf("unexpected validation result %+v", payload.Data)
+	payload := decodeCompat[ChallengeValidationResult](t, response.Body.Bytes())
+	if payload.Status != "valid" || !payload.BaselineSSHContractOK || !payload.CheckerContractOK {
+		t.Fatalf("unexpected validation result %+v", payload)
 	}
 }
 
@@ -1880,15 +1850,9 @@ func TestAdminDeployRejectsInvalidChallengeRuntime(t *testing.T) {
 		t.Fatalf("expected deploy rejection 400, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode deploy rejection: %v", err)
-	}
-	if payload.Message != "missing ssh daemon binary inside image" {
-		t.Fatalf("unexpected deploy rejection message %q", payload.Message)
+	payload := decodeProblemCompat(t, response.Body.Bytes())
+	if payload.Detail != "missing ssh daemon binary inside image" {
+		t.Fatalf("unexpected deploy rejection message %q", payload.Detail)
 	}
 }
 
@@ -1914,15 +1878,9 @@ func TestAdminDeployRejectsInvalidCheckerRuntime(t *testing.T) {
 		t.Fatalf("expected deploy rejection 400, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode deploy rejection: %v", err)
-	}
-	if payload.Message != "missing standard checker entrypoint inside image" {
-		t.Fatalf("unexpected deploy rejection message %q", payload.Message)
+	payload := decodeProblemCompat(t, response.Body.Bytes())
+	if payload.Detail != "missing standard checker entrypoint inside image" {
+		t.Fatalf("unexpected deploy rejection message %q", payload.Detail)
 	}
 }
 
@@ -1938,15 +1896,9 @@ func TestPlayerJWTScopesRequestsToAuthenticatedTeam(t *testing.T) {
 		t.Fatalf("expected team create 200, got %d", teamResponse.Code)
 	}
 
-	var teamPayload struct {
-		Status string    `json:"status"`
-		Data   adminTeam `json:"data"`
-	}
-	if err := json.Unmarshal(teamResponse.Body.Bytes(), &teamPayload); err != nil {
-		t.Fatalf("failed to decode team response: %v", err)
-	}
+	teamPayload := decodeCompat[adminTeam](t, teamResponse.Body.Bytes())
 
-	playerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/players", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"display_name":"Nova Captain","email":"nova.captain@example.com","password":"nova-secret","role":"captain"}`, teamPayload.Data.ID)))
+	playerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/players", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"display_name":"Nova Captain","email":"nova.captain@example.com","password":"nova-secret","role":"captain"}`, teamPayload.ID)))
 	playerRequest.Header.Set("Authorization", adminAuth)
 	playerResponse := httptest.NewRecorder()
 	mux.ServeHTTP(playerResponse, playerRequest)
@@ -1962,34 +1914,30 @@ func TestPlayerJWTScopesRequestsToAuthenticatedTeam(t *testing.T) {
 	}
 
 	var authPayload struct {
-		Status string `json:"status"`
-		Data   string `json:"data"`
+		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authResponse.Body.Bytes(), &authPayload); err != nil {
 		t.Fatalf("failed to decode auth response: %v", err)
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	servicesRequest.Header.Set("Authorization", "Bearer "+authPayload.Data)
+	servicesRequest.Header.Set("Authorization", "Bearer "+authPayload.Token)
 	servicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(servicesResponse, servicesRequest)
 	if servicesResponse.Code != http.StatusOK {
 		t.Fatalf("expected services 200, got %d", servicesResponse.Code)
 	}
 
-	var servicesPayload struct {
-		Status string         `json:"status"`
-		Data   []serviceState `json:"data"`
-	}
+	var servicesPayload []serviceState
 	if err := json.Unmarshal(servicesResponse.Body.Bytes(), &servicesPayload); err != nil {
 		t.Fatalf("failed to decode services response: %v", err)
 	}
-	if len(servicesPayload.Data) == 0 {
+	if len(servicesPayload) == 0 {
 		t.Fatal("expected team services for authenticated player")
 	}
-	for _, state := range servicesPayload.Data {
-		if state.TeamID != teamPayload.Data.ID {
-			t.Fatalf("expected team id %d, got %d", teamPayload.Data.ID, state.TeamID)
+	for _, state := range servicesPayload {
+		if state.TeamID != teamPayload.ID {
+			t.Fatalf("expected team id %d, got %d", teamPayload.ID, state.TeamID)
 		}
 	}
 }
@@ -2006,15 +1954,9 @@ func TestAdminPlayerWireGuardLifecycle(t *testing.T) {
 		t.Fatalf("expected player create 200, got %d", createResponse.Code)
 	}
 
-	var playerPayload struct {
-		Status string      `json:"status"`
-		Data   adminPlayer `json:"data"`
-	}
-	if err := json.Unmarshal(createResponse.Body.Bytes(), &playerPayload); err != nil {
-		t.Fatalf("failed to decode player response: %v", err)
-	}
+	playerPayload := decodeCompat[adminPlayer](t, createResponse.Body.Bytes())
 
-	getRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/admin/players/%d/wireguard", playerPayload.Data.ID), nil)
+	getRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/admin/players/%d/wireguard", playerPayload.ID), nil)
 	getRequest.Header.Set("Authorization", adminAuth)
 	getResponse := httptest.NewRecorder()
 	mux.ServeHTTP(getResponse, getRequest)
@@ -2022,21 +1964,15 @@ func TestAdminPlayerWireGuardLifecycle(t *testing.T) {
 		t.Fatalf("expected wireguard get 200, got %d", getResponse.Code)
 	}
 
-	var getPayload struct {
-		Status string             `json:"status"`
-		Data   adminWireGuardPeer `json:"data"`
+	getPayload := decodeCompat[adminWireGuardPeer](t, getResponse.Body.Bytes())
+	if getPayload.Status != "active" {
+		t.Fatalf("expected active peer, got %s", getPayload.Status)
 	}
-	if err := json.Unmarshal(getResponse.Body.Bytes(), &getPayload); err != nil {
-		t.Fatalf("failed to decode wireguard response: %v", err)
-	}
-	if getPayload.Data.Status != "active" {
-		t.Fatalf("expected active peer, got %s", getPayload.Data.Status)
-	}
-	if !bytes.Contains([]byte(getPayload.Data.Config), []byte("[Interface]")) {
-		t.Fatalf("expected wireguard config body, got %q", getPayload.Data.Config)
+	if !bytes.Contains([]byte(getPayload.Config), []byte("[Interface]")) {
+		t.Fatalf("expected wireguard config body, got %q", getPayload.Config)
 	}
 
-	revokeRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/players/%d/wireguard/revoke", playerPayload.Data.ID), nil)
+	revokeRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/players/%d/wireguard/revoke", playerPayload.ID), nil)
 	revokeRequest.Header.Set("Authorization", adminAuth)
 	revokeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(revokeResponse, revokeRequest)
@@ -2044,18 +1980,12 @@ func TestAdminPlayerWireGuardLifecycle(t *testing.T) {
 		t.Fatalf("expected revoke 200, got %d", revokeResponse.Code)
 	}
 
-	var revokePayload struct {
-		Status string             `json:"status"`
-		Data   adminWireGuardPeer `json:"data"`
-	}
-	if err := json.Unmarshal(revokeResponse.Body.Bytes(), &revokePayload); err != nil {
-		t.Fatalf("failed to decode revoke response: %v", err)
-	}
-	if revokePayload.Data.Status != "revoked" || revokePayload.Data.RevokedAt == "" {
-		t.Fatalf("expected revoked peer with timestamp, got %+v", revokePayload.Data)
+	revokePayload := decodeCompat[adminWireGuardPeer](t, revokeResponse.Body.Bytes())
+	if revokePayload.Status != "revoked" || revokePayload.RevokedAt == "" {
+		t.Fatalf("expected revoked peer with timestamp, got %+v", revokePayload)
 	}
 
-	rotateRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/players/%d/wireguard/rotate", playerPayload.Data.ID), nil)
+	rotateRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/players/%d/wireguard/rotate", playerPayload.ID), nil)
 	rotateRequest.Header.Set("Authorization", adminAuth)
 	rotateResponse := httptest.NewRecorder()
 	mux.ServeHTTP(rotateResponse, rotateRequest)
@@ -2063,17 +1993,11 @@ func TestAdminPlayerWireGuardLifecycle(t *testing.T) {
 		t.Fatalf("expected rotate 200, got %d", rotateResponse.Code)
 	}
 
-	var rotatePayload struct {
-		Status string             `json:"status"`
-		Data   adminWireGuardPeer `json:"data"`
+	rotatePayload := decodeCompat[adminWireGuardPeer](t, rotateResponse.Body.Bytes())
+	if rotatePayload.Status != "active" || rotatePayload.RevokedAt != "" {
+		t.Fatalf("expected active peer after rotate, got %+v", rotatePayload)
 	}
-	if err := json.Unmarshal(rotateResponse.Body.Bytes(), &rotatePayload); err != nil {
-		t.Fatalf("failed to decode rotate response: %v", err)
-	}
-	if rotatePayload.Data.Status != "active" || rotatePayload.Data.RevokedAt != "" {
-		t.Fatalf("expected active peer after rotate, got %+v", rotatePayload.Data)
-	}
-	if rotatePayload.Data.Config == getPayload.Data.Config {
+	if rotatePayload.Config == getPayload.Config {
 		t.Fatal("expected rotate to issue a new config")
 	}
 }
@@ -2091,15 +2015,9 @@ func TestAdminWireGuardGatewayStatusDisabledByDefault(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                 `json:"status"`
-		Data   WireGuardGatewayStatus `json:"data"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode status response: %v", err)
-	}
-	if payload.Data.State != "disabled" || payload.Data.Mode != "disabled" {
-		t.Fatalf("unexpected gateway status %+v", payload.Data)
+	payload := decodeCompat[WireGuardGatewayStatus](t, response.Body.Bytes())
+	if payload.State != "disabled" || payload.Mode != "disabled" {
+		t.Fatalf("unexpected gateway status %+v", payload)
 	}
 }
 
@@ -2121,7 +2039,7 @@ func TestAdminOperationsStatusHealthyWhenRuntimeMatchesStore(t *testing.T) {
 	mux := newTestMuxWithOps(
 		testGameCoreClient{
 			status: GameStatus{
-				Match: &GameMatchStatus{State: "stopped", AcceptingSubmissions: false},
+				Match:     &GameMatchStatus{State: "stopped", AcceptingSubmissions: false},
 				Scheduler: &GameSchedulerStatus{State: "stopped", IntervalSeconds: 60},
 			},
 		},
@@ -2154,18 +2072,12 @@ func TestAdminOperationsStatusHealthyWhenRuntimeMatchesStore(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                `json:"status"`
-		Data   AdminOperationsStatus `json:"data"`
+	payload := decodeCompat[AdminOperationsStatus](t, response.Body.Bytes())
+	if !payload.Healthy {
+		t.Fatalf("expected healthy operations status, got %+v", payload)
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode operations response: %v", err)
-	}
-	if !payload.Data.Healthy {
-		t.Fatalf("expected healthy operations status, got %+v", payload.Data)
-	}
-	if len(payload.Data.Alerts) != 0 {
-		t.Fatalf("expected no alerts, got %+v", payload.Data.Alerts)
+	if len(payload.Alerts) != 0 {
+		t.Fatalf("expected no alerts, got %+v", payload.Alerts)
 	}
 }
 
@@ -2242,19 +2154,13 @@ func TestAdminOperationsStatusFlagsOperationalDrift(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                `json:"status"`
-		Data   AdminOperationsStatus `json:"data"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode operations response: %v", err)
-	}
-	if payload.Data.Healthy {
-		t.Fatalf("expected degraded operations status, got %+v", payload.Data)
+	payload := decodeCompat[AdminOperationsStatus](t, response.Body.Bytes())
+	if payload.Healthy {
+		t.Fatalf("expected degraded operations status, got %+v", payload)
 	}
 
-	alertIDs := make(map[string]bool, len(payload.Data.Alerts))
-	for _, alert := range payload.Data.Alerts {
+	alertIDs := make(map[string]bool, len(payload.Alerts))
+	for _, alert := range payload.Alerts {
 		alertIDs[alert.ID] = true
 	}
 	for _, required := range []string{
@@ -2268,7 +2174,7 @@ func TestAdminOperationsStatusFlagsOperationalDrift(t *testing.T) {
 		"access-last-error",
 	} {
 		if !alertIDs[required] {
-			t.Fatalf("expected alert %q in %+v", required, payload.Data.Alerts)
+			t.Fatalf("expected alert %q in %+v", required, payload.Alerts)
 		}
 	}
 }
@@ -2320,15 +2226,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected match status 200, got %d", matchResponse.Code)
 	}
 
-	var matchPayload struct {
-		Status string          `json:"status"`
-		Data   GameMatchStatus `json:"data"`
-	}
-	if err := json.Unmarshal(matchResponse.Body.Bytes(), &matchPayload); err != nil {
-		t.Fatalf("failed to decode match status response: %v", err)
-	}
-	if matchPayload.Data.State != "running" || !matchPayload.Data.AcceptingSubmissions {
-		t.Fatalf("unexpected match payload %+v", matchPayload.Data)
+	matchPayload := decodeCompat[GameMatchStatus](t, matchResponse.Body.Bytes())
+	if matchPayload.State != "running" || !matchPayload.AcceptingSubmissions {
+		t.Fatalf("unexpected match payload %+v", matchPayload)
 	}
 
 	updateMatchScheduleRequest := httptest.NewRequest(
@@ -2344,15 +2244,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected match schedule update 200, got %d", updateMatchScheduleResponse.Code)
 	}
 
-	var updateMatchSchedulePayload struct {
-		Status string          `json:"status"`
-		Data   GameMatchStatus `json:"data"`
-	}
-	if err := json.Unmarshal(updateMatchScheduleResponse.Body.Bytes(), &updateMatchSchedulePayload); err != nil {
-		t.Fatalf("failed to decode match schedule update response: %v", err)
-	}
-	if updateMatchSchedulePayload.Data.ScheduledStartAt != "2026-03-10T11:00:00Z" || updateMatchSchedulePayload.Data.ScheduledEndAt != "2026-03-10T13:00:00Z" {
-		t.Fatalf("unexpected updated match schedule payload %+v", updateMatchSchedulePayload.Data)
+	updateMatchSchedulePayload := decodeCompat[GameMatchStatus](t, updateMatchScheduleResponse.Body.Bytes())
+	if updateMatchSchedulePayload.ScheduledStartAt != "2026-03-10T11:00:00Z" || updateMatchSchedulePayload.ScheduledEndAt != "2026-03-10T13:00:00Z" {
+		t.Fatalf("unexpected updated match schedule payload %+v", updateMatchSchedulePayload)
 	}
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/status", nil)
@@ -2363,15 +2257,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected game status 200, got %d", statusResponse.Code)
 	}
 
-	var statusPayload struct {
-		Status string     `json:"status"`
-		Data   GameStatus `json:"data"`
-	}
-	if err := json.Unmarshal(statusResponse.Body.Bytes(), &statusPayload); err != nil {
-		t.Fatalf("failed to decode game status response: %v", err)
-	}
-	if statusPayload.Data.CurrentTick == nil || statusPayload.Data.CurrentTick.ID != 1 {
-		t.Fatalf("unexpected current tick %+v", statusPayload.Data.CurrentTick)
+	statusPayload := decodeCompat[GameStatus](t, statusResponse.Body.Bytes())
+	if statusPayload.CurrentTick == nil || statusPayload.CurrentTick.ID != 1 {
+		t.Fatalf("unexpected current tick %+v", statusPayload.CurrentTick)
 	}
 
 	publicStatusRequest := httptest.NewRequest(http.MethodGet, "/api/v2/game/status", nil)
@@ -2381,15 +2269,12 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected public game status 200, got %d", publicStatusResponse.Code)
 	}
 
-	var publicStatusPayload struct {
-		Status string     `json:"status"`
-		Data   GameStatus `json:"data"`
-	}
+	var publicStatusPayload GameStatus
 	if err := json.Unmarshal(publicStatusResponse.Body.Bytes(), &publicStatusPayload); err != nil {
 		t.Fatalf("failed to decode public game status response: %v", err)
 	}
-	if publicStatusPayload.Data.Match == nil || publicStatusPayload.Data.Match.State != "running" {
-		t.Fatalf("unexpected public game match %+v", publicStatusPayload.Data.Match)
+	if publicStatusPayload.Match == nil || publicStatusPayload.Match.State != "running" {
+		t.Fatalf("unexpected public game match %+v", publicStatusPayload.Match)
 	}
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/game/ticks/advance", nil)
@@ -2400,15 +2285,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	var advancePayload struct {
-		Status string         `json:"status"`
-		Data   GameTickStatus `json:"data"`
-	}
-	if err := json.Unmarshal(advanceResponse.Body.Bytes(), &advancePayload); err != nil {
-		t.Fatalf("failed to decode advance response: %v", err)
-	}
-	if advancePayload.Data.ID != 2 || advancePayload.Data.FailedCheckerRuns != 3 {
-		t.Fatalf("unexpected advance payload %+v", advancePayload.Data)
+	advancePayload := decodeCompat[GameTickStatus](t, advanceResponse.Body.Bytes())
+	if advancePayload.ID != 2 || advancePayload.FailedCheckerRuns != 3 {
+		t.Fatalf("unexpected advance payload %+v", advancePayload)
 	}
 
 	runsRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/checker-runs?limit=1", nil)
@@ -2419,18 +2298,12 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected checker runs 200, got %d", runsResponse.Code)
 	}
 
-	var runsPayload struct {
-		Status string             `json:"status"`
-		Data   GameCheckerRunPage `json:"data"`
+	runsPayload := decodeCompat[GameCheckerRunPage](t, runsResponse.Body.Bytes())
+	if len(runsPayload.Items) != 1 || runsPayload.Items[0].Phase != "put" {
+		t.Fatalf("unexpected checker runs payload %+v", runsPayload)
 	}
-	if err := json.Unmarshal(runsResponse.Body.Bytes(), &runsPayload); err != nil {
-		t.Fatalf("failed to decode checker runs response: %v", err)
-	}
-	if len(runsPayload.Data.Items) != 1 || runsPayload.Data.Items[0].Phase != "put" {
-		t.Fatalf("unexpected checker runs payload %+v", runsPayload.Data)
-	}
-	if runsPayload.Data.TotalCount != 2 || !runsPayload.Data.HasNext {
-		t.Fatalf("unexpected checker run page metadata %+v", runsPayload.Data)
+	if runsPayload.TotalCount != 2 || !runsPayload.HasNext {
+		t.Fatalf("unexpected checker run page metadata %+v", runsPayload)
 	}
 
 	schedulerRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/scheduler", nil)
@@ -2441,15 +2314,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected scheduler status 200, got %d", schedulerResponse.Code)
 	}
 
-	var schedulerPayload struct {
-		Status string              `json:"status"`
-		Data   GameSchedulerStatus `json:"data"`
-	}
-	if err := json.Unmarshal(schedulerResponse.Body.Bytes(), &schedulerPayload); err != nil {
-		t.Fatalf("failed to decode scheduler response: %v", err)
-	}
-	if schedulerPayload.Data.State != "stopped" {
-		t.Fatalf("unexpected scheduler payload %+v", schedulerPayload.Data)
+	schedulerPayload := decodeCompat[GameSchedulerStatus](t, schedulerResponse.Body.Bytes())
+	if schedulerPayload.State != "stopped" {
+		t.Fatalf("unexpected scheduler payload %+v", schedulerPayload)
 	}
 
 	eventsRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/scheduler/events?limit=1", nil)
@@ -2460,18 +2327,12 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected scheduler events 200, got %d", eventsResponse.Code)
 	}
 
-	var eventsPayload struct {
-		Status string                 `json:"status"`
-		Data   GameSchedulerEventPage `json:"data"`
+	eventsPayload := decodeCompat[GameSchedulerEventPage](t, eventsResponse.Body.Bytes())
+	if len(eventsPayload.Items) != 1 || eventsPayload.Items[0].EventType != "tick_completed" {
+		t.Fatalf("unexpected scheduler events payload %+v", eventsPayload)
 	}
-	if err := json.Unmarshal(eventsResponse.Body.Bytes(), &eventsPayload); err != nil {
-		t.Fatalf("failed to decode scheduler events response: %v", err)
-	}
-	if len(eventsPayload.Data.Items) != 1 || eventsPayload.Data.Items[0].EventType != "tick_completed" {
-		t.Fatalf("unexpected scheduler events payload %+v", eventsPayload.Data)
-	}
-	if eventsPayload.Data.TotalCount != 2 || !eventsPayload.Data.HasNext {
-		t.Fatalf("unexpected scheduler event page metadata %+v", eventsPayload.Data)
+	if eventsPayload.TotalCount != 2 || !eventsPayload.HasNext {
+		t.Fatalf("unexpected scheduler event page metadata %+v", eventsPayload)
 	}
 
 	startSchedulerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/game/scheduler/start", nil)
@@ -2514,15 +2375,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected scoreboard 200, got %d", scoreboardResponse.Code)
 	}
 
-	var scoreboardPayload struct {
-		Status string          `json:"status"`
-		Data   []ScoreRowAlias `json:"data"`
-	}
-	if err := json.Unmarshal(scoreboardResponse.Body.Bytes(), &scoreboardPayload); err != nil {
-		t.Fatalf("failed to decode scoreboard response: %v", err)
-	}
-	if len(scoreboardPayload.Data) == 0 || scoreboardPayload.Data[0].Rank != 1 {
-		t.Fatalf("unexpected scoreboard payload %+v", scoreboardPayload.Data)
+	scoreboardPayload := decodeCompat[[]ScoreRowAlias](t, scoreboardResponse.Body.Bytes())
+	if len(scoreboardPayload) == 0 || scoreboardPayload[0].Rank != 1 {
+		t.Fatalf("unexpected scoreboard payload %+v", scoreboardPayload)
 	}
 
 	recomputeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/game/scoring/recompute", nil)
@@ -2533,15 +2388,9 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 		t.Fatalf("expected score recompute 200, got %d", recomputeResponse.Code)
 	}
 
-	var recomputePayload struct {
-		Status string          `json:"status"`
-		Data   []ScoreRowAlias `json:"data"`
-	}
-	if err := json.Unmarshal(recomputeResponse.Body.Bytes(), &recomputePayload); err != nil {
-		t.Fatalf("failed to decode score recompute response: %v", err)
-	}
-	if len(recomputePayload.Data) == 0 || recomputePayload.Data[0].Team == "" {
-		t.Fatalf("unexpected recompute payload %+v", recomputePayload.Data)
+	recomputePayload := decodeCompat[[]ScoreRowAlias](t, recomputeResponse.Body.Bytes())
+	if len(recomputePayload) == 0 || recomputePayload[0].Team == "" {
+		t.Fatalf("unexpected recompute payload %+v", recomputePayload)
 	}
 }
 
@@ -2569,18 +2418,12 @@ func TestAdminGameCoreRoutesApplyHistoryFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected checker runs 200, got %d", runsResponse.Code)
 	}
 
-	var runsPayload struct {
-		Status string             `json:"status"`
-		Data   GameCheckerRunPage `json:"data"`
+	runsPayload := decodeCompat[GameCheckerRunPage](t, runsResponse.Body.Bytes())
+	if len(runsPayload.Items) != 1 || runsPayload.Items[0].ID != 31 {
+		t.Fatalf("unexpected filtered checker runs payload %+v", runsPayload)
 	}
-	if err := json.Unmarshal(runsResponse.Body.Bytes(), &runsPayload); err != nil {
-		t.Fatalf("failed to decode filtered checker runs response: %v", err)
-	}
-	if len(runsPayload.Data.Items) != 1 || runsPayload.Data.Items[0].ID != 31 {
-		t.Fatalf("unexpected filtered checker runs payload %+v", runsPayload.Data)
-	}
-	if runsPayload.Data.TotalCount != 1 || runsPayload.Data.HasNext || runsPayload.Data.HasPrev {
-		t.Fatalf("unexpected filtered checker run page metadata %+v", runsPayload.Data)
+	if runsPayload.TotalCount != 1 || runsPayload.HasNext || runsPayload.HasPrev {
+		t.Fatalf("unexpected filtered checker run page metadata %+v", runsPayload)
 	}
 
 	runsOffsetRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/checker-runs?team_id=101&offset=1&limit=1", nil)
@@ -2590,14 +2433,12 @@ func TestAdminGameCoreRoutesApplyHistoryFiltersAndOffset(t *testing.T) {
 	if runsOffsetResponse.Code != http.StatusOK {
 		t.Fatalf("expected checker runs offset 200, got %d", runsOffsetResponse.Code)
 	}
-	if err := json.Unmarshal(runsOffsetResponse.Body.Bytes(), &runsPayload); err != nil {
-		t.Fatalf("failed to decode offset checker runs response: %v", err)
+	runsPayload = decodeCompat[GameCheckerRunPage](t, runsOffsetResponse.Body.Bytes())
+	if len(runsPayload.Items) != 1 || runsPayload.Items[0].ID != 30 {
+		t.Fatalf("unexpected checker runs offset payload %+v", runsPayload)
 	}
-	if len(runsPayload.Data.Items) != 1 || runsPayload.Data.Items[0].ID != 30 {
-		t.Fatalf("unexpected checker runs offset payload %+v", runsPayload.Data)
-	}
-	if !runsPayload.Data.HasPrev || !runsPayload.Data.HasNext || runsPayload.Data.TotalCount != 3 {
-		t.Fatalf("unexpected checker runs offset metadata %+v", runsPayload.Data)
+	if !runsPayload.HasPrev || !runsPayload.HasNext || runsPayload.TotalCount != 3 {
+		t.Fatalf("unexpected checker runs offset metadata %+v", runsPayload)
 	}
 
 	eventsRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/scheduler/events?source=scheduler&state=running&event_type=tick_failed&limit=1", nil)
@@ -2608,18 +2449,12 @@ func TestAdminGameCoreRoutesApplyHistoryFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected filtered scheduler events 200, got %d", eventsResponse.Code)
 	}
 
-	var eventsPayload struct {
-		Status string                 `json:"status"`
-		Data   GameSchedulerEventPage `json:"data"`
+	eventsPayload := decodeCompat[GameSchedulerEventPage](t, eventsResponse.Body.Bytes())
+	if len(eventsPayload.Items) != 1 || eventsPayload.Items[0].ID != 11 {
+		t.Fatalf("unexpected filtered scheduler events payload %+v", eventsPayload)
 	}
-	if err := json.Unmarshal(eventsResponse.Body.Bytes(), &eventsPayload); err != nil {
-		t.Fatalf("failed to decode filtered scheduler events response: %v", err)
-	}
-	if len(eventsPayload.Data.Items) != 1 || eventsPayload.Data.Items[0].ID != 11 {
-		t.Fatalf("unexpected filtered scheduler events payload %+v", eventsPayload.Data)
-	}
-	if eventsPayload.Data.TotalCount != 1 || eventsPayload.Data.HasNext || eventsPayload.Data.HasPrev {
-		t.Fatalf("unexpected filtered scheduler page metadata %+v", eventsPayload.Data)
+	if eventsPayload.TotalCount != 1 || eventsPayload.HasNext || eventsPayload.HasPrev {
+		t.Fatalf("unexpected filtered scheduler page metadata %+v", eventsPayload)
 	}
 
 	eventsOffsetRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/scheduler/events?source=scheduler&offset=1&limit=1", nil)
@@ -2629,14 +2464,12 @@ func TestAdminGameCoreRoutesApplyHistoryFiltersAndOffset(t *testing.T) {
 	if eventsOffsetResponse.Code != http.StatusOK {
 		t.Fatalf("expected scheduler events offset 200, got %d", eventsOffsetResponse.Code)
 	}
-	if err := json.Unmarshal(eventsOffsetResponse.Body.Bytes(), &eventsPayload); err != nil {
-		t.Fatalf("failed to decode offset scheduler events response: %v", err)
+	eventsPayload = decodeCompat[GameSchedulerEventPage](t, eventsOffsetResponse.Body.Bytes())
+	if len(eventsPayload.Items) != 1 || eventsPayload.Items[0].ID != 10 {
+		t.Fatalf("unexpected scheduler events offset payload %+v", eventsPayload)
 	}
-	if len(eventsPayload.Data.Items) != 1 || eventsPayload.Data.Items[0].ID != 10 {
-		t.Fatalf("unexpected scheduler events offset payload %+v", eventsPayload.Data)
-	}
-	if !eventsPayload.Data.HasPrev || eventsPayload.Data.HasNext || eventsPayload.Data.TotalCount != 2 {
-		t.Fatalf("unexpected scheduler events offset metadata %+v", eventsPayload.Data)
+	if !eventsPayload.HasPrev || eventsPayload.HasNext || eventsPayload.TotalCount != 2 {
+		t.Fatalf("unexpected scheduler events offset metadata %+v", eventsPayload)
 	}
 }
 
@@ -2651,8 +2484,8 @@ func TestSubmitPrefersGameCoreWhenConfigured(t *testing.T) {
 		noopWireGuardClient{},
 		testGameCoreClient{
 			submit: []SubmissionVerdictAlias{
-				{Flag: "FLAGv1.authoritative", Verdict: "flag is correct."},
-				{Flag: "FLAGv1.dupe", Verdict: "flag already submitted."},
+				{Flag: "FLAGv1.authoritative", Status: "accepted", Detail: "flag is correct."},
+				{Flag: "FLAGv1.dupe", Status: "duplicate", Detail: "flag already submitted."},
 			},
 		},
 	).RegisterRoutes(mux)
@@ -2667,15 +2500,12 @@ func TestSubmitPrefersGameCoreWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                   `json:"status"`
-		Data   []SubmissionVerdictAlias `json:"data"`
-	}
+	var payload submissionResult
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode submit response: %v", err)
 	}
-	if len(payload.Data) != 2 || payload.Data[1].Verdict != "flag already submitted." {
-		t.Fatalf("unexpected submit payload %+v", payload.Data)
+	if len(payload.Results) != 2 || payload.Results[1].Status != "duplicate" || payload.Results[1].Detail != "flag already submitted." {
+		t.Fatalf("unexpected submit payload %+v", payload.Results)
 	}
 }
 
@@ -2707,15 +2537,12 @@ func TestSubmitRejectsWhenContestHasNotStarted(t *testing.T) {
 		t.Fatalf("expected 400, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
+	var payload httpapi.ProblemDetails
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode pre-start submit response: %v", err)
 	}
-	if payload.Message != "contest has not started yet." {
-		t.Fatalf("unexpected message %q", payload.Message)
+	if payload.Detail != "contest has not started yet." {
+		t.Fatalf("unexpected message %q", payload.Detail)
 	}
 }
 
@@ -2723,12 +2550,12 @@ func TestSubmitPrefersSubmissionServiceWhenConfigured(t *testing.T) {
 	mux := newTestMuxWithWorkers(
 		testGameCoreClient{
 			submit: []SubmissionVerdictAlias{
-				{Flag: "FLAGv1.core", Verdict: "flag is correct."},
+				{Flag: "FLAGv1.core", Status: "accepted", Detail: "flag is correct."},
 			},
 		},
 		testSubmissionClient{
 			submit: []SubmissionVerdictAlias{
-				{Flag: "FLAGv1.worker", Verdict: "submission-service accepted the flag."},
+				{Flag: "FLAGv1.worker", Status: "accepted", Detail: "submission-service accepted the flag."},
 			},
 		},
 		noopScoringClient{},
@@ -2743,15 +2570,12 @@ func TestSubmitPrefersSubmissionServiceWhenConfigured(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                   `json:"status"`
-		Data   []SubmissionVerdictAlias `json:"data"`
-	}
+	var payload submissionResult
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode submit response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].Verdict != "submission-service accepted the flag." {
-		t.Fatalf("unexpected submit payload %+v", payload.Data)
+	if len(payload.Results) != 1 || payload.Results[0].Status != "accepted" || payload.Results[0].Detail != "submission-service accepted the flag." {
+		t.Fatalf("unexpected submit payload %+v", payload.Results)
 	}
 }
 
@@ -2785,14 +2609,11 @@ func TestSubmitRejectsWhenContestIsOver(t *testing.T) {
 		t.Fatalf("expected 400, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
+	var payload httpapi.ProblemDetails
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode finished submit response: %v", err)
 	}
-	if payload.Message != "contest is over." {
-		t.Fatalf("unexpected message %q", payload.Message)
+	if payload.Detail != "contest is over." {
+		t.Fatalf("unexpected message %q", payload.Detail)
 	}
 }

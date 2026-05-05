@@ -8,6 +8,13 @@ type LoginCredentials = {
   password: string;
 };
 
+function problemResponse(status: number, title: string, detail: string) {
+  return NextResponse.json(
+    { title, status, detail },
+    { status, headers: { "Content-Type": "application/problem+json" } },
+  );
+}
+
 export async function POST(request: Request) {
   const credentials = await readLoginCredentials(request);
   if (!hasRequiredCredentials(credentials)) {
@@ -42,14 +49,11 @@ function hasRequiredCredentials(credentials: LoginCredentials): boolean {
 }
 
 function missingCredentialsResponse() {
-  return NextResponse.json(
-    { status: "failed", message: "email and password are required." },
-    { status: 400 },
-  );
+  return problemResponse(400, "Invalid request", "email and password are required.");
 }
 
 function loginResponse(token: string) {
-  const response = NextResponse.json({ status: "success", data: {} });
+  const response = NextResponse.json({ authenticated: true });
   response.cookies.set(participantSessionCookie(token, 60 * 60 * 24));
   return response;
 }
@@ -60,8 +64,9 @@ function loginErrorResponse(error: unknown) {
       ? error.message
       : "participant authentication failed";
   const status = message === "email or password is wrong." ? 403 : 502;
-  return NextResponse.json(
-    { status: status === 403 ? "forbidden" : "failed", message },
-    { status },
+  return problemResponse(
+    status,
+    status === 403 ? "Authentication failed" : "Authentication unavailable",
+    message,
   );
 }

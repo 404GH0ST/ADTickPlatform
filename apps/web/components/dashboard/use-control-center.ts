@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttackFeedPage, ScoreRow, ServiceRow } from '@/lib/dashboard-types';
 import type { SSHSessionData } from '@/components/dashboard/control-center-sections';
+import type { TeamServiceState } from '@/lib/platform-api';
 import { useAttackHighlights } from '@/components/hooks/use-attack-highlights';
 import {
   computePageOffset,
@@ -13,6 +14,7 @@ import {
   isDefaultAttackFilters,
   type AttackFilters,
 } from '@/lib/dashboard-utils';
+import { processApiResponse } from '@/lib/api-utils';
 
 export type ControlCenterOptions = {
   attackPage: AttackFeedPage;
@@ -20,16 +22,6 @@ export type ControlCenterOptions = {
   scores: ScoreRow[];
   services: ServiceRow[];
 };
-
-type ActionEnvelope<T> =
-  | {
-      status: 'success';
-      data: T;
-    }
-  | {
-      status: 'failed' | 'forbidden' | 'too many request';
-      message: string;
-    };
 
 const baseAttackFilters = {
   limit: '12',
@@ -185,6 +177,41 @@ export function useControlCenter({
     return query ? `?${query}` : '';
   }
 
+  function mergeServiceState(row: ServiceRow, state: TeamServiceState): ServiceRow {
+    return {
+      ...row,
+      endpoint: state.endpoint,
+      port: Number(state.endpoint.split(':').at(-1) ?? row.port),
+      status: state.status,
+      checker: state.checker,
+      unlocked: state.unlocked,
+      sshHint: state.ssh_hint,
+      lastEvent: state.last_event,
+      resetCooldown: state.reset_cooldown,
+      slaStatus: state.sla_status ?? row.slaStatus,
+      slaPhase: state.sla_phase ?? row.slaPhase,
+      slaTickId: state.sla_tick_id ?? row.slaTickId,
+      slaMessage: state.sla_message ?? row.slaMessage,
+    };
+  }
+
+  async function refreshServiceRow(challengeId: number): Promise<void> {
+    const response = await fetch('/api/platform/team/services');
+    const states = await processApiResponse<TeamServiceState[]>(
+      response,
+      '/api/platform/team/services',
+    );
+    const nextState = states.find((entry) => entry.challenge_id === challengeId);
+    if (!nextState) {
+      return;
+    }
+    setRows((current) =>
+      current.map((row) =>
+        row.challengeId === challengeId ? mergeServiceState(row, nextState) : row,
+      ),
+    );
+  }
+
   async function refreshAttackFeed(
     silent = false,
     filters: AttackFilters = attackFilters,
@@ -196,13 +223,10 @@ export function useControlCenter({
 
     try {
       const response = await fetch(`/api/platform/attacks${buildAttackQuery(filters)}`);
-      const payload = (await response.json()) as ActionEnvelope<AttackFeedPage>;
-      if (!response.ok || payload.status !== 'success') {
-        throw new Error('message' in payload ? payload.message : 'attack feed fetch failed');
-      }
+      const payload = await processApiResponse<AttackFeedPage>(response, '/api/platform/attacks');
 
       clearAttackHighlights();
-      setAttackPageState(payload.data);
+      setAttackPageState(payload);
     } catch (error) {
       if (!silent) {
         setActionError(error instanceof Error ? error.message : 'attack feed fetch failed');
@@ -247,10 +271,7 @@ export function useControlCenter({
         },
         body: JSON.stringify({ proof }),
       });
-      const payload = (await response.json()) as ActionEnvelope<{ unlocked: boolean }>;
-      if (!response.ok || payload.status !== 'success') {
-        throw new Error('message' in payload ? payload.message : 'unlock request failed');
-      }
+      await processApiResponse<{ unlocked: boolean }>(response, 'unlock request');
 
       setRows((current) =>
         current.map((row) =>
@@ -259,13 +280,13 @@ export function useControlCenter({
                 ...row,
                 unlocked: true,
                 status: row.status === 'degraded' ? 'warming' : row.status,
-                sshHint:
-                  'unlock accepted; request a one-time root password to get the current credential',
+                sshHint: 'unlock accepted; use SSH Access to view the team credential',
                 lastEvent: 'unlock granted via participant API',
               }
             : row,
         ),
       );
+      await refreshServiceRow(unlockTarget.challengeId);
       setUnlockTarget(null);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'unlock request failed');
@@ -286,10 +307,7 @@ export function useControlCenter({
       const response = await fetch(`/api/platform/services/${sessionTarget.challengeId}/ssh-session`, {
         method: 'POST',
       });
-      const payload = (await response.json()) as ActionEnvelope<SSHSessionData>;
-      if (!response.ok || payload.status !== 'success') {
-        throw new Error('message' in payload ? payload.message : 'ssh session request failed');
-      }
+      const payload = await processApiResponse<SSHSessionData>(response, 'ssh session request');
 
       setRows((current) =>
         current.map((row) =>
@@ -297,15 +315,16 @@ export function useControlCenter({
             ? {
                 ...row,
                 unlocked: true,
-                sshHint: payload.data.connection_hint,
-                lastEvent: 'ssh access active',
+                sshHint: payload.connection_hint,
+                lastEvent: 'team ssh credential retrieved',
               }
             : row,
         ),
       );
-      setIssuedSession(payload.data);
+      await refreshServiceRow(sessionTarget.challengeId);
+      setIssuedSession(payload);
       setSessionTarget((current) =>
-        current ? { ...current, sshHint: payload.data.connection_hint } : current,
+        current ? { ...current, sshHint: payload.connection_hint } : current,
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'ssh session request failed');
@@ -326,10 +345,7 @@ export function useControlCenter({
       const response = await fetch(`/api/platform/services/${resetTarget.challengeId}/reset/factory`, {
         method: 'POST',
       });
-      const payload = (await response.json()) as ActionEnvelope<{ unlock_preserved: boolean }>;
-      if (!response.ok || payload.status !== 'success') {
-        throw new Error('message' in payload ? payload.message : 'factory reset request failed');
-      }
+      const payload = await processApiResponse<{ unlock_preserved: boolean }>(response, 'factory reset request');
 
       setRows((current) =>
         current.map((row) =>
@@ -338,9 +354,9 @@ export function useControlCenter({
                 ...row,
                 status: 'warming',
                 checker: 'warning',
-                unlocked: payload.data.unlock_preserved ? row.unlocked : false,
-                sshHint: payload.data.unlock_preserved
-                  ? 'unlock preserved; request a fresh one-time root password to rotate the credential'
+                unlocked: payload.unlock_preserved ? row.unlocked : false,
+                sshHint: payload.unlock_preserved
+                  ? 'unlock preserved; open SSH Access to reapply the team credential'
                   : row.sshHint,
                 lastEvent: 'factory reset triggered via participant API',
                 resetCooldown: 'cooldown: 90s',
@@ -348,6 +364,7 @@ export function useControlCenter({
             : row,
         ),
       );
+      await refreshServiceRow(resetTarget.challengeId);
       setIssuedSession(null);
       setResetTarget(null);
     } catch (error) {
@@ -365,10 +382,7 @@ export function useControlCenter({
       const response = await fetch(`/api/platform/services/${service.challengeId}/reset/restart`, {
         method: 'POST',
       });
-      const payload = (await response.json()) as ActionEnvelope<{ action: 'restart' }>;
-      if (!response.ok || payload.status !== 'success') {
-        throw new Error('message' in payload ? payload.message : 'restart request failed');
-      }
+      await processApiResponse<{ action: 'restart' }>(response, 'restart request');
 
       setRows((current) =>
         current.map((row) =>
@@ -383,6 +397,7 @@ export function useControlCenter({
             : row,
         ),
       );
+      await refreshServiceRow(service.challengeId);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'restart request failed');
     } finally {

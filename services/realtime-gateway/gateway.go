@@ -302,12 +302,18 @@ func (g *realtimeGateway) subscribe(kind streamKind) (int, <-chan []byte, func()
 
 func (g *realtimeGateway) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	if g.adminToken == "" {
-		httpapi.WriteJSON(w, http.StatusServiceUnavailable, httpapi.ErrorEnvelope{Status: "failed", Message: "admin realtime stream is not configured."})
+		httpapi.WriteProblem(w, http.StatusServiceUnavailable, httpapi.ProblemDetails{
+			Title:  "Service unavailable",
+			Detail: "admin realtime stream is not configured.",
+		})
 		return false
 	}
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != g.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing admin realtime streams."})
+		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
+			Title:  "Forbidden",
+			Detail: "please authenticate before accessing admin realtime streams.",
+		})
 		return false
 	}
 	return true

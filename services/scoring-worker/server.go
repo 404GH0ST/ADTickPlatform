@@ -12,11 +12,6 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type scoringWorkerStatus struct {
 	State            string `json:"state"`
 	LastRecomputedAt string `json:"last_recomputed_at,omitempty"`
@@ -62,7 +57,7 @@ func (s *scoringWorkerServer) handleStatus(w http.ResponseWriter, r *http.Reques
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[scoringWorkerStatus]{Status: "success", Data: s.snapshotStatus()})
+	httpapi.WriteJSON(w, http.StatusOK, s.snapshotStatus())
 }
 
 func (s *scoringWorkerServer) handleScoreboard(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +70,7 @@ func (s *scoringWorkerServer) handleScoreboard(w http.ResponseWriter, r *http.Re
 		writeScoringWorkerFailure(w, err, "game-core scoreboard failed.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.ScoreRowAlias]{Status: "success", Data: rows})
+	httpapi.WriteJSON(w, http.StatusOK, rows)
 }
 
 func (s *scoringWorkerServer) handleRecompute(w http.ResponseWriter, r *http.Request) {
@@ -89,13 +84,16 @@ func (s *scoringWorkerServer) handleRecompute(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.recordSuccess(len(rows))
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.ScoreRowAlias]{Status: "success", Data: rows})
+	httpapi.WriteJSON(w, http.StatusOK, rows)
 }
 
 func (s *scoringWorkerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing scoring-worker endpoints."})
+		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
+			Title:  "Forbidden",
+			Detail: "please authenticate before accessing scoring-worker endpoints.",
+		})
 		return false
 	}
 	return true
@@ -131,5 +129,8 @@ func writeScoringWorkerFailure(w http.ResponseWriter, err error, fallback string
 	if errors.Is(err, errGameCoreScoringDisabled) {
 		message = "scoring-worker is not connected to game-core."
 	}
-	httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+	httpapi.WriteProblem(w, http.StatusBadGateway, httpapi.ProblemDetails{
+		Title:  "Upstream unavailable",
+		Detail: message,
+	})
 }

@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
@@ -139,6 +140,17 @@ func sshConnectionHint(challengeID, teamID int) string {
 	return fmt.Sprintf("ssh %s@%s", sshUsername(), sshHost(challengeID, teamID))
 }
 
+func stableRootPassword(secret string, teamID, challengeID int) string {
+	key := []byte(strings.TrimSpace(secret))
+	if len(key) == 0 {
+		key = []byte("dev-team-token")
+	}
+	mac := hmac.New(sha256.New, key)
+	fmt.Fprintf(mac, "ssh-root:%d:%d", teamID, challengeID)
+	encoded := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return fmt.Sprintf("Adp-%s-Aa1!", encoded[:18])
+}
+
 func issueOneTimeRootPassword() (string, error) {
 	buffer := make([]byte, 18)
 	if _, err := rand.Read(buffer); err != nil {
@@ -162,6 +174,20 @@ func wireguardPeerName(teamID, playerID int) string {
 		return fmt.Sprintf("organizer-player-%d", playerID)
 	}
 	return fmt.Sprintf("team-%d-player-%d", teamID, playerID)
+}
+
+func newSubmissionResult(items []submissionVerdict) submissionResult {
+	result := submissionResult{
+		Results:       items,
+		RejectedCount: len(items),
+	}
+	for _, item := range items {
+		if item.Status == "accepted" {
+			result.AcceptedCount++
+			result.RejectedCount--
+		}
+	}
+	return result
 }
 
 func normalizedRole(role string) string {
@@ -261,7 +287,13 @@ func defaultServiceStateForConfig(challengeID, teamID int, challengeName string,
 		SSHHint:       "solve service to generate SSH credential",
 		LastEvent:     "no patch applied yet",
 		ResetCooldown: "ready",
+		SLAStatus:     "passing",
+		SLAMessage:    "checker passing; per-phase detail unavailable",
 	}
+}
+
+func sanitizeSourceBundlePath(value string) string {
+	return strings.TrimSpace(value)
 }
 
 func challengeRuntimeStatus(published bool, totalTeams, readyTeams, queuedTeams int) string {

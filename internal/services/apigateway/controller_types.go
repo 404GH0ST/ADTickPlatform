@@ -43,6 +43,5 @@ type ControllerAccessStatus struct {
 }
 
 type ControllerSSHCredential struct {
-	Password  string `json:"password"`
-	ExpiresAt string `json:"expires_at"`
+	Password string `json:"password"`
 }

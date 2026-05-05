@@ -91,6 +91,7 @@ type ChallengeDraft = {
   name: string;
   baselineImage: string;
   checkerImage: string;
+  sourceBundlePath: string;
   servicePort: string;
   serviceSubnetOctet: string;
   weight: string;
@@ -1069,6 +1070,9 @@ function ChallengeCatalogRow({
         <div className="max-w-[20rem] text-xs text-muted-foreground">
           <p>{challenge.baseline_image}</p>
           <p>{challenge.checker_image}</p>
+          {challenge.source_bundle_path ? (
+            <p>{challenge.source_bundle_path}</p>
+          ) : null}
         </div>
       </TableCell>
       <TableCell>
@@ -3805,6 +3809,26 @@ export function EntityFormDialog({
               })
             }
           />
+        </Field>
+        <Field label="Source bundle path" htmlFor="form-challenge-source-bundle">
+          <div className="space-y-2">
+            <Input
+              id="form-challenge-source-bundle"
+              value={challengeDraft.sourceBundlePath}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  sourceBundlePath: event.target.value,
+                })
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Relative to <code>AD_CHALLENGE_SOURCE_ROOT</code>. The download is
+              served verbatim, so use a sanitized whitebox directory or archive
+              with dummy placeholder secrets and inject real secrets only at
+              runtime.
+            </p>
+          </div>
         </Field>
         {formMode === "create" && (
           <>

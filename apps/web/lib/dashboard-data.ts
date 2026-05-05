@@ -140,44 +140,50 @@ function readDashboardResults(
 }
 
 function buildServiceRows(data: DashboardLiveData, ownID: string): ServiceRow[] {
-  const challengeNameByID = new Map(
-    data.challenges.map((challenge) => [String(challenge.id), challenge.name]),
+  const challengeByID = new Map(
+    data.challenges.map((challenge) => [String(challenge.id), challenge] as const),
   );
 
   if (data.serviceStates.length > 0) {
     return data.serviceStates.map((state) =>
-      serviceStateToRow(state, challengeNameByID),
+      serviceStateToRow(state, challengeByID),
     );
   }
 
   return Object.entries(data.serviceMap)
     .flatMap(([challengeID, teams]) =>
-      fallbackServiceRows(challengeID, teams[ownID] ?? [], ownID, challengeNameByID),
+      fallbackServiceRows(challengeID, teams[ownID] ?? [], ownID, challengeByID),
     )
     .filter((service) => service.endpoint.length > 0);
 }
 
 function serviceStateToRow(
   state: TeamServiceState,
-  challengeNameByID: Map<string, string>,
+  challengeByID: Map<string, { id: number; name: string; has_source_download: boolean }>,
 ): ServiceRow {
   const port = Number(state.endpoint.split(":").at(-1) ?? 0);
+  const challenge = challengeByID.get(String(state.challenge_id));
   return {
     id: `svc-${state.challenge_id}`,
     challengeId: state.challenge_id,
     teamId: state.team_id,
     name:
       state.name ??
-      challengeNameByID.get(String(state.challenge_id)) ??
+      challenge?.name ??
       `challenge-${state.challenge_id}`,
     endpoint: state.endpoint,
     port,
     status: state.status,
     checker: state.checker,
+    hasSourceDownload: challenge?.has_source_download ?? false,
     unlocked: state.unlocked,
     sshHint: state.ssh_hint,
     lastEvent: state.last_event,
     resetCooldown: state.reset_cooldown,
+    slaStatus: state.sla_status ?? "unknown",
+    slaPhase: state.sla_phase ?? "",
+    slaTickId: state.sla_tick_id ?? null,
+    slaMessage: state.sla_message ?? "awaiting first checker run",
   };
 }
 
@@ -185,21 +191,27 @@ function fallbackServiceRows(
   challengeID: string,
   endpoints: string[],
   ownID: string,
-  challengeNameByID: Map<string, string>,
+  challengeByID: Map<string, { id: number; name: string; has_source_download: boolean }>,
 ): ServiceRow[] {
+  const challenge = challengeByID.get(challengeID);
   return endpoints.map((endpoint, index) => ({
     id: `svc-${challengeID}-${index + 1}`,
     challengeId: Number(challengeID),
     teamId: Number(ownID),
-    name: challengeNameByID.get(challengeID) ?? `challenge-${challengeID}`,
+    name: challenge?.name ?? `challenge-${challengeID}`,
     endpoint,
     port: Number(endpoint.split(":").at(-1) ?? 0),
     status: "warming",
     checker: "warning",
+    hasSourceDownload: challenge?.has_source_download ?? false,
     unlocked: false,
     sshHint: "service state endpoint unavailable",
     lastEvent: "service state endpoint unavailable",
     resetCooldown: "unknown",
+    slaStatus: "unknown",
+    slaPhase: "",
+    slaTickId: null,
+    slaMessage: "service state endpoint unavailable",
   }));
 }
 

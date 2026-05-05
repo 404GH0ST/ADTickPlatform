@@ -15,11 +15,6 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type checkerRunnerServer struct {
 	adminToken string
 	executor   checkerExecutor
@@ -57,15 +52,21 @@ func (s *checkerRunnerServer) handleValidateChecker(w http.ResponseWriter, r *ht
 	}
 	var request apigateway.CheckerValidationRequest
 	if err := httpapi.DecodeJSON(r, &request); err != nil || request.ChallengeID <= 0 || strings.TrimSpace(request.CheckerImage) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "checker validation request is invalid."})
+		httpapi.WriteProblem(w, http.StatusBadRequest, httpapi.ProblemDetails{
+			Title:  "Invalid request",
+			Detail: "checker validation request is invalid.",
+		})
 		return
 	}
 	result, err := s.executor.ValidateChecker(r.Context(), request)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
+			Title:  "Checker validation failed",
+			Detail: err.Error(),
+		})
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.CheckerValidationResult]{Status: "success", Data: result})
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 func (s *checkerRunnerServer) handleExecuteChecker(w http.ResponseWriter, r *http.Request) {
@@ -74,21 +75,30 @@ func (s *checkerRunnerServer) handleExecuteChecker(w http.ResponseWriter, r *htt
 	}
 	var request apigateway.CheckerExecutionRequest
 	if err := httpapi.DecodeJSON(r, &request); err != nil || request.TeamID <= 0 || request.ChallengeID <= 0 || strings.TrimSpace(request.CheckerImage) == "" || !isValidCheckerPhase(request.Phase) || strings.TrimSpace(request.Target) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "checker execution request is invalid."})
+		httpapi.WriteProblem(w, http.StatusBadRequest, httpapi.ProblemDetails{
+			Title:  "Invalid request",
+			Detail: "checker execution request is invalid.",
+		})
 		return
 	}
 	result, err := s.executor.ExecuteChecker(r.Context(), request)
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
+			Title:  "Checker execution failed",
+			Detail: err.Error(),
+		})
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.CheckerExecutionResult]{Status: "success", Data: result})
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 func (s *checkerRunnerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing checker-runner endpoints."})
+		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
+			Title:  "Forbidden",
+			Detail: "please authenticate before accessing checker-runner endpoints.",
+		})
 		return false
 	}
 	return true

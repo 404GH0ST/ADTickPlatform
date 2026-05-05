@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"adplatform/internal/platform/httpapi"
 )
 
 var errSubmissionServiceDisabled = errors.New("submission service is not configured")
@@ -117,22 +119,46 @@ func requestSubmissionJSON[T any](ctx context.Context, c *httpSubmissionClient, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[T]
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			return zero, err
-		}
-		return payload.Data, nil
+		return decodeSubmissionSuccess[T](resp.Body)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	message, err := decodeSubmissionError(resp.Body)
+	if err != nil {
 		return zero, fmt.Errorf("submission-service request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
-		return zero, fmt.Errorf("submission-service request failed: %s", payload.Message)
+	if message != "" {
+		return zero, fmt.Errorf("submission-service request failed: %s", message)
 	}
 	return zero, fmt.Errorf("submission-service request failed with status %d", resp.StatusCode)
+}
+
+func decodeSubmissionSuccess[T any](body io.Reader) (T, error) {
+	var zero T
+	if err := json.NewDecoder(body).Decode(&zero); err != nil {
+		return zero, err
+	}
+	return zero, nil
+}
+
+func decodeSubmissionError(body io.Reader) (string, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return trimmed, nil
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.Message), nil
 }

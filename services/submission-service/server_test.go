@@ -24,7 +24,7 @@ func (c testSubmissionGameCoreClient) SubmitFlags(_ context.Context, _ int, _ []
 		return nil, c.err
 	}
 	if len(c.submit) == 0 {
-		return []apigateway.SubmissionVerdictAlias{{Flag: "FLAGv1.demo", Verdict: "flag is correct."}}, nil
+		return []apigateway.SubmissionVerdictAlias{{Flag: "FLAGv1.demo", Status: "accepted", Detail: "flag is correct."}}, nil
 	}
 	return c.submit, nil
 }
@@ -65,15 +65,12 @@ func TestSubmissionServiceSubmit(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                              `json:"status"`
-		Data   []apigateway.SubmissionVerdictAlias `json:"data"`
-	}
+	var payload []apigateway.SubmissionVerdictAlias
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode submit response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].Verdict != "flag is correct." {
-		t.Fatalf("unexpected payload %+v", payload.Data)
+	if len(payload) != 1 || payload[0].Detail != "flag is correct." {
+		t.Fatalf("unexpected payload %+v", payload)
 	}
 }
 
@@ -91,15 +88,12 @@ func TestSubmissionServiceAttackFeed(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.AttackFeedPage `json:"data"`
-	}
+	var payload apigateway.AttackFeedPage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode attack feed response: %v", err)
 	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].Service != "banking" {
-		t.Fatalf("unexpected attack feed %+v", payload.Data)
+	if len(payload.Items) != 1 || payload.Items[0].Service != "banking" {
+		t.Fatalf("unexpected attack feed %+v", payload)
 	}
 }
 
@@ -121,9 +115,9 @@ func TestSubmissionServiceMetricsEndpoint(t *testing.T) {
 	info := httpapi.ServiceInfo{Name: "submission-service-metrics-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Version: "test", Addr: ":0"}
 	server := newSubmissionServiceServer("dev-admin-token", testSubmissionGameCoreClient{
 		submit: []apigateway.SubmissionVerdictAlias{
-			{Flag: "FLAGv1.ok", Verdict: "flag is correct."},
-			{Flag: "FLAGv1.dupe", Verdict: "flag already submitted."},
-			{Flag: "FLAGv1.bad", Verdict: "flag is wrong or expired."},
+			{Flag: "FLAGv1.ok", Status: "accepted", Detail: "flag is correct."},
+			{Flag: "FLAGv1.dupe", Status: "duplicate", Detail: "flag already submitted."},
+			{Flag: "FLAGv1.bad", Status: "invalid", Detail: "flag is wrong or expired."},
 		},
 	})
 	httpapi.RegisterMetricsSource(info.Name, server)

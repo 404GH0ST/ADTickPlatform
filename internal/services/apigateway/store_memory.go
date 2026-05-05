@@ -75,8 +75,8 @@ func NewMemoryStore(teamID int) Store {
 			4: mustNewAdminPlayerRecord(4, 104, "Team Orchid", "Orchid Captain", "orchid.captain@example.com", "captain", "orchid-secret", now.Add(-69*time.Hour)),
 		},
 		challenges: map[int]*adminChallenge{
-			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", Weight: 1, ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
-			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", Weight: 1, ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
+			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", Weight: 1, ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
+			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", Weight: 1, ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
 			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", Weight: 1, ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
 		},
 		teamStates:  make(map[int]map[int]*serviceState),
@@ -189,7 +189,11 @@ func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
 	result := make([]challenge, 0, len(s.challenges))
 	for _, item := range s.challenges {
 		if item.Published {
-			result = append(result, challenge{ID: item.ID, Name: item.Name})
+			result = append(result, challenge{
+				ID:                item.ID,
+				Name:              item.Name,
+				HasSourceDownload: strings.TrimSpace(item.SourceBundlePath) != "",
+			})
 		}
 	}
 	slices.SortFunc(result, func(a, b challenge) int { return a.ID - b.ID })
@@ -263,13 +267,13 @@ func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) 
 	}
 	state.Unlocked = true
 	state.Status = demoteStatus(state.Status)
-	state.SSHHint = "unlock accepted; request a one-time root password to get the current credential"
+	state.SSHHint = "unlock accepted; use SSH Access to view the team credential"
 	state.LastEvent = "unlock granted via participant API"
 
-	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true, SSHCredentialTTLSeconds: 1800}, nil
+	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
 }
 
-func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID int, now time.Time) (sshSessionData, error) {
+func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -281,17 +285,12 @@ func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID in
 		return sshSessionData{}, ErrServiceLocked
 	}
 
-	password, err := issueOneTimeRootPassword()
-	if err != nil {
-		return sshSessionData{}, err
-	}
-
 	host, _ := ParseEndpoint(state.Endpoint)
 	connectionHint := fmt.Sprintf("ssh %s@%s", sshUsername(), host)
 	state.SSHHint = connectionHint
-	state.LastEvent = "fresh one-time root password issued"
+	state.LastEvent = "team ssh credential retrieved"
 
-	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), Password: password, ExpiresAt: now.UTC().Add(30 * time.Minute).Format(time.RFC3339), ConnectionHint: connectionHint}, nil
+	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint}, nil
 }
 
 func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, challengeID int) error {
@@ -302,7 +301,7 @@ func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, chal
 	if err != nil {
 		return err
 	}
-	state.SSHHint = "credential apply failed; request a fresh one-time root password to retry"
+	state.SSHHint = "credential apply failed; open SSH Access to retry applying the team credential"
 	state.LastEvent = "ssh credential apply failed"
 	return nil
 }
@@ -320,7 +319,7 @@ func (s *memoryStore) FactoryResetService(_ context.Context, teamID, challengeID
 	state.LastEvent = "factory reset triggered via participant API"
 	state.ResetCooldown = "cooldown: 90s"
 	if state.Unlocked {
-		state.SSHHint = "unlock preserved; request a fresh one-time root password to rotate the credential"
+		state.SSHHint = "unlock preserved; open SSH Access to reapply the team credential"
 	}
 
 	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked}, nil
@@ -630,6 +629,7 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		Name:               name,
 		BaselineImage:      baselineImage,
 		CheckerImage:       checkerImage,
+		SourceBundlePath:   sanitizeSourceBundlePath(input.SourceBundlePath),
 		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
@@ -1184,6 +1184,7 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	if img := strings.TrimSpace(input.CheckerImage); img != "" {
 		challenge.CheckerImage = img
 	}
+	challenge.SourceBundlePath = sanitizeSourceBundlePath(input.SourceBundlePath)
 	if input.Weight > 0 {
 		challenge.Weight = input.Weight
 	}

@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 
+import { problemResponse } from '@/lib/api-handler';
 import { createAdminTeam } from '@/lib/admin-api';
 import { parseTeamBody } from '@/lib/api-utils';
 
 export async function POST(request: Request) {
   const { name, contactEmail } = await parseTeamBody(request);
   if (!name || !contactEmail) {
-    return NextResponse.json({ status: 'failed', message: 'team request is invalid.' }, { status: 400 });
+    return problemResponse(400, 'Invalid request', 'team request is invalid.');
   }
 
   try {
     const data = await createAdminTeam({ name, contact_email: contactEmail });
-    return NextResponse.json({ status: 'success', data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'team create failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
+    return problemResponse(502, 'Upstream request failed', message);
   }
 }

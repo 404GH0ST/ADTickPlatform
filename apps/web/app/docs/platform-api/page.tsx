@@ -41,6 +41,17 @@ export default async function ParticipantSwaggerPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
+              <CardTitle>Bearer Auth</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>Call <code>POST /api/v2/authenticate</code> first to get a participant JWT.</p>
+              <p>In Swagger, click <strong>Authorize</strong> and paste only the JWT token value. Swagger adds the <code>Bearer</code> prefix automatically for this security scheme.</p>
+              <p>Only authenticated participant routes need that token. Public discovery routes such as challenge catalog, scoreboard, game status, and attack feed intentionally do not show Bearer auth.</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Scope</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -56,7 +67,7 @@ export default async function ParticipantSwaggerPage() {
               <CardTitle>Practical Use</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>Use this page to inspect request bodies, response envelopes, and authentication requirements.</p>
+              <p>Use this page to inspect request bodies, raw success payloads, Problem Details errors, and authentication requirements.</p>
               <p>Use the raw YAML route for code generation in Python, Go, Rust, or TypeScript bots.</p>
             </CardContent>
           </Card>

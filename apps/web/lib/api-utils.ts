@@ -1,11 +1,9 @@
-export type SuccessEnvelope<T> = {
-  status: "success";
-  data: T;
-};
-
-export type ErrorEnvelope = {
-  status: "failed" | "forbidden" | "too many request";
-  message: string;
+export type ProblemDetails = {
+  type?: string;
+  title: string;
+  status: number;
+  detail?: string;
+  instance?: string;
 };
 
 export function buildQueryString(
@@ -48,20 +46,45 @@ export async function authenticatedFetch<T>(
   return processApiResponse<T>(response, path);
 }
 
-async function processApiResponse<T>(
+export async function processApiResponse<T>(
   response: Response,
   path: string,
 ): Promise<T> {
-  const payload = (await response.json()) as
-    | SuccessEnvelope<T>
-    | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload
-        ? payload.message
-        : `API request to ${path} failed with status ${response.status}`,
-    );
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, path));
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
 
-  return payload.data;
+export async function parseApiError(
+  response: Response,
+  path: string,
+): Promise<string> {
+  const fallback = `API request to ${path} failed with status ${response.status}`;
+  const contentType = response.headers.get("content-type") ?? "";
+  const isJsonLike =
+    contentType.includes("application/json") || contentType.includes("+json");
+  if (!isJsonLike) {
+    return fallback;
+  }
+  const payload = (await response.json().catch(() => null)) as
+    | ProblemDetails
+    | { message?: string }
+    | null;
+  if (!payload) {
+    return fallback;
+  }
+  if ("message" in payload && payload.message) {
+    return payload.message;
+  }
+  if ("detail" in payload && payload.detail) {
+    return payload.detail;
+  }
+  if ("title" in payload && payload.title) {
+    return payload.title;
+  }
+  return fallback;
 }

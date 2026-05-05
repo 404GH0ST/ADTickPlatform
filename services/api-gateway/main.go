@@ -57,6 +57,7 @@ func main() {
 		),
 	)
 	server.WithUnlockProofSecret(config.String("UNLOCK_PROOF_SECRET", config.String("TEAM_JWT_SECRET", config.String("TEAM_JWT_DEV_TOKEN", "dev-team-token"))))
+	server.WithSSHCredentialSecret(config.String("SSH_CREDENTIAL_SECRET", config.String("TEAM_JWT_SECRET", config.String("TEAM_JWT_DEV_TOKEN", "dev-team-token"))))
 	server.WithRateLimiter(
 		apigateway.NewRateLimiter(
 			config.String("API_GATEWAY_RATE_LIMIT_REDIS_ADDR", config.String("REDIS_ADDR", "")),

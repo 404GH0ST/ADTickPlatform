@@ -10,6 +10,7 @@ function trimBaseUrl(value: string) {
 type Challenge = {
   id: number;
   name: string;
+  has_source_download: boolean;
 };
 
 type ScoreRow = {
@@ -92,25 +93,29 @@ export type TeamServiceState = {
   ssh_hint: string;
   last_event: string;
   reset_cooldown: string;
+  sla_status?: "passing" | "failing" | "unknown";
+  sla_phase?: string;
+  sla_tick_id?: number;
+  sla_message?: string;
 };
 
 export type ServicesResponseData = Record<string, Record<string, string[]>>;
 
-import { authenticatedFetch, buildQueryString, SuccessEnvelope, ErrorEnvelope } from "./api-utils";
+import { authenticatedFetch, buildQueryString, parseApiError } from "./api-utils";
 
 type UnlockResponseData = {
   challenge_id: number;
   team_id: number;
   unlocked: boolean;
-  ssh_credential_ttl_seconds: number;
 };
 
 type SSHSessionResponseData = {
+  challenge_id: number;
   host: string;
   port: number;
   username: "root";
   password: string;
-  expires_at: string;
+  password_mode?: "stable";
   connection_hint: string;
 };
 
@@ -248,6 +253,11 @@ const getParticipantToken = cache(async () => {
   return session.token;
 });
 
+type AuthenticateResponse = {
+  token: string;
+  token_type: string;
+};
+
 export async function authenticateParticipant(email: string, password: string) {
   const response = await fetch(`${apiBaseUrl()}/api/v2/authenticate`, {
     method: "POST",
@@ -258,18 +268,11 @@ export async function authenticateParticipant(email: string, password: string) {
     cache: "no-store",
   });
 
-  const payload = (await response.json()) as
-    | SuccessEnvelope<string>
-    | ErrorEnvelope;
-  if (!response.ok || payload.status !== "success") {
-    throw new Error(
-      "message" in payload
-        ? payload.message
-        : "participant authentication failed",
-    );
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "/api/v2/authenticate"));
   }
-
-  return payload.data;
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
 }
 
 async function participantFetch<T>(
@@ -278,6 +281,25 @@ async function participantFetch<T>(
 ): Promise<T> {
   const token = await getParticipantToken();
   return authenticatedFetch<T>(apiBaseUrl(), path, token, init);
+}
+
+export async function participantFetchResponse(
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const token = await getParticipantToken();
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, path));
+  }
+  return response;
 }
 
 async function publicFetch<T>(path: string): Promise<T> {
@@ -347,4 +369,8 @@ export async function restartService(challengeID: number) {
       method: "POST",
     },
   );
+}
+
+export async function downloadChallengeSource(challengeID: number) {
+  return participantFetchResponse(`/api/v2/challenges/${challengeID}/source`);
 }

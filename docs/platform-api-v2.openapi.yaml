@@ -2,27 +2,25 @@ openapi: 3.1.0
 info:
   title: AD Platform Participant API
   version: 2.0.0
-  summary: Participant-facing API for Attack-Defense Tick automation
+  summary: Participant-facing API for attack-defense automation
   description: >
-    Machine-readable participant API specification for the AD Platform.
-    This API is intended for teams building their own automation for target
-    discovery, bulk flag submission, service unlock, SSH session issuance,
-    and service reset workflows.
+    Participant API for target discovery, whitebox source download, flag
+    submission, service unlock, SSH access, and service recovery workflows.
 servers:
   - url: https://api.example.com
-    description: Replace with the production participant API host
+    description: Replace with the real participant API host
 tags:
   - name: Authentication
-  - name: Public
+  - name: Discovery
   - name: Submission
-  - name: Service Access
+  - name: Services
 paths:
   /api/v2/authenticate:
     post:
       tags:
         - Authentication
       summary: Authenticate team member
-      description: Get a team JWT for authenticated participant actions.
+      description: Exchange team-member credentials for a participant JWT.
       operationId: authenticateParticipant
       requestBody:
         required: true
@@ -41,169 +39,201 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthenticateSuccessResponse'
+                $ref: '#/components/schemas/AuthenticateResponse'
               examples:
                 default:
                   value:
-                    status: success
-                    data: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example
+                    token_type: Bearer
+        '400':
+          description: Invalid request body
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                invalidRequest:
+                  value:
+                    title: Invalid request
+                    status: 400
+                    detail: email and password are required.
         '403':
           description: Invalid credentials
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 wrongCredentials:
                   value:
-                    status: forbidden
-                    message: email or password is wrong.
+                    title: Authentication failed
+                    status: 403
+                    detail: email or password is wrong.
         '429':
           description: Authentication rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/challenges:
     get:
       tags:
-        - Public
-      summary: List challenges
-      description: Get all challenge definitions for the current match.
+        - Discovery
+      summary: List published challenges
       operationId: listChallenges
       responses:
         '200':
-          description: Challenge list
+          description: Challenge catalog
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChallengesResponse'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Challenge'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      - id: 1
-                        name: banking
-                      - id: 2
-                        name: chat
+                    - id: 1
+                      name: banking
+                      has_source_download: true
+                    - id: 2
+                      name: chat
+                      has_source_download: false
         '429':
-          description: Challenge catalog polling rate limited
+          description: Challenge polling rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/challenges/{challenge_id}/source:
+    get:
+      tags:
+        - Discovery
+      summary: Download whitebox source bundle
+      description: >
+        Download the shared whitebox source bundle for a challenge. The response
+        may be a streamed archive file or a configured artifact file.
+      operationId: downloadChallengeSource
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ChallengeId'
+      responses:
+        '200':
+          description: Source bundle stream
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
-                default:
+                unauthenticated:
                   value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before source access.
+        '404':
+          description: Source bundle unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services:
     get:
       tags:
-        - Public
-      summary: List service targets
+        - Discovery
+      summary: List published service targets
       description: >
-        Get all published challenge service addresses for all teams.
-        These addresses are reachable only through the WireGuard game network.
+        Return WireGuard-reachable service endpoints grouped by challenge ID and
+        team ID.
       operationId: listServiceTargets
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Published service targets by challenge and team
+          description: Published service targets
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServicesResponse'
+                $ref: '#/components/schemas/ServicesByChallenge'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      "1":
-                        "101":
-                          - 10.80.1.11:10001
-                        "102":
-                          - 10.80.1.12:10001
-                      "2":
-                        "101":
-                          - 10.80.2.11:10002
-                        "102":
-                          - 10.80.2.12:10002
+                    "1":
+                      "101":
+                        - 10.80.1.11:10001
+                      "102":
+                        - 10.80.1.12:10001
+                    "2":
+                      "101":
+                        - 10.80.2.11:10002
+                      "102":
+                        - 10.80.2.12:10002
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before access.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before access.
         '429':
-          description: Service target polling rate limited
+          description: Service polling rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/scoreboard:
     get:
       tags:
-        - Public
+        - Discovery
       summary: Get scoreboard snapshot
-      description: Get the current scoreboard snapshot with attack, defense, and SLA breakdowns.
       operationId: getScoreboard
       responses:
         '200':
-          description: Scoreboard snapshot
+          description: Scoreboard rows
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScoreboardResponse'
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScoreRow'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      - rank: 1
-                        team: Team Alpha
-                        attack: 1840
-                        defense: 910
-                        sla: 780
-                        total: 3530
-                        delta: "+2"
+                    - rank: 1
+                      team: Team Alpha
+                      attack: 1840
+                      defense: 910
+                      sla: 780
+                      total: 3530
+                      delta: "+2"
         '429':
           description: Scoreboard polling rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/game/status:
     get:
       tags:
-        - Public
+        - Discovery
       summary: Get public game status
-      description: >
-        Get the current public match state, scheduler state, and current tick.
-        This endpoint is intended for participant dashboards and automation that
-        needs to know whether submissions are currently open.
+      description: Get public match state, scheduler state, and current tick.
       operationId: getGameStatus
       responses:
         '200':
@@ -211,63 +241,52 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameStatusResponse'
+                $ref: '#/components/schemas/GameStatus'
               examples:
                 running:
                   value:
-                    status: success
-                    data:
-                      match:
-                        state: running
-                        started_at: 2026-03-10T10:00:00Z
-                        accepting_submissions: true
-                      current_tick:
-                        id: 248
-                        status: completed
-                      scheduler:
-                        state: running
-                        interval_seconds: 60
-                        last_tick_id: 248
-                      total_ticks: 248
+                    match:
+                      state: running
+                      started_at: 2026-03-10T10:00:00Z
+                      accepting_submissions: true
+                    current_tick:
+                      id: 248
+                      status: completed
+                    scheduler:
+                      state: running
+                      interval_seconds: 60
+                      last_tick_id: 248
+                    total_ticks: 248
                 finished:
                   value:
-                    status: success
-                    data:
-                      match:
-                        state: finished
-                        started_at: 2026-03-10T10:00:00Z
-                        ended_at: 2026-03-10T12:00:00Z
-                        accepting_submissions: false
-                      current_tick:
-                        id: 250
-                        status: completed
-                      scheduler:
-                        state: stopped
-                        interval_seconds: 60
-                        last_tick_id: 250
-                      total_ticks: 250
+                    match:
+                      state: finished
+                      started_at: 2026-03-10T10:00:00Z
+                      ended_at: 2026-03-10T12:00:00Z
+                      accepting_submissions: false
+                    current_tick:
+                      id: 250
+                      status: completed
+                    scheduler:
+                      state: stopped
+                      interval_seconds: 60
+                      last_tick_id: 250
+                    total_ticks: 250
         '429':
           description: Game status polling rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/attacks:
     get:
       tags:
-        - Public
-      summary: Get recent accepted attacks
-      description: Get the latest accepted attack events for dashboards and team tooling.
+        - Discovery
+      summary: Get accepted attack feed
       operationId: getAttackFeed
       parameters:
         - name: limit
           in: query
-          required: false
           schema:
             type: integer
             minimum: 1
@@ -275,84 +294,73 @@ paths:
             default: 12
         - name: offset
           in: query
-          required: false
           schema:
             type: integer
             minimum: 0
             default: 0
         - name: attacker
           in: query
-          required: false
-          description: Case-insensitive substring filter for attacker team name.
           schema:
             type: string
+          description: Case-insensitive substring filter on attacker team name.
         - name: victim
           in: query
-          required: false
-          description: Case-insensitive substring filter for victim team name.
           schema:
             type: string
+          description: Case-insensitive substring filter on victim team name.
         - name: service
           in: query
-          required: false
-          description: Case-insensitive substring filter for service name.
           schema:
             type: string
+          description: Case-insensitive substring filter on service name.
         - name: tick_from
           in: query
-          required: false
-          description: Inclusive lower bound for the attack tick number.
           schema:
             type: integer
             minimum: 0
+          description: Inclusive lower bound for attack tick.
         - name: tick_to
           in: query
-          required: false
-          description: Inclusive upper bound for the attack tick number.
           schema:
             type: integer
             minimum: 0
+          description: Inclusive upper bound for attack tick.
       responses:
         '200':
-          description: Accepted attack events
+          description: Accepted attack page
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AttackFeedResponse'
+                $ref: '#/components/schemas/AttackFeedPage'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      items:
-                        - id: atk-1
-                          attacker: Team Alpha
-                          victim: Team Delta
-                          service: banking
-                          tick: 248
-                          verdict: first valid submission accepted
-                      limit: 12
-                      offset: 0
-                      total_count: 1
-                      has_prev: false
-                      has_next: false
+                    items:
+                      - id: atk-1
+                        attacker: Team Alpha
+                        victim: Team Delta
+                        service: banking
+                        tick: 248
+                        verdict: first valid submission accepted
+                    limit: 12
+                    offset: 0
+                    total_count: 1
+                    has_prev: false
+                    has_next: false
         '429':
           description: Attack feed polling rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/submit:
     post:
       tags:
         - Submission
       summary: Submit flags
-      description: Submit one or more candidate flags for validation.
+      description: >
+        Submit one or more candidate flags. The request succeeds at the HTTP
+        layer when the batch is processed; each flag receives its own result.
       operationId: submitFlags
       security:
         - bearerAuth: []
@@ -370,113 +378,118 @@ paths:
                     - FLAGv1.baz.qux
       responses:
         '200':
-          description: Submission accepted and processed
+          description: Submission batch processed
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubmitFlagsResponse'
+                $ref: '#/components/schemas/SubmissionResult'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
+                    results:
                       - flag: FLAGv1.foo.bar
-                        verdict: flag is wrong or expired.
+                        status: invalid
+                        detail: flag is wrong or expired.
                       - flag: FLAGv1.baz.qux
-                        verdict: flag is correct.
+                        status: accepted
+                        detail: flag is correct.
                       - flag: FLAGv1.baz.qux
-                        verdict: flag already submitted.
+                        status: duplicate
+                        detail: flag already submitted.
+                    accepted_count: 1
+                    rejected_count: 2
         '400':
-          description: Contest not active
+          description: Submission rejected before processing
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/FailedResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
-                notStarted:
-                  value:
-                    status: failed
-                    message: contest has not started yet.
-                contestOver:
-                  value:
-                    status: failed
-                    message: contest is over.
                 invalidPayload:
                   value:
-                    status: failed
-                    message: request body is invalid.
+                    title: Invalid request
+                    status: 400
+                    detail: request body is invalid.
+                notStarted:
+                  value:
+                    title: Submission rejected
+                    status: 400
+                    detail: contest has not started yet.
+                contestOver:
+                  value:
+                    title: Submission rejected
+                    status: 400
+                    detail: contest is over.
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before submit.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before submit.
         '429':
-          description: Rate limited
+          description: Submission rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/team/services:
     get:
       tags:
-        - Service Access
+        - Services
       summary: Get own service state
-      description: Get the current readable state for the authenticated team's own services.
       operationId: listOwnServiceStates
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Team service state
+          description: Owned service state rows
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamServicesResponse'
+                type: array
+                items:
+                  $ref: '#/components/schemas/TeamServiceState'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      - challenge_id: 1
-                        team_id: 101
-                        name: banking
-                        endpoint: 10.80.1.11:10001
-                        status: stable
-                        checker: passing
-                        unlocked: true
-                        ssh_hint: ssh root@10.80.1.11
-                        last_event: nginx.conf hotfix deployed 2m ago
-                        reset_cooldown: ready
+                    - challenge_id: 1
+                      team_id: 101
+                      name: banking
+                      endpoint: 10.80.1.11:10001
+                      status: stable
+                      checker: passing
+                      unlocked: true
+                      ssh_hint: ssh root@10.80.1.11 -p 22
+                      last_event: nginx.conf hotfix deployed 2m ago
+                      reset_cooldown: ready
+                      sla_status: passing
+                      sla_phase: check
+                      sla_tick_id: 248
+                      sla_message: latest SLA cycle passed
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before access.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before access.
   /api/v2/services/{challenge_id}/unlock:
     post:
       tags:
-        - Service Access
+        - Services
       summary: Unlock owned service
-      description: >
-        Submit proof that the team solved its own service and wants SSH access
-        to the exact team service container.
+      description: Submit proof recovered from your own service to unlock SSH access.
       operationId: unlockService
       security:
         - bearerAuth: []
@@ -498,59 +511,51 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UnlockResponse'
+                $ref: '#/components/schemas/UnlockData'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      challenge_id: 1
-                      team_id: 101
-                      unlocked: true
-                      ssh_credential_ttl_seconds: 1800
+                    challenge_id: 1
+                    team_id: 101
+                    unlocked: true
         '400':
           description: Invalid unlock request
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/FailedResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 invalidProof:
                   value:
-                    status: failed
-                    message: unlock proof is invalid.
+                    title: Request rejected
+                    status: 400
+                    detail: unlock proof is invalid.
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before unlock.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before unlock.
         '429':
           description: Unlock rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services/{challenge_id}/ssh-session:
     post:
       tags:
-        - Service Access
-      summary: Issue one-time root credential
+        - Services
+      summary: Get team SSH credential
       description: >
-        Get short-lived SSH connection details for the already-unlocked owned
-        service container. The SSH host is the same service IP, the username
-        is `root`, and the password is one-time secret material reachable only
-        through WireGuard for the owning team after unlock.
+        Return the stable per-team SSH credential for an already-unlocked owned
+        service.
       operationId: createSshSession
       security:
         - bearerAuth: []
@@ -558,64 +563,57 @@ paths:
         - $ref: '#/components/parameters/ChallengeId'
       responses:
         '200':
-          description: SSH session issued
+          description: SSH credential issued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SshSessionResponse'
+                $ref: '#/components/schemas/SshSessionData'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      host: 10.80.1.11
-                      port: 22
-                      username: root
-                      password: one-time-root-password
-                      expires_at: '2026-03-10T12:30:00Z'
-                      connection_hint: ssh root@10.80.1.11
+                    challenge_id: 1
+                    host: 10.80.1.11
+                    port: 22
+                    username: root
+                    password: stable-team-root-password
+                    password_mode: stable
+                    connection_hint: ssh root@10.80.1.11 -p 22
         '400':
-          description: Service not unlocked or unavailable
+          description: Service not unlocked
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/FailedResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 locked:
                   value:
-                    status: failed
-                    message: service is not unlocked yet.
+                    title: Request rejected
+                    status: 400
+                    detail: service is not unlocked yet.
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before requesting ssh access.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before requesting ssh access.
         '429':
-          description: SSH credential issuance rate limited
+          description: SSH request rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services/{challenge_id}/reset/factory:
     post:
       tags:
-        - Service Access
+        - Services
       summary: Factory reset owned service
-      description: >
-        Recreate the owned service from the organizer baseline image.
-        Unlock state is preserved for the same team and service during the
-        same match.
+      description: Recreate the owned service from the baseline image.
       operationId: factoryResetService
       security:
         - bearerAuth: []
@@ -623,50 +621,42 @@ paths:
         - $ref: '#/components/parameters/ChallengeId'
       responses:
         '200':
-          description: Factory reset started or completed
+          description: Factory reset triggered
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FactoryResetResponse'
+                $ref: '#/components/schemas/FactoryResetData'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      challenge_id: 1
-                      team_id: 101
-                      action: factory_reset
-                      unlock_preserved: true
+                    challenge_id: 1
+                    team_id: 101
+                    action: factory_reset
+                    unlock_preserved: true
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before reset.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before reset.
         '429':
           description: Reset rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services/{challenge_id}/reset/restart:
     post:
       tags:
-        - Service Access
+        - Services
       summary: Restart owned service
-      description: >
-        Optional non-destructive restart that preserves current filesystem
-        modifications while restarting the process or container.
+      description: Restart the owned service without discarding filesystem changes.
       operationId: restartService
       security:
         - bearerAuth: []
@@ -674,41 +664,35 @@ paths:
         - $ref: '#/components/parameters/ChallengeId'
       responses:
         '200':
-          description: Restart started or completed
+          description: Restart triggered
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RestartResponse'
+                $ref: '#/components/schemas/RestartData'
               examples:
                 default:
                   value:
-                    status: success
-                    data:
-                      challenge_id: 1
-                      team_id: 101
-                      action: restart
+                    challenge_id: 1
+                    team_id: 101
+                    action: restart
         '403':
           description: Authentication required
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/ForbiddenResponse'
+                $ref: '#/components/schemas/ProblemDetails'
               examples:
                 unauthenticated:
                   value:
-                    status: forbidden
-                    message: please authenticate before restart.
+                    title: Forbidden
+                    status: 403
+                    detail: please authenticate before restart.
         '429':
           description: Restart rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/TooManyRequestsResponse'
-              examples:
-                default:
-                  value:
-                    status: too many request
-                    message: no bruteforce needed, calm down a little bit.
+                $ref: '#/components/schemas/ProblemDetails'
 components:
   securitySchemes:
     bearerAuth:
@@ -725,18 +709,23 @@ components:
         type: integer
         minimum: 1
   schemas:
-    StatusSuccess:
-      type: string
-      const: success
-    StatusFailed:
-      type: string
-      const: failed
-    StatusForbidden:
-      type: string
-      const: forbidden
-    StatusTooManyRequest:
-      type: string
-      const: too many request
+    ProblemDetails:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - status
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
     AuthenticateRequest:
       type: object
       additionalProperties: false
@@ -750,57 +739,26 @@ components:
         password:
           type: string
           minLength: 1
-    AuthenticateSuccessResponse:
+    AuthenticateResponse:
       type: object
       additionalProperties: false
       required:
-        - status
-        - data
+        - token
+        - token_type
       properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
+        token:
           type: string
-          description: Team JWT
-    FailedResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - message
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusFailed'
-        message:
+          description: Participant JWT
+        token_type:
           type: string
-    ForbiddenResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - message
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusForbidden'
-        message:
-          type: string
-    TooManyRequestsResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - message
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusTooManyRequest'
-        message:
-          type: string
+          const: Bearer
     Challenge:
       type: object
       additionalProperties: false
       required:
         - id
         - name
+        - has_source_download
       properties:
         id:
           type: integer
@@ -808,28 +766,17 @@ components:
         name:
           type: string
           minLength: 1
-    ChallengesResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/Challenge'
+        has_source_download:
+          type: boolean
     ServiceEndpointList:
       type: array
+      minItems: 1
       items:
         type: string
-        description: host:port published to the WireGuard game network
-      minItems: 1
+        description: host:port reachable on the WireGuard game network
     ServicesByTeam:
       type: object
-      description: Map of team_id to list of published endpoints
+      description: Map of team_id to published endpoints
       additionalProperties:
         $ref: '#/components/schemas/ServiceEndpointList'
     ServicesByChallenge:
@@ -837,17 +784,6 @@ components:
       description: Map of challenge_id to nested team endpoint map
       additionalProperties:
         $ref: '#/components/schemas/ServicesByTeam'
-    ServicesResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/ServicesByChallenge'
     ScoreRow:
       type: object
       additionalProperties: false
@@ -875,19 +811,6 @@ components:
           type: integer
         delta:
           type: string
-    ScoreboardResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/ScoreRow'
     GameTickStatus:
       type: object
       additionalProperties: false
@@ -963,17 +886,6 @@ components:
         total_ticks:
           type: integer
           minimum: 0
-    GameStatusResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/GameStatus'
     AttackEvent:
       type: object
       additionalProperties: false
@@ -998,17 +910,6 @@ components:
           minimum: 0
         verdict:
           type: string
-    AttackFeedResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/AttackFeedPage'
     AttackFeedPage:
       type: object
       additionalProperties: false
@@ -1054,29 +955,41 @@ components:
       additionalProperties: false
       required:
         - flag
-        - verdict
+        - status
+        - detail
       properties:
         flag:
           type: string
-        verdict:
+        status:
+          type: string
+          enum:
+            - accepted
+            - duplicate
+            - invalid
+        detail:
           type: string
           enum:
             - flag is correct.
             - flag already submitted.
             - flag is wrong or expired.
-    SubmitFlagsResponse:
+    SubmissionResult:
       type: object
       additionalProperties: false
       required:
-        - status
-        - data
+        - results
+        - accepted_count
+        - rejected_count
       properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
+        results:
           type: array
           items:
             $ref: '#/components/schemas/SubmissionVerdict'
+        accepted_count:
+          type: integer
+          minimum: 0
+        rejected_count:
+          type: integer
+          minimum: 0
     TeamServiceState:
       type: object
       additionalProperties: false
@@ -1121,19 +1034,19 @@ components:
           type: string
         reset_cooldown:
           type: string
-    TeamServicesResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/TeamServiceState'
+        sla_status:
+          type: string
+          enum:
+            - passing
+            - failing
+            - unknown
+        sla_phase:
+          type: string
+        sla_tick_id:
+          type: integer
+          minimum: 0
+        sla_message:
+          type: string
     UnlockRequest:
       type: object
       additionalProperties: false
@@ -1150,7 +1063,6 @@ components:
         - challenge_id
         - team_id
         - unlocked
-        - ssh_credential_ttl_seconds
       properties:
         challenge_id:
           type: integer
@@ -1160,31 +1072,20 @@ components:
           minimum: 1
         unlocked:
           type: boolean
-        ssh_credential_ttl_seconds:
-          type: integer
-          minimum: 1
-    UnlockResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/UnlockData'
     SshSessionData:
       type: object
       additionalProperties: false
       required:
+        - challenge_id
         - host
         - port
         - username
         - password
-        - expires_at
         - connection_hint
       properties:
+        challenge_id:
+          type: integer
+          minimum: 1
         host:
           type: string
         port:
@@ -1196,23 +1097,13 @@ components:
           const: root
         password:
           type: string
-          minLength: 12
-        expires_at:
+          minLength: 1
+        password_mode:
           type: string
-          format: date-time
+          enum:
+            - stable
         connection_hint:
           type: string
-    SshSessionResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/SshSessionData'
     FactoryResetData:
       type: object
       additionalProperties: false
@@ -1234,17 +1125,6 @@ components:
         unlock_preserved:
           type: boolean
           const: true
-    FactoryResetResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/FactoryResetData'
     RestartData:
       type: object
       additionalProperties: false
@@ -1262,14 +1142,3 @@ components:
         action:
           type: string
           const: restart
-    RestartResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - status
-        - data
-      properties:
-        status:
-          $ref: '#/components/schemas/StatusSuccess'
-        data:
-          $ref: '#/components/schemas/RestartData'

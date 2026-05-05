@@ -7,20 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBanner } from "@/components/ui/status-banner";
-
-type LoginEnvelope =
-  | {
-      status: "success";
-      data: {
-        team_id?: number;
-        team_name?: string;
-        display_name?: string;
-      };
-    }
-  | {
-      status: "failed" | "forbidden" | "too many request";
-      message: string;
-    };
+import { parseApiError } from "@/lib/api-utils";
 
 export function ParticipantLoginForm() {
   const router = useRouter();
@@ -43,10 +30,9 @@ export function ParticipantLoginForm() {
         body: JSON.stringify({ email, password }),
       });
 
-      const payload = (await response.json()) as LoginEnvelope;
-      if (!response.ok || payload.status !== "success") {
+      if (!response.ok) {
         throw new Error(
-          "message" in payload ? payload.message : "participant login failed",
+          await parseApiError(response, "/api/platform/session/login"),
         );
       }
 

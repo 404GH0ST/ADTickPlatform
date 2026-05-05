@@ -7,14 +7,10 @@ import type {
   AdminOperationsStatus,
   AdminOverview,
 } from '@/lib/admin-dashboard-types';
+import { processApiResponse } from '@/lib/api-utils';
 
 type Props = {
   overview: AdminOverview;
-};
-
-type SuccessEnvelope<T> = {
-  status: 'success';
-  data: T;
 };
 
 function SummaryItem({
@@ -57,10 +53,12 @@ export function OrganizerStatusSummary({ overview }: Props) {
         if (!response.ok) {
           return;
         }
-        const payload =
-          (await response.json()) as SuccessEnvelope<AdminOperationsStatus>;
-        if (!cancelled && payload.status === 'success') {
-          setOperationsStatus(payload.data);
+        const payload = await processApiResponse<AdminOperationsStatus>(
+          response,
+          '/api/admin/operations/status',
+        );
+        if (!cancelled) {
+          setOperationsStatus(payload);
         }
       } catch {
         // Keep the last known operations snapshot if one refresh fails.

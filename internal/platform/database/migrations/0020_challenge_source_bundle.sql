@@ -1,0 +1,2 @@
+ALTER TABLE challenges
+ADD COLUMN IF NOT EXISTS source_bundle_path TEXT NOT NULL DEFAULT '';

@@ -194,15 +194,12 @@ func TestCheckerRunnerValidateEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                             `json:"status"`
-		Data   apigateway.CheckerValidationResult `json:"data"`
-	}
+	var payload apigateway.CheckerValidationResult
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode validation response: %v", err)
 	}
-	if payload.Data.Status != "valid" || !payload.Data.ContractOK {
-		t.Fatalf("unexpected validation payload %+v", payload.Data)
+	if payload.Status != "valid" || !payload.ContractOK {
+		t.Fatalf("unexpected validation payload %+v", payload)
 	}
 }
 

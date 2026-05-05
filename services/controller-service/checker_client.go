@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"adplatform/internal/platform/config"
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -58,22 +59,22 @@ func (c *httpCheckerValidationClient) Validate(ctx context.Context, request apig
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[apigateway.CheckerValidationResult]
+		var payload apigateway.CheckerValidationResult
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			return apigateway.CheckerValidationResult{}, err
 		}
-		return payload.Data, nil
+		return payload, nil
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	var problem httpapi.ProblemDetails
+	if err := json.NewDecoder(resp.Body).Decode(&problem); err != nil {
 		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
-		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed: %s", payload.Message)
+	if strings.TrimSpace(problem.Detail) != "" {
+		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed: %s", strings.TrimSpace(problem.Detail))
+	}
+	if strings.TrimSpace(problem.Title) != "" {
+		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed: %s", strings.TrimSpace(problem.Title))
 	}
 	return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 }

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -72,22 +74,41 @@ func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.Chec
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[apigateway.CheckerExecutionResult]
+		var payload apigateway.CheckerExecutionResult
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			return apigateway.CheckerExecutionResult{}, err
 		}
-		return payload.Data, nil
+		return payload, nil
 	}
-
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	message, err := decodeCheckerRunnerError(resp.Body)
+	if err != nil {
 		return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
-		return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed: %s", payload.Message)
+	if message != "" {
+		return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed: %s", message)
 	}
 	return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
+}
+
+func decodeCheckerRunnerError(body io.Reader) (string, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return trimmed, nil
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.Message), nil
 }

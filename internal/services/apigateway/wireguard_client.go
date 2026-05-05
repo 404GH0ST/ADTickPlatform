@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"adplatform/internal/platform/httpapi"
 )
 
 var errWireGuardGatewayDisabled = errors.New("wireguard gateway is not configured")
@@ -84,22 +87,41 @@ func (c *httpWireGuardClient) request(ctx context.Context, method, path string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[WireGuardGatewayStatus]
+		var payload WireGuardGatewayStatus
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			return WireGuardGatewayStatus{}, err
 		}
-		return payload.Data, nil
+		return payload, nil
 	}
-
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	message, err := decodeWireGuardProblem(resp.Body)
+	if err != nil {
 		return WireGuardGatewayStatus{}, fmt.Errorf("wireguard gateway request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
-		return WireGuardGatewayStatus{}, fmt.Errorf("wireguard gateway request failed: %s", payload.Message)
+	if message != "" {
+		return WireGuardGatewayStatus{}, fmt.Errorf("wireguard gateway request failed: %s", message)
 	}
 	return WireGuardGatewayStatus{}, fmt.Errorf("wireguard gateway request failed with status %d", resp.StatusCode)
+}
+
+func decodeWireGuardProblem(body io.Reader) (string, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return trimmed, nil
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.Message), nil
 }

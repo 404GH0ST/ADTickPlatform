@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"adplatform/internal/platform/httpapi"
 )
 
 type rateLimitPolicy struct {
@@ -289,10 +287,7 @@ func writeRateLimitFailure(w http.ResponseWriter, decision rateLimitDecision, me
 		retryAfter = 1
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-	httpapi.WriteJSON(w, http.StatusTooManyRequests, httpapi.ErrorEnvelope{
-		Status:  "too many request",
-		Message: message,
-	})
+	writeProblem(w, http.StatusTooManyRequests, "Too many requests", message)
 }
 
 func rateLimitTeamKey(prefix string, teamID int) string {
@@ -316,16 +311,17 @@ func rateLimitAuthKey(email, clientIP string) string {
 }
 
 var (
-	authRateLimitPolicy         = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0}
-	challengesRateLimitPolicy   = rateLimitPolicy{capacity: 4, refillPerSecond: 2}
-	servicesReadRateLimitPolicy = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
-	scoreboardRateLimitPolicy   = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
-	attacksReadRateLimitPolicy  = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
-	teamServicesRateLimitPolicy = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
-	submitRateLimitPolicy       = rateLimitPolicy{capacity: 30, refillPerSecond: 10}
-	unlockRateLimitPolicy       = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0}
-	sshSessionRateLimitPolicy   = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
-	factoryResetRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0}
-	restartRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
-	defaultRateLimit429Message  = "no bruteforce needed, calm down a little bit."
+	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0}
+	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2}
+	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
+	scoreboardRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
+	attacksReadRateLimitPolicy     = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
+	teamServicesRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
+	challengeSourceRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 1}
+	submitRateLimitPolicy          = rateLimitPolicy{capacity: 30, refillPerSecond: 10}
+	unlockRateLimitPolicy          = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0}
+	sshSessionRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
+	factoryResetRateLimitPolicy    = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0}
+	restartRateLimitPolicy         = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
+	defaultRateLimit429Message     = "no bruteforce needed, calm down a little bit."
 )

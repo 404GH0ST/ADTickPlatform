@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"adplatform/internal/platform/httpapi"
 )
 
 var errGameCoreDisabled = errors.New("game core is not configured")
@@ -308,19 +310,40 @@ func requestGameCoreJSON[T any](ctx context.Context, c *httpGameCoreClient, meth
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[T]
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			return zero, err
-		}
-		return payload.Data, nil
+		return decodeSuccessPayload[T](resp.Body)
 	}
 
+	message := decodeErrorMessage(resp.Body)
+	return zero, gameCoreHTTPError{StatusCode: resp.StatusCode, Message: message}
+}
+
+func decodeSuccessPayload[T any](body io.Reader) (T, error) {
+	var zero T
+	if err := json.NewDecoder(body).Decode(&zero); err != nil {
+		return zero, err
+	}
+	return zero, nil
+}
+
+func decodeErrorMessage(body io.Reader) string {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return ""
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return trimmed
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return trimmed
+		}
+	}
 	var payload struct {
-		Status  string `json:"status"`
 		Message string `json:"message"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return zero, gameCoreHTTPError{StatusCode: resp.StatusCode}
+	if err := json.Unmarshal(data, &payload); err == nil {
+		return strings.TrimSpace(payload.Message)
 	}
-	return zero, gameCoreHTTPError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(payload.Message)}
+	return ""
 }

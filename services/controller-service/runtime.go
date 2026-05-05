@@ -462,7 +462,6 @@ func buildDockerSSHCredentialArgs(task apigateway.ControllerRuntimeTask, credent
 	return []string{
 		"exec",
 		"-e", fmt.Sprintf("AD_PLATFORM_ROOT_PASSWORD=%s", credential.Password),
-		"-e", fmt.Sprintf("AD_PLATFORM_SSH_PASSWORD_EXPIRES_AT=%s", credential.ExpiresAt),
 		task.ContainerName,
 		"/bin/sh",
 		"-lc",
@@ -471,13 +470,13 @@ if command -v chpasswd >/dev/null 2>&1; then
   printf 'root:%s\n' "$AD_PLATFORM_ROOT_PASSWORD" | chpasswd
 elif command -v passwd >/dev/null 2>&1; then
   printf '%s\n%s\n' "$AD_PLATFORM_ROOT_PASSWORD" "$AD_PLATFORM_ROOT_PASSWORD" | passwd root >/dev/null
-else
-  echo 'no supported password setter found inside container' >&2
-  exit 1
-fi
-if [ -d /run/adplatform ]; then
-  printf '%s\n' "$AD_PLATFORM_SSH_PASSWORD_EXPIRES_AT" > /run/adplatform/ssh-password-expires-at
-fi`,
+	else
+	  echo 'no supported password setter found inside container' >&2
+	  exit 1
+	fi
+	if [ -d /run/adplatform ]; then
+	  rm -f /run/adplatform/ssh-password-expires-at
+	fi`,
 	}
 }
 

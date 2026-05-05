@@ -10,25 +10,31 @@ export async function handleAdminIdRoute<T>(
   const params = await context.params;
   const idStr = params[idParamName];
   if (!idStr) {
-    return NextResponse.json(
-      { status: "failed", message: `${idName} is invalid.` },
-      { status: 400 },
-    );
+    return problemResponse(400, "Invalid request", `${idName} is invalid.`);
   }
 
   const id = Number(idStr);
   if (!Number.isInteger(id) || id <= 0) {
-    return NextResponse.json(
-      { status: "failed", message: `${idName} is invalid.` },
-      { status: 400 },
-    );
+    return problemResponse(400, "Invalid request", `${idName} is invalid.`);
   }
 
   try {
     const data = await actionFn(id);
-    return NextResponse.json({ status: "success", data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : `${actionName} failed`;
-    return NextResponse.json({ status: "failed", message }, { status: 502 });
+    return problemResponse(502, "Upstream request failed", message);
   }
+}
+
+export function problemResponse(status: number, title: string, detail: string) {
+  return NextResponse.json(
+    { title, status, detail },
+    {
+      status,
+      headers: {
+        "Content-Type": "application/problem+json",
+      },
+    },
+  );
 }

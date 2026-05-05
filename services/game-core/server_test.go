@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -158,6 +159,26 @@ func newTestGameCoreMuxWithScheduler(checker checkerClient, scheduler gameSchedu
 	return mux
 }
 
+func decodeResponse[T any](t *testing.T, body []byte) T {
+	t.Helper()
+
+	var payload T
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	return payload
+}
+
+func decodeProblem(t *testing.T, body []byte) httpapi.ProblemDetails {
+	t.Helper()
+
+	var payload httpapi.ProblemDetails
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to decode problem response: %v", err)
+	}
+	return payload
+}
+
 func startTestMatch(t *testing.T, mux *http.ServeMux) {
 	t.Helper()
 
@@ -213,18 +234,12 @@ func TestAdvanceTickPersistsRunsAndStatus(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.GameTickStatus `json:"data"`
+	payload := decodeResponse[apigateway.GameTickStatus](t, response.Body.Bytes())
+	if payload.TotalCheckerRuns != 36 {
+		t.Fatalf("expected 36 checker runs, got %d", payload.TotalCheckerRuns)
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode advance response: %v", err)
-	}
-	if payload.Data.TotalCheckerRuns != 36 {
-		t.Fatalf("expected 36 checker runs, got %d", payload.Data.TotalCheckerRuns)
-	}
-	if payload.Data.SuccessfulCheckerRuns != 12 || payload.Data.FailedCheckerRuns != 12 || payload.Data.SkippedCheckerRuns != 12 {
-		t.Fatalf("unexpected tick counters %+v", payload.Data)
+	if payload.SuccessfulCheckerRuns != 12 || payload.FailedCheckerRuns != 12 || payload.SkippedCheckerRuns != 12 {
+		t.Fatalf("unexpected tick counters %+v", payload)
 	}
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/status", nil)
@@ -235,18 +250,12 @@ func TestAdvanceTickPersistsRunsAndStatus(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", statusResponse.Code)
 	}
 
-	var statusPayload struct {
-		Status string                `json:"status"`
-		Data   apigateway.GameStatus `json:"data"`
+	statusPayload := decodeResponse[apigateway.GameStatus](t, statusResponse.Body.Bytes())
+	if statusPayload.CurrentTick == nil || statusPayload.CurrentTick.ID != 1 {
+		t.Fatalf("unexpected game status %+v", statusPayload)
 	}
-	if err := json.Unmarshal(statusResponse.Body.Bytes(), &statusPayload); err != nil {
-		t.Fatalf("failed to decode game status response: %v", err)
-	}
-	if statusPayload.Data.CurrentTick == nil || statusPayload.Data.CurrentTick.ID != 1 {
-		t.Fatalf("unexpected game status %+v", statusPayload.Data)
-	}
-	if statusPayload.Data.TotalCheckerRuns != 36 {
-		t.Fatalf("expected aggregate total 36, got %d", statusPayload.Data.TotalCheckerRuns)
+	if statusPayload.TotalCheckerRuns != 36 {
+		t.Fatalf("expected aggregate total 36, got %d", statusPayload.TotalCheckerRuns)
 	}
 }
 
@@ -270,21 +279,15 @@ func TestCheckerRunsEndpointHonorsLimit(t *testing.T) {
 		t.Fatalf("expected runs 200, got %d", runsResponse.Code)
 	}
 
-	var payload struct {
-		Status string                        `json:"status"`
-		Data   apigateway.GameCheckerRunPage `json:"data"`
+	payload := decodeResponse[apigateway.GameCheckerRunPage](t, runsResponse.Body.Bytes())
+	if len(payload.Items) != 5 {
+		t.Fatalf("expected 5 checker runs, got %d", len(payload.Items))
 	}
-	if err := json.Unmarshal(runsResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode checker runs response: %v", err)
+	if payload.TotalCount != 36 || !payload.HasNext {
+		t.Fatalf("unexpected checker run page metadata %+v", payload)
 	}
-	if len(payload.Data.Items) != 5 {
-		t.Fatalf("expected 5 checker runs, got %d", len(payload.Data.Items))
-	}
-	if payload.Data.TotalCount != 36 || !payload.Data.HasNext {
-		t.Fatalf("unexpected checker run page metadata %+v", payload.Data)
-	}
-	if payload.Data.Items[0].TickID != 1 {
-		t.Fatalf("expected latest runs from tick 1, got tick %d", payload.Data.Items[0].TickID)
+	if payload.Items[0].TickID != 1 {
+		t.Fatalf("expected latest runs from tick 1, got tick %d", payload.Items[0].TickID)
 	}
 }
 
@@ -354,18 +357,12 @@ func TestCheckerRunsEndpointSupportsFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected filtered checker runs 200, got %d", filteredResponse.Code)
 	}
 
-	var filteredPayload struct {
-		Status string                        `json:"status"`
-		Data   apigateway.GameCheckerRunPage `json:"data"`
+	filteredPayload := decodeResponse[apigateway.GameCheckerRunPage](t, filteredResponse.Body.Bytes())
+	if len(filteredPayload.Items) != 1 || filteredPayload.Items[0].Phase != "get" || filteredPayload.Items[0].Status != "failed" {
+		t.Fatalf("unexpected filtered checker runs payload %+v", filteredPayload)
 	}
-	if err := json.Unmarshal(filteredResponse.Body.Bytes(), &filteredPayload); err != nil {
-		t.Fatalf("failed to decode filtered checker runs response: %v", err)
-	}
-	if len(filteredPayload.Data.Items) != 1 || filteredPayload.Data.Items[0].Phase != "get" || filteredPayload.Data.Items[0].Status != "failed" {
-		t.Fatalf("unexpected filtered checker runs payload %+v", filteredPayload.Data)
-	}
-	if filteredPayload.Data.TotalCount != 1 || filteredPayload.Data.HasNext || filteredPayload.Data.HasPrev {
-		t.Fatalf("unexpected filtered checker run page metadata %+v", filteredPayload.Data)
+	if filteredPayload.TotalCount != 1 || filteredPayload.HasNext || filteredPayload.HasPrev {
+		t.Fatalf("unexpected filtered checker run page metadata %+v", filteredPayload)
 	}
 
 	offsetRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/checker-runs?team_id=101&challenge_id=1&offset=1&limit=1", nil)
@@ -376,14 +373,12 @@ func TestCheckerRunsEndpointSupportsFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected checker runs offset 200, got %d", offsetResponse.Code)
 	}
 
-	if err := json.Unmarshal(offsetResponse.Body.Bytes(), &filteredPayload); err != nil {
-		t.Fatalf("failed to decode checker runs offset response: %v", err)
+	filteredPayload = decodeResponse[apigateway.GameCheckerRunPage](t, offsetResponse.Body.Bytes())
+	if len(filteredPayload.Items) != 1 || filteredPayload.Items[0].Phase != "get" {
+		t.Fatalf("unexpected checker runs offset payload %+v", filteredPayload)
 	}
-	if len(filteredPayload.Data.Items) != 1 || filteredPayload.Data.Items[0].Phase != "get" {
-		t.Fatalf("unexpected checker runs offset payload %+v", filteredPayload.Data)
-	}
-	if !filteredPayload.Data.HasPrev {
-		t.Fatalf("expected checker run offset page to expose previous page %+v", filteredPayload.Data)
+	if !filteredPayload.HasPrev {
+		t.Fatalf("expected checker run offset page to expose previous page %+v", filteredPayload)
 	}
 }
 
@@ -405,15 +400,9 @@ func TestSchedulerEndpointsExposeStatusAndControl(t *testing.T) {
 		t.Fatalf("expected scheduler status 200, got %d", statusResponse.Code)
 	}
 
-	var statusPayload struct {
-		Status string                         `json:"status"`
-		Data   apigateway.GameSchedulerStatus `json:"data"`
-	}
-	if err := json.Unmarshal(statusResponse.Body.Bytes(), &statusPayload); err != nil {
-		t.Fatalf("failed to decode scheduler status: %v", err)
-	}
-	if statusPayload.Data.State != "stopped" || statusPayload.Data.IntervalSeconds != 60 {
-		t.Fatalf("unexpected scheduler status %+v", statusPayload.Data)
+	statusPayload := decodeResponse[apigateway.GameSchedulerStatus](t, statusResponse.Body.Bytes())
+	if statusPayload.State != "stopped" || statusPayload.IntervalSeconds != 60 {
+		t.Fatalf("unexpected scheduler status %+v", statusPayload)
 	}
 
 	startRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/scheduler/start", nil)
@@ -454,15 +443,9 @@ func TestMatchEndpointsExposeStatusAndControl(t *testing.T) {
 		t.Fatalf("expected match status 200, got %d", statusResponse.Code)
 	}
 
-	var statusPayload struct {
-		Status string                     `json:"status"`
-		Data   apigateway.GameMatchStatus `json:"data"`
-	}
-	if err := json.Unmarshal(statusResponse.Body.Bytes(), &statusPayload); err != nil {
-		t.Fatalf("failed to decode match status: %v", err)
-	}
-	if statusPayload.Data.State != "not_started" || statusPayload.Data.AcceptingSubmissions {
-		t.Fatalf("unexpected match status %+v", statusPayload.Data)
+	statusPayload := decodeResponse[apigateway.GameMatchStatus](t, statusResponse.Body.Bytes())
+	if statusPayload.State != "not_started" || statusPayload.AcceptingSubmissions {
+		t.Fatalf("unexpected match status %+v", statusPayload)
 	}
 
 	updateRequest := httptest.NewRequest(
@@ -478,15 +461,9 @@ func TestMatchEndpointsExposeStatusAndControl(t *testing.T) {
 		t.Fatalf("expected match schedule update 200, got %d", updateResponse.Code)
 	}
 
-	var updatePayload struct {
-		Status string                     `json:"status"`
-		Data   apigateway.GameMatchStatus `json:"data"`
-	}
-	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updatePayload); err != nil {
-		t.Fatalf("failed to decode match schedule response: %v", err)
-	}
-	if updatePayload.Data.ScheduledStartAt != "2099-03-10T09:00:00Z" || updatePayload.Data.ScheduledEndAt != "2099-03-10T13:00:00Z" {
-		t.Fatalf("unexpected match schedule %+v", updatePayload.Data)
+	updatePayload := decodeResponse[apigateway.GameMatchStatus](t, updateResponse.Body.Bytes())
+	if updatePayload.ScheduledStartAt != "2099-03-10T09:00:00Z" || updatePayload.ScheduledEndAt != "2099-03-10T13:00:00Z" {
+		t.Fatalf("unexpected match schedule %+v", updatePayload)
 	}
 
 	startRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/match/start", nil)
@@ -591,18 +568,12 @@ func TestSchedulerEventsEndpointHonorsLimit(t *testing.T) {
 		t.Fatalf("expected scheduler events 200, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status string                            `json:"status"`
-		Data   apigateway.GameSchedulerEventPage `json:"data"`
+	payload := decodeResponse[apigateway.GameSchedulerEventPage](t, response.Body.Bytes())
+	if len(payload.Items) != 1 || payload.Items[0].EventType != "tick_completed" {
+		t.Fatalf("unexpected scheduler events payload %+v", payload)
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode scheduler events response: %v", err)
-	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].EventType != "tick_completed" {
-		t.Fatalf("unexpected scheduler events payload %+v", payload.Data)
-	}
-	if payload.Data.TotalCount != 2 || payload.Data.HasNext != true {
-		t.Fatalf("unexpected scheduler page metadata %+v", payload.Data)
+	if payload.TotalCount != 2 || payload.HasNext != true {
+		t.Fatalf("unexpected scheduler page metadata %+v", payload)
 	}
 }
 
@@ -624,18 +595,12 @@ func TestSchedulerEventsEndpointSupportsFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected filtered scheduler events 200, got %d", filteredResponse.Code)
 	}
 
-	var filteredPayload struct {
-		Status string                            `json:"status"`
-		Data   apigateway.GameSchedulerEventPage `json:"data"`
+	filteredPayload := decodeResponse[apigateway.GameSchedulerEventPage](t, filteredResponse.Body.Bytes())
+	if len(filteredPayload.Items) != 1 || filteredPayload.Items[0].ID != 3 {
+		t.Fatalf("unexpected filtered scheduler events payload %+v", filteredPayload)
 	}
-	if err := json.Unmarshal(filteredResponse.Body.Bytes(), &filteredPayload); err != nil {
-		t.Fatalf("failed to decode filtered scheduler events response: %v", err)
-	}
-	if len(filteredPayload.Data.Items) != 1 || filteredPayload.Data.Items[0].ID != 3 {
-		t.Fatalf("unexpected filtered scheduler events payload %+v", filteredPayload.Data)
-	}
-	if filteredPayload.Data.TotalCount != 1 || filteredPayload.Data.HasNext || filteredPayload.Data.HasPrev {
-		t.Fatalf("unexpected filtered scheduler event page metadata %+v", filteredPayload.Data)
+	if filteredPayload.TotalCount != 1 || filteredPayload.HasNext || filteredPayload.HasPrev {
+		t.Fatalf("unexpected filtered scheduler event page metadata %+v", filteredPayload)
 	}
 
 	offsetRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/scheduler/events?source=scheduler&offset=1&limit=1", nil)
@@ -646,14 +611,12 @@ func TestSchedulerEventsEndpointSupportsFiltersAndOffset(t *testing.T) {
 		t.Fatalf("expected scheduler events offset 200, got %d", offsetResponse.Code)
 	}
 
-	if err := json.Unmarshal(offsetResponse.Body.Bytes(), &filteredPayload); err != nil {
-		t.Fatalf("failed to decode scheduler events offset response: %v", err)
+	filteredPayload = decodeResponse[apigateway.GameSchedulerEventPage](t, offsetResponse.Body.Bytes())
+	if len(filteredPayload.Items) != 1 || filteredPayload.Items[0].ID != 2 {
+		t.Fatalf("unexpected scheduler events offset payload %+v", filteredPayload)
 	}
-	if len(filteredPayload.Data.Items) != 1 || filteredPayload.Data.Items[0].ID != 2 {
-		t.Fatalf("unexpected scheduler events offset payload %+v", filteredPayload.Data)
-	}
-	if !filteredPayload.Data.HasPrev {
-		t.Fatalf("expected scheduler event offset page to expose previous page %+v", filteredPayload.Data)
+	if !filteredPayload.HasPrev {
+		t.Fatalf("expected scheduler event offset page to expose previous page %+v", filteredPayload)
 	}
 }
 
@@ -678,19 +641,70 @@ func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 		t.Fatalf("expected submit 200, got %d", submitResponse.Code)
 	}
 
-	var payload struct {
-		Status string                              `json:"status"`
-		Data   []apigateway.SubmissionVerdictAlias `json:"data"`
+	payload := decodeResponse[[]apigateway.SubmissionVerdictAlias](t, submitResponse.Body.Bytes())
+	if len(payload) != 2 {
+		t.Fatalf("expected 2 verdicts, got %d", len(payload))
 	}
-	if err := json.Unmarshal(submitResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode submit response: %v", err)
+	if payload[0].Detail != "flag is correct." || payload[1].Detail != "flag already submitted." {
+		t.Fatalf("unexpected submit verdicts %+v", payload)
 	}
-	if len(payload.Data) != 2 {
-		t.Fatalf("expected 2 verdicts, got %d", len(payload.Data))
+}
+
+func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
+	mux := newTestGameCoreMux(testCheckerClient{})
+	startTestMatch(t, mux)
+
+	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
+	advanceRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	advanceResponse := httptest.NewRecorder()
+	mux.ServeHTTP(advanceResponse, advanceRequest)
+	if advanceResponse.Code != http.StatusOK {
+		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
-	if payload.Data[0].Verdict != "flag is correct." || payload.Data[1].Verdict != "flag already submitted." {
-		t.Fatalf("unexpected submit verdicts %+v", payload.Data)
+
+	flag := newFlagCodec("test-flag-secret").Issue(102, 1, 1, 1)
+	for _, teamID := range []int{101, 103} {
+		submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"flags":["%s"]}`, teamID, flag)))
+		submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+		submitResponse := httptest.NewRecorder()
+		mux.ServeHTTP(submitResponse, submitRequest)
+		if submitResponse.Code != http.StatusOK {
+			t.Fatalf("expected submit 200 for team %d, got %d", teamID, submitResponse.Code)
+		}
+
+		payload := decodeResponse[[]apigateway.SubmissionVerdictAlias](t, submitResponse.Body.Bytes())
+		if len(payload) != 1 || payload[0].Detail != "flag is correct." {
+			t.Fatalf("unexpected submit verdict for team %d: %+v", teamID, payload)
+		}
 	}
+
+	scoreboardRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/scoring/recompute", nil)
+	scoreboardRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	scoreboardResponse := httptest.NewRecorder()
+	mux.ServeHTTP(scoreboardResponse, scoreboardRequest)
+	if scoreboardResponse.Code != http.StatusOK {
+		t.Fatalf("expected score recompute 200, got %d", scoreboardResponse.Code)
+	}
+
+	scoreboard := decodeResponse[[]apigateway.ScoreRowAlias](t, scoreboardResponse.Body.Bytes())
+	rows := scoreRowsByTeam(scoreboard)
+	if rows["Team Alpha"].Attack != 10 {
+		t.Fatalf("expected first capture to be worth 10, got %+v", rows["Team Alpha"])
+	}
+	if rows["Team Sigma"].Attack != 5 {
+		t.Fatalf("expected second capture to be worth 5, got %+v", rows["Team Sigma"])
+	}
+	if rows["Team Delta"].Defense != 700 {
+		t.Fatalf("expected victim defense to drop once for the stolen flag, got %+v", rows["Team Delta"])
+	}
+}
+
+func scoreRowsByTeam(rows []apigateway.ScoreRowAlias) map[string]apigateway.ScoreRowAlias {
+	result := make(map[string]apigateway.ScoreRowAlias, len(rows))
+	for _, row := range rows {
+		result[row.Team] = row
+	}
+	return result
 }
 
 func TestSubmitFlagsRequiresRunningMatch(t *testing.T) {
@@ -704,15 +718,9 @@ func TestSubmitFlagsRequiresRunningMatch(t *testing.T) {
 		t.Fatalf("expected submit 400 before start, got %d", response.Code)
 	}
 
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode pre-start submit response: %v", err)
-	}
-	if payload.Message != "contest has not started yet." {
-		t.Fatalf("unexpected pre-start message %q", payload.Message)
+	payload := decodeProblem(t, response.Body.Bytes())
+	if payload.Detail != "contest has not started yet." {
+		t.Fatalf("unexpected pre-start message %q", payload.Detail)
 	}
 
 	startTestMatch(t, mux)
@@ -732,11 +740,9 @@ func TestSubmitFlagsRequiresRunningMatch(t *testing.T) {
 	if finishedResponse.Code != http.StatusBadRequest {
 		t.Fatalf("expected submit 400 after finish, got %d", finishedResponse.Code)
 	}
-	if err := json.Unmarshal(finishedResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode finished submit response: %v", err)
-	}
-	if payload.Message != "contest is over." {
-		t.Fatalf("unexpected finished message %q", payload.Message)
+	payload = decodeProblem(t, finishedResponse.Body.Bytes())
+	if payload.Detail != "contest is over." {
+		t.Fatalf("unexpected finished message %q", payload.Detail)
 	}
 }
 
@@ -766,15 +772,9 @@ func TestSubmitFlagsRejectsOwnAndExpiredFlags(t *testing.T) {
 		t.Fatalf("expected submit 200, got %d", submitResponse.Code)
 	}
 
-	var payload struct {
-		Status string                              `json:"status"`
-		Data   []apigateway.SubmissionVerdictAlias `json:"data"`
-	}
-	if err := json.Unmarshal(submitResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode submit response: %v", err)
-	}
-	if payload.Data[0].Verdict != "flag is wrong or expired." || payload.Data[1].Verdict != "flag is wrong or expired." {
-		t.Fatalf("unexpected submit verdicts %+v", payload.Data)
+	payload := decodeResponse[[]apigateway.SubmissionVerdictAlias](t, submitResponse.Body.Bytes())
+	if payload[0].Detail != "flag is wrong or expired." || payload[1].Detail != "flag is wrong or expired." {
+		t.Fatalf("unexpected submit verdicts %+v", payload)
 	}
 }
 
@@ -807,18 +807,12 @@ func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
 		t.Fatalf("expected score recompute 200, got %d", scoreboardResponse.Code)
 	}
 
-	var payload struct {
-		Status string                     `json:"status"`
-		Data   []apigateway.ScoreRowAlias `json:"data"`
+	payload := decodeResponse[[]apigateway.ScoreRowAlias](t, scoreboardResponse.Body.Bytes())
+	if len(payload) != 4 {
+		t.Fatalf("expected 4 score rows, got %d", len(payload))
 	}
-	if err := json.Unmarshal(scoreboardResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode scoreboard response: %v", err)
-	}
-	if len(payload.Data) != 4 {
-		t.Fatalf("expected 4 score rows, got %d", len(payload.Data))
-	}
-	if payload.Data[0].Team != "Team Alpha" || payload.Data[0].Attack != 10 || payload.Data[0].Defense != 30 || payload.Data[0].SLA != 30 || payload.Data[0].Total != 70 {
-		t.Fatalf("unexpected leading score row %+v", payload.Data[0])
+	if payload[0].Team != "Team Alpha" || payload[0].Attack != 10 || payload[0].Defense != 1000 || payload[0].SLA != 33 || payload[0].Total != 1043 {
+		t.Fatalf("unexpected leading score row %+v", payload[0])
 	}
 }
 
@@ -851,21 +845,15 @@ func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {
 		t.Fatalf("expected attacks 200, got %d", attackResponse.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.AttackFeedPage `json:"data"`
+	payload := decodeResponse[apigateway.AttackFeedPage](t, attackResponse.Body.Bytes())
+	if len(payload.Items) != 1 {
+		t.Fatalf("expected 1 attack event, got %d", len(payload.Items))
 	}
-	if err := json.Unmarshal(attackResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode attack feed response: %v", err)
+	if payload.Items[0].Attacker != "Team Alpha" || payload.Items[0].Victim != "Team Delta" || payload.Items[0].Tick != 1 {
+		t.Fatalf("unexpected attack event %+v", payload.Items[0])
 	}
-	if len(payload.Data.Items) != 1 {
-		t.Fatalf("expected 1 attack event, got %d", len(payload.Data.Items))
-	}
-	if payload.Data.Items[0].Attacker != "Team Alpha" || payload.Data.Items[0].Victim != "Team Delta" || payload.Data.Items[0].Tick != 1 {
-		t.Fatalf("unexpected attack event %+v", payload.Data.Items[0])
-	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasNext || payload.Data.HasPrev {
-		t.Fatalf("unexpected attack page metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasNext || payload.HasPrev {
+		t.Fatalf("unexpected attack page metadata %+v", payload)
 	}
 }
 
@@ -906,18 +894,12 @@ func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
 		t.Fatalf("expected attacks 200, got %d", attackResponse.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.AttackFeedPage `json:"data"`
+	payload := decodeResponse[apigateway.AttackFeedPage](t, attackResponse.Body.Bytes())
+	if len(payload.Items) != 1 || payload.Items[0].Victim != "Team Delta" {
+		t.Fatalf("unexpected paged attack feed %+v", payload)
 	}
-	if err := json.Unmarshal(attackResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode paged attack feed response: %v", err)
-	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].Victim != "Team Delta" {
-		t.Fatalf("unexpected paged attack feed %+v", payload.Data)
-	}
-	if payload.Data.TotalCount != 2 || !payload.Data.HasPrev || payload.Data.HasNext {
-		t.Fatalf("unexpected paged attack metadata %+v", payload.Data)
+	if payload.TotalCount != 2 || !payload.HasPrev || payload.HasNext {
+		t.Fatalf("unexpected paged attack metadata %+v", payload)
 	}
 }
 
@@ -958,18 +940,12 @@ func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
 		t.Fatalf("expected attacks 200, got %d", attackResponse.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.AttackFeedPage `json:"data"`
+	payload := decodeResponse[apigateway.AttackFeedPage](t, attackResponse.Body.Bytes())
+	if len(payload.Items) != 1 || payload.Items[0].Service != "chat" {
+		t.Fatalf("unexpected filtered attack feed %+v", payload)
 	}
-	if err := json.Unmarshal(attackResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode filtered attack feed response: %v", err)
-	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].Service != "chat" {
-		t.Fatalf("unexpected filtered attack feed %+v", payload.Data)
-	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasPrev || payload.Data.HasNext {
-		t.Fatalf("unexpected filtered attack metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasPrev || payload.HasNext {
+		t.Fatalf("unexpected filtered attack metadata %+v", payload)
 	}
 }
 
@@ -1018,17 +994,11 @@ func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
 		t.Fatalf("expected attacks 200, got %d", attackResponse.Code)
 	}
 
-	var payload struct {
-		Status string                    `json:"status"`
-		Data   apigateway.AttackFeedPage `json:"data"`
+	payload := decodeResponse[apigateway.AttackFeedPage](t, attackResponse.Body.Bytes())
+	if len(payload.Items) != 1 || payload.Items[0].Tick != 2 {
+		t.Fatalf("unexpected tick-filtered attack feed %+v", payload)
 	}
-	if err := json.Unmarshal(attackResponse.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode tick-filtered attack feed response: %v", err)
-	}
-	if len(payload.Data.Items) != 1 || payload.Data.Items[0].Tick != 2 {
-		t.Fatalf("unexpected tick-filtered attack feed %+v", payload.Data)
-	}
-	if payload.Data.TotalCount != 1 || payload.Data.HasPrev || payload.Data.HasNext {
-		t.Fatalf("unexpected tick-filtered attack metadata %+v", payload.Data)
+	if payload.TotalCount != 1 || payload.HasPrev || payload.HasNext {
+		t.Fatalf("unexpected tick-filtered attack metadata %+v", payload)
 	}
 }

@@ -16,27 +16,34 @@ type unlockRequest struct {
 }
 
 type challenge struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID                int    `json:"id"`
+	Name              string `json:"name"`
+	HasSourceDownload bool   `json:"has_source_download"`
 }
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
+type authenticateResponse struct {
+	Token     string `json:"token"`
+	TokenType string `json:"token_type"`
 }
 
 type SubmissionVerdictAlias struct {
-	Flag    string `json:"flag"`
-	Verdict string `json:"verdict"`
+	Flag   string `json:"flag"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type submissionVerdict = SubmissionVerdictAlias
 
+type submissionResult struct {
+	Results       []submissionVerdict `json:"results"`
+	AcceptedCount int                 `json:"accepted_count"`
+	RejectedCount int                 `json:"rejected_count"`
+}
+
 type unlockData struct {
-	ChallengeID             int  `json:"challenge_id"`
-	TeamID                  int  `json:"team_id"`
-	Unlocked                bool `json:"unlocked"`
-	SSHCredentialTTLSeconds int  `json:"ssh_credential_ttl_seconds"`
+	ChallengeID int  `json:"challenge_id"`
+	TeamID      int  `json:"team_id"`
+	Unlocked    bool `json:"unlocked"`
 }
 
 type sshSessionData struct {
@@ -45,7 +52,7 @@ type sshSessionData struct {
 	Port           int    `json:"port"`
 	Username       string `json:"username"`
 	Password       string `json:"password"`
-	ExpiresAt      string `json:"expires_at"`
+	PasswordMode   string `json:"password_mode,omitempty"`
 	ConnectionHint string `json:"connection_hint"`
 }
 
@@ -67,6 +74,10 @@ type serviceState struct {
 	SSHHint       string `json:"ssh_hint"`
 	LastEvent     string `json:"last_event"`
 	ResetCooldown string `json:"reset_cooldown"`
+	SLAStatus     string `json:"sla_status,omitempty"`
+	SLAPhase      string `json:"sla_phase,omitempty"`
+	SLATickID     int    `json:"sla_tick_id,omitempty"`
+	SLAMessage    string `json:"sla_message,omitempty"`
 }
 
 type ScoreRowAlias struct {

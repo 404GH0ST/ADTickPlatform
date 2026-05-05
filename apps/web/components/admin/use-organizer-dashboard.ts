@@ -25,7 +25,7 @@ import type {
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
-import { buildQueryString } from "@/lib/api-utils";
+import { buildQueryString, processApiResponse } from "@/lib/api-utils";
 
 import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
 
@@ -51,16 +51,6 @@ export type OrganizerDashboardOptions = {
   scoreboard: AdminGameScoreRow[];
   teams: AdminTeam[];
 };
-
-type ActionEnvelope<T> =
-  | {
-      status: "success";
-      data: T;
-    }
-  | {
-      status: "failed" | "forbidden";
-      message: string;
-    };
 
 const defaultCheckerRunFilters = {
   limit: "18",
@@ -107,6 +97,7 @@ type ChallengeDraft = {
   baselineImage: string;
   checkerImage: string;
   name: string;
+  sourceBundlePath: string;
   servicePort: string;
   serviceSubnetOctet: string;
   weight: string;
@@ -308,6 +299,7 @@ export function useOrganizerDashboard({
     name: "",
     baselineImage: "",
     checkerImage: "",
+    sourceBundlePath: "",
     servicePort: "",
     serviceSubnetOctet: "",
     weight: "1",
@@ -491,15 +483,10 @@ export function useOrganizerDashboard({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const payload = (await response.json()) as ActionEnvelope<T>;
-    if (!response.ok || payload.status !== "success") {
-      throw new Error(
-        "message" in payload
-          ? payload.message
-          : `${typeLabel} ${method === "POST" ? "create" : "update"} failed`,
-      );
-    }
-    return payload.data;
+    return processApiResponse<T>(
+      response,
+      `${typeLabel} ${method === "POST" ? "create" : "update"} request`,
+    );
   }
 
   async function createTeam(): Promise<void> {
@@ -651,21 +638,16 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/operations/status", {
         cache: "no-store",
       });
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminOperationsStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "operations status failed",
-        );
-      }
-      setOperationsStatusState(payload.data);
+      const payload = await processApiResponse<AdminOperationsStatus>(
+        response,
+        "/api/admin/operations/status",
+      );
+      setOperationsStatusState(payload);
       if (!silent) {
         setActionNote(
-          payload.data.alerts.length === 0
+          payload.alerts.length === 0
             ? "Runtime operations look healthy."
-            : `Loaded ${payload.data.alerts.length} runtime alert(s).`,
+            : `Loaded ${payload.alerts.length} runtime alert(s).`,
         );
       }
     } catch (error) {
@@ -692,16 +674,11 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/operations/metrics", {
         cache: "no-store",
       });
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminServiceMetricSnapshot>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "operations metrics failed",
-        );
-      }
-      setServiceMetricsState(payload.data);
+      const payload = await processApiResponse<AdminServiceMetricSnapshot>(
+        response,
+        "/api/admin/operations/metrics",
+      );
+      setServiceMetricsState(payload);
       if (!silent) {
         setActionNote("Loaded live service metrics.");
       }
@@ -737,18 +714,13 @@ export function useOrganizerDashboard({
 
     try {
       const response = await fetch(`/api/admin/players/${player.id}/wireguard`);
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminWireGuardPeer>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "wireguard config fetch failed",
-        );
-      }
+      const payload = await processApiResponse<AdminWireGuardPeer>(
+        response,
+        `/api/admin/players/${player.id}/wireguard`,
+      );
 
-      applyWireGuardUpdate(payload.data);
-      setSelectedWireGuardPeer(payload.data);
+      applyWireGuardUpdate(payload);
+      setSelectedWireGuardPeer(payload);
       setWireGuardDialogOpen(true);
       setActionNote(`Loaded WireGuard config for ${player.display_name}.`);
     } catch (error) {
@@ -777,16 +749,13 @@ export function useOrganizerDashboard({
         `/api/admin/players/${player.id}/wireguard/${action}`,
         { method: "POST" },
       );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminWireGuardPeer>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : `wireguard ${action} failed`,
-        );
-      }
+      const payload = await processApiResponse<AdminWireGuardPeer>(
+        response,
+        `/api/admin/players/${player.id}/wireguard/${action}`,
+      );
 
-      applyWireGuardUpdate(payload.data);
-      setSelectedWireGuardPeer(payload.data);
+      applyWireGuardUpdate(payload);
+      setSelectedWireGuardPeer(payload);
       if (openDialog) setWireGuardDialogOpen(true);
       setActionNote(successMessage);
     } catch (error) {
@@ -825,19 +794,14 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/wireguard/reconcile", {
         method: "POST",
       });
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminWireGuardGatewayStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "wireguard gateway reconcile failed",
-        );
-      }
+      const payload = await processApiResponse<AdminWireGuardGatewayStatus>(
+        response,
+        "/api/admin/wireguard/reconcile",
+      );
 
-      setWireGuardGatewayStatus(payload.data);
+      setWireGuardGatewayStatus(payload);
       setActionNote(
-        `WireGuard gateway applied revision ${payload.data.revision ?? "n/a"} with ${payload.data.peers_active} active peer(s) and ${payload.data.peers_revoked} revoked peer(s).`,
+        `WireGuard gateway applied revision ${payload.revision ?? "n/a"} with ${payload.peers_active} active peer(s) and ${payload.peers_revoked} revoked peer(s).`,
       );
     } catch (error) {
       setActionError(
@@ -859,18 +823,13 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/access/reconcile", {
         method: "POST",
       });
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminControllerAccessStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "controller access reconcile failed",
-        );
-      }
-      setAccessStatus(payload.data);
+      const payload = await processApiResponse<AdminControllerAccessStatus>(
+        response,
+        "/api/admin/access/reconcile",
+      );
+      setAccessStatus(payload);
       setActionNote(
-        `Controller access applied revision ${payload.data.revision ?? "n/a"} across ${payload.data.policies_total} service policy row(s).`,
+        `Controller access applied revision ${payload.revision ?? "n/a"} across ${payload.policies_total} service policy row(s).`,
       );
     } catch (error) {
       setActionError(
@@ -900,14 +859,7 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/wireguard/teardown", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "wireguard gateway teardown failed",
-        );
-      }
+      await processApiResponse<void>(response, "/api/admin/wireguard/teardown");
 
       await refreshWireGuardGatewayStatus(true);
       setActionNote("WireGuard gateway rules and interface torn down.");
@@ -939,14 +891,7 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/access/teardown", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "controller access teardown failed",
-        );
-      }
+      await processApiResponse<void>(response, "/api/admin/access/teardown");
 
       await refreshAccessStatus(true);
       setActionNote("Controller service access rules torn down.");
@@ -974,12 +919,7 @@ export function useOrganizerDashboard({
 
     try {
       const response = await fetch(opts.url, { method: "DELETE" });
-      const payload = (await response.json()) as ActionEnvelope<void>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : opts.errorLabel,
-        );
-      }
+      await processApiResponse<void>(response, opts.url);
 
       opts.onSuccess();
       setActionNote(opts.successNote);
@@ -1062,6 +1002,7 @@ export function useOrganizerDashboard({
           name: challengeDraft.name,
           baseline_image: challengeDraft.baselineImage,
           checker_image: challengeDraft.checkerImage,
+          source_bundle_path: challengeDraft.sourceBundlePath,
           weight: Number(challengeDraft.weight) || 1,
           service_port:
             challengeDraft.servicePort.trim() === ""
@@ -1073,29 +1014,28 @@ export function useOrganizerDashboard({
               : Number(challengeDraft.serviceSubnetOctet),
         }),
       });
-      const payload = (await response.json()) as ActionEnvelope<AdminChallenge>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "challenge create failed",
-        );
-      }
+      const payload = await processApiResponse<AdminChallenge>(
+        response,
+        "/api/admin/challenges",
+      );
 
-      setChallengeRows((current) => [...current, payload.data]);
+      setChallengeRows((current) => [...current, payload]);
       setChallengeValidationRows((current) => {
         const next = { ...current };
-        delete next[payload.data.id];
+        delete next[payload.id];
         return next;
       });
       setChallengeDraft({
         name: "",
         baselineImage: "",
         checkerImage: "",
+        sourceBundlePath: "",
         servicePort: "",
         serviceSubnetOctet: "",
         weight: "1",
       });
       setActionNote(
-        `Created draft challenge ${payload.data.name}. Deploy it to replicate one service per team.`,
+        `Created draft challenge ${payload.name}. Deploy it to replicate one service per team.`,
       );
     } catch (error) {
       setActionError(
@@ -1132,26 +1072,21 @@ export function useOrganizerDashboard({
           method: "POST",
         },
       );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminChallengeValidationResult>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "challenge validation failed",
-        );
-      }
+      const payload = await processApiResponse<AdminChallengeValidationResult>(
+        response,
+        `/api/admin/challenges/${challenge.id}/validate`,
+      );
 
-      applyChallengeValidation(payload.data);
+      applyChallengeValidation(payload);
       if (!silent) {
         setActionNote(
-          payload.data.status === "valid"
+          payload.status === "valid"
             ? `${challenge.name} service and checker images satisfy the current runtime package policy.`
-            : payload.data.message ||
+            : payload.message ||
                 `${challenge.name} failed runtime validation.`,
         );
       }
-      return payload.data;
+      return payload;
     } catch (error) {
       if (!silent) {
         setActionError(
@@ -1192,13 +1127,10 @@ export function useOrganizerDashboard({
           method: "POST",
         },
       );
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminDeployment>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "challenge deploy failed",
-        );
-      }
+      const payload = await processApiResponse<AdminDeployment>(
+        response,
+        `/api/admin/challenges/${challenge.id}/deploy`,
+      );
 
       setChallengeRows((current) =>
         current.map((item) =>
@@ -1206,41 +1138,41 @@ export function useOrganizerDashboard({
             ? {
                 ...item,
                 published: true,
-                deployed_teams: payload.data.total_team_count,
-                total_teams: payload.data.total_team_count,
+                deployed_teams: payload.total_team_count,
+                total_teams: payload.total_team_count,
                 runtime_status:
-                  payload.data.queued_team_count > 0 ? "deploying" : "ready",
-                queued_teams: payload.data.queued_team_count,
-                ready_teams: payload.data.ready_team_count,
+                  payload.queued_team_count > 0 ? "deploying" : "ready",
+                queued_teams: payload.queued_team_count,
+                ready_teams: payload.ready_team_count,
               }
             : item,
         ),
       );
 
-      if (payload.data.job_id > 0) {
+      if (payload.job_id > 0) {
         setDeploymentRows((current) => [
           {
-            id: payload.data.job_id,
-            challenge_id: payload.data.challenge_id,
-            challenge_name: payload.data.challenge_name,
-            status: payload.data.status,
-            target_team_count: payload.data.total_team_count,
-            queued_team_count: payload.data.queued_team_count,
-            ready_team_count: payload.data.ready_team_count,
+            id: payload.job_id,
+            challenge_id: payload.challenge_id,
+            challenge_name: payload.challenge_name,
+            status: payload.status,
+            target_team_count: payload.total_team_count,
+            queued_team_count: payload.queued_team_count,
+            ready_team_count: payload.ready_team_count,
             failed_team_count: 0,
-            created_at: payload.data.created_at,
-            completed_at: payload.data.completed_at,
+            created_at: payload.created_at,
+            completed_at: payload.completed_at,
           },
           ...current.map((deployment) =>
-            deployment.challenge_id === payload.data.challenge_id &&
-            deployment.id !== payload.data.job_id &&
+            deployment.challenge_id === payload.challenge_id &&
+            deployment.id !== payload.job_id &&
             (deployment.status === "queued" || deployment.status === "running")
               ? {
                   ...deployment,
                   status: "superseded",
                   queued_team_count: 0,
                   completed_at:
-                    payload.data.created_at ?? new Date().toISOString(),
+                    payload.created_at ?? new Date().toISOString(),
                 }
               : deployment,
           ),
@@ -1248,14 +1180,14 @@ export function useOrganizerDashboard({
       } else {
         setDeploymentRows((current) =>
           current.map((deployment) =>
-            deployment.challenge_id === payload.data.challenge_id &&
+            deployment.challenge_id === payload.challenge_id &&
             (deployment.status === "queued" || deployment.status === "running")
               ? {
                   ...deployment,
                   status: "superseded",
                   queued_team_count: 0,
                   completed_at:
-                    payload.data.created_at ?? new Date().toISOString(),
+                    payload.created_at ?? new Date().toISOString(),
                 }
               : deployment,
           ),
@@ -1272,9 +1204,9 @@ export function useOrganizerDashboard({
       }
 
       setActionNote(
-        payload.data.status === "queued"
-          ? `Queued ${payload.data.challenge_name} for ${payload.data.deployed_team_count} team runtimes. Reconcile to mark the rollout ready.`
-          : `${payload.data.challenge_name} was already fully deployed across all teams.`,
+        payload.status === "queued"
+          ? `Queued ${payload.challenge_name} for ${payload.deployed_team_count} team runtimes. Reconcile to mark the rollout ready.`
+          : `${payload.challenge_name} was already fully deployed across all teams.`,
       );
     } catch (error) {
       setActionError(
@@ -1294,34 +1226,21 @@ export function useOrganizerDashboard({
       const reconcileResponse = await fetch("/api/admin/deployments/reconcile", {
         method: "POST",
       });
-      const payload =
-        (await reconcileResponse.json()) as ActionEnvelope<AdminReconcileResult>;
-      if (!reconcileResponse.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "deployment reconcile failed",
-        );
-      }
+      const payload = await processApiResponse<AdminReconcileResult>(
+        reconcileResponse,
+        "/api/admin/deployments/reconcile",
+      );
 
       const deploymentsResponse = await fetch("/api/admin/deployments");
-      const deploymentsPayload =
-        (await deploymentsResponse.json()) as ActionEnvelope<AdminDeploymentJob[]>;
-      if (
-        !deploymentsResponse.ok ||
-        deploymentsPayload.status !== "success"
-      ) {
-        throw new Error(
-          "message" in deploymentsPayload
-            ? deploymentsPayload.message
-            : "deployment list refresh failed",
-        );
-      }
+      const deploymentsPayload = await processApiResponse<AdminDeploymentJob[]>(
+        deploymentsResponse,
+        "/api/admin/deployments",
+      );
 
-      setDeploymentRows(deploymentsPayload.data);
+      setDeploymentRows(deploymentsPayload);
 
       setActionNote(
-        `Controller reconcile processed ${payload.data.processed_jobs} job(s), advanced ${payload.data.processed_instances} team service instance(s), and refreshed the deployment queue.`,
+        `Controller reconcile processed ${payload.processed_jobs} job(s), advanced ${payload.processed_instances} team service instance(s), and refreshed the deployment queue.`,
       );
     } catch (error) {
       setActionError(
@@ -1341,18 +1260,15 @@ export function useOrganizerDashboard({
 
     try {
       const response = await fetch("/api/admin/game/status");
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminGameStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "game-core status failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus>(
+        response,
+        "/api/admin/game/status",
+      );
 
-      setGameState(payload.data);
+      setGameState(payload);
       if (!silent) {
         setActionNote(
-          `Game-core reports match ${payload.data.match?.state ?? "unknown"} with ${payload.data.total_ticks} persisted tick(s).`,
+          `Game-core reports match ${payload.match?.state ?? "unknown"} with ${payload.total_ticks} persisted tick(s).`,
         );
       }
     } catch (error) {
@@ -1379,42 +1295,29 @@ export function useOrganizerDashboard({
       const matchResponse = await fetch("/api/admin/game/match/start", {
         method: "POST",
       });
-      const matchPayload = (await matchResponse.json()) as ActionEnvelope<
-        AdminGameStatus["match"]
-      >;
-      if (!matchResponse.ok || matchPayload.status !== "success") {
-        throw new Error(
-          "message" in matchPayload
-            ? matchPayload.message
-            : "game match start failed",
-        );
-      }
+      const matchPayload = await processApiResponse<AdminGameStatus["match"]>(
+        matchResponse,
+        "/api/admin/game/match/start",
+      );
 
       matchStarted = true;
-      setGameState((current) => ({ ...current, match: matchPayload.data }));
+      setGameState((current) => ({ ...current, match: matchPayload }));
 
       const schedulerResponse = await fetch("/api/admin/game/scheduler/start", {
         method: "POST",
       });
-      const schedulerPayload = (await schedulerResponse.json()) as ActionEnvelope<
+      const schedulerPayload = await processApiResponse<
         AdminGameStatus["scheduler"]
-      >;
-      if (!schedulerResponse.ok || schedulerPayload.status !== "success") {
-        throw new Error(
-          "message" in schedulerPayload
-            ? schedulerPayload.message
-            : "game-core scheduler start failed",
-        );
-      }
+      >(schedulerResponse, "/api/admin/game/scheduler/start");
 
       setGameState((current) => ({
         ...current,
-        match: matchPayload.data,
-        scheduler: schedulerPayload.data,
+        match: matchPayload,
+        scheduler: schedulerPayload,
       }));
       await refreshSchedulerEvents(true);
       setActionNote(
-        `Game started. Submissions are ${matchPayload.data?.accepting_submissions ? "open" : "closed"} and the scheduler is running at ${schedulerPayload.data?.interval_seconds ?? 0}s.`,
+        `Game started. Submissions are ${matchPayload?.accepting_submissions ? "open" : "closed"} and the scheduler is running at ${schedulerPayload?.interval_seconds ?? 0}s.`,
       );
     } catch (error) {
       setActionError(
@@ -1438,18 +1341,14 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/game/match/stop", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameStatus["match"]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "game match stop failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus["match"]>(
+        response,
+        "/api/admin/game/match/stop",
+      );
 
       setGameState((current) => ({
         ...current,
-        match: payload.data,
+        match: payload,
         scheduler: {
           ...(current.scheduler ?? { interval_seconds: 60 }),
           state: "stopped",
@@ -1476,21 +1375,15 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/game/scheduler/start", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameStatus["scheduler"]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "game-core scheduler start failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus["scheduler"]>(
+        response,
+        "/api/admin/game/scheduler/start",
+      );
 
-      setGameState((current) => ({ ...current, scheduler: payload.data }));
+      setGameState((current) => ({ ...current, scheduler: payload }));
       await refreshSchedulerEvents(true);
       setActionNote(
-        `Scheduler started with ${payload.data?.interval_seconds ?? 0}s interval.`,
+        `Scheduler started with ${payload?.interval_seconds ?? 0}s interval.`,
       );
     } catch (error) {
       setActionError(
@@ -1512,18 +1405,12 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/game/scheduler/stop", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameStatus["scheduler"]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "game-core scheduler stop failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus["scheduler"]>(
+        response,
+        "/api/admin/game/scheduler/stop",
+      );
 
-      setGameState((current) => ({ ...current, scheduler: payload.data }));
+      setGameState((current) => ({ ...current, scheduler: payload }));
       await refreshSchedulerEvents(true);
       setActionNote(
         "Scheduler stopped. Manual tick advance remains available.",
@@ -1556,20 +1443,14 @@ export function useOrganizerDashboard({
           scheduled_end_at: schedule.scheduledEndAt,
         }),
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameStatus["match"]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "game match schedule update failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus["match"]>(
+        response,
+        "/api/admin/game/match/schedule",
+      );
 
-      setGameState((current) => ({ ...current, match: payload.data }));
+      setGameState((current) => ({ ...current, match: payload }));
       setActionNote(
-        `Match window updated. Start: ${payload.data?.scheduled_start_at ?? "manual"}; end: ${payload.data?.scheduled_end_at ?? "manual"}.`,
+        `Match window updated. Start: ${payload?.scheduled_start_at ?? "manual"}; end: ${payload?.scheduled_end_at ?? "manual"}.`,
       );
     } catch (error) {
       setActionError(
@@ -1593,18 +1474,12 @@ export function useOrganizerDashboard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interval_seconds: intervalSeconds }),
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameStatus["scheduler"]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "game-core scheduler update failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameStatus["scheduler"]>(
+        response,
+        "/api/admin/game/scheduler/interval",
+      );
 
-      setGameState((current) => ({ ...current, scheduler: payload.data }));
+      setGameState((current) => ({ ...current, scheduler: payload }));
       setActionNote(
         `Scheduler interval updated to ${intervalSeconds} seconds.`,
       );
@@ -1638,18 +1513,12 @@ export function useOrganizerDashboard({
 
     try {
       const response = await fetch(opts.url);
-      const payload =
-        (await response.json()) as ActionEnvelope<T>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : opts.errorLabel,
-        );
-      }
+      const payload = await processApiResponse<T>(response, opts.url);
 
       opts.beforeSet?.();
-      opts.setPage(payload.data);
+      opts.setPage(payload);
       if (!opts.silent) {
-        setActionNote(opts.formatNote(payload.data));
+        setActionNote(opts.formatNote(payload));
       }
     } catch (error) {
       if (!opts.silent) {
@@ -1785,19 +1654,15 @@ export function useOrganizerDashboard({
 
     try {
       const response = await fetch("/api/admin/game/scoreboard");
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameScoreRow[]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "scoreboard fetch failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameScoreRow[]>(
+        response,
+        "/api/admin/game/scoreboard",
+      );
 
-      setScoreRows(payload.data);
+      setScoreRows(payload);
       if (!silent) {
         setActionNote(
-          `Loaded ${payload.data.length} scoreboard row(s) from game-core.`,
+          `Loaded ${payload.length} scoreboard row(s) from game-core.`,
         );
       }
     } catch (error) {
@@ -1824,19 +1689,15 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/game/scoring/recompute", {
         method: "POST",
       });
-      const payload = (await response.json()) as ActionEnvelope<
-        AdminGameScoreRow[]
-      >;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "score recompute failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameScoreRow[]>(
+        response,
+        "/api/admin/game/scoring/recompute",
+      );
 
-      setScoreRows(payload.data);
+      setScoreRows(payload);
       if (!silent) {
         setActionNote(
-          `Recomputed ${payload.data.length} scoreboard row(s) from authoritative tick and submission state.`,
+          `Recomputed ${payload.length} scoreboard row(s) from authoritative tick and submission state.`,
         );
       }
     } catch (error) {
@@ -1861,34 +1722,29 @@ export function useOrganizerDashboard({
       const response = await fetch("/api/admin/game/ticks/advance", {
         method: "POST",
       });
-      const payload =
-        (await response.json()) as ActionEnvelope<AdminGameTickStatus>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload
-            ? payload.message
-            : "game-core tick advance failed",
-        );
-      }
+      const payload = await processApiResponse<AdminGameTickStatus>(
+        response,
+        "/api/admin/game/ticks/advance",
+      );
 
       setGameState((current) => ({
-        current_tick: payload.data,
-        total_ticks: Math.max(current.total_ticks + 1, payload.data.id),
+        current_tick: payload,
+        total_ticks: Math.max(current.total_ticks + 1, payload.id),
         total_checker_runs:
-          current.total_checker_runs + payload.data.total_checker_runs,
+          current.total_checker_runs + payload.total_checker_runs,
         successful_checker_runs:
           current.successful_checker_runs +
-          payload.data.successful_checker_runs,
+          payload.successful_checker_runs,
         failed_checker_runs:
-          current.failed_checker_runs + payload.data.failed_checker_runs,
+          current.failed_checker_runs + payload.failed_checker_runs,
         skipped_checker_runs:
-          current.skipped_checker_runs + payload.data.skipped_checker_runs,
+          current.skipped_checker_runs + payload.skipped_checker_runs,
       }));
       await refreshSchedulerEvents(true);
       await refreshCheckerRuns(true);
       await recomputeGameScoring(true);
       setActionNote(
-        `Tick ${payload.data.id} completed with ${payload.data.successful_checker_runs} success, ${payload.data.failed_checker_runs} failed, and ${payload.data.skipped_checker_runs} skipped checker runs.`,
+        `Tick ${payload.id} completed with ${payload.successful_checker_runs} success, ${payload.failed_checker_runs} failed, and ${payload.skipped_checker_runs} skipped checker runs.`,
       );
     } catch (error) {
       setActionError(
@@ -1979,6 +1835,7 @@ export function useOrganizerDashboard({
         name: "",
         baselineImage: "",
         checkerImage: "",
+        sourceBundlePath: "",
         servicePort: "",
         serviceSubnetOctet: "",
         weight: "1",
@@ -2018,6 +1875,7 @@ export function useOrganizerDashboard({
           name: challenge.name,
           baselineImage: challenge.baseline_image,
           checkerImage: challenge.checker_image,
+          sourceBundlePath: challenge.source_bundle_path,
           servicePort: String(challenge.service_port),
           serviceSubnetOctet: String(challenge.service_subnet_octet),
           weight: String(challenge.weight),
@@ -2101,20 +1959,19 @@ export function useOrganizerDashboard({
           name: challengeDraft.name,
           baseline_image: challengeDraft.baselineImage,
           checker_image: challengeDraft.checkerImage,
+          source_bundle_path: challengeDraft.sourceBundlePath,
           weight: Number(challengeDraft.weight) || 1,
         }),
       });
-      const payload = (await response.json()) as ActionEnvelope<AdminChallenge>;
-      if (!response.ok || payload.status !== "success") {
-        throw new Error(
-          "message" in payload ? payload.message : "challenge update failed",
-        );
-      }
+      const payload = await processApiResponse<AdminChallenge>(
+        response,
+        `/api/admin/challenges/${editingId}`,
+      );
       setChallengeRows((current) =>
-        current.map((c) => (c.id === editingId ? payload.data : c)),
+        current.map((c) => (c.id === editingId ? payload : c)),
       );
       closeFormDialog();
-      setActionNote(`Updated challenge ${payload.data.name}.`);
+      setActionNote(`Updated challenge ${payload.name}.`);
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "challenge update failed",

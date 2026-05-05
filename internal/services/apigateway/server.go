@@ -1,6 +1,7 @@
 package apigateway
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -13,19 +14,20 @@ import (
 )
 
 type Server struct {
-	teamTokenSecret   string
-	legacyTeamToken   string
-	legacyTeamID      int
-	adminToken        string
-	store             Store
-	controller        controllerClient
-	wireGuard         wireGuardClient
-	submission        submissionClient
-	scoring           scoringClient
-	gameCore          gameCoreClient
-	rateLimiter       rateLimiter
-	unlockProofSecret string
-	now               func() time.Time
+	teamTokenSecret     string
+	legacyTeamToken     string
+	legacyTeamID        int
+	adminToken          string
+	sshCredentialSecret string
+	store               Store
+	controller          controllerClient
+	wireGuard           wireGuardClient
+	submission          submissionClient
+	scoring             scoringClient
+	gameCore            gameCoreClient
+	rateLimiter         rateLimiter
+	unlockProofSecret   string
+	now                 func() time.Time
 }
 
 func New(teamToken, adminToken string, teamID int) *Server {
@@ -42,19 +44,20 @@ func NewWithDeps(teamToken, adminToken string, teamID int, store Store, controll
 		game = gameCore[0]
 	}
 	return &Server{
-		teamTokenSecret:   teamToken,
-		legacyTeamToken:   teamToken,
-		legacyTeamID:      teamID,
-		adminToken:        adminToken,
-		store:             store,
-		controller:        controller,
-		wireGuard:         wireGuard,
-		submission:        noopSubmissionClient{},
-		scoring:           noopScoringClient{},
-		gameCore:          game,
-		rateLimiter:       noopRateLimiter{},
-		unlockProofSecret: teamToken,
-		now:               time.Now,
+		teamTokenSecret:     teamToken,
+		legacyTeamToken:     teamToken,
+		legacyTeamID:        teamID,
+		adminToken:          adminToken,
+		sshCredentialSecret: teamToken,
+		store:               store,
+		controller:          controller,
+		wireGuard:           wireGuard,
+		submission:          noopSubmissionClient{},
+		scoring:             noopScoringClient{},
+		gameCore:            game,
+		rateLimiter:         noopRateLimiter{},
+		unlockProofSecret:   teamToken,
+		now:                 time.Now,
 	}
 }
 
@@ -80,6 +83,14 @@ func (s *Server) WithUnlockProofSecret(secret string) *Server {
 	return s
 }
 
+func (s *Server) WithSSHCredentialSecret(secret string) *Server {
+	trimmed := strings.TrimSpace(secret)
+	if trimmed != "" {
+		s.sshCredentialSecret = trimmed
+	}
+	return s
+}
+
 func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 	if limiter != nil {
 		s.rateLimiter = limiter
@@ -90,6 +101,7 @@ func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
+	mux.HandleFunc("GET /api/v2/challenges/{challenge_id}/source", s.handleChallengeSourceDownload)
 	mux.HandleFunc("GET /api/v2/services", s.handleServices)
 	mux.HandleFunc("GET /api/v2/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/v2/game/status", s.handleGameStatus)
@@ -147,7 +159,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	var req authenticateRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "email or password is wrong."})
+		writeProblem(w, http.StatusForbidden, "Authentication failed", "email or password is wrong.")
 		return
 	}
 
@@ -158,14 +170,14 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Password) == "" {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "email or password is wrong."})
+		writeProblem(w, http.StatusForbidden, "Authentication failed", "email or password is wrong.")
 		return
 	}
 
 	player, err := s.store.AuthenticatePlayer(r.Context(), req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {
-			httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "email or password is wrong."})
+			writeProblem(w, http.StatusForbidden, "Authentication failed", "email or password is wrong.")
 			return
 		}
 		writeStoreFailure(w, err)
@@ -174,11 +186,11 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 
 	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: "team authentication token could not be issued."})
+		writeProblem(w, http.StatusInternalServerError, "Authentication failed", "team authentication token could not be issued.")
 		return
 	}
 
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[string]{Status: "success", Data: token})
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
 }
 
 func (s *Server) handleChallenges(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +205,7 @@ func (s *Server) handleChallenges(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]challenge]{Status: "success", Data: challenges})
+	writeData(w, http.StatusOK, challenges)
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +223,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[map[string]map[string][]string]{Status: "success", Data: services})
+	writeData(w, http.StatusOK, services)
 }
 
 func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
@@ -223,19 +235,19 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 
 	if s.scoring != nil {
 		if rows, err := s.scoring.Scoreboard(r.Context()); err == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+			writeData(w, http.StatusOK, rows)
 			return
 		} else if !errors.Is(err, errScoringWorkerDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "scoring-worker scoreboard failed."})
+			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "scoring-worker scoreboard failed.")
 			return
 		}
 	}
 	if s.gameCore != nil {
 		if rows, err := s.gameCore.Scoreboard(r.Context()); err == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+			writeData(w, http.StatusOK, rows)
 			return
 		} else if !errors.Is(err, errGameCoreDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "game-core scoreboard failed."})
+			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "game-core scoreboard failed.")
 			return
 		}
 	}
@@ -244,7 +256,7 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +271,7 @@ func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
 		writeGameCoreFailure(w, err, "game-core status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
@@ -272,19 +284,19 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 	query := parseAttackFeedQuery(r)
 	if s.submission != nil {
 		if events, err := s.submission.AttackFeed(r.Context(), query); err == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[AttackFeedPage]{Status: "success", Data: events})
+			writeData(w, http.StatusOK, events)
 			return
 		} else if !errors.Is(err, errSubmissionServiceDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "submission-service attack feed failed."})
+			writeProblem(w, http.StatusBadGateway, "Attack feed unavailable", "submission-service attack feed failed.")
 			return
 		}
 	}
 	if s.gameCore != nil {
 		if events, err := s.gameCore.AttackFeed(r.Context(), query); err == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[AttackFeedPage]{Status: "success", Data: events})
+			writeData(w, http.StatusOK, events)
 			return
 		} else if !errors.Is(err, errGameCoreDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "game-core attack feed failed."})
+			writeProblem(w, http.StatusBadGateway, "Attack feed unavailable", "game-core attack feed failed.")
 			return
 		}
 	}
@@ -293,7 +305,7 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[AttackFeedPage]{Status: "success", Data: paginateAttackFeed(events, query)})
+	writeData(w, http.StatusOK, paginateAttackFeed(events, query))
 }
 
 func parseAttackFeedQuery(r *http.Request) AttackFeedQuery {
@@ -411,7 +423,8 @@ func (s *Server) handleTeamServices(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]serviceState]{Status: "success", Data: states})
+	states = s.enrichServiceStatesWithSLADetails(r.Context(), teamID, states)
+	writeData(w, http.StatusOK, states)
 }
 
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +441,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	var req submitRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || len(req.Flags) == 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "request body is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "request body is invalid.")
 		return
 	}
 
@@ -436,14 +449,14 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		if status, statusErr := s.gameCore.Status(r.Context()); statusErr == nil {
 			switch matchSubmissionState(status.Match) {
 			case "not_started":
-				httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "contest has not started yet."})
+				writeProblem(w, http.StatusBadRequest, "Submission rejected", "contest has not started yet.")
 				return
 			case "finished":
-				httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "contest is over."})
+				writeProblem(w, http.StatusBadRequest, "Submission rejected", "contest is over.")
 				return
 			}
 		} else if !errors.Is(statusErr, errGameCoreDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "game-core status could not be read."})
+			writeProblem(w, http.StatusBadGateway, "Submission unavailable", "game-core status could not be read.")
 			return
 		}
 
@@ -451,36 +464,235 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if s.submission != nil {
 		if results, submissionErr := s.submission.SubmitFlags(r.Context(), teamID, req.Flags); submissionErr == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]submissionVerdict]{Status: "success", Data: results})
+			writeData(w, http.StatusOK, newSubmissionResult(results))
 			return
 		} else if !errors.Is(submissionErr, errSubmissionServiceDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "submission-service flag submission failed."})
+			writeProblem(w, http.StatusBadGateway, "Submission unavailable", "submission-service flag submission failed.")
 			return
 		}
 	}
 
 	if s.gameCore != nil {
 		if gameResults, gameErr := s.gameCore.SubmitFlags(r.Context(), teamID, req.Flags); gameErr == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]submissionVerdict]{Status: "success", Data: gameResults})
+			writeData(w, http.StatusOK, newSubmissionResult(gameResults))
 			return
 		} else if !errors.Is(gameErr, errGameCoreDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "game-core flag submission failed."})
+			writeProblem(w, http.StatusBadGateway, "Submission unavailable", "game-core flag submission failed.")
 			return
 		}
 	}
 	results, err := s.store.SubmitFlags(r.Context(), teamID, req.Flags)
 	if err != nil {
 		if errors.Is(err, ErrSubmissionUnavailable) {
-			httpapi.WriteJSON(w, http.StatusServiceUnavailable, httpapi.ErrorEnvelope{
-				Status:  "failed",
-				Message: "authoritative flag submission backend is unavailable.",
-			})
+			writeProblem(w, http.StatusServiceUnavailable, "Submission unavailable", "authoritative flag submission backend is unavailable.")
 			return
 		}
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]submissionVerdict]{Status: "success", Data: results})
+	writeData(w, http.StatusOK, newSubmissionResult(results))
+}
+
+func (s *Server) enrichServiceStatesWithSLADetails(ctx context.Context, teamID int, states []serviceState) []serviceState {
+	if len(states) == 0 {
+		return states
+	}
+
+	remaining := make(map[int]struct{}, len(states))
+	for i := range states {
+		if strings.TrimSpace(states[i].SLAStatus) == "" {
+			states[i].SLAStatus = fallbackSLAStatus(states[i].Checker)
+		}
+		if strings.TrimSpace(states[i].SLAMessage) == "" {
+			states[i].SLAMessage = fallbackSLAMessage(states[i].Checker)
+		}
+		remaining[states[i].ChallengeID] = struct{}{}
+	}
+
+	type latestTickRuns struct {
+		tickID int
+		runs   []GameCheckerRun
+	}
+
+	accumulators := make(map[int]*latestTickRuns, len(states))
+	limit := len(states) * 3
+	if limit < 25 {
+		limit = 25
+	}
+	offset := 0
+
+	for len(remaining) > 0 {
+		page, err := s.gameCore.CheckerRuns(ctx, GameCheckerRunQuery{
+			TeamID: teamID,
+			Limit:  limit,
+			Offset: offset,
+		})
+		if err != nil {
+			return states
+		}
+		if len(page.Items) == 0 {
+			break
+		}
+
+		for _, run := range page.Items {
+			if _, ok := remaining[run.ChallengeID]; !ok {
+				continue
+			}
+			accumulator := accumulators[run.ChallengeID]
+			if accumulator == nil {
+				accumulator = &latestTickRuns{tickID: run.TickID}
+				accumulators[run.ChallengeID] = accumulator
+			}
+			if run.TickID == accumulator.tickID {
+				accumulator.runs = append(accumulator.runs, run)
+				continue
+			}
+			applySLASummary(states, run.ChallengeID, summarizeSLARuns(accumulator.runs, accumulator.tickID))
+			delete(remaining, run.ChallengeID)
+		}
+
+		if !page.HasNext {
+			break
+		}
+		offset += len(page.Items)
+	}
+
+	for challengeID := range remaining {
+		if accumulator := accumulators[challengeID]; accumulator != nil && len(accumulator.runs) > 0 {
+			applySLASummary(states, challengeID, summarizeSLARuns(accumulator.runs, accumulator.tickID))
+		}
+	}
+	return states
+}
+
+type slaSummary struct {
+	Status  string
+	Phase   string
+	TickID  int
+	Message string
+}
+
+func applySLASummary(states []serviceState, challengeID int, summary slaSummary) {
+	for i := range states {
+		if states[i].ChallengeID != challengeID {
+			continue
+		}
+		states[i].SLAStatus = summary.Status
+		states[i].SLAPhase = summary.Phase
+		states[i].SLATickID = summary.TickID
+		states[i].SLAMessage = summary.Message
+		return
+	}
+}
+
+func summarizeSLARuns(runs []GameCheckerRun, tickID int) slaSummary {
+	selected := chooseSLARun(runs)
+	if selected == nil {
+		return slaSummary{
+			Status:  "unknown",
+			TickID:  tickID,
+			Message: "awaiting first checker run",
+		}
+	}
+
+	summary := slaSummary{
+		Phase:  selected.Phase,
+		TickID: tickID,
+	}
+	switch strings.ToLower(strings.TrimSpace(selected.Status)) {
+	case "success":
+		summary.Status = "passing"
+		summary.Message = "latest SLA cycle passed"
+	default:
+		summary.Status = "failing"
+		summary.Message = strings.TrimSpace(selected.Message)
+		if summary.Message == "" {
+			summary.Message = "checker reported a failed SLA phase"
+		}
+	}
+	return summary
+}
+
+func chooseSLARun(runs []GameCheckerRun) *GameCheckerRun {
+	if len(runs) == 0 {
+		return nil
+	}
+
+	var firstFailed *GameCheckerRun
+	var firstSkipped *GameCheckerRun
+	var lastSuccess *GameCheckerRun
+	for i := range runs {
+		run := &runs[i]
+		switch strings.ToLower(strings.TrimSpace(run.Status)) {
+		case "failed":
+			if firstFailed == nil || shouldPreferPhase(run, firstFailed) {
+				firstFailed = run
+			}
+		case "skipped":
+			if firstSkipped == nil || shouldPreferPhase(run, firstSkipped) {
+				firstSkipped = run
+			}
+		case "success":
+			if lastSuccess == nil || shouldPreferLaterPhase(run, lastSuccess) {
+				lastSuccess = run
+			}
+		default:
+			if firstSkipped == nil || shouldPreferPhase(run, firstSkipped) {
+				firstSkipped = run
+			}
+		}
+	}
+	if firstFailed != nil {
+		return firstFailed
+	}
+	if firstSkipped != nil {
+		return firstSkipped
+	}
+	if lastSuccess != nil {
+		return lastSuccess
+	}
+	return &runs[0]
+}
+
+func shouldPreferPhase(candidate, current *GameCheckerRun) bool {
+	return phaseOrder(candidate.Phase) < phaseOrder(current.Phase)
+}
+
+func shouldPreferLaterPhase(candidate, current *GameCheckerRun) bool {
+	return phaseOrder(candidate.Phase) > phaseOrder(current.Phase)
+}
+
+func phaseOrder(phase string) int {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "put":
+		return 0
+	case "get":
+		return 1
+	case "check":
+		return 2
+	default:
+		return 99
+	}
+}
+
+func fallbackSLAStatus(checker string) string {
+	if strings.EqualFold(strings.TrimSpace(checker), "warning") {
+		return "failing"
+	}
+	if strings.TrimSpace(checker) == "" {
+		return "unknown"
+	}
+	return "passing"
+}
+
+func fallbackSLAMessage(checker string) string {
+	if strings.EqualFold(strings.TrimSpace(checker), "warning") {
+		return "checker warning; per-phase detail unavailable"
+	}
+	if strings.TrimSpace(checker) == "" {
+		return "awaiting first checker run"
+	}
+	return "checker passing; per-phase detail unavailable"
 }
 
 func matchSubmissionState(match *GameMatchStatus) string {
@@ -516,11 +728,11 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 	var req unlockRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Proof) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "unlock proof is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "unlock proof is invalid.")
 		return
 	}
 	if !unlockproof.Verify(s.unlockProofSecret, teamID, challengeID, req.Proof) {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "unlock proof is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Unlock rejected", "unlock proof is invalid.")
 		return
 	}
 
@@ -530,14 +742,13 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.controller.ReconcileServiceAccess(r.Context(), teamID, challengeID); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "service unlock access reconcile failed."})
+		writeProblem(w, http.StatusBadGateway, "Unlock unavailable", "service unlock access reconcile failed.")
 		return
 	}
 	s.recordTeamAudit(r.Context(), teamID, "service.unlock", "service", auditServiceTarget(teamID, challengeID), "unlocked service", map[string]any{
-		"challenge_id":               challengeID,
-		"ssh_credential_ttl_seconds": data.SSHCredentialTTLSeconds,
+		"challenge_id": challengeID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[unlockData]{Status: "success", Data: data})
+	writeData(w, http.StatusOK, data)
 }
 
 func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {
@@ -559,21 +770,21 @@ func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {
 		writeDomainFailure(w, err)
 		return
 	}
+	data.Password = stableRootPassword(s.sshCredentialSecret, teamID, challengeID)
+	data.PasswordMode = "stable"
 	if err := s.controller.ApplySSHCredential(r.Context(), teamID, challengeID, ControllerSSHCredential{
-		Password:  data.Password,
-		ExpiresAt: data.ExpiresAt,
+		Password: data.Password,
 	}); err != nil {
 		_ = s.store.MarkSSHSessionApplyFailure(r.Context(), teamID, challengeID)
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "ssh credential runtime apply failed."})
+		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "ssh credential runtime apply failed.")
 		return
 	}
-	s.recordTeamAudit(r.Context(), teamID, "service.ssh_session", "service", auditServiceTarget(teamID, challengeID), "issued one-time root credential", map[string]any{
+	s.recordTeamAudit(r.Context(), teamID, "service.ssh_session", "service", auditServiceTarget(teamID, challengeID), "retrieved stable team ssh credential", map[string]any{
 		"challenge_id": challengeID,
-		"expires_at":   data.ExpiresAt,
 		"host":         data.Host,
 		"port":         data.Port,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[sshSessionData]{Status: "success", Data: data})
+	writeData(w, http.StatusOK, data)
 }
 
 func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
@@ -595,7 +806,7 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 			writeDomainFailure(w, err)
 			return
 		}
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "factory reset runtime failed."})
+		writeProblem(w, http.StatusBadGateway, "Reset unavailable", "factory reset runtime failed.")
 		return
 	}
 	data, err := s.store.FactoryResetService(r.Context(), teamID, challengeID)
@@ -607,7 +818,7 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		"challenge_id":     challengeID,
 		"unlock_preserved": data.UnlockPreserved,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[resetData]{Status: "success", Data: data})
+	writeData(w, http.StatusOK, data)
 }
 
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
@@ -629,7 +840,7 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 			writeDomainFailure(w, err)
 			return
 		}
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "service restart runtime failed."})
+		writeProblem(w, http.StatusBadGateway, "Restart unavailable", "service restart runtime failed.")
 		return
 	}
 	data, err := s.store.RestartService(r.Context(), teamID, challengeID)
@@ -640,13 +851,13 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	s.recordTeamAudit(r.Context(), teamID, "service.restart", "service", auditServiceTarget(teamID, challengeID), "triggered service restart", map[string]any{
 		"challenge_id": challengeID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[resetData]{Status: "success", Data: data})
+	writeData(w, http.StatusOK, data)
 }
 
 func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message string) (int, bool) {
 	token, ok := httpapi.BearerToken(r)
 	if !ok {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: message})
+		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return 0, false
 	}
 	if token == s.legacyTeamToken {
@@ -654,7 +865,7 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 	}
 	claims, err := verifyTeamJWT(s.teamTokenSecret, token, s.now())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: message})
+		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return 0, false
 	}
 	return claims.TeamID, true
@@ -663,7 +874,7 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate as organizer."})
+		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate as organizer.")
 		return false
 	}
 	return true
@@ -672,7 +883,7 @@ func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 func parseChallengeID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	challengeID, err := strconv.Atoi(r.PathValue("challenge_id"))
 	if err != nil || challengeID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 		return 0, false
 	}
 	return challengeID, true
@@ -681,7 +892,7 @@ func parseChallengeID(w http.ResponseWriter, r *http.Request) (int, bool) {
 func parseTeamID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	teamID, err := strconv.Atoi(r.PathValue("team_id"))
 	if err != nil || teamID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return 0, false
 	}
 	return teamID, true
@@ -690,7 +901,7 @@ func parseTeamID(w http.ResponseWriter, r *http.Request) (int, bool) {
 func parsePlayerID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	playerID, err := strconv.Atoi(r.PathValue("player_id"))
 	if err != nil || playerID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "player id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player id is invalid.")
 		return 0, false
 	}
 	return playerID, true
@@ -699,7 +910,7 @@ func parsePlayerID(w http.ResponseWriter, r *http.Request) (int, bool) {
 func parseDeploymentID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	deploymentID, err := strconv.Atoi(r.PathValue("deployment_id"))
 	if err != nil || deploymentID <= 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "deployment job id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "deployment job id is invalid.")
 		return 0, false
 	}
 	return deploymentID, true
@@ -708,21 +919,21 @@ func parseDeploymentID(w http.ResponseWriter, r *http.Request) (int, bool) {
 func writeDomainFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrServiceLocked):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "service is not unlocked yet."})
+		writeProblem(w, http.StatusBadRequest, "Request rejected", "service is not unlocked yet.")
 	case errors.Is(err, ErrChallengeNotFound):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 	case errors.Is(err, ErrTeamNotFound):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 	case errors.Is(err, ErrPlayerNotFound):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "player id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player id is invalid.")
 	case errors.Is(err, ErrDeploymentNotFound):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "deployment job id is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "deployment job id is invalid.")
 	case errors.Is(err, ErrDeploymentActive):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "deployment job is still active."})
+		writeProblem(w, http.StatusBadRequest, "Request rejected", "deployment job is still active.")
 	case errors.Is(err, ErrDuplicateResource):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "resource already exists."})
+		writeProblem(w, http.StatusConflict, "Duplicate resource", "resource already exists.")
 	case errors.Is(err, ErrInvalidRuntimeConfig):
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusBadRequest, "Invalid runtime configuration", err.Error())
 	default:
 		writeStoreFailure(w, err)
 	}
@@ -732,5 +943,17 @@ func writeStoreFailure(w http.ResponseWriter, err error) {
 	if err != nil {
 		log.Printf("store failure: %v", err)
 	}
-	httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: "internal platform state is unavailable."})
+	writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", "internal platform state is unavailable.")
+}
+
+func writeData(w http.ResponseWriter, statusCode int, value any) {
+	httpapi.WriteJSON(w, statusCode, value)
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, title, detail string) {
+	httpapi.WriteProblem(w, statusCode, httpapi.ProblemDetails{
+		Title:  title,
+		Status: statusCode,
+		Detail: detail,
+	})
 }

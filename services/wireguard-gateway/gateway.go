@@ -32,11 +32,6 @@ type wireGuardGatewayServer struct {
 	lastStatus apigateway.WireGuardGatewayStatus
 }
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type wireGuardApplier interface {
 	Status() apigateway.WireGuardGatewayStatus
 	Apply(context.Context, wireGuardGatewaySnapshot) (apigateway.WireGuardGatewayStatus, error)
@@ -121,7 +116,7 @@ func (s *wireGuardGatewayServer) handleStatus(w http.ResponseWriter, r *http.Req
 	started := time.Now()
 	status := s.status()
 	s.metrics.recordOperation(wireGuardOperationStatus, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.WireGuardGatewayStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +128,7 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 	peers, err := s.store.ListWireGuardGatewayPeers(r.Context())
 	if err != nil {
 		s.metrics.recordReconcile(time.Since(started), 0, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
 
@@ -142,13 +137,13 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 	if err != nil {
 		s.rememberStatus(status)
 		s.metrics.recordReconcile(time.Since(started), snapshot.PeersTotal, true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: status.LastError})
+		writeProblem(w, http.StatusInternalServerError, "WireGuard reconcile failed", status.LastError)
 		return
 	}
 
 	s.rememberStatus(status)
 	s.metrics.recordReconcile(time.Since(started), snapshot.PeersTotal, false)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.WireGuardGatewayStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.Request) {
@@ -158,20 +153,32 @@ func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.R
 	started := time.Now()
 	if err := s.applier.Teardown(r.Context()); err != nil {
 		s.metrics.recordOperation(wireGuardOperationTeardown, time.Since(started), true)
-		httpapi.WriteJSON(w, http.StatusInternalServerError, httpapi.ErrorEnvelope{Status: "failed", Message: err.Error()})
+		writeProblem(w, http.StatusInternalServerError, "WireGuard teardown failed", err.Error())
 		return
 	}
 	s.metrics.recordOperation(wireGuardOperationTeardown, time.Since(started), false)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *wireGuardGatewayServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing wireguard gateway endpoints."})
+		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing wireguard gateway endpoints.")
 		return false
 	}
 	return true
+}
+
+func writeData(w http.ResponseWriter, statusCode int, value any) {
+	httpapi.WriteJSON(w, statusCode, value)
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, title, detail string) {
+	httpapi.WriteProblem(w, statusCode, httpapi.ProblemDetails{
+		Title:  title,
+		Status: statusCode,
+		Detail: detail,
+	})
 }
 
 func (s *wireGuardGatewayServer) rememberStatus(status apigateway.WireGuardGatewayStatus) {

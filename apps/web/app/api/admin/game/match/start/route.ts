@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 
+import { problemResponse } from '@/lib/api-handler';
 import { startAdminGameMatch } from '@/lib/admin-api';
 
 export async function POST() {
   try {
     const data = await startAdminGameMatch();
-    return NextResponse.json({ status: 'success', data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'game match start failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
+    return problemResponse(502, 'Upstream request failed', message);
   }
 }

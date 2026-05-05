@@ -14,11 +14,6 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
-type successEnvelope[T any] struct {
-	Status string `json:"status"`
-	Data   T      `json:"data"`
-}
-
 type submissionServiceServer struct {
 	adminToken string
 	gameCore   submissionGameCoreClient
@@ -72,7 +67,7 @@ func (s *submissionServiceServer) handleSubmit(w http.ResponseWriter, r *http.Re
 
 	var request apigateway.GameSubmitFlagsRequest
 	if err := httpapi.DecodeJSON(r, &request); err != nil || request.TeamID <= 0 || len(request.Flags) == 0 {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "submission request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "submission request is invalid.")
 		return
 	}
 
@@ -83,7 +78,7 @@ func (s *submissionServiceServer) handleSubmit(w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.metrics.recordSubmitSuccess(time.Since(started), len(request.Flags), results)
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]apigateway.SubmissionVerdictAlias]{Status: "success", Data: results})
+	writeData(w, http.StatusOK, results)
 }
 
 func (s *submissionServiceServer) handleAttackFeed(w http.ResponseWriter, r *http.Request) {
@@ -107,13 +102,13 @@ func (s *submissionServiceServer) handleAttackFeed(w http.ResponseWriter, r *htt
 		return
 	}
 	s.metrics.recordAttackFeedSuccess(time.Since(started), len(page.Items))
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[apigateway.AttackFeedPage]{Status: "success", Data: page})
+	writeData(w, http.StatusOK, page)
 }
 
 func (s *submissionServiceServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
-		httpapi.WriteJSON(w, http.StatusForbidden, httpapi.ErrorEnvelope{Status: "forbidden", Message: "please authenticate before accessing submission-service endpoints."})
+		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing submission-service endpoints.")
 		return false
 	}
 	return true
@@ -127,7 +122,7 @@ func writeSubmissionServiceFailure(w http.ResponseWriter, err error, fallback st
 	if errors.Is(err, errGameCoreSubmissionDisabled) {
 		message = "submission-service is not connected to game-core."
 	}
-	httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+	writeProblem(w, http.StatusBadGateway, "Upstream unavailable", message)
 }
 
 func parsePositiveQueryInt(r *http.Request, key string, fallback int, max int) int {
@@ -170,8 +165,20 @@ func (m *submissionServiceMetrics) recordSubmitSuccess(duration time.Duration, f
 	m.submitDurationSecondsSum += duration.Seconds()
 	m.submitDurationSecondsCount++
 	for _, verdict := range verdicts {
-		m.submitVerdictClassTotals[classifySubmissionVerdict(verdict.Verdict)]++
+		m.submitVerdictClassTotals[classifySubmissionVerdict(verdict.Detail)]++
 	}
+}
+
+func writeData(w http.ResponseWriter, statusCode int, value any) {
+	httpapi.WriteJSON(w, statusCode, value)
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, title, detail string) {
+	httpapi.WriteProblem(w, statusCode, httpapi.ProblemDetails{
+		Title:  title,
+		Status: statusCode,
+		Detail: detail,
+	})
 }
 
 func (m *submissionServiceMetrics) recordSubmitFailure(duration time.Duration, flags int) {

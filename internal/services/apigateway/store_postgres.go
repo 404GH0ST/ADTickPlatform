@@ -112,7 +112,7 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 }
 
 func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM challenges WHERE published = TRUE ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(source_bundle_path, '') <> '' FROM challenges WHERE published = TRUE ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error)
 	result := make([]challenge, 0)
 	for rows.Next() {
 		var item challenge
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -237,7 +237,7 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 		UPDATE team_service_states
 		SET unlocked = TRUE,
 		    status = CASE WHEN status = 'degraded' THEN 'warming' ELSE status END,
-		    ssh_hint = 'unlock accepted; request a one-time root password to get the current credential',
+		    ssh_hint = 'unlock accepted; use SSH Access to view the team credential',
 		    last_event = 'unlock granted via participant API'
 		WHERE team_id = $1 AND challenge_id = $2
 	`, teamID, challengeID)
@@ -247,10 +247,10 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return unlockData{}, ErrChallengeNotFound
 	}
-	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true, SSHCredentialTTLSeconds: 1800}, nil
+	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
 }
 
-func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, now time.Time) (sshSessionData, error) {
+func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return sshSessionData{}, err
@@ -274,17 +274,12 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 		return sshSessionData{}, ErrServiceLocked
 	}
 
-	password, err := issueOneTimeRootPassword()
-	if err != nil {
-		return sshSessionData{}, err
-	}
-
 	host, _ := ParseEndpoint(endpoint)
 	connectionHint := fmt.Sprintf("ssh %s@%s", sshUsername(), host)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE team_service_states
 		SET ssh_hint = $3,
-		    last_event = 'fresh one-time root password issued'
+		    last_event = 'team ssh credential retrieved'
 		WHERE team_id = $1 AND challenge_id = $2
 	`, teamID, challengeID, connectionHint); err != nil {
 		return sshSessionData{}, err
@@ -293,13 +288,13 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 		return sshSessionData{}, err
 	}
 
-	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), Password: password, ExpiresAt: now.UTC().Add(30 * time.Minute).Format(time.RFC3339), ConnectionHint: connectionHint}, nil
+	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint}, nil
 }
 
 func (s *postgresStore) MarkSSHSessionApplyFailure(ctx context.Context, teamID, challengeID int) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
-		SET ssh_hint = 'credential apply failed; request a fresh one-time root password to retry',
+		SET ssh_hint = 'credential apply failed; open SSH Access to retry applying the team credential',
 		    last_event = 'ssh credential apply failed'
 		WHERE team_id = $1 AND challenge_id = $2
 	`, teamID, challengeID)
@@ -320,7 +315,7 @@ func (s *postgresStore) FactoryResetService(ctx context.Context, teamID, challen
 		    checker = 'warning',
 		    last_event = 'factory reset triggered via participant API',
 		    reset_cooldown = 'cooldown: 90s',
-		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; request a fresh one-time root password to rotate the credential' ELSE ssh_hint END
+		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; open SSH Access to reapply the team credential' ELSE ssh_hint END
 		WHERE team_id = $1 AND challenge_id = $2
 		RETURNING unlocked
 	`, teamID, challengeID).Scan(&unlocked); err != nil {
@@ -721,6 +716,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       c.name,
 		       COALESCE(c.baseline_image, ''),
 		       COALESCE(c.checker_image, ''),
+		       COALESCE(c.source_bundle_path, ''),
 		       c.weight,
 		       COALESCE(NULLIF(c.service_port, 0), 10000 + c.id),
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
@@ -732,7 +728,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.weight, c.service_port, c.service_subnet_octet, c.published, c.created_at
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.published, c.created_at
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -749,6 +745,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.Name,
 			&challenge.BaselineImage,
 			&challenge.CheckerImage,
+			&challenge.SourceBundlePath,
 			&challenge.Weight,
 			&challenge.ServicePort,
 			&challenge.ServiceSubnetOctet,
@@ -796,6 +793,7 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 	if weight <= 0 {
 		weight = 1
 	}
+	sourceBundlePath := sanitizeSourceBundlePath(input.SourceBundlePath)
 
 	challengeID, err := s.nextID(ctx, `SELECT COALESCE(MAX(id), 0) + 1 FROM challenges`)
 	if err != nil {
@@ -820,9 +818,9 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		return adminChallenge{}, fmt.Errorf("%w: service_subnet_octet %d is already assigned to another challenge", ErrInvalidRuntimeConfig, serviceSubnetOctet)
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO challenges (id, name, baseline_image, checker_image, weight, service_port, service_subnet_octet, published, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8)
-	`, challengeID, name, baselineImage, checkerImage, weight, servicePort, serviceSubnetOctet, now.UTC()); err != nil {
+		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, weight, service_port, service_subnet_octet, published, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, $9)
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, servicePort, serviceSubnetOctet, now.UTC()); err != nil {
 		return adminChallenge{}, err
 	}
 	totalTeams, err := s.countTeams(ctx)
@@ -834,6 +832,7 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		Name:               name,
 		BaselineImage:      baselineImage,
 		CheckerImage:       checkerImage,
+		SourceBundlePath:   sourceBundlePath,
 		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
@@ -909,6 +908,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	name := strings.TrimSpace(input.Name)
 	baselineImage := strings.TrimSpace(input.BaselineImage)
 	checkerImage := strings.TrimSpace(input.CheckerImage)
+	sourceBundlePath := sanitizeSourceBundlePath(input.SourceBundlePath)
 	weight := input.Weight
 	if name == "" {
 		return adminChallenge{}, fmt.Errorf("%w: name is required", ErrDuplicateResource)
@@ -923,7 +923,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if duplicate {
 		return adminChallenge{}, ErrDuplicateResource
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE challenges SET name = $2, baseline_image = $3, checker_image = $4, weight = $5 WHERE id = $1`, challengeID, name, baselineImage, checkerImage, weight); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE challenges SET name = $2, baseline_image = $3, checker_image = $4, source_bundle_path = $5, weight = $6 WHERE id = $1`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight); err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)

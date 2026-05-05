@@ -48,7 +48,7 @@ func TestHTTPControllerClientReconcileDeploymentsUsesExpectedRoute(t *testing.T)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"status":"success","data":{"processed_jobs":1,"processed_instances":4,"completed_jobs":1}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"processed_jobs":1,"processed_instances":4,"completed_jobs":1}`)),
 			}, nil
 		}),
 	}
@@ -94,7 +94,7 @@ func TestHTTPControllerClientAccessStatusUsesExpectedRoute(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"status":"success","data":{"state":"applied","mode":"dry-run","policies_total":12,"ssh_open_services":4,"ssh_locked_services":8,"allowed_peers_total":6}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"state":"applied","mode":"dry-run","policies_total":12,"ssh_open_services":4,"ssh_locked_services":8,"allowed_peers_total":6}`)),
 			}, nil
 		}),
 	}
@@ -133,8 +133,7 @@ func TestHTTPControllerClientApplySSHCredentialUsesExpectedRouteAndBody(t *testi
 	}
 
 	err := client.ApplySSHCredential(context.Background(), 101, 1, ControllerSSHCredential{
-		Password:  "one-time-secret",
-		ExpiresAt: "2026-03-10T09:00:00Z",
+		Password: "one-time-secret",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -142,7 +141,7 @@ func TestHTTPControllerClientApplySSHCredentialUsesExpectedRouteAndBody(t *testi
 	if requestedPath != "/internal/v1/teams/101/services/1/ssh-credential" {
 		t.Fatalf("unexpected path %s", requestedPath)
 	}
-	if !strings.Contains(requestedBody, `"password":"one-time-secret"`) || !strings.Contains(requestedBody, `"expires_at":"2026-03-10T09:00:00Z"`) {
+	if !strings.Contains(requestedBody, `"password":"one-time-secret"`) || strings.Contains(requestedBody, `"expires_at":`) {
 		t.Fatalf("unexpected request body %q", requestedBody)
 	}
 }
@@ -163,7 +162,7 @@ func TestHTTPControllerClientValidateChallengeRuntimeUsesExpectedRouteAndBody(t 
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"status":"success","data":{"challenge_id":7,"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","status":"valid","baseline_ssh_contract_ok":true,"checker_contract_ok":true,"checked_at":"2026-03-10T09:30:00Z","message":"challenge package satisfies runtime validation."}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"challenge_id":7,"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","status":"valid","baseline_ssh_contract_ok":true,"checker_contract_ok":true,"checked_at":"2026-03-10T09:30:00Z","message":"challenge package satisfies runtime validation."}`)),
 			}, nil
 		}),
 	}

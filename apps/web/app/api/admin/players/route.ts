@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { problemResponse } from '@/lib/api-handler';
 import { createAdminPlayer } from '@/lib/admin-api';
 
 export async function POST(request: Request) {
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
   } | null;
 
   if (!body?.team_id || !body.display_name?.trim() || !body.email?.trim() || !body.password?.trim()) {
-    return NextResponse.json({ status: 'failed', message: 'player request is invalid.' }, { status: 400 });
+    return problemResponse(400, 'Invalid request', 'player request is invalid.');
   }
 
   try {
@@ -23,9 +24,9 @@ export async function POST(request: Request) {
       password: body.password.trim(),
       role: body.role?.trim() || 'member',
     });
-    return NextResponse.json({ status: 'success', data });
+    return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'player create failed';
-    return NextResponse.json({ status: 'failed', message }, { status: 502 });
+    return problemResponse(502, 'Upstream request failed', message);
   }
 }

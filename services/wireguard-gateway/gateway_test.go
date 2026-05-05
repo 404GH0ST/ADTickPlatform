@@ -236,15 +236,15 @@ func TestWireGuardGatewayServerReconcileReturnsCounts(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.Code)
 	}
 
-	var payload successEnvelope[apigateway.WireGuardGatewayStatus]
+	var payload apigateway.WireGuardGatewayStatus
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if payload.Data.PeersTotal != 4 || payload.Data.PeersActive != 3 || payload.Data.PeersRevoked != 1 {
-		t.Fatalf("unexpected counts: %+v", payload.Data)
+	if payload.PeersTotal != 4 || payload.PeersActive != 3 || payload.PeersRevoked != 1 {
+		t.Fatalf("unexpected counts: %+v", payload)
 	}
-	if payload.Data.Mode != "dry-run" || payload.Data.State != "applied" {
-		t.Fatalf("unexpected status: %+v", payload.Data)
+	if payload.Mode != "dry-run" || payload.State != "applied" {
+		t.Fatalf("unexpected status: %+v", payload)
 	}
 }
 

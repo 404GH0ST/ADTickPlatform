@@ -30,7 +30,7 @@ func TestHTTPCheckerValidationClientUsesExpectedRouteAndBody(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"status":"success","data":{"challenge_id":7,"name":"proxy","checker_image":"registry.local/proxy-checker:latest","status":"valid","contract_ok":true,"checked_at":"2026-03-10T11:00:00Z","message":"checker image satisfies runner contract."}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"challenge_id":7,"name":"proxy","checker_image":"registry.local/proxy-checker:latest","status":"valid","contract_ok":true,"checked_at":"2026-03-10T11:00:00Z","message":"checker image satisfies runner contract."}`)),
 			}, nil
 		}),
 	})

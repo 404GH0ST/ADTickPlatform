@@ -9,12 +9,12 @@ const participantSteps = [
   {
     step: '1',
     title: 'Sign In',
-    detail: 'Call POST /api/v2/authenticate to get the JWT used for participant actions.',
+    detail: 'Call POST /api/v2/authenticate to get the JWT used for participant actions. Use that token as Bearer auth in your bot or automation.',
   },
   {
     step: '2',
     title: 'Find Targets',
-    detail: 'Use GET /api/v2/services to list your own services and enemy endpoints over WireGuard.',
+    detail: 'Use GET /api/v2/services to list your own services and enemy endpoints over WireGuard, then download the whitebox source bundle for each challenge you own.',
   },
   {
     step: '3',
@@ -24,18 +24,19 @@ const participantSteps = [
   {
     step: '4',
     title: 'Patch Or Recover',
-    detail: 'Issue one-time SSH credentials, patch safely, or use restart and factory reset when needed.',
+    detail: 'Open the stable team SSH credential, patch safely, or use restart and factory reset when needed.',
   },
   {
     step: '5',
     title: 'Submit Flags',
-    detail: 'Send stolen enemy flags to POST /api/v2/submit. Only the first valid submission scores.',
+    detail: 'Send stolen enemy flags to POST /api/v2/submit. The HTTP request returns a batch result with per-flag status and detail fields.',
   },
 ] as const;
 
 const participantEndpoints = [
   'POST /api/v2/authenticate',
   'GET /api/v2/challenges',
+  'GET /api/v2/challenges/{challenge_id}/source',
   'GET /api/v2/services',
   'GET /api/v2/scoreboard',
   'GET /api/v2/attacks',
@@ -108,12 +109,24 @@ export default async function ParticipantManualPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Bearer Auth</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>Authenticate first with <code>POST /api/v2/authenticate</code>.</p>
+              <p>For scripts and bots, send <code>Authorization: Bearer &lt;team JWT&gt;</code> on authenticated routes.</p>
+              <p>In Swagger, click <strong>Authorize</strong> and paste only the JWT value. Swagger adds the <code>Bearer</code> prefix automatically.</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Practical Notes</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>Service traffic and SSH both use the same service IP.</p>
               <p>Targets are reachable through WireGuard, not host-published ports.</p>
               <p>Factory reset keeps the current match unlock state for the owning team.</p>
+              <p>Successful responses are raw JSON bodies. Errors use <code>application/problem+json</code>.</p>
               <p>Swagger is the browser-facing source of truth for request and response shapes.</p>
             </CardContent>
           </Card>

@@ -56,15 +56,12 @@ func TestScoringWorkerRecompute(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", statusResponse.Code)
 	}
 
-	var payload struct {
-		Status string              `json:"status"`
-		Data   scoringWorkerStatus `json:"data"`
-	}
+	var payload scoringWorkerStatus
 	if err := json.Unmarshal(statusResponse.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode scoring status: %v", err)
 	}
-	if payload.Data.LastScoreRows != 1 || payload.Data.LastRecomputedAt == "" || payload.Data.State != "ready" {
-		t.Fatalf("unexpected scoring status %+v", payload.Data)
+	if payload.LastScoreRows != 1 || payload.LastRecomputedAt == "" || payload.State != "ready" {
+		t.Fatalf("unexpected scoring status %+v", payload)
 	}
 }
 

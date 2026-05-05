@@ -20,7 +20,7 @@ func TestHTTPWireGuardClientReconcileUsesExpectedRoute(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"status":"success","data":{"state":"applied","mode":"dry-run","peers_total":4,"peers_active":4,"peers_revoked":0}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"state":"applied","mode":"dry-run","peers_total":4,"peers_active":4,"peers_revoked":0}`)),
 			}, nil
 		}),
 	}

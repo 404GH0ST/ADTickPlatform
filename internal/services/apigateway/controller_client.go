@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"adplatform/internal/platform/httpapi"
 )
 
 var errControllerDisabled = errors.New("controller is not configured")
@@ -60,7 +62,7 @@ func (noopControllerClient) AccessStatus(context.Context) (ControllerAccessStatu
 func (noopControllerClient) ReconcileAccessPolicies(context.Context) (ControllerAccessStatus, error) {
 	return ControllerAccessStatus{State: "disabled", Mode: "disabled"}, nil
 }
-func (noopControllerClient) TeardownAccessPolicies(context.Context) error { return nil }
+func (noopControllerClient) TeardownAccessPolicies(context.Context) error  { return nil }
 func (noopControllerClient) RemoveService(context.Context, int, int) error { return nil }
 func (noopControllerClient) RemoveTeamServices(context.Context, int) error { return nil }
 func (noopControllerClient) RemoveChallengeServices(context.Context, int) error {
@@ -164,21 +166,20 @@ func (c *httpControllerClient) postJSON(ctx context.Context, path string, body a
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if resp.StatusCode == http.StatusNoContent {
+			return nil
+		}
 		return nil
 	}
-
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	message, err := decodeProblemBody(resp.Body)
+	if err != nil {
 		return fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrChallengeNotFound
 	}
-	if payload.Message != "" {
-		return fmt.Errorf("controller request failed: %s", payload.Message)
+	if message != "" {
+		return fmt.Errorf("controller request failed: %s", message)
 	}
 	return fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 }
@@ -212,22 +213,40 @@ func requestControllerJSON[T any](ctx context.Context, c *httpControllerClient, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[T]
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
 			return zero, err
 		}
-		return payload.Data, nil
+		return zero, nil
 	}
-
-	var payload struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	message, err := decodeProblemBody(resp.Body)
+	if err != nil {
 		return zero, fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 	}
-	if payload.Message != "" {
-		return zero, fmt.Errorf("controller request failed: %s", payload.Message)
+	if message != "" {
+		return zero, fmt.Errorf("controller request failed: %s", message)
 	}
 	return zero, fmt.Errorf("controller request failed with status %d", resp.StatusCode)
+}
+
+func decodeProblemBody(body io.Reader) (string, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", err
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return trimmed, nil
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(payload.Message), nil
 }

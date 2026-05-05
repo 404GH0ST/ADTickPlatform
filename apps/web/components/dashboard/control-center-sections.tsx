@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Download, LoaderCircle } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
@@ -35,11 +35,12 @@ import {
 } from "@/components/ui/paged-filter-controls";
 import { StatusBanner } from "@/components/ui/status-banner";
 export type SSHSessionData = {
+  challenge_id: number;
   host: string;
   port: number;
   username: "root";
   password: string;
-  expires_at: string;
+  password_mode?: "stable";
   connection_hint: string;
 };
 
@@ -448,7 +449,7 @@ export function SSHSessionDialog({
           ) : null}
         </div>
       }
-      description="Connect over WireGuard with a one-time root password."
+      description="Connect over WireGuard with the stable team root credential."
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -463,7 +464,7 @@ export function SSHSessionDialog({
               {pendingAction?.startsWith("ssh:") ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : null}
-              Rotate Password
+              Reapply Credential
             </Button>
           ) : null}
         </>
@@ -567,12 +568,48 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <DetailRow label="Challenge" value={`#${service.challengeId}`} />
       <DetailRow label="Checker" value={service.checker} />
+      <DetailRow label="SLA" value={formatSLAState(service)} />
       <DetailRow label="Reset" value={service.resetCooldown} />
       <DetailRow label="SSH" value={service.unlocked ? "unlocked" : "locked"} />
       <DetailRow label="Last event" value={service.lastEvent} />
+      <DetailRow label="SLA detail" value={service.slaMessage} wide />
       <DetailRow label="Access hint" value={service.sshHint} wide />
     </dl>
   );
+}
+
+function formatSLAState(service: ServiceRow): string {
+  const status = service.slaStatus;
+  const phase = service.slaPhase.trim();
+  const tick = service.slaTickId;
+
+  if (status === "passing") {
+    if (phase && tick) {
+      return `${phase} passed on tick #${tick}`;
+    }
+    if (tick) {
+      return `passing on tick #${tick}`;
+    }
+    return "passing";
+  }
+
+  if (status === "failing") {
+    if (phase && tick) {
+      return `${phase} failed on tick #${tick}`;
+    }
+    if (phase) {
+      return `${phase} failed`;
+    }
+    if (tick) {
+      return `failing on tick #${tick}`;
+    }
+    return "failing";
+  }
+
+  if (tick) {
+    return `awaiting detail after tick #${tick}`;
+  }
+  return "awaiting checker detail";
 }
 
 function ServiceActionBar({
@@ -612,9 +649,20 @@ function ServiceActionBar({
       >
         {isRestartPending ? (
           <LoaderCircle className="h-4 w-4 animate-spin" />
-        ) : null}
-        Restart
+      ) : null}
+      Restart
       </Button>
+      {service.hasSourceDownload ? (
+        <Button asChild variant="outline">
+          <a
+            href={`/api/platform/challenges/${service.challengeId}/source`}
+            download
+          >
+            <Download className="h-4 w-4" />
+            Download Source
+          </a>
+        </Button>
+      ) : null}
       <Button
         disabled={pendingAction !== null}
         onClick={() => onSelectReset(service)}

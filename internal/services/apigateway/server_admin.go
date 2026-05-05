@@ -20,7 +20,7 @@ func (s *Server) handleAdminListTeams(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]adminTeam]{Status: "success", Data: teams})
+	writeData(w, http.StatusOK, teams)
 }
 
 func (s *Server) handleAdminCreateTeam(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +29,7 @@ func (s *Server) handleAdminCreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	var req adminCreateTeamRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ContactEmail) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team request is invalid.")
 		return
 	}
 	team, err := s.store.CreateAdminTeam(r.Context(), req)
@@ -41,7 +41,7 @@ func (s *Server) handleAdminCreateTeam(w http.ResponseWriter, r *http.Request) {
 		"team_id":       team.ID,
 		"contact_email": team.ContactEmail,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminTeam]{Status: "success", Data: team})
+	writeData(w, http.StatusOK, team)
 }
 
 func (s *Server) handleAdminDeleteTeam(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func (s *Server) handleAdminDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	s.recordAdminAudit(r.Context(), "team.delete", "team", fmt.Sprintf("team:%d", teamID), "deleted team", map[string]any{
 		"team_id": teamID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	var req adminUpdateTeamRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ContactEmail) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "team update request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team update request is invalid.")
 		return
 	}
 	team, err := s.store.UpdateAdminTeam(r.Context(), teamID, req)
@@ -91,7 +91,7 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		"name":          team.Name,
 		"contact_email": team.ContactEmail,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminTeam]{Status: "success", Data: team})
+	writeData(w, http.StatusOK, team)
 }
 
 func (s *Server) handleAdminListPlayers(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +103,7 @@ func (s *Server) handleAdminListPlayers(w http.ResponseWriter, r *http.Request) 
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]adminPlayer]{Status: "success", Data: players})
+	writeData(w, http.StatusOK, players)
 }
 
 func (s *Server) handleAdminCreatePlayer(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +112,7 @@ func (s *Server) handleAdminCreatePlayer(w http.ResponseWriter, r *http.Request)
 	}
 	var req adminCreatePlayerRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || req.TeamID < 0 || strings.TrimSpace(req.DisplayName) == "" || strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Password) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "player request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player request is invalid.")
 		return
 	}
 	player, err := s.store.CreateAdminPlayer(r.Context(), req, s.now())
@@ -128,7 +128,7 @@ func (s *Server) handleAdminCreatePlayer(w http.ResponseWriter, r *http.Request)
 		"peer":        player.WireGuardPeer,
 		"peer_status": player.WireGuardStatus,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminPlayer]{Status: "success", Data: player})
+	writeData(w, http.StatusOK, player)
 }
 
 func (s *Server) handleAdminDeletePlayer(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +150,7 @@ func (s *Server) handleAdminDeletePlayer(w http.ResponseWriter, r *http.Request)
 	s.recordAdminAudit(r.Context(), "player.delete", "player", fmt.Sprintf("player:%d", playerID), "deleted player", map[string]any{
 		"player_id": playerID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminUpdatePlayer(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +163,7 @@ func (s *Server) handleAdminUpdatePlayer(w http.ResponseWriter, r *http.Request)
 	}
 	var req adminUpdatePlayerRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.DisplayName) == "" || strings.TrimSpace(req.Email) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "player update request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player update request is invalid.")
 		return
 	}
 	player, err := s.store.UpdateAdminPlayer(r.Context(), playerID, req)
@@ -177,7 +177,7 @@ func (s *Server) handleAdminUpdatePlayer(w http.ResponseWriter, r *http.Request)
 		"email":        player.Email,
 		"role":         player.Role,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminPlayer]{Status: "success", Data: player})
+	writeData(w, http.StatusOK, player)
 }
 
 func (s *Server) handleAdminGetPlayerWireGuard(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +199,7 @@ func (s *Server) handleAdminGetPlayerWireGuard(w http.ResponseWriter, r *http.Re
 		"peer":      peer.WireGuardPeer,
 		"status":    peer.Status,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminWireGuardPeer]{Status: "success", Data: peer})
+	writeData(w, http.StatusOK, peer)
 }
 
 func (s *Server) handleAdminRotatePlayerWireGuard(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +221,7 @@ func (s *Server) handleAdminRotatePlayerWireGuard(w http.ResponseWriter, r *http
 		"peer":      peer.WireGuardPeer,
 		"status":    peer.Status,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminWireGuardPeer]{Status: "success", Data: peer})
+	writeData(w, http.StatusOK, peer)
 }
 
 func (s *Server) handleAdminRevokePlayerWireGuard(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,7 @@ func (s *Server) handleAdminRevokePlayerWireGuard(w http.ResponseWriter, r *http
 		"peer":      peer.WireGuardPeer,
 		"status":    peer.Status,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminWireGuardPeer]{Status: "success", Data: peer})
+	writeData(w, http.StatusOK, peer)
 }
 
 func (s *Server) handleAdminWireGuardGatewayStatus(w http.ResponseWriter, r *http.Request) {
@@ -252,10 +252,10 @@ func (s *Server) handleAdminWireGuardGatewayStatus(w http.ResponseWriter, r *htt
 	}
 	status, err := s.wireGuard.Status(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "wireguard gateway status could not be read."})
+		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[WireGuardGatewayStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminWireGuardGatewayReconcile(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +270,7 @@ func (s *Server) handleAdminWireGuardGatewayReconcile(w http.ResponseWriter, r *
 			statusCode = http.StatusServiceUnavailable
 			message = "wireguard gateway is not configured."
 		}
-		httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+		writeProblem(w, statusCode, "WireGuard unavailable", message)
 		return
 	}
 	s.recordAdminAudit(r.Context(), "wireguard.reconcile", "wireguard_gateway", "wireguard-gateway", "reconciled WireGuard gateway state", map[string]any{
@@ -279,7 +279,7 @@ func (s *Server) handleAdminWireGuardGatewayReconcile(w http.ResponseWriter, r *
 		"peers_total":  status.PeersTotal,
 		"peers_active": status.PeersActive,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[WireGuardGatewayStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminWireGuardGatewayTeardown(w http.ResponseWriter, r *http.Request) {
@@ -287,10 +287,10 @@ func (s *Server) handleAdminWireGuardGatewayTeardown(w http.ResponseWriter, r *h
 		return
 	}
 	if err := s.wireGuard.Teardown(r.Context()); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "wireguard gateway teardown failed."})
+		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway teardown failed.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminAccessStatus(w http.ResponseWriter, r *http.Request) {
@@ -299,10 +299,10 @@ func (s *Server) handleAdminAccessStatus(w http.ResponseWriter, r *http.Request)
 	}
 	status, err := s.controller.AccessStatus(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "controller access status could not be read."})
+		writeProblem(w, http.StatusBadGateway, "Controller access unavailable", "controller access status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[ControllerAccessStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminAccessReconcile(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +311,7 @@ func (s *Server) handleAdminAccessReconcile(w http.ResponseWriter, r *http.Reque
 	}
 	status, err := s.controller.ReconcileAccessPolicies(r.Context())
 	if err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "controller access reconcile failed."})
+		writeProblem(w, http.StatusBadGateway, "Controller access unavailable", "controller access reconcile failed.")
 		return
 	}
 	s.recordAdminAudit(r.Context(), "access.reconcile", "controller_access", "controller-access", "reconciled controller access policies", map[string]any{
@@ -321,7 +321,7 @@ func (s *Server) handleAdminAccessReconcile(w http.ResponseWriter, r *http.Reque
 		"ssh_locked_services": status.SSHLockedServices,
 		"allowed_peers_total": status.AllowedPeersTotal,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[ControllerAccessStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminAccessTeardown(w http.ResponseWriter, r *http.Request) {
@@ -329,10 +329,10 @@ func (s *Server) handleAdminAccessTeardown(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := s.controller.TeardownAccessPolicies(r.Context()); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "controller access teardown failed."})
+		writeProblem(w, http.StatusBadGateway, "Controller access unavailable", "controller access teardown failed.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminListChallenges(w http.ResponseWriter, r *http.Request) {
@@ -344,7 +344,7 @@ func (s *Server) handleAdminListChallenges(w http.ResponseWriter, r *http.Reques
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]adminChallenge]{Status: "success", Data: challenges})
+	writeData(w, http.StatusOK, challenges)
 }
 
 func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +353,7 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 	}
 	var req adminCreateChallengeRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge request is invalid.")
 		return
 	}
 	challenge, err := s.store.CreateAdminChallenge(r.Context(), req, s.now())
@@ -369,7 +369,7 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 		"service_subnet_octet": challenge.ServiceSubnetOctet,
 		"weight":               challenge.Weight,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminChallenge]{Status: "success", Data: challenge})
+	writeData(w, http.StatusOK, challenge)
 }
 
 func (s *Server) handleAdminDeleteChallenge(w http.ResponseWriter, r *http.Request) {
@@ -392,7 +392,7 @@ func (s *Server) handleAdminDeleteChallenge(w http.ResponseWriter, r *http.Reque
 	s.recordAdminAudit(r.Context(), "challenge.delete", "challenge", fmt.Sprintf("challenge:%d", challengeID), "deleted challenge", map[string]any{
 		"challenge_id": challengeID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +405,7 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 	}
 	var req adminUpdateChallengeRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge update request is invalid."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge update request is invalid.")
 		return
 	}
 	challenge, err := s.store.UpdateAdminChallenge(r.Context(), challengeID, req)
@@ -420,7 +420,7 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 		"checker_image":  challenge.CheckerImage,
 		"weight":         challenge.Weight,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminChallenge]{Status: "success", Data: challenge})
+	writeData(w, http.StatusOK, challenge)
 }
 
 func (s *Server) handleAdminValidateChallenge(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +437,7 @@ func (s *Server) handleAdminValidateChallenge(w http.ResponseWriter, r *http.Req
 			writeDomainFailure(w, err)
 			return
 		}
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge runtime validation failed."})
+		writeProblem(w, http.StatusBadGateway, "Challenge validation unavailable", "challenge runtime validation failed.")
 		return
 	}
 	s.recordAdminAudit(r.Context(), "challenge.validate", "challenge", auditChallengeTarget(result.ChallengeID, result.Name), "validated challenge runtime", map[string]any{
@@ -446,7 +446,7 @@ func (s *Server) handleAdminValidateChallenge(w http.ResponseWriter, r *http.Req
 		"baseline_ssh_contract_ok": result.BaselineSSHContractOK,
 		"checker_contract_ok":      result.CheckerContractOK,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[ChallengeValidationResult]{Status: "success", Data: result})
+	writeData(w, http.StatusOK, result)
 }
 
 func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Request) {
@@ -463,7 +463,7 @@ func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Reque
 			writeDomainFailure(w, err)
 			return
 		}
-		httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "challenge runtime validation failed."})
+		writeProblem(w, http.StatusBadGateway, "Challenge deployment unavailable", "challenge runtime validation failed.")
 		return
 	}
 	if validation.Status != "valid" || !validation.BaselineSSHContractOK || !validation.CheckerContractOK {
@@ -471,7 +471,7 @@ func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Reque
 		if message == "" {
 			message = "challenge package failed runtime validation."
 		}
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+		writeProblem(w, http.StatusBadRequest, "Invalid runtime configuration", message)
 		return
 	}
 	deployment, err := s.store.DeployAdminChallenge(r.Context(), challengeID)
@@ -485,7 +485,7 @@ func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Reque
 		"ready_team_count":  deployment.ReadyTeamCount,
 		"total_team_count":  deployment.TotalTeamCount,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminDeployment]{Status: "success", Data: deployment})
+	writeData(w, http.StatusOK, deployment)
 }
 
 func (s *Server) handleAdminListDeployments(w http.ResponseWriter, r *http.Request) {
@@ -497,7 +497,7 @@ func (s *Server) handleAdminListDeployments(w http.ResponseWriter, r *http.Reque
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]adminDeploymentJob]{Status: "success", Data: deployments})
+	writeData(w, http.StatusOK, deployments)
 }
 
 func (s *Server) handleAdminDeleteDeployment(w http.ResponseWriter, r *http.Request) {
@@ -515,7 +515,7 @@ func (s *Server) handleAdminDeleteDeployment(w http.ResponseWriter, r *http.Requ
 	s.recordAdminAudit(r.Context(), "deployment.delete", "deployment", fmt.Sprintf("deployment-job:%d", deploymentID), "deleted deployment job", map[string]any{
 		"deployment_job_id": deploymentID,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminListAuditLogs(w http.ResponseWriter, r *http.Request) {
@@ -527,7 +527,7 @@ func (s *Server) handleAdminListAuditLogs(w http.ResponseWriter, r *http.Request
 		writeStoreFailure(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminAuditLogPage]{Status: "success", Data: page})
+	writeData(w, http.StatusOK, page)
 }
 
 func (s *Server) handleAdminReconcileDeployments(w http.ResponseWriter, r *http.Request) {
@@ -543,7 +543,7 @@ func (s *Server) handleAdminReconcileDeployments(w http.ResponseWriter, r *http.
 				return
 			}
 		} else {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "controller deployment reconcile failed."})
+			writeProblem(w, http.StatusBadGateway, "Deployment reconcile unavailable", "controller deployment reconcile failed.")
 			return
 		}
 	}
@@ -552,7 +552,7 @@ func (s *Server) handleAdminReconcileDeployments(w http.ResponseWriter, r *http.
 		"processed_instances": result.ProcessedInstances,
 		"completed_jobs":      result.CompletedJobs,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[adminReconcileResult]{Status: "success", Data: result})
+	writeData(w, http.StatusOK, result)
 }
 
 func (s *Server) handleAdminGameStatus(w http.ResponseWriter, r *http.Request) {
@@ -564,7 +564,7 @@ func (s *Server) handleAdminGameStatus(w http.ResponseWriter, r *http.Request) {
 		writeGameCoreFailure(w, err, "game-core status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminGameMatchStatus(w http.ResponseWriter, r *http.Request) {
@@ -576,7 +576,7 @@ func (s *Server) handleAdminGameMatchStatus(w http.ResponseWriter, r *http.Reque
 		writeGameCoreFailure(w, err, "game-core match status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminStartGameMatch(w http.ResponseWriter, r *http.Request) {
@@ -592,7 +592,7 @@ func (s *Server) handleAdminStartGameMatch(w http.ResponseWriter, r *http.Reques
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminStopGameMatch(w http.ResponseWriter, r *http.Request) {
@@ -608,7 +608,7 @@ func (s *Server) handleAdminStopGameMatch(w http.ResponseWriter, r *http.Request
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminUpdateGameMatchSchedule(w http.ResponseWriter, r *http.Request) {
@@ -618,7 +618,7 @@ func (s *Server) handleAdminUpdateGameMatchSchedule(w http.ResponseWriter, r *ht
 
 	var req UpdateMatchScheduleRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "could not parse match schedule payload."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse match schedule payload.")
 		return
 	}
 
@@ -634,7 +634,7 @@ func (s *Server) handleAdminUpdateGameMatchSchedule(w http.ResponseWriter, r *ht
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameMatchStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminAdvanceGameTick(w http.ResponseWriter, r *http.Request) {
@@ -654,7 +654,7 @@ func (s *Server) handleAdminAdvanceGameTick(w http.ResponseWriter, r *http.Reque
 		"failed_checker_runs":     status.FailedCheckerRuns,
 		"skipped_checker_runs":    status.SkippedCheckerRuns,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameTickStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminListCheckerRuns(w http.ResponseWriter, r *http.Request) {
@@ -667,7 +667,7 @@ func (s *Server) handleAdminListCheckerRuns(w http.ResponseWriter, r *http.Reque
 		writeGameCoreFailure(w, err, "game-core checker runs could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameCheckerRunPage]{Status: "success", Data: runs})
+	writeData(w, http.StatusOK, runs)
 }
 
 func (s *Server) handleAdminGameSchedulerStatus(w http.ResponseWriter, r *http.Request) {
@@ -679,7 +679,7 @@ func (s *Server) handleAdminGameSchedulerStatus(w http.ResponseWriter, r *http.R
 		writeGameCoreFailure(w, err, "game-core scheduler status could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminGameSchedulerEvents(w http.ResponseWriter, r *http.Request) {
@@ -692,7 +692,7 @@ func (s *Server) handleAdminGameSchedulerEvents(w http.ResponseWriter, r *http.R
 		writeGameCoreFailure(w, err, "game-core scheduler events could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameSchedulerEventPage]{Status: "success", Data: events})
+	writeData(w, http.StatusOK, events)
 }
 
 func (s *Server) handleAdminStartGameScheduler(w http.ResponseWriter, r *http.Request) {
@@ -709,7 +709,7 @@ func (s *Server) handleAdminStartGameScheduler(w http.ResponseWriter, r *http.Re
 		"interval_seconds": status.IntervalSeconds,
 		"next_run_at":      status.NextRunAt,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminStopGameScheduler(w http.ResponseWriter, r *http.Request) {
@@ -726,7 +726,7 @@ func (s *Server) handleAdminStopGameScheduler(w http.ResponseWriter, r *http.Req
 		"interval_seconds": status.IntervalSeconds,
 		"last_run_at":      status.LastRunAt,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminUpdateGameScheduler(w http.ResponseWriter, r *http.Request) {
@@ -736,7 +736,7 @@ func (s *Server) handleAdminUpdateGameScheduler(w http.ResponseWriter, r *http.R
 
 	var req UpdateSchedulerRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteJSON(w, http.StatusBadRequest, httpapi.ErrorEnvelope{Status: "invalid payload", Message: "could not parse interval payload."})
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse interval payload.")
 		return
 	}
 
@@ -750,7 +750,7 @@ func (s *Server) handleAdminUpdateGameScheduler(w http.ResponseWriter, r *http.R
 		"interval_seconds": status.IntervalSeconds,
 		"state":            status.State,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[GameSchedulerStatus]{Status: "success", Data: status})
+	writeData(w, http.StatusOK, status)
 }
 
 func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Request) {
@@ -759,10 +759,10 @@ func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Reques
 	}
 	if s.scoring != nil {
 		if rows, err := s.scoring.Scoreboard(r.Context()); err == nil {
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+			writeData(w, http.StatusOK, rows)
 			return
 		} else if !errors.Is(err, errScoringWorkerDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "scoring-worker scoreboard could not be read."})
+			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "scoring-worker scoreboard could not be read.")
 			return
 		}
 	}
@@ -771,7 +771,7 @@ func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Reques
 		writeGameCoreFailure(w, err, "game-core scoreboard could not be read.")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func (s *Server) handleAdminRecomputeScoring(w http.ResponseWriter, r *http.Request) {
@@ -783,10 +783,10 @@ func (s *Server) handleAdminRecomputeScoring(w http.ResponseWriter, r *http.Requ
 			s.recordAdminAudit(r.Context(), "scoring.recompute", "scoreboard", "public-scoreboard", "recomputed scoreboard", map[string]any{
 				"rows": len(rows),
 			})
-			httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+			writeData(w, http.StatusOK, rows)
 			return
 		} else if !errors.Is(err, errScoringWorkerDisabled) {
-			httpapi.WriteJSON(w, http.StatusBadGateway, httpapi.ErrorEnvelope{Status: "failed", Message: "scoring-worker score recompute failed."})
+			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "scoring-worker score recompute failed.")
 			return
 		}
 	}
@@ -798,7 +798,7 @@ func (s *Server) handleAdminRecomputeScoring(w http.ResponseWriter, r *http.Requ
 	s.recordAdminAudit(r.Context(), "scoring.recompute", "scoreboard", "public-scoreboard", "recomputed scoreboard", map[string]any{
 		"rows": len(rows),
 	})
-	httpapi.WriteJSON(w, http.StatusOK, successEnvelope[[]scoreRow]{Status: "success", Data: rows})
+	writeData(w, http.StatusOK, rows)
 }
 
 func parseAdminCheckerRunQuery(r *http.Request) GameCheckerRunQuery {
@@ -907,5 +907,5 @@ func writeGameCoreFailure(w http.ResponseWriter, err error, fallback string) {
 			message = trimmed
 		}
 	}
-	httpapi.WriteJSON(w, statusCode, httpapi.ErrorEnvelope{Status: "failed", Message: message})
+	writeProblem(w, statusCode, "Game-core unavailable", message)
 }

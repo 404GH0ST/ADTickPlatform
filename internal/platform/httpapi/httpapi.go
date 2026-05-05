@@ -20,6 +20,14 @@ type ErrorEnvelope struct {
 	Message string `json:"message"`
 }
 
+type ProblemDetails struct {
+	Type     string `json:"type,omitempty"`
+	Title    string `json:"title"`
+	Status   int    `json:"status"`
+	Detail   string `json:"detail,omitempty"`
+	Instance string `json:"instance,omitempty"`
+}
+
 func NewBaseMux(info ServiceInfo) *http.ServeMux {
 	mux := http.NewServeMux()
 	metrics := lookupServiceMetrics(info)
@@ -54,6 +62,18 @@ func WriteJSON(w http.ResponseWriter, statusCode int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func WriteProblem(w http.ResponseWriter, statusCode int, problem ProblemDetails) {
+	if problem.Title == "" {
+		problem.Title = http.StatusText(statusCode)
+	}
+	if problem.Status == 0 {
+		problem.Status = statusCode
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(problem)
 }
 
 func DecodeJSON(r *http.Request, dst any) error {

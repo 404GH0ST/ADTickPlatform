@@ -162,8 +162,7 @@ func TestBuildDockerSSHCredentialArgs(t *testing.T) {
 		ContainerName: "svc-banking-team-101",
 	}
 	credential := apigateway.ControllerSSHCredential{
-		Password:  "one-time-secret",
-		ExpiresAt: "2026-03-10T09:00:00Z",
+		Password: "one-time-secret",
 	}
 
 	args := buildDockerSSHCredentialArgs(task, credential)
@@ -172,7 +171,6 @@ func TestBuildDockerSSHCredentialArgs(t *testing.T) {
 		"exec",
 		"-e",
 		"AD_PLATFORM_ROOT_PASSWORD=one-time-secret",
-		"AD_PLATFORM_SSH_PASSWORD_EXPIRES_AT=2026-03-10T09:00:00Z",
 		"svc-banking-team-101",
 		"/bin/sh",
 		"-lc",
@@ -356,8 +354,7 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 	t.Setenv("DOCKER_CONTAINER_NAME", task.ContainerName)
 
 	if err := executor.ApplySSHCredential(context.Background(), task, apigateway.ControllerSSHCredential{
-		Password:  "one-time-secret",
-		ExpiresAt: "2026-03-10T09:00:00Z",
+		Password: "one-time-secret",
 	}); err != nil {
 		t.Fatalf("apply ssh credential failed: %v", err)
 	}
@@ -370,7 +367,7 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 	expected := []string{
 		"ps -a --filter name=^/svc-banking-team-101$ --format {{.Names}}",
 		"exec svc-banking-team-101 /bin/sh -lc",
-		"exec -e AD_PLATFORM_ROOT_PASSWORD=one-time-secret -e AD_PLATFORM_SSH_PASSWORD_EXPIRES_AT=2026-03-10T09:00:00Z svc-banking-team-101 /bin/sh -lc",
+		"exec -e AD_PLATFORM_ROOT_PASSWORD=one-time-secret svc-banking-team-101 /bin/sh -lc",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(logOutput, fragment) {

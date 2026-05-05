@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -83,18 +84,29 @@ func requestGameCoreScoringJSON[T any](ctx context.Context, c *httpGameCoreScori
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var payload successEnvelope[T]
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&zero); err != nil {
 			return zero, err
 		}
-		return payload.Data, nil
+		return zero, nil
 	}
 
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return zero, fmt.Errorf("game-core request failed with status %d", resp.StatusCode)
+	}
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(data, &problem); err == nil {
+		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
+			return zero, fmt.Errorf("game-core request failed: %s", trimmed)
+		}
+		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
+			return zero, fmt.Errorf("game-core request failed: %s", trimmed)
+		}
+	}
 	var payload struct {
-		Status  string `json:"status"`
 		Message string `json:"message"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return zero, fmt.Errorf("game-core request failed with status %d", resp.StatusCode)
 	}
 	if payload.Message != "" {

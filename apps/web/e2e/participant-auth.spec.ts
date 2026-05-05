@@ -25,7 +25,9 @@ test("unauthenticated admin access redirects to the participant login page", asy
   await page.goto("/admin");
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByText("Participant Sign In")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sign In" }),
+  ).toBeVisible();
 });
 
 test("participant login shows an error for invalid credentials", async ({

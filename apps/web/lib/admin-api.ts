@@ -47,6 +47,7 @@ export type CreateChallengeInput = {
   name: string;
   baseline_image: string;
   checker_image: string;
+  source_bundle_path?: string;
   weight: number;
   service_port?: number;
   service_subnet_octet?: number;
@@ -67,6 +68,7 @@ export type UpdateChallengeInput = {
   name: string;
   baseline_image: string;
   checker_image: string;
+  source_bundle_path?: string;
   weight: number;
 };
 
@@ -420,7 +422,7 @@ export async function createAdminTeam(input: CreateTeamInput) {
 }
 
 export async function deleteAdminTeam(teamID: number) {
-  return adminFetch<{ status: "success" }>(`/api/v2/admin/teams/${teamID}`, {
+  return adminFetch<void>(`/api/v2/admin/teams/${teamID}`, {
     method: "DELETE",
   });
 }
@@ -444,7 +446,7 @@ export async function createAdminPlayer(input: CreatePlayerInput) {
 }
 
 export async function deleteAdminPlayer(playerID: number) {
-  return adminFetch<{ status: "success" }>(
+  return adminFetch<void>(
     `/api/v2/admin/players/${playerID}`,
     {
       method: "DELETE",
@@ -502,7 +504,7 @@ export async function reconcileAdminWireGuardGateway() {
 }
 
 export async function teardownAdminWireGuardGateway() {
-  return adminFetch<{ status: "success" }>("/api/v2/admin/wireguard/teardown", {
+  return adminFetch<void>("/api/v2/admin/wireguard/teardown", {
     method: "POST",
   });
 }
@@ -521,7 +523,7 @@ export async function reconcileAdminAccess() {
 }
 
 export async function teardownAdminAccess() {
-  return adminFetch<{ status: "success" }>("/api/v2/admin/access/teardown", {
+  return adminFetch<void>("/api/v2/admin/access/teardown", {
     method: "POST",
   });
 }
@@ -538,7 +540,7 @@ export async function createAdminChallenge(input: CreateChallengeInput) {
 }
 
 export async function deleteAdminChallenge(challengeID: number) {
-  return adminFetch<{ status: "success" }>(
+  return adminFetch<void>(
     `/api/v2/admin/challenges/${challengeID}`,
     {
       method: "DELETE",
@@ -579,7 +581,7 @@ export async function listAdminDeployments() {
 }
 
 export async function deleteAdminDeployment(deploymentID: number) {
-  return adminFetch<{ status: "success" }>(
+  return adminFetch<void>(
     `/api/v2/admin/deployments/${deploymentID}`,
     {
       method: "DELETE",
