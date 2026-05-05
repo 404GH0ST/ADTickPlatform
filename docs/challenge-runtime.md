@@ -177,6 +177,7 @@ A working reference package is included in:
 
 - `examples/sample-http-challenge`
 - `examples/sample-lfi-challenge`
+- `examples/sample-rce-challenge`
 
 ## Docker Network Layout
 

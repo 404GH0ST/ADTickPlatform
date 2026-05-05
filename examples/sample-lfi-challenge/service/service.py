@@ -12,9 +12,11 @@ from urllib.parse import parse_qs, urlparse
 STATE_DIR = Path(os.environ.get("AD_STATE_DIR", "/opt/ad/state"))
 MESSAGES_DIR = STATE_DIR / "messages"
 SECRET_DIR = STATE_DIR / "secret"
-TEMPLATES_DIR = Path("/opt/ad/content/templates")
+FLAG_PATH = STATE_DIR / "flag.txt"
+TEMPLATES_DIR = Path(os.environ.get("AD_TEMPLATES_DIR", "/opt/ad/content/templates"))
 SERVICE_PORT = int(os.environ.get("PORT", os.environ.get("AD_PLATFORM_SERVICE_PORT", "8080")))
 UNLOCK_PROOF = os.environ.get("AD_PLATFORM_UNLOCK_PROOF", "missing-unlock-proof")
+CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-lfi-checker-token")
 TITLE_RE = re.compile(r"^[A-Za-z0-9 _.\-]{1,64}$")
 
 
@@ -52,6 +54,21 @@ def write_slot(slot: int, title: str, body: str) -> dict:
     with slot_path(slot).open("w", encoding="utf-8") as handle:
         json.dump(payload, handle)
     return payload
+
+
+def read_flag() -> str:
+    try:
+        return FLAG_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def write_flag(flag: str) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = FLAG_PATH.with_suffix(".tmp")
+    tmp_path.write_text(f"{flag}\n", encoding="utf-8")
+    tmp_path.chmod(0o600)
+    os.replace(tmp_path, FLAG_PATH)
 
 
 class LFISampleHandler(BaseHTTPRequestHandler):
@@ -93,6 +110,15 @@ class LFISampleHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"status": "rendered", "template": template, "content": content})
             return
 
+        if parsed.path == "/v1/flag":
+            supplied = parse_qs(parsed.query).get("value", [""])[0]
+            flag = read_flag()
+            if supplied and supplied == flag:
+                self._send_json(HTTPStatus.OK, {"status": "stored", "flag": supplied})
+                return
+            self._send_json(HTTPStatus.NOT_FOUND, {"status": "missing"})
+            return
+
         if parsed.path.startswith("/v1/messages/"):
             slot_raw = parsed.path.rsplit("/", 1)[-1]
             if not slot_raw.isdigit():
@@ -128,6 +154,28 @@ class LFISampleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/flag":
+            if self.headers.get("X-Checker-Token", "") != CHECKER_TOKEN:
+                self._send_json(HTTPStatus.FORBIDDEN, {"status": "forbidden"})
+                return
+
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"status": "invalid_json"})
+                return
+
+            flag = payload.get("flag", "")
+            if not isinstance(flag, str) or flag == "":
+                self._send_json(HTTPStatus.BAD_REQUEST, {"status": "missing_flag"})
+                return
+
+            write_flag(flag)
+            self._send_json(HTTPStatus.OK, {"status": "stored", "path": "flag.txt"})
+            return
+
         if parsed.path != "/v1/messages":
             self._send_json(HTTPStatus.NOT_FOUND, {"status": "not_found"})
             return

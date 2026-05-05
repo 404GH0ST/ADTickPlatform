@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-lfi-checker-token")
+CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-rce-checker-token")
 
 
 def http_request(
@@ -95,37 +95,26 @@ def main() -> int:
             return 0
 
         if phase == "check":
-            # This phase uses only valid expected user inputs.
             status, body = http_request("GET", f"{base_url}/v1/health")
             health = require_json(status, body)
             if health.get("status") != "ok":
                 print(body, file=sys.stderr)
                 return 1
 
-            status, body = http_request("GET", f"{base_url}/v1/render?{urlencode({'template': 'welcome.txt'})}")
-            render = require_json(status, body)
-            if "Welcome to sample LFI challenge." not in str(render.get("content", "")):
+            status, body = http_request("GET", f"{base_url}/v1/status")
+            status_payload = require_json(status, body)
+            if "diagnostics online" not in str(status_payload.get("message", "")):
                 print(body, file=sys.stderr)
                 return 1
 
-            slot = 0
-            status, body = http_request(
-                "POST",
-                f"{base_url}/v1/messages",
-                {"slot": slot, "title": "health-check", "body": "normal user content"},
-            )
-            payload = require_json(status, body)
-            token = payload.get("token", "")
-            if not isinstance(token, str) or token == "":
+            query = urlencode({"host": "localhost"})
+            status, body = http_request("GET", f"{base_url}/v1/diagnostics?{query}")
+            diagnostic = require_json(status, body)
+            result = diagnostic.get("result")
+            if not isinstance(result, dict) or "localhost" not in str(result.get("stdout", "")):
                 print(body, file=sys.stderr)
                 return 1
-
-            status, body = http_request("GET", f"{base_url}/v1/messages/{slot}?{urlencode({'token': token})}")
-            payload = require_json(status, body)
-            if payload.get("body") != "normal user content":
-                print(body, file=sys.stderr)
-                return 1
-            print(json.dumps({"status": "ok", "slot": slot}))
+            print(json.dumps({"status": "ok"}))
             return 0
     except (HTTPError, URLError, ValueError, json.JSONDecodeError) as exc:
         print(f"checker error: {exc}", file=sys.stderr)
