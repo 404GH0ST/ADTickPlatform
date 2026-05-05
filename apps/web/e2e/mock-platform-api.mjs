@@ -711,6 +711,46 @@ function createStateForScenario(scenario = "default") {
     };
   }
 
+  if (scenario === "runtime-health-drift") {
+    nextState.deployments = pendingDeployments.map((deployment) => ({
+      ...deployment,
+    }));
+    nextState.operationsStatus = {
+      healthy: false,
+      generated_at: "2026-03-20T10:24:00Z",
+      alerts: [
+        {
+          id: "deployment-queue-stalled",
+          severity: "warning",
+          source: "deployments",
+          summary: "2 deployment job(s) are still active.",
+          detail: "The oldest active job has been 14m in status queued.",
+        },
+      ],
+    };
+    nextState.accessStatus = {
+      ...nextState.accessStatus,
+      state: "idle",
+      applied_at: "2026-03-20T10:10:00Z",
+    };
+    nextState.wireguardStatus = {
+      ...nextState.wireguardStatus,
+      state: "idle",
+      applied_at: "2026-03-20T10:10:00Z",
+    };
+    nextState.serviceMetrics = {
+      ...nextState.serviceMetrics,
+      controller_service: {
+        ...nextState.serviceMetrics.controller_service,
+        access_last_apply_success: false,
+      },
+      wireguard_gateway: {
+        ...nextState.serviceMetrics.wireguard_gateway,
+        last_apply_success: false,
+      },
+    };
+  }
+
   if (scenario === "metrics-attention") {
     nextState.gameStatus.match = {
       ...nextState.gameStatus.match,

@@ -147,6 +147,9 @@ export function OrganizerDashboard({
         onRefreshCheckerRuns: () => {
           void state.refreshCheckerRuns();
         },
+        onRefreshDeploymentRows: () => {
+          void state.refreshDeploymentRows();
+        },
         onRefreshGameScoreboard: () => {
           void state.refreshGameScoreboard();
         },
@@ -155,6 +158,9 @@ export function OrganizerDashboard({
         },
         onRefreshOperationsStatus: () => {
           void state.refreshOperationsStatus();
+        },
+        onRefreshRuntimeHealth: () => {
+          void state.refreshRuntimeHealth();
         },
         onRefreshServiceMetrics: () => {
           void state.refreshServiceMetrics();
@@ -283,9 +289,11 @@ function renderOrganizerPanel({
   onRefreshAccessStatus,
   onRefreshAttacks,
   onRefreshCheckerRuns,
+  onRefreshDeploymentRows,
   onRefreshGameScoreboard,
   onRefreshGameStatus,
   onRefreshOperationsStatus,
+  onRefreshRuntimeHealth,
   onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
   onRefreshWireGuardGatewayStatus,
@@ -370,9 +378,11 @@ function renderOrganizerPanel({
   onRefreshAccessStatus: () => void;
   onRefreshAttacks: () => void;
   onRefreshCheckerRuns: () => void;
+  onRefreshDeploymentRows: () => void;
   onRefreshGameScoreboard: () => void;
   onRefreshGameStatus: () => void;
   onRefreshOperationsStatus: () => void;
+  onRefreshRuntimeHealth: () => void;
   onRefreshServiceMetrics: () => void;
   onRefreshSchedulerEvents: () => void;
   onRefreshWireGuardGatewayStatus: () => void;
@@ -512,12 +522,15 @@ function renderOrganizerPanel({
           schedulerEvent: schedulerEventFilters,
         }}
         gameState={gameState}
+        accessStatus={accessStatus}
+        deploymentRows={deploymentRows}
         operationsStatus={operationsStatus}
         serviceMetrics={serviceMetrics}
         pendingAction={pendingAction}
         schedulerEventPage={schedulerEventPage}
         schedulerEventsLiveMode={schedulerEventsLiveMode}
         scoreRows={scoreRows}
+        wireGuardGatewayStatus={wireGuardGatewayStatus}
       onAdvanceTick={onAdvanceGameTick}
       onApplyAttackFilters={onApplyAttackFilters}
       onApplyCheckerRunFilters={onApplyCheckerRunFilters}
@@ -530,9 +543,11 @@ function renderOrganizerPanel({
       onRecomputeScores={onRecomputeGameScoring}
       onRefreshAttacks={onRefreshAttacks}
       onRefreshCheckerRuns={onRefreshCheckerRuns}
+        onRefreshDeploymentRows={onRefreshDeploymentRows}
         onRefreshGameScoreboard={onRefreshGameScoreboard}
         onRefreshGameStatus={onRefreshGameStatus}
         onRefreshOperationsStatus={onRefreshOperationsStatus}
+        onRefreshRuntimeHealth={onRefreshRuntimeHealth}
         onRefreshServiceMetrics={onRefreshServiceMetrics}
         onRefreshSchedulerEvents={onRefreshSchedulerEvents}
       onResetAttackFilters={onResetAttackFilters}

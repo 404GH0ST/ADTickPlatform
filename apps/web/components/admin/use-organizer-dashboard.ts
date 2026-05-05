@@ -180,8 +180,10 @@ export type OrganizerDashboardState = {
     silent?: boolean,
     filters?: CheckerRunFilters,
   ) => Promise<void>;
+  refreshDeploymentRows: (silent?: boolean) => Promise<void>;
   refreshGameScoreboard: (silent?: boolean) => Promise<void>;
   refreshGameStatus: (silent?: boolean) => Promise<void>;
+  refreshRuntimeHealth: (silent?: boolean) => Promise<void>;
   refreshSchedulerEvents: (
     silent?: boolean,
     filters?: SchedulerEventFilters,
@@ -692,6 +694,39 @@ export function useOrganizerDashboard({
           error instanceof Error
             ? error.message
             : "operations metrics failed",
+        );
+      }
+    } finally {
+      if (!silent) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function refreshRuntimeHealth(silent = false): Promise<void> {
+    if (!silent) {
+      setPendingAction("runtime:health");
+      setActionError(null);
+      setActionNote(null);
+    }
+
+    try {
+      await Promise.all([
+        refreshDeploymentRows(true),
+        refreshWireGuardGatewayStatus(true),
+        refreshAccessStatus(true),
+        refreshOperationsStatus(true),
+        refreshServiceMetrics(true),
+      ]);
+      if (!silent) {
+        setActionNote(
+          "Refreshed deployment, access policy, WireGuard, runtime alerts, and service metrics.",
+        );
+      }
+    } catch (error) {
+      if (!silent) {
+        setActionError(
+          error instanceof Error ? error.message : "runtime health refresh failed",
         );
       }
     } finally {
@@ -1237,13 +1272,7 @@ export function useOrganizerDashboard({
         "/api/admin/deployments/reconcile",
       );
 
-      const deploymentsResponse = await fetch("/api/admin/deployments");
-      const deploymentsPayload = await processApiResponse<AdminDeploymentJob[]>(
-        deploymentsResponse,
-        "/api/admin/deployments",
-      );
-
-      setDeploymentRows(deploymentsPayload);
+      await refreshRuntimeHealth(true);
 
       setActionNote(
         `Trusted reconcile processed ${payload.processed_jobs} job(s), advanced ${payload.processed_instances} team service instance(s), and refreshed deployment, SSH access, and WireGuard truth.`,
@@ -1288,6 +1317,17 @@ export function useOrganizerDashboard({
         setPendingAction(null);
       }
     }
+  }
+
+  async function refreshDeploymentRows(silent = false): Promise<void> {
+    return refreshPagedFeed<AdminDeploymentJob[]>({
+      silent,
+      actionKey: "deployments:list",
+      url: "/api/admin/deployments",
+      errorLabel: "deployment list fetch failed",
+      setPage: setDeploymentRows,
+      formatNote: (rows) => `Loaded ${rows.length} deployment job(s).`,
+    });
   }
 
   async function startGameMatch(): Promise<void> {
@@ -2066,9 +2106,11 @@ export function useOrganizerDashboard({
     refreshAccessStatus,
     refreshAttacks,
     refreshCheckerRuns,
+    refreshDeploymentRows,
     refreshGameScoreboard,
     refreshGameStatus,
     refreshOperationsStatus,
+    refreshRuntimeHealth,
     refreshServiceMetrics,
     refreshSchedulerEvents,
     refreshWireGuardGatewayStatus,

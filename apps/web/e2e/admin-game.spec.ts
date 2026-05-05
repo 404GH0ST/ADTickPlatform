@@ -326,6 +326,47 @@ test("organizer deployments reconcile surfaces trusted-truth failure details", a
   ).toBeVisible();
 });
 
+test("organizer game page shows aggregated runtime drift warnings and refreshes them together", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "default" },
+  });
+  await page.goto("/admin/game");
+
+  const runtimeHealthCard = page.getByTestId("runtime-health-card");
+  await expect(runtimeHealthCard).toContainText(
+    "Trusted reconcile, controller access, WireGuard, deployments, and live metrics currently agree.",
+  );
+
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "runtime-health-drift" },
+  });
+
+  await page.getByTestId("refresh-runtime-health").click();
+
+  await expect(
+    page.getByText(
+      "Refreshed deployment, access policy, WireGuard, runtime alerts, and service metrics.",
+    ),
+  ).toBeVisible();
+  await expect(runtimeHealthCard).toContainText(
+    "Runtime drift warnings are active. Review deployments, access, and gateway state before assuming the stack is converged.",
+  );
+  await expect(runtimeHealthCard).toContainText("1 pending / 0 failed");
+  await expect(runtimeHealthCard).toContainText("idle (host)");
+  await expect(runtimeHealthCard).toContainText(
+    "Controller access policy is idle, so SSH truth may be stale.",
+  );
+  await expect(runtimeHealthCard).toContainText(
+    "WireGuard gateway is idle, so peer truth may be stale.",
+  );
+  await expect(runtimeHealthCard).toContainText(
+    "1 deployment job(s) still need trusted reconcile completion.",
+  );
+});
+
 test("organizer match controls handle manual match operations and recompute logic", async ({
   page,
   request,

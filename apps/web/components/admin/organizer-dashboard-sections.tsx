@@ -193,11 +193,13 @@ type GameFilters = {
 };
 
 type GameTabProps = {
+  accessStatus: AdminControllerAccessStatus | null;
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
   highlightedAttackIDs: string[];
   checkerRunPage: AdminCheckerRunPage;
   checkerRunsLiveMode: boolean;
+  deploymentRows: AdminDeploymentJob[];
   filters: GameFilters;
   focusPanel?: "all" | "attacks";
   gameState: AdminGameStatus;
@@ -207,6 +209,7 @@ type GameTabProps = {
   schedulerEventPage: AdminSchedulerEventPage;
   schedulerEventsLiveMode: boolean;
   scoreRows: AdminGameScoreRow[];
+  wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
   onAdvanceTick: () => void;
   onApplyAttackFilters: () => void;
   onApplyCheckerRunFilters: () => void;
@@ -219,9 +222,11 @@ type GameTabProps = {
   onRecomputeScores: () => void;
   onRefreshAttacks: () => void;
   onRefreshCheckerRuns: () => void;
+  onRefreshDeploymentRows: () => void;
   onRefreshGameScoreboard: () => void;
   onRefreshGameStatus: () => void;
   onRefreshOperationsStatus: () => void;
+  onRefreshRuntimeHealth: () => void;
   onRefreshServiceMetrics: () => void;
   onRefreshSchedulerEvents: () => void;
   onResetAttackFilters: () => void;
@@ -1336,11 +1341,13 @@ export function DeploymentsTab({
 }
 
 export function GameTab({
+  accessStatus,
   attackPage,
   attacksLiveMode,
   highlightedAttackIDs,
   checkerRunPage,
   checkerRunsLiveMode,
+  deploymentRows,
   filters,
   focusPanel = "all",
   gameState,
@@ -1350,6 +1357,7 @@ export function GameTab({
   schedulerEventPage,
   schedulerEventsLiveMode,
   scoreRows,
+  wireGuardGatewayStatus,
   onAdvanceTick,
 
   onApplyCheckerRunFilters,
@@ -1362,9 +1370,11 @@ export function GameTab({
   onRecomputeScores,
   onRefreshAttacks,
   onRefreshCheckerRuns,
+  onRefreshDeploymentRows,
   onRefreshGameScoreboard,
   onRefreshGameStatus,
   onRefreshOperationsStatus,
+  onRefreshRuntimeHealth,
   onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
 
@@ -1420,6 +1430,17 @@ export function GameTab({
             Runtime controls, audit history, and recent checker execution.
           </p>
         </div>
+        <RuntimeHealthCard
+          accessStatus={accessStatus}
+          deploymentRows={deploymentRows}
+          operationsStatus={operationsStatus}
+          pendingAction={pendingAction}
+          serviceMetrics={serviceMetrics}
+          wireGuardGatewayStatus={wireGuardGatewayStatus}
+          onRefreshDeploymentRows={onRefreshDeploymentRows}
+          onRefreshOperationsStatus={onRefreshOperationsStatus}
+          onRefreshRuntimeHealth={onRefreshRuntimeHealth}
+        />
         <OperationsAlertsCard
           operationsStatus={operationsStatus}
           pendingAction={pendingAction}
@@ -1975,6 +1996,298 @@ function QuickActionsCard({
       </CardContent>
     </Card>
   );
+}
+
+type RuntimeHealthSeverity = "healthy" | "warning" | "critical";
+
+type RuntimeHealthSnapshot = {
+  accessLabel: string;
+  deploymentFailedCount: number;
+  deploymentPendingCount: number;
+  generatedAt: string;
+  metricsAttentionCount: number;
+  operationsCriticalCount: number;
+  operationsWarningCount: number;
+  severity: RuntimeHealthSeverity;
+  summary: string;
+  wireGuardLabel: string;
+  warnings: string[];
+};
+
+function RuntimeHealthCard({
+  accessStatus,
+  deploymentRows,
+  operationsStatus,
+  pendingAction,
+  serviceMetrics,
+  wireGuardGatewayStatus,
+  onRefreshDeploymentRows,
+  onRefreshOperationsStatus,
+  onRefreshRuntimeHealth,
+}: {
+  accessStatus: AdminControllerAccessStatus | null;
+  deploymentRows: AdminDeploymentJob[];
+  operationsStatus: AdminOperationsStatus | null;
+  pendingAction: string | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
+  wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
+  onRefreshDeploymentRows: () => void;
+  onRefreshOperationsStatus: () => void;
+  onRefreshRuntimeHealth: () => void;
+}): ReactElement {
+  const snapshot = buildRuntimeHealthSnapshot({
+    accessStatus,
+    deploymentRows,
+    operationsStatus,
+    serviceMetrics,
+    wireGuardGatewayStatus,
+  });
+
+  return (
+    <AdminRuntimeCard
+      title="Runtime Health"
+      description="Aggregated drift view for trusted reconcile, controller access, WireGuard, deployment backlog, and the latest runtime alerts."
+    >
+      <div className="space-y-4 p-4" data-testid="runtime-health-card">
+        <StatusBanner
+          message={snapshot.summary}
+          variant={
+            snapshot.severity === "healthy"
+              ? "success"
+              : snapshot.severity === "critical"
+                ? "error"
+                : "warning"
+          }
+        />
+        <InfoPanel layout="grid">
+          <InfoLine
+            label="Trusted reconcile"
+            value={runtimeHealthSeverityLabel(snapshot.severity)}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Deployments"
+            value={`${snapshot.deploymentPendingCount} pending / ${snapshot.deploymentFailedCount} failed`}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Access policy"
+            value={snapshot.accessLabel}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="WireGuard"
+            value={snapshot.wireGuardLabel}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Ops alerts"
+            value={`${snapshot.operationsCriticalCount} critical / ${snapshot.operationsWarningCount} warning`}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Metric attention"
+            value={String(snapshot.metricsAttentionCount)}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Snapshot"
+            value={snapshot.generatedAt}
+            valueClassName="font-mono"
+          />
+        </InfoPanel>
+        {snapshot.warnings.length > 0 ? (
+          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+            <p className="text-sm font-medium text-foreground">
+              Operator attention points
+            </p>
+            <ul className="mt-2 grid gap-2 text-sm text-muted-foreground">
+              {snapshot.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <CardActionRow>
+          <RuntimeActionButton
+            actionID="runtime:health"
+            label="Refresh Runtime"
+            pendingAction={pendingAction}
+            testID="refresh-runtime-health"
+            variant="outline"
+            onClick={onRefreshRuntimeHealth}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="refresh-runtime-alerts"
+            disabled={pendingAction !== null}
+            onClick={onRefreshOperationsStatus}
+          >
+            {pendingAction === "operations:status" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh Alerts
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="refresh-runtime-deployments"
+            disabled={pendingAction !== null}
+            onClick={onRefreshDeploymentRows}
+          >
+            {pendingAction === "deployments:list" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh Jobs
+          </Button>
+          <Button asChild size="sm" variant="outline" className="ml-auto">
+            <Link href="/admin/deployments">Open Deployments</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/admin/players">Open Access Controls</Link>
+          </Button>
+        </CardActionRow>
+      </div>
+    </AdminRuntimeCard>
+  );
+}
+
+function buildRuntimeHealthSnapshot({
+  accessStatus,
+  deploymentRows,
+  operationsStatus,
+  serviceMetrics,
+  wireGuardGatewayStatus,
+}: {
+  accessStatus: AdminControllerAccessStatus | null;
+  deploymentRows: AdminDeploymentJob[];
+  operationsStatus: AdminOperationsStatus | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
+  wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
+}): RuntimeHealthSnapshot {
+  const deploymentPendingCount = deploymentRows.filter(
+    (deployment) => !["completed", "failed", "superseded"].includes(deployment.status),
+  ).length;
+  const deploymentFailedCount = deploymentRows.filter(
+    (deployment) =>
+      deployment.status === "failed" || deployment.failed_team_count > 0,
+  ).length;
+  const operationsAlerts = operationsStatus?.alerts ?? [];
+  const operationsCriticalCount = operationsAlerts.filter(
+    (alert) => alert.severity === "critical",
+  ).length;
+  const operationsWarningCount = operationsAlerts.length - operationsCriticalCount;
+  const metricsWarnings: string[] = [];
+
+  if (serviceMetrics === null) {
+    metricsWarnings.push("Live service metrics snapshot is unavailable.");
+  } else {
+    if (serviceMetrics.controller_service.access_last_apply_success === false) {
+      metricsWarnings.push(
+        "Controller metrics report the last access apply was unsuccessful.",
+      );
+    }
+    if (serviceMetrics.wireguard_gateway.last_apply_success === false) {
+      metricsWarnings.push(
+        "WireGuard metrics report the last gateway apply was unsuccessful.",
+      );
+    }
+    if (serviceMetrics.realtime_gateway.last_sync_success === false) {
+      metricsWarnings.push(
+        "Realtime metrics report the last snapshot sync was unsuccessful.",
+      );
+    }
+  }
+
+  const warnings: string[] = [];
+  if (deploymentPendingCount > 0) {
+    warnings.push(
+      `${deploymentPendingCount} deployment job(s) still need trusted reconcile completion.`,
+    );
+  }
+  if (deploymentFailedCount > 0) {
+    warnings.push(
+      `${deploymentFailedCount} deployment job(s) have failed team runtime work recorded.`,
+    );
+  }
+  if (accessStatus && accessStatus.state !== "applied") {
+    warnings.push(
+      `Controller access policy is ${accessStatus.state}, so SSH truth may be stale.`,
+    );
+  } else if (!accessStatus) {
+    warnings.push("Controller access policy status is not loaded yet.");
+  }
+  if (wireGuardGatewayStatus && wireGuardGatewayStatus.state !== "applied") {
+    warnings.push(
+      `WireGuard gateway is ${wireGuardGatewayStatus.state}, so peer truth may be stale.`,
+    );
+  } else if (!wireGuardGatewayStatus) {
+    warnings.push("WireGuard gateway status is not loaded yet.");
+  }
+  if (operationsCriticalCount > 0) {
+    warnings.push(`${operationsCriticalCount} critical runtime alert(s) are active.`);
+  }
+  if (operationsWarningCount > 0) {
+    warnings.push(`${operationsWarningCount} warning runtime alert(s) are active.`);
+  }
+  warnings.push(...metricsWarnings);
+
+  const severity: RuntimeHealthSeverity =
+    operationsCriticalCount > 0 ||
+    deploymentFailedCount > 0 ||
+    accessStatus?.state === "error" ||
+    wireGuardGatewayStatus?.state === "error"
+      ? "critical"
+      : warnings.length > 0
+        ? "warning"
+        : "healthy";
+
+  return {
+    accessLabel: accessStatus
+      ? `${accessStatus.state} (${accessStatus.mode})`
+      : "not loaded",
+    deploymentFailedCount,
+    deploymentPendingCount,
+    generatedAt: formatRuntimeHealthTimestamp(
+      operationsStatus?.generated_at ??
+        accessStatus?.applied_at ??
+        wireGuardGatewayStatus?.applied_at,
+    ),
+    metricsAttentionCount: metricsWarnings.length,
+    operationsCriticalCount,
+    operationsWarningCount,
+    severity,
+    summary:
+      severity === "healthy"
+        ? "Trusted reconcile, controller access, WireGuard, deployments, and live metrics currently agree."
+        : severity === "critical"
+          ? "Runtime truth is degraded. Reconcile or inspect the failing layer before trusting SSH access or deployment state."
+          : "Runtime drift warnings are active. Review deployments, access, and gateway state before assuming the stack is converged.",
+    wireGuardLabel: wireGuardGatewayStatus
+      ? `${wireGuardGatewayStatus.state} (${wireGuardGatewayStatus.mode})`
+      : "not loaded",
+    warnings,
+  };
+}
+
+function runtimeHealthSeverityLabel(severity: RuntimeHealthSeverity): string {
+  switch (severity) {
+    case "critical":
+      return "critical";
+    case "warning":
+      return "attention";
+    default:
+      return "healthy";
+  }
+}
+
+function formatRuntimeHealthTimestamp(value?: string): string {
+  return formatIndonesianDate(value) || "n/a";
 }
 
 function OperationsAlertsCard({
