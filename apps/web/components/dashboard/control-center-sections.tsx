@@ -583,7 +583,7 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
 
 function formatSLAState(service: ServiceRow): string {
   const status = service.slaStatus;
-  const phase = service.slaPhase.trim();
+  const phase = formatSLAPhaseLabel(service.slaPhase);
   const tick = service.slaTickId;
 
   if (status === "passing") {
@@ -613,6 +613,19 @@ function formatSLAState(service: ServiceRow): string {
     return `awaiting detail after tick #${tick}`;
   }
   return "awaiting checker detail";
+}
+
+function formatSLAPhaseLabel(phase: string): string {
+  switch (phase.trim().toLowerCase()) {
+    case "put":
+      return "flag storage";
+    case "get":
+      return "flag retrieval";
+    case "check":
+      return "service functionality";
+    default:
+      return phase.trim();
+  }
 }
 
 function ServiceActionBar({
