@@ -489,7 +489,7 @@ export function useOrganizerDashboard({
     );
   }
 
-  async function createTeam(): Promise<void> {
+  async function createTeam(): Promise<boolean> {
     setPendingAction("team:create");
     setActionError(null);
     setActionNote(null);
@@ -524,19 +524,21 @@ export function useOrganizerDashboard({
       setActionNote(
         `Created ${data.name} and seeded deployed services for published challenges.`,
       );
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "team create failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
   }
 
-  async function createPlayer(): Promise<void> {
+  async function createPlayer(): Promise<boolean> {
     if (!playerDraft.teamId) {
       setActionError("select a team before creating a player");
-      return;
+      return false;
     }
 
     setPendingAction("player:create");
@@ -574,10 +576,12 @@ export function useOrganizerDashboard({
       setActionNote(
         `Created player ${data.display_name} with peer ${data.wireguard_peer}. Reconcile the WireGuard gateway and service access policy if that team already has unlocked services.`,
       );
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "player create failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
@@ -989,7 +993,7 @@ export function useOrganizerDashboard({
     });
   }
 
-  async function createChallenge(): Promise<void> {
+  async function createChallenge(): Promise<boolean> {
     setPendingAction("challenge:create");
     setActionError(null);
     setActionNote(null);
@@ -1037,10 +1041,12 @@ export function useOrganizerDashboard({
       setActionNote(
         `Created draft challenge ${payload.name}. Deploy it to replicate one service per team.`,
       );
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "challenge create failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
@@ -1890,8 +1896,8 @@ export function useOrganizerDashboard({
     setEditingId(null);
   }
 
-  async function updateTeam(): Promise<void> {
-    if (editingId === null) return;
+  async function updateTeam(): Promise<boolean> {
+    if (editingId === null) return false;
     setPendingAction("team:update");
     setActionError(null);
     setActionNote(null);
@@ -1905,19 +1911,20 @@ export function useOrganizerDashboard({
       setTeamRows((current) =>
         current.map((t) => (t.id === editingId ? data : t)),
       );
-      closeFormDialog();
       setActionNote(`Updated team ${data.name}.`);
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "team update failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
   }
 
-  async function updatePlayer(): Promise<void> {
-    if (editingId === null) return;
+  async function updatePlayer(): Promise<boolean> {
+    if (editingId === null) return false;
     setPendingAction("player:update");
     setActionError(null);
     setActionNote(null);
@@ -1935,19 +1942,20 @@ export function useOrganizerDashboard({
       setPlayerRows((current) =>
         current.map((p) => (p.id === editingId ? data : p)),
       );
-      closeFormDialog();
       setActionNote(`Updated player ${data.display_name}.`);
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "player update failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
   }
 
-  async function updateChallenge(): Promise<void> {
-    if (editingId === null) return;
+  async function updateChallenge(): Promise<boolean> {
+    if (editingId === null) return false;
     setPendingAction("challenge:update");
     setActionError(null);
     setActionNote(null);
@@ -1970,12 +1978,13 @@ export function useOrganizerDashboard({
       setChallengeRows((current) =>
         current.map((c) => (c.id === editingId ? payload : c)),
       );
-      closeFormDialog();
       setActionNote(`Updated challenge ${payload.name}.`);
+      return true;
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "challenge update failed",
       );
+      return false;
     } finally {
       setPendingAction(null);
     }
@@ -1983,14 +1992,21 @@ export function useOrganizerDashboard({
 
   async function submitForm(): Promise<void> {
     if (formMode === "create") {
-      if (formEntity === "team") await createTeam();
-      else if (formEntity === "player") await createPlayer();
-      else if (formEntity === "challenge") await createChallenge();
-      closeFormDialog();
+      let created = false;
+      if (formEntity === "team") created = await createTeam();
+      else if (formEntity === "player") created = await createPlayer();
+      else if (formEntity === "challenge") created = await createChallenge();
+      if (created) {
+        closeFormDialog();
+      }
     } else if (formMode === "edit") {
-      if (formEntity === "team") await updateTeam();
-      else if (formEntity === "player") await updatePlayer();
-      else if (formEntity === "challenge") await updateChallenge();
+      let updated = false;
+      if (formEntity === "team") updated = await updateTeam();
+      else if (formEntity === "player") updated = await updatePlayer();
+      else if (formEntity === "challenge") updated = await updateChallenge();
+      if (updated) {
+        closeFormDialog();
+      }
     }
   }
 
@@ -2015,9 +2031,15 @@ export function useOrganizerDashboard({
     closeFormDialog,
     closeWireGuardDialog,
     confirmDelete,
-    createChallenge,
-    createPlayer,
-    createTeam,
+    createChallenge: async () => {
+      await createChallenge();
+    },
+    createPlayer: async () => {
+      await createPlayer();
+    },
+    createTeam: async () => {
+      await createTeam();
+    },
     deleteTarget,
     editingId,
     formEntity,

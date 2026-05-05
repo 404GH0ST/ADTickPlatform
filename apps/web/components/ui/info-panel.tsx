@@ -13,7 +13,7 @@ type InfoPanelProps = {
   compact?: boolean;
   layout?: InfoPanelLayout;
   tone?: InfoPanelTone;
-};
+} & React.HTMLAttributes<HTMLDivElement>;
 
 type InfoLineProps = {
   className?: string;
@@ -39,6 +39,7 @@ export function InfoPanel({
   compact = false,
   layout = 'stack',
   tone = 'muted',
+  ...props
 }: InfoPanelProps): ReactElement {
   return (
     <div
@@ -49,6 +50,7 @@ export function InfoPanel({
         toneClassName[tone],
         className,
       )}
+      {...props}
     >
       {children}
     </div>

@@ -562,7 +562,7 @@ function WireGuardGatewayCard({
   return (
     <AdminRuntimeCard
       title="WireGuard Gateway"
-      description="Apply player peer changes to the gateway runtime config after create, rotate, and revoke operations."
+      description="Maintenance surface for applying player peer changes to the gateway runtime after create, rotate, and revoke operations."
     >
         <RuntimeStatusBlock
           tone={getGatewayTone(wireGuardGatewayStatus?.state)}
@@ -596,7 +596,7 @@ function AccessPolicyCard({
   return (
     <AdminRuntimeCard
       title="Service Access Policy"
-      description="Controller-side SSH allowlists are rendered from unlock state plus active team peer addresses."
+      description="Maintenance surface for controller-side SSH allowlists rendered from unlock state plus active team peer addresses."
     >
         <RuntimeStatusBlock
           tone={getGatewayTone(accessStatus?.state)}
@@ -1203,8 +1203,9 @@ export function DeploymentsTab({
                 puts the rollout into a queued job.
               </p>
               <p>
-                Reconcile flips queued instances to ready and updates team
-                service state from provisioning to stable.
+                Trusted reconcile flips queued instances to ready and verifies
+                controller access plus WireGuard truth before rollout success is
+                reported.
               </p>
               <p>
                 Inactive jobs can be deleted from the table without removing
@@ -3625,6 +3626,245 @@ function getCheckerRunStatusTone(status: string): string {
   return validationTone.unchecked;
 }
 
+type ChallengeDraftField =
+  | "name"
+  | "baselineImage"
+  | "checkerImage"
+  | "sourceBundlePath"
+  | "servicePort"
+  | "serviceSubnetOctet"
+  | "weight";
+
+type ChallengeDraftValidation = {
+  effectiveChallengeID: number;
+  effectiveServicePort: number;
+  effectiveServiceSubnetOctet: number;
+  effectiveWeight: number;
+  endpointExample: string;
+  errors: string[];
+  fieldErrors: Partial<Record<ChallengeDraftField, string>>;
+};
+
+type TeamDraftField = "name" | "contactEmail";
+
+type TeamDraftValidation = {
+  errors: string[];
+  fieldErrors: Partial<Record<TeamDraftField, string>>;
+};
+
+type PlayerDraftField =
+  | "teamId"
+  | "displayName"
+  | "email"
+  | "password"
+  | "role";
+
+type PlayerDraftValidation = {
+  errors: string[];
+  fieldErrors: Partial<Record<PlayerDraftField, string>>;
+};
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateTeamDraft(teamDraft: TeamDraft): TeamDraftValidation {
+  const fieldErrors: Partial<Record<TeamDraftField, string>> = {};
+  const errors: string[] = [];
+
+  if (teamDraft.name.trim() === "") {
+    fieldErrors.name = "Enter a team name.";
+    errors.push("Team name is required.");
+  }
+
+  const email = teamDraft.contactEmail.trim();
+  if (email === "") {
+    fieldErrors.contactEmail = "Enter a contact email.";
+    errors.push("Contact email is required.");
+  } else if (!emailPattern.test(email)) {
+    fieldErrors.contactEmail = "Enter a valid email address.";
+    errors.push("Contact email must be a valid email address.");
+  }
+
+  return { errors, fieldErrors };
+}
+
+function validatePlayerDraft(
+  playerDraft: PlayerDraft,
+  formMode: FormMode,
+): PlayerDraftValidation {
+  const fieldErrors: Partial<Record<PlayerDraftField, string>> = {};
+  const errors: string[] = [];
+
+  if (formMode === "create" && playerDraft.teamId <= 0) {
+    fieldErrors.teamId = "Select a team.";
+    errors.push("Team selection is required.");
+  }
+
+  if (playerDraft.displayName.trim() === "") {
+    fieldErrors.displayName = "Enter a display name.";
+    errors.push("Display name is required.");
+  }
+
+  const email = playerDraft.email.trim();
+  if (email === "") {
+    fieldErrors.email = "Enter an email address.";
+    errors.push("Email is required.");
+  } else if (!emailPattern.test(email)) {
+    fieldErrors.email = "Enter a valid email address.";
+    errors.push("Email must be a valid email address.");
+  }
+
+  if (formMode === "create" && playerDraft.password.trim() === "") {
+    fieldErrors.password = "Enter a password.";
+    errors.push("Password is required.");
+  }
+
+  if (playerDraft.role !== "member" && playerDraft.role !== "captain") {
+    fieldErrors.role = "Select a valid role.";
+    errors.push("Role must be member or captain.");
+  }
+
+  return { errors, fieldErrors };
+}
+
+function parseOptionalInteger(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return Number.NaN;
+  }
+  return Number(trimmed);
+}
+
+function nextChallengeID(challengeRows: AdminChallenge[]): number {
+  return (
+    challengeRows.reduce((maxID, challenge) => Math.max(maxID, challenge.id), 0) +
+    1
+  );
+}
+
+function validateChallengeDraft(
+  challengeDraft: ChallengeDraft,
+  challengeRows: AdminChallenge[],
+  formMode: FormMode,
+  editingID: number | null,
+  teamRows: AdminTeam[],
+): ChallengeDraftValidation {
+  const fieldErrors: Partial<Record<ChallengeDraftField, string>> = {};
+  const errors: string[] = [];
+
+  const effectiveChallengeID =
+    formMode === "edit" && editingID !== null
+      ? editingID
+      : nextChallengeID(challengeRows);
+  const parsedWeight = parseOptionalInteger(challengeDraft.weight);
+  const effectiveWeight =
+    parsedWeight === null || Number.isNaN(parsedWeight) || parsedWeight <= 0
+      ? 1
+      : parsedWeight;
+
+  if (challengeDraft.name.trim() === "") {
+    fieldErrors.name = "Enter a challenge name.";
+    errors.push("Challenge name is required.");
+  }
+  if (challengeDraft.baselineImage.trim() === "") {
+    fieldErrors.baselineImage = "Enter the baseline runtime image.";
+    errors.push("Baseline image is required.");
+  }
+  if (challengeDraft.checkerImage.trim() === "") {
+    fieldErrors.checkerImage = "Enter the checker image.";
+    errors.push("Checker image is required.");
+  }
+
+  const trimmedSourceBundlePath = challengeDraft.sourceBundlePath.trim();
+  if (
+    trimmedSourceBundlePath !== "" &&
+    (trimmedSourceBundlePath.startsWith("/") ||
+      trimmedSourceBundlePath === "." ||
+      trimmedSourceBundlePath === ".." ||
+      trimmedSourceBundlePath.split("/").some((segment) => segment === ".."))
+  ) {
+    fieldErrors.sourceBundlePath =
+      "Use a relative path inside AD_CHALLENGE_SOURCE_ROOT.";
+    errors.push("Source bundle path must stay inside AD_CHALLENGE_SOURCE_ROOT.");
+  }
+
+  if (
+    parsedWeight !== null &&
+    (Number.isNaN(parsedWeight) || parsedWeight <= 0)
+  ) {
+    fieldErrors.weight = "Enter a positive integer.";
+    errors.push("Weight must be a positive integer.");
+  }
+
+  const parsedServicePort = parseOptionalInteger(challengeDraft.servicePort);
+  const effectiveServicePort =
+    parsedServicePort === null || Number.isNaN(parsedServicePort)
+      ? 10000 + effectiveChallengeID
+      : parsedServicePort;
+
+  const parsedServiceSubnetOctet = parseOptionalInteger(
+    challengeDraft.serviceSubnetOctet,
+  );
+  const effectiveServiceSubnetOctet =
+    parsedServiceSubnetOctet === null || Number.isNaN(parsedServiceSubnetOctet)
+      ? Math.max(1, effectiveChallengeID)
+      : parsedServiceSubnetOctet;
+
+  if (formMode === "create") {
+    if (
+      parsedServicePort !== null &&
+      (Number.isNaN(parsedServicePort) ||
+        parsedServicePort <= 0 ||
+        parsedServicePort > 65535)
+    ) {
+      fieldErrors.servicePort = "Enter a port between 1 and 65535.";
+      errors.push("Service port must be between 1 and 65535.");
+    }
+    if (
+      parsedServiceSubnetOctet !== null &&
+      (Number.isNaN(parsedServiceSubnetOctet) ||
+        parsedServiceSubnetOctet <= 0 ||
+        parsedServiceSubnetOctet > 254)
+    ) {
+      fieldErrors.serviceSubnetOctet = "Enter an octet between 1 and 254.";
+      errors.push("Subnet octet must be between 1 and 254.");
+    }
+
+    if (
+      !Number.isNaN(effectiveServiceSubnetOctet) &&
+      effectiveServiceSubnetOctet > 0 &&
+      effectiveServiceSubnetOctet <= 254
+    ) {
+      const conflictingChallenge = challengeRows.find(
+        (challenge) =>
+          challenge.id !== editingID &&
+          challenge.service_subnet_octet === effectiveServiceSubnetOctet,
+      );
+      if (conflictingChallenge) {
+        fieldErrors.serviceSubnetOctet = `Already assigned to ${conflictingChallenge.name}.`;
+        errors.push(
+          `Subnet octet ${effectiveServiceSubnetOctet} is already assigned to ${conflictingChallenge.name}.`,
+        );
+      }
+    }
+  }
+
+  const exampleTeamID = teamRows[0]?.id ?? 101;
+  const endpointExample = `10.80.${effectiveServiceSubnetOctet}.${exampleTeamID >= 101 ? exampleTeamID - 90 : 11}:${effectiveServicePort}`;
+
+  return {
+    effectiveChallengeID,
+    effectiveServicePort,
+    effectiveServiceSubnetOctet,
+    effectiveWeight,
+    endpointExample,
+    errors,
+    fieldErrors,
+  };
+}
+
 export function EntityFormDialog({
   formMode,
   formEntity,
@@ -3633,6 +3873,8 @@ export function EntityFormDialog({
   teamDraft,
   playerDraft,
   challengeDraft,
+  challengeRows,
+  editingID,
   teamRows,
   onTeamDraftChange,
   onPlayerDraftChange,
@@ -3647,6 +3889,8 @@ export function EntityFormDialog({
   teamDraft: TeamDraft;
   playerDraft: PlayerDraft;
   challengeDraft: ChallengeDraft;
+  challengeRows: AdminChallenge[];
+  editingID: number | null;
   teamRows: AdminTeam[];
   onTeamDraftChange: (next: TeamDraft) => void;
   onPlayerDraftChange: (next: PlayerDraft) => void;
@@ -3662,158 +3906,323 @@ export function EntityFormDialog({
   const isSubmitting =
     pendingAction !== null &&
     (pendingAction.includes(":create") || pendingAction.includes(":update"));
+  const teamValidation =
+    formEntity === "team" ? validateTeamDraft(teamDraft) : null;
+  const playerValidation =
+    formEntity === "player"
+      ? validatePlayerDraft(playerDraft, formMode)
+      : null;
+  const challengeValidation =
+    formEntity === "challenge"
+      ? validateChallengeDraft(
+          challengeDraft,
+          challengeRows,
+          formMode,
+          editingID,
+          teamRows,
+        )
+      : null;
+  const teamFormInvalid = teamValidation !== null && teamValidation.errors.length > 0;
+  const playerFormInvalid =
+    playerValidation !== null && playerValidation.errors.length > 0;
+  const challengeFormInvalid =
+    challengeValidation !== null && challengeValidation.errors.length > 0;
+  const formInvalid = teamFormInvalid || playerFormInvalid || challengeFormInvalid;
 
   let body: ReactNode = null;
 
   if (formEntity === "team") {
+    const fieldErrors = teamValidation?.fieldErrors ?? {};
     body = (
       <div className="space-y-4">
         <Field label="Team name" htmlFor="form-team-name">
-          <Input
-            id="form-team-name"
-            value={teamDraft.name}
-            onChange={(event) =>
-              onTeamDraftChange({ ...teamDraft, name: event.target.value })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-team-name"
+              aria-invalid={fieldErrors.name ? true : undefined}
+              className={
+                fieldErrors.name
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={teamDraft.name}
+              onChange={(event) =>
+                onTeamDraftChange({ ...teamDraft, name: event.target.value })
+              }
+            />
+            {fieldErrors.name ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.name}
+              </p>
+            ) : null}
+          </div>
         </Field>
         <Field label="Contact email" htmlFor="form-team-contact">
-          <Input
-            id="form-team-contact"
-            type="email"
-            value={teamDraft.contactEmail}
-            onChange={(event) =>
-              onTeamDraftChange({
-                ...teamDraft,
-                contactEmail: event.target.value,
-              })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-team-contact"
+              type="email"
+              aria-invalid={fieldErrors.contactEmail ? true : undefined}
+              className={
+                fieldErrors.contactEmail
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={teamDraft.contactEmail}
+              onChange={(event) =>
+                onTeamDraftChange({
+                  ...teamDraft,
+                  contactEmail: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.contactEmail ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.contactEmail}
+              </p>
+            ) : null}
+          </div>
         </Field>
       </div>
     );
   } else if (formEntity === "player") {
+    const fieldErrors = playerValidation?.fieldErrors ?? {};
     body = (
       <div className="space-y-4">
         {formMode === "create" && (
           <Field label="Team" htmlFor="form-player-team">
-            <select
-              id="form-player-team"
-              className={selectClassName}
-              value={playerDraft.teamId}
-              onChange={(event) =>
-                onPlayerDraftChange({
-                  ...playerDraft,
-                  teamId: Number(event.target.value),
-                })
-              }
-            >
-              <option value={0} disabled>
-                Select a team
-              </option>
-              {teamRows.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
+            <div className="space-y-2">
+              <select
+                id="form-player-team"
+                aria-invalid={fieldErrors.teamId ? true : undefined}
+                className={cn(
+                  selectClassName,
+                  fieldErrors.teamId
+                    ? "border-destructive focus-visible:ring-destructive/20"
+                    : undefined,
+                )}
+                value={playerDraft.teamId}
+                onChange={(event) =>
+                  onPlayerDraftChange({
+                    ...playerDraft,
+                    teamId: Number(event.target.value),
+                  })
+                }
+              >
+                <option value={0} disabled>
+                  Select a team
                 </option>
-              ))}
-            </select>
+                {teamRows.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.teamId ? (
+                <p className="text-xs leading-5 text-destructive">
+                  {fieldErrors.teamId}
+                </p>
+              ) : null}
+            </div>
           </Field>
         )}
         <Field label="Display name" htmlFor="form-player-name">
-          <Input
-            id="form-player-name"
-            value={playerDraft.displayName}
-            onChange={(event) =>
-              onPlayerDraftChange({
-                ...playerDraft,
-                displayName: event.target.value,
-              })
-            }
-          />
-        </Field>
-        <Field label="Email" htmlFor="form-player-email">
-          <Input
-            id="form-player-email"
-            type="email"
-            value={playerDraft.email}
-            onChange={(event) =>
-              onPlayerDraftChange({ ...playerDraft, email: event.target.value })
-            }
-          />
-        </Field>
-        {formMode === "create" && (
-          <Field label="Password" htmlFor="form-player-password">
+          <div className="space-y-2">
             <Input
-              id="form-player-password"
-              type="password"
-              value={playerDraft.password}
+              id="form-player-name"
+              aria-invalid={fieldErrors.displayName ? true : undefined}
+              className={
+                fieldErrors.displayName
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={playerDraft.displayName}
               onChange={(event) =>
                 onPlayerDraftChange({
                   ...playerDraft,
-                  password: event.target.value,
+                  displayName: event.target.value,
                 })
               }
             />
+            {fieldErrors.displayName ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.displayName}
+              </p>
+            ) : null}
+          </div>
+        </Field>
+        <Field label="Email" htmlFor="form-player-email">
+          <div className="space-y-2">
+            <Input
+              id="form-player-email"
+              type="email"
+              aria-invalid={fieldErrors.email ? true : undefined}
+              className={
+                fieldErrors.email
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={playerDraft.email}
+              onChange={(event) =>
+                onPlayerDraftChange({
+                  ...playerDraft,
+                  email: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.email ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.email}
+              </p>
+            ) : null}
+          </div>
+        </Field>
+        {formMode === "create" && (
+          <Field label="Password" htmlFor="form-player-password">
+            <div className="space-y-2">
+              <Input
+                id="form-player-password"
+                type="password"
+                aria-invalid={fieldErrors.password ? true : undefined}
+                className={
+                  fieldErrors.password
+                    ? "border-destructive focus-visible:ring-destructive/20"
+                    : undefined
+                }
+                value={playerDraft.password}
+                onChange={(event) =>
+                  onPlayerDraftChange({
+                    ...playerDraft,
+                    password: event.target.value,
+                  })
+                }
+              />
+              {fieldErrors.password ? (
+                <p className="text-xs leading-5 text-destructive">
+                  {fieldErrors.password}
+                </p>
+              ) : null}
+            </div>
           </Field>
         )}
         <Field label="Role" htmlFor="form-player-role">
-          <select
-            id="form-player-role"
-            className={selectClassName}
-            value={playerDraft.role}
-            onChange={(event) =>
-              onPlayerDraftChange({ ...playerDraft, role: event.target.value })
-            }
-          >
-            <option value="member">member</option>
-            <option value="captain">captain</option>
-          </select>
+          <div className="space-y-2">
+            <select
+              id="form-player-role"
+              aria-invalid={fieldErrors.role ? true : undefined}
+              className={cn(
+                selectClassName,
+                fieldErrors.role
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined,
+              )}
+              value={playerDraft.role}
+              onChange={(event) =>
+                onPlayerDraftChange({ ...playerDraft, role: event.target.value })
+              }
+            >
+              <option value="member">member</option>
+              <option value="captain">captain</option>
+            </select>
+            {fieldErrors.role ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.role}
+              </p>
+            ) : null}
+          </div>
         </Field>
       </div>
     );
   } else if (formEntity === "challenge") {
+    const fieldErrors = challengeValidation?.fieldErrors ?? {};
+    const sourceBundlePath = challengeDraft.sourceBundlePath.trim();
     body = (
       <div className="space-y-4">
         <Field label="Challenge name" htmlFor="form-challenge-name">
-          <Input
-            id="form-challenge-name"
-            value={challengeDraft.name}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                name: event.target.value,
-              })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-challenge-name"
+              aria-invalid={fieldErrors.name ? true : undefined}
+              className={
+                fieldErrors.name
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={challengeDraft.name}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  name: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.name ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.name}
+              </p>
+            ) : null}
+          </div>
         </Field>
         <Field label="Baseline image" htmlFor="form-challenge-baseline">
-          <Input
-            id="form-challenge-baseline"
-            value={challengeDraft.baselineImage}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                baselineImage: event.target.value,
-              })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-challenge-baseline"
+              aria-invalid={fieldErrors.baselineImage ? true : undefined}
+              className={
+                fieldErrors.baselineImage
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={challengeDraft.baselineImage}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  baselineImage: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.baselineImage ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.baselineImage}
+              </p>
+            ) : null}
+          </div>
         </Field>
         <Field label="Checker image" htmlFor="form-challenge-checker">
-          <Input
-            id="form-challenge-checker"
-            value={challengeDraft.checkerImage}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                checkerImage: event.target.value,
-              })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-challenge-checker"
+              aria-invalid={fieldErrors.checkerImage ? true : undefined}
+              className={
+                fieldErrors.checkerImage
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={challengeDraft.checkerImage}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  checkerImage: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.checkerImage ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.checkerImage}
+              </p>
+            ) : null}
+          </div>
         </Field>
         <Field label="Source bundle path" htmlFor="form-challenge-source-bundle">
           <div className="space-y-2">
             <Input
               id="form-challenge-source-bundle"
+              aria-invalid={fieldErrors.sourceBundlePath ? true : undefined}
+              className={
+                fieldErrors.sourceBundlePath
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
               value={challengeDraft.sourceBundlePath}
               onChange={(event) =>
                 onChallengeDraftChange({
@@ -3828,51 +4237,160 @@ export function EntityFormDialog({
               with dummy placeholder secrets and inject real secrets only at
               runtime.
             </p>
+            {fieldErrors.sourceBundlePath ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.sourceBundlePath}
+              </p>
+            ) : null}
           </div>
         </Field>
         {formMode === "create" && (
           <>
             <Field label="Service port" htmlFor="form-challenge-port">
-              <Input
-                id="form-challenge-port"
-                type="number"
-                value={challengeDraft.servicePort}
-                onChange={(event) =>
-                  onChallengeDraftChange({
-                    ...challengeDraft,
-                    servicePort: event.target.value,
-                  })
-                }
-              />
+              <div className="space-y-2">
+                <Input
+                  id="form-challenge-port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  placeholder={String(
+                    challengeValidation?.effectiveServicePort ?? 10001,
+                  )}
+                  aria-invalid={fieldErrors.servicePort ? true : undefined}
+                  className={
+                    fieldErrors.servicePort
+                      ? "border-destructive focus-visible:ring-destructive/20"
+                      : undefined
+                  }
+                  value={challengeDraft.servicePort}
+                  onChange={(event) =>
+                    onChallengeDraftChange({
+                      ...challengeDraft,
+                      servicePort: event.target.value,
+                    })
+                  }
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Leave blank to auto-assign{" "}
+                  <code>{challengeValidation?.effectiveServicePort ?? 10001}</code>.
+                </p>
+                {fieldErrors.servicePort ? (
+                  <p className="text-xs leading-5 text-destructive">
+                    {fieldErrors.servicePort}
+                  </p>
+                ) : null}
+              </div>
             </Field>
             <Field label="Subnet octet" htmlFor="form-challenge-octet">
-              <Input
-                id="form-challenge-octet"
-                type="number"
-                value={challengeDraft.serviceSubnetOctet}
-                onChange={(event) =>
-                  onChallengeDraftChange({
-                    ...challengeDraft,
-                    serviceSubnetOctet: event.target.value,
-                  })
-                }
-              />
+              <div className="space-y-2">
+                <Input
+                  id="form-challenge-octet"
+                  type="number"
+                  min={1}
+                  max={254}
+                  placeholder={String(
+                    challengeValidation?.effectiveServiceSubnetOctet ?? 1,
+                  )}
+                  aria-invalid={fieldErrors.serviceSubnetOctet ? true : undefined}
+                  className={
+                    fieldErrors.serviceSubnetOctet
+                      ? "border-destructive focus-visible:ring-destructive/20"
+                      : undefined
+                  }
+                  value={challengeDraft.serviceSubnetOctet}
+                  onChange={(event) =>
+                    onChallengeDraftChange({
+                      ...challengeDraft,
+                      serviceSubnetOctet: event.target.value,
+                    })
+                  }
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Leave blank to auto-assign{" "}
+                  <code>
+                    {challengeValidation?.effectiveServiceSubnetOctet ?? 1}
+                  </code>
+                  .
+                </p>
+                {fieldErrors.serviceSubnetOctet ? (
+                  <p className="text-xs leading-5 text-destructive">
+                    {fieldErrors.serviceSubnetOctet}
+                  </p>
+                ) : null}
+              </div>
             </Field>
           </>
         )}
         <Field label="Weight" htmlFor="form-challenge-weight">
-          <Input
-            id="form-challenge-weight"
-            type="number"
-            value={challengeDraft.weight}
-            onChange={(event) =>
-              onChallengeDraftChange({
-                ...challengeDraft,
-                weight: event.target.value,
-              })
-            }
-          />
+          <div className="space-y-2">
+            <Input
+              id="form-challenge-weight"
+              type="number"
+              min={1}
+              aria-invalid={fieldErrors.weight ? true : undefined}
+              className={
+                fieldErrors.weight
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              value={challengeDraft.weight}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  weight: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.weight ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.weight}
+              </p>
+            ) : null}
+          </div>
         </Field>
+        {challengeValidation ? (
+          <InfoPanel tone={challengeFormInvalid ? "warning" : "surface"}>
+            <InfoLine
+              label="Challenge ID"
+              value={`#${challengeValidation.effectiveChallengeID}`}
+            />
+            <InfoLine
+              label="Runtime network"
+              value={`10.80.${challengeValidation.effectiveServiceSubnetOctet}.0/24`}
+            />
+            <InfoLine
+              label="Service port"
+              value={challengeValidation.effectiveServicePort}
+            />
+            <InfoLine
+              label="Example team endpoint"
+              value={challengeValidation.endpointExample}
+            />
+            <InfoLine
+              label="Effective weight"
+              value={challengeValidation.effectiveWeight}
+            />
+            <InfoLine
+              label="Participant source download"
+              value={
+                sourceBundlePath === ""
+                  ? "disabled until a bundle path is set"
+                  : sourceBundlePath
+              }
+            />
+            {challengeFormInvalid ? (
+              <ul className="space-y-1 text-xs leading-5 text-destructive">
+                {challengeValidation.errors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs leading-5 text-muted-foreground">
+                This challenge will create one service runtime per team after deployment.
+              </p>
+            )}
+          </InfoPanel>
+        ) : null}
       </div>
     );
   }
@@ -3893,7 +4411,10 @@ export function EntityFormDialog({
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={isSubmitting}>
+          <Button
+            onClick={onSubmit}
+            disabled={isSubmitting || formInvalid}
+          >
             {isSubmitting ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
             ) : null}
@@ -3919,18 +4440,62 @@ function DeleteConfirmDialog({
   const isDeleting =
     deleteTarget !== null &&
     pendingAction === `${deleteTarget.kind}:delete:${deleteTarget.id}`;
+  const kindLabel =
+    deleteTarget?.kind === "deployment"
+      ? "deployment job"
+      : deleteTarget?.kind ?? "item";
+  const deleteActionLabel =
+    deleteTarget?.kind === "deployment"
+      ? "Delete Job"
+      : `Delete ${deleteTarget?.kind ? deleteTarget.kind.charAt(0).toUpperCase() + deleteTarget.kind.slice(1) : "Item"}`;
+  const impactLines =
+    deleteTarget?.kind === "team"
+      ? [
+          "All associated player accounts are removed from the roster.",
+          "Published service state owned by this team is removed from organizer views.",
+          "This changes scoreboard ownership and team service visibility immediately.",
+        ]
+      : deleteTarget?.kind === "player"
+        ? [
+            "The player account is removed from the roster immediately.",
+            "Existing WireGuard or SSH access must be reconciled separately after deletion.",
+          ]
+        : deleteTarget?.kind === "challenge"
+          ? [
+              "Associated service instances are removed from organizer and participant views.",
+              "Future deployments for this challenge must be recreated from the catalog.",
+            ]
+          : deleteTarget?.kind === "deployment"
+            ? [
+                "Only the deployment job record is removed.",
+                "Already deployed runtimes remain intact.",
+              ]
+            : [];
 
   return (
     <AppDialog
       open={deleteTarget !== null}
       onClose={onClose}
-      title={`Delete ${deleteTarget?.kind ?? "item"}`}
-      description={`Are you sure you want to delete ${deleteTarget?.kind ?? "this item"} "${deleteTarget?.label ?? ""}"?`}
+      title={`Delete ${kindLabel}`}
+      description={`Delete ${kindLabel} "${deleteTarget?.label ?? ""}"? This cannot be undone from the dashboard.`}
       body={
-        deleteTarget?.warning ? (
-          <p className="text-sm text-muted-foreground">
-            {deleteTarget.warning}
-          </p>
+        deleteTarget ? (
+          <InfoPanel tone="warning" data-testid="delete-impact-panel">
+            <InfoLine label="Target" value={deleteTarget.label} />
+            <InfoLine label="Effect" value={`Delete this ${kindLabel} immediately`} />
+            {deleteTarget.warning ? (
+              <p className="text-sm leading-6 text-muted-foreground">
+                {deleteTarget.warning}
+              </p>
+            ) : null}
+            {impactLines.length > 0 ? (
+              <ul className="space-y-1 text-xs leading-5 text-foreground">
+                {impactLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+          </InfoPanel>
         ) : null
       }
       footer={
@@ -3948,7 +4513,7 @@ function DeleteConfirmDialog({
             ) : (
               <Trash2 className="h-4 w-4" />
             )}
-            Delete
+            {deleteActionLabel}
           </Button>
         </>
       }

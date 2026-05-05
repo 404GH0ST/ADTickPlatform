@@ -2,6 +2,8 @@
 
 import type { ReactElement, ReactNode } from 'react';
 
+import { cn } from '@/lib/utils';
+
 import {
   Dialog,
   DialogContent,
@@ -32,13 +34,22 @@ export function AppDialog({
 }: AppDialogProps): ReactElement {
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className={contentClassName}>
+      <DialogContent
+        className={cn(
+          'max-h-[min(88vh,48rem)] overflow-hidden',
+          contentClassName,
+        )}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {body}
-        {footer ? <DialogFooter>{footer}</DialogFooter> : null}
+        <div className="min-h-0 overflow-y-auto pr-1">{body}</div>
+        {footer ? (
+          <DialogFooter className="border-t border-border/70 pt-4">
+            {footer}
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

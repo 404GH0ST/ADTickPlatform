@@ -22,7 +22,7 @@ test("organizer challenge redeploy supersedes the older queued job", async ({
 
   await expect(
     page.getByText(
-      "Queued college-http for 3 team runtimes. Reconcile to mark the rollout ready.",
+      "Queued college-http for 3 team runtimes. Run trusted reconcile to verify rollout, SSH access, and WireGuard state.",
     ),
   ).toBeVisible();
   await expect(challengeRow.getByText("valid", { exact: true })).toBeVisible();
@@ -51,6 +51,13 @@ test("organizer can create, edit, and delete a challenge", async ({
   await page.getByRole("button", { name: "Create Challenge" }).click();
   const createDialog = page.getByRole("dialog", { name: "Create challenge" });
   await expect(createDialog).toBeVisible();
+  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+  await expect(createDialog.getByText("Challenge ID: #2")).toBeVisible();
+  await expect(createDialog.getByText("Runtime network: 10.80.2.0/24")).toBeVisible();
+  await expect(
+    createDialog.getByText("Participant source download: disabled until a bundle path is set"),
+  ).toBeVisible();
+
   await createDialog.getByLabel("Challenge name").fill("college-ftp");
   await createDialog
     .getByLabel("Baseline image")
@@ -58,9 +65,34 @@ test("organizer can create, edit, and delete a challenge", async ({
   await createDialog
     .getByLabel("Checker image")
     .fill("adplatform/sample-ftp-checker:latest");
+  await expect(createDialog.getByRole("button", { name: "Create" })).toBeEnabled();
+
+  await createDialog.getByLabel("Source bundle path").fill("/bad");
+  await expect(
+    createDialog.getByText("Use a relative path inside AD_CHALLENGE_SOURCE_ROOT."),
+  ).toBeVisible();
+  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+
+  await createDialog
+    .getByLabel("Source bundle path")
+    .fill("examples/sample-lfi-challenge");
   await createDialog.getByLabel("Service port").fill("30060");
+  await expect(createDialog.getByText("Example team endpoint: 10.80.2.11:30060")).toBeVisible();
+  await createDialog.getByLabel("Subnet octet").fill("50");
+  await expect(
+    createDialog.getByText("Already assigned to college-http.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+
   await createDialog.getByLabel("Subnet octet").fill("60");
   await createDialog.getByLabel("Weight").fill("7");
+  await expect(createDialog.getByText("Runtime network: 10.80.60.0/24")).toBeVisible();
+  await expect(createDialog.getByText("Example team endpoint: 10.80.60.11:30060")).toBeVisible();
+  await expect(
+    createDialog.getByText("Participant source download: examples/sample-lfi-challenge"),
+  ).toBeVisible();
   await createDialog.getByRole("button", { name: "Create" }).click();
 
   await expect(
@@ -99,7 +131,17 @@ test("organizer can create, edit, and delete a challenge", async ({
   await page.getByTestId("delete-challenge-2").click();
   const deleteDialog = page.getByRole("dialog", { name: "Delete challenge" });
   await expect(deleteDialog).toBeVisible();
-  await deleteDialog.getByRole("button", { name: "Delete" }).click();
+  await expect(
+    deleteDialog.getByText(
+      'Delete challenge "college-ftp-v2"? This cannot be undone from the dashboard.',
+    ),
+  ).toBeVisible();
+  await expect(
+    deleteDialog.getByText(
+      "Associated service instances are removed from organizer and participant views.",
+    ),
+  ).toBeVisible();
+  await deleteDialog.getByRole("button", { name: "Delete Challenge" }).click();
 
   await expect(page.getByText('Challenge "college-ftp-v2" deleted.')).toBeVisible();
   await expect(page.getByTestId("challenge-row-2")).toHaveCount(0);

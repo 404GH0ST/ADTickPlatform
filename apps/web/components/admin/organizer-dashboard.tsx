@@ -218,6 +218,8 @@ export function OrganizerDashboard({
         teamDraft={state.teamDraft}
         playerDraft={state.playerDraft}
         challengeDraft={state.challengeDraft}
+        challengeRows={state.challengeRows}
+        editingID={state.editingId}
         teamRows={state.teamRows}
         onTeamDraftChange={state.setTeamDraft}
         onPlayerDraftChange={state.setPlayerDraft}
