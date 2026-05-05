@@ -381,3 +381,19 @@ export type AdminServiceMetricSnapshot = {
     last_apply_success: boolean | null;
   };
 };
+
+export type AdminRuntimeEvidenceFailure = {
+  section: string;
+  message: string;
+};
+
+export type AdminRuntimeEvidenceReport = {
+  generated_at: string;
+  failures: AdminRuntimeEvidenceFailure[];
+  access_status: AdminControllerAccessStatus | null;
+  deployments: AdminDeploymentJob[] | null;
+  game_status: AdminGameStatus | null;
+  operations_status: AdminOperationsStatus | null;
+  service_metrics: AdminServiceMetricSnapshot | null;
+  wireguard_status: AdminWireGuardGatewayStatus | null;
+};

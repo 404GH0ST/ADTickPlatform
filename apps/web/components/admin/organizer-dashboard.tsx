@@ -106,6 +106,9 @@ export function OrganizerDashboard({
         onConfirmDelete: () => {
           void state.confirmDelete();
         },
+        onDownloadRuntimeHealthReport: () => {
+          void state.downloadRuntimeHealthReport();
+        },
         onOpenCreateDialog: state.openCreateDialog,
         onOpenEditDialog: state.openEditDialog,
         onSelectDeleteTarget: state.selectDeleteTarget,
@@ -272,6 +275,7 @@ function renderOrganizerPanel({
   onCloseDeleteDialog,
   onCloseWireGuardDialog,
   onConfirmDelete,
+  onDownloadRuntimeHealthReport,
   onOpenCreateDialog,
   onOpenEditDialog,
   onSelectDeleteTarget,
@@ -354,6 +358,7 @@ function renderOrganizerPanel({
   onCloseDeleteDialog: () => void;
   onCloseWireGuardDialog: () => void;
   onConfirmDelete: () => void;
+  onDownloadRuntimeHealthReport: () => void;
   onOpenCreateDialog: (entity: "team" | "player" | "challenge") => void;
   onOpenEditDialog: (
     entity: "team" | "player" | "challenge",
@@ -543,13 +548,14 @@ function renderOrganizerPanel({
       onRecomputeScores={onRecomputeGameScoring}
       onRefreshAttacks={onRefreshAttacks}
       onRefreshCheckerRuns={onRefreshCheckerRuns}
-        onRefreshDeploymentRows={onRefreshDeploymentRows}
-        onRefreshGameScoreboard={onRefreshGameScoreboard}
-        onRefreshGameStatus={onRefreshGameStatus}
-        onRefreshOperationsStatus={onRefreshOperationsStatus}
-        onRefreshRuntimeHealth={onRefreshRuntimeHealth}
-        onRefreshServiceMetrics={onRefreshServiceMetrics}
-        onRefreshSchedulerEvents={onRefreshSchedulerEvents}
+          onRefreshDeploymentRows={onRefreshDeploymentRows}
+          onRefreshGameScoreboard={onRefreshGameScoreboard}
+          onRefreshGameStatus={onRefreshGameStatus}
+          onRefreshOperationsStatus={onRefreshOperationsStatus}
+          onRefreshRuntimeHealth={onRefreshRuntimeHealth}
+          onRefreshServiceMetrics={onRefreshServiceMetrics}
+          onRefreshSchedulerEvents={onRefreshSchedulerEvents}
+          onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
       onResetAttackFilters={onResetAttackFilters}
       onResetCheckerRunFilters={onResetCheckerRunFilters}
       onResetSchedulerEventFilters={onResetSchedulerEventFilters}

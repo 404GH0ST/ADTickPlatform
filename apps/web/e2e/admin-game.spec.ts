@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect } from "@playwright/test";
 import { expectNoHorizontalOverflow, expectSchedulerFiltersVisible } from "./test-layout-utils";
 import { adminTest as test, mockApiBaseUrl } from "./test-utils";
@@ -365,6 +367,29 @@ test("organizer game page shows aggregated runtime drift warnings and refreshes 
   await expect(runtimeHealthCard).toContainText(
     "1 deployment job(s) still need trusted reconcile completion.",
   );
+});
+
+test("organizer game page can download a runtime evidence report", async ({
+  page,
+}) => {
+  await page.goto("/admin/game");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByTestId("download-runtime-health-report").click(),
+  ]);
+
+  expect(download.suggestedFilename()).toMatch(/^runtime-health-.*\.json$/);
+
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+
+  const report = JSON.parse(await readFile(downloadPath!, "utf8"));
+  expect(Array.isArray(report.failures)).toBeTruthy();
+  expect(report.deployments).toBeTruthy();
+  expect(report.access_status?.state).toBe("applied");
+  expect(report.wireguard_status?.state).toBe("applied");
+  expect(report.operations_status?.healthy).toBe(true);
 });
 
 test("organizer match controls handle manual match operations and recompute logic", async ({

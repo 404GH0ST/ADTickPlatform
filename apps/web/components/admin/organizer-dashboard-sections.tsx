@@ -216,6 +216,7 @@ type GameTabProps = {
   onApplySchedulerEventFilters: () => void;
   onAttackFilterChange: (next: GameFilters["attack"]) => void;
   onCheckerRunFilterChange: (next: GameFilters["checkerRun"]) => void;
+  onDownloadRuntimeHealthReport: () => void;
   onPageAttacks: (direction: "prev" | "next") => void;
   onPageCheckerRuns: (direction: "prev" | "next") => void;
   onPageSchedulerEvents: (direction: "prev" | "next") => void;
@@ -1364,6 +1365,7 @@ export function GameTab({
   onApplySchedulerEventFilters,
 
   onCheckerRunFilterChange,
+  onDownloadRuntimeHealthReport,
 
   onPageCheckerRuns,
   onPageSchedulerEvents,
@@ -1437,6 +1439,7 @@ export function GameTab({
           pendingAction={pendingAction}
           serviceMetrics={serviceMetrics}
           wireGuardGatewayStatus={wireGuardGatewayStatus}
+          onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
           onRefreshDeploymentRows={onRefreshDeploymentRows}
           onRefreshOperationsStatus={onRefreshOperationsStatus}
           onRefreshRuntimeHealth={onRefreshRuntimeHealth}
@@ -2017,6 +2020,7 @@ type RuntimeHealthSnapshot = {
 function RuntimeHealthCard({
   accessStatus,
   deploymentRows,
+  onDownloadRuntimeHealthReport,
   operationsStatus,
   pendingAction,
   serviceMetrics,
@@ -2027,6 +2031,7 @@ function RuntimeHealthCard({
 }: {
   accessStatus: AdminControllerAccessStatus | null;
   deploymentRows: AdminDeploymentJob[];
+  onDownloadRuntimeHealthReport: () => void;
   operationsStatus: AdminOperationsStatus | null;
   pendingAction: string | null;
   serviceMetrics: AdminServiceMetricSnapshot | null;
@@ -2144,6 +2149,20 @@ function RuntimeHealthCard({
               <RefreshCw className="h-4 w-4" />
             )}
             Refresh Jobs
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="download-runtime-health-report"
+            disabled={pendingAction !== null}
+            onClick={onDownloadRuntimeHealthReport}
+          >
+            {pendingAction === "runtime:report" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Download Evidence
           </Button>
           <Button asChild size="sm" variant="outline" className="ml-auto">
             <Link href="/admin/deployments">Open Deployments</Link>

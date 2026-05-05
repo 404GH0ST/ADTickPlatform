@@ -25,7 +25,7 @@ import type {
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
-import { buildQueryString, processApiResponse } from "@/lib/api-utils";
+import { buildQueryString, parseApiError, processApiResponse } from "@/lib/api-utils";
 
 import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
 
@@ -150,6 +150,7 @@ export type OrganizerDashboardState = {
   createPlayer: () => Promise<void>;
   createTeam: () => Promise<void>;
   deleteTarget: DeleteTarget | null;
+  downloadRuntimeHealthReport: () => Promise<void>;
   editingId: number | null;
   formEntity: FormEntity;
   formMode: FormMode;
@@ -733,6 +734,47 @@ export function useOrganizerDashboard({
       if (!silent) {
         setPendingAction(null);
       }
+    }
+  }
+
+  async function downloadRuntimeHealthReport(): Promise<void> {
+    setPendingAction("runtime:report");
+    setActionError(null);
+    setActionNote(null);
+
+    try {
+      const response = await fetch("/api/admin/runtime-health/report", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(
+          await parseApiError(response, "/api/admin/runtime-health/report"),
+        );
+      }
+
+      const blob = await response.blob();
+      const contentDisposition =
+        response.headers.get("content-disposition") ?? "";
+      const downloadName =
+        contentDisposition.match(/filename="?([^"]+)"?/)?.[1] ??
+        "runtime-health-report.json";
+
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = downloadName;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+
+      setActionNote(`Downloaded runtime evidence report as ${downloadName}.`);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "runtime health report download failed",
+      );
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -2081,6 +2123,7 @@ export function useOrganizerDashboard({
       await createTeam();
     },
     deleteTarget,
+    downloadRuntimeHealthReport,
     editingId,
     formEntity,
     formMode,
