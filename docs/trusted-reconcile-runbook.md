@@ -88,6 +88,13 @@ To keep the temporary challenge for inspection:
 RUNTIME_SMOKE_KEEP_CHALLENGE=1 ./scripts/smoke-admin-runtime-flow.sh
 ```
 
+To clean up older `runtime-smoke-*` challenges that were created before auto-cleanup existed:
+
+```bash
+./scripts/cleanup-runtime-smoke-challenges.sh
+./scripts/cleanup-runtime-smoke-challenges.sh --apply
+```
+
 ## When Reconcile Fails
 
 Check in this order:
