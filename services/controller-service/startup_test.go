@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,14 +11,15 @@ import (
 )
 
 type controllerStartupStoreStub struct {
-	tasks              []apigateway.ControllerRuntimeTask
-	policies           []apigateway.ControllerServiceAccessPolicy
-	reconcileCalls     int
-	listTaskCalls      int
-	listPolicyCalls    int
-	reconcileErr       error
-	listTasksErr       error
-	listPoliciesErr    error
+	tasks           []apigateway.ControllerRuntimeTask
+	policies        []apigateway.ControllerServiceAccessPolicy
+	reconcileCalls  int
+	reconcileResult controllerDeploymentReconcileState
+	listTaskCalls   int
+	listPolicyCalls int
+	reconcileErr    error
+	listTasksErr    error
+	listPoliciesErr error
 }
 
 func (s *controllerStartupStoreStub) ListControllerRuntimeTasks(context.Context) ([]apigateway.ControllerRuntimeTask, error) {
@@ -30,9 +32,12 @@ func (s *controllerStartupStoreStub) ListControllerServiceAccessPolicies(context
 	return s.policies, s.listPoliciesErr
 }
 
-func (s *controllerStartupStoreStub) ReconcileDeployments(context.Context, time.Time) error {
+func (s *controllerStartupStoreStub) ReconcileDeployments(context.Context, time.Time) (controllerDeploymentReconcileState, error) {
 	s.reconcileCalls++
-	return s.reconcileErr
+	if s.reconcileErr != nil {
+		return controllerDeploymentReconcileState{}, s.reconcileErr
+	}
+	return s.reconcileResult, nil
 }
 
 type runtimeExecutorStub struct {
@@ -76,6 +81,7 @@ func (*runtimeExecutorStub) RemoveChallengeServices(context.Context, int) error 
 type serviceAccessExecutorStub struct {
 	policies []apigateway.ControllerServiceAccessPolicy
 	err      error
+	mode     string
 }
 
 func (*serviceAccessExecutorStub) Status() apigateway.ControllerAccessStatus {
@@ -87,9 +93,13 @@ func (s *serviceAccessExecutorStub) Apply(_ context.Context, policies []apigatew
 	if s.err != nil {
 		return apigateway.ControllerAccessStatus{State: "error", LastError: s.err.Error()}, s.err
 	}
+	mode := s.mode
+	if mode == "" {
+		mode = "host"
+	}
 	return apigateway.ControllerAccessStatus{
 		State:         "applied",
-		Mode:          "host",
+		Mode:          mode,
 		PoliciesTotal: len(policies),
 		AppliedAt:     now.UTC().Format(time.RFC3339),
 	}, nil
@@ -97,6 +107,23 @@ func (s *serviceAccessExecutorStub) Apply(_ context.Context, policies []apigatew
 
 func (s *serviceAccessExecutorStub) Teardown(_ context.Context) error {
 	return nil
+}
+
+type controllerWireGuardReconcilerStub struct {
+	status apigateway.WireGuardGatewayStatus
+	err    error
+	calls  int
+}
+
+func (s *controllerWireGuardReconcilerStub) Reconcile(context.Context) (apigateway.WireGuardGatewayStatus, error) {
+	s.calls++
+	if s.err != nil {
+		return apigateway.WireGuardGatewayStatus{}, s.err
+	}
+	if s.status == (apigateway.WireGuardGatewayStatus{}) {
+		return apigateway.WireGuardGatewayStatus{State: "applied", Mode: "host"}, nil
+	}
+	return s.status, nil
 }
 
 func TestRestoreControllerStateAppliesQueuedDeploymentsAndAccessPolicies(t *testing.T) {
@@ -113,9 +140,10 @@ func TestRestoreControllerStateAppliesQueuedDeploymentsAndAccessPolicies(t *test
 	}
 	executor := &runtimeExecutorStub{}
 	access := &serviceAccessExecutorStub{}
+	wireGuard := &controllerWireGuardReconcilerStub{}
 	now := func() time.Time { return time.Date(2026, time.March, 11, 9, 0, 0, 0, time.UTC) }
 
-	if err := restoreControllerState(context.Background(), store, executor, access, now); err != nil {
+	if err := restoreControllerState(context.Background(), store, executor, access, wireGuard, now); err != nil {
 		t.Fatalf("expected startup restore to succeed, got %v", err)
 	}
 	if len(executor.ensured) != 1 {
@@ -126,6 +154,9 @@ func TestRestoreControllerStateAppliesQueuedDeploymentsAndAccessPolicies(t *test
 	}
 	if len(access.policies) != 1 {
 		t.Fatalf("expected access apply to receive 1 policy, got %d", len(access.policies))
+	}
+	if wireGuard.calls != 1 {
+		t.Fatalf("expected wireguard reconcile to run once, got %d", wireGuard.calls)
 	}
 }
 
@@ -140,8 +171,41 @@ func TestRestoreControllerStateFailsFastOnAccessRestoreError(t *testing.T) {
 	}
 	access := &serviceAccessExecutorStub{err: errors.New("nft apply failed")}
 
-	err := restoreControllerState(context.Background(), store, &runtimeExecutorStub{}, access, time.Now)
-	if err == nil || err.Error() != "controller access restore failed: nft apply failed" {
+	err := restoreControllerState(context.Background(), store, &runtimeExecutorStub{}, access, &controllerWireGuardReconcilerStub{}, time.Now)
+	if err == nil || !strings.Contains(err.Error(), controllerAccessTruthUnknownDetail) {
 		t.Fatalf("expected startup restore to fail on access error, got %v", err)
+	}
+}
+
+func TestRestoreControllerStateSkipsWireGuardOutsideHostMode(t *testing.T) {
+	t.Setenv("CONTROLLER_RECONCILE_DEPLOYMENTS_ON_STARTUP", "true")
+	t.Setenv("CONTROLLER_RECONCILE_ACCESS_ON_STARTUP", "true")
+
+	store := &controllerStartupStoreStub{
+		reconcileResult: controllerDeploymentReconcileState{ProcessedJobs: 1, ProcessedInstances: 2, CompletedJobs: 1},
+	}
+	access := &serviceAccessExecutorStub{mode: "dry-run"}
+	wireGuard := &controllerWireGuardReconcilerStub{}
+
+	if err := restoreControllerState(context.Background(), store, &runtimeExecutorStub{}, access, wireGuard, time.Now); err != nil {
+		t.Fatalf("expected startup restore to succeed, got %v", err)
+	}
+	if wireGuard.calls != 0 {
+		t.Fatalf("expected no wireguard reconcile call outside host mode, got %d", wireGuard.calls)
+	}
+}
+
+func TestRestoreControllerStateFailsWhenWireGuardTruthUnknown(t *testing.T) {
+	t.Setenv("CONTROLLER_RECONCILE_DEPLOYMENTS_ON_STARTUP", "true")
+	t.Setenv("CONTROLLER_RECONCILE_ACCESS_ON_STARTUP", "true")
+
+	store := &controllerStartupStoreStub{
+		reconcileResult: controllerDeploymentReconcileState{ProcessedJobs: 1, ProcessedInstances: 2, CompletedJobs: 1},
+	}
+	wireGuard := &controllerWireGuardReconcilerStub{err: errors.New("wg sync failed")}
+
+	err := restoreControllerState(context.Background(), store, &runtimeExecutorStub{}, &serviceAccessExecutorStub{}, wireGuard, time.Now)
+	if err == nil || !strings.Contains(err.Error(), controllerWireGuardTruthUnknownDetail) {
+		t.Fatalf("expected startup restore to fail on wireguard error, got %v", err)
 	}
 }

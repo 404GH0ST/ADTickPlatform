@@ -19,6 +19,7 @@ type controllerServer struct {
 	store      apigateway.Store
 	executor   runtimeExecutor
 	access     serviceAccessExecutor
+	wireGuard  controllerWireGuardReconciler
 	metrics    controllerServiceMetrics
 	now        func() time.Time
 }
@@ -38,11 +39,12 @@ func main() {
 		store:      store,
 		executor:   newRuntimeExecutor(),
 		access:     newServiceAccessExecutor(),
+		wireGuard:  newControllerWireGuardReconciler(),
 		metrics:    newControllerServiceMetrics(),
 		now:        time.Now,
 	}
 	httpapi.RegisterMetricsSource(info.Name, server)
-	if err := restoreControllerState(ctx, controllerStartupStoreAdapter{store: store}, server.executor, server.access, server.now); err != nil {
+	if err := restoreControllerState(ctx, controllerReconcileStoreAdapter{store: store}, server.executor, server.access, server.wireGuard, server.now); err != nil {
 		log.Fatal(err)
 	}
 
@@ -109,28 +111,24 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 		return
 	}
 	started := time.Now()
-	tasks, err := s.store.ListControllerRuntimeTasks(r.Context())
+	result, err := newControllerTrustedReconciler(
+		controllerReconcileStoreAdapter{store: s.store},
+		s.executor,
+		s.access,
+		s.wireGuard,
+		s.now,
+	).Reconcile(r.Context())
 	if err != nil {
-		s.metrics.recordDeploymentReconcile(time.Since(started), 0, true)
-		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
-		return
-	}
-	ensured := 0
-	for _, task := range tasks {
-		if err := s.executor.EnsureService(r.Context(), task); err != nil {
-			s.metrics.recordDeploymentReconcile(time.Since(started), ensured, true)
-			writeProblem(w, http.StatusInternalServerError, "Runtime reconcile failed", err.Error())
+		s.metrics.recordDeploymentReconcile(time.Since(started), result.ProcessedInstances, true)
+		var reconcileErr *controllerReconcilePhaseError
+		if errors.As(err, &reconcileErr) {
+			writeProblem(w, reconcileErr.StatusCode(), reconcileErr.Title(), reconcileErr.Detail())
 			return
 		}
-		ensured++
-	}
-	result, err := s.store.ReconcileAdminDeployments(r.Context(), s.now())
-	if err != nil {
-		s.metrics.recordDeploymentReconcile(time.Since(started), ensured, true)
-		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
+		writeProblem(w, http.StatusInternalServerError, "Runtime reconcile failed", err.Error())
 		return
 	}
-	s.metrics.recordDeploymentReconcile(time.Since(started), ensured, false)
+	s.metrics.recordDeploymentReconcile(time.Since(started), result.ProcessedInstances, false)
 	writeData(w, http.StatusOK, result)
 }
 

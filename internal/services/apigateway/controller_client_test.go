@@ -84,6 +84,34 @@ func TestHTTPControllerClientMapsNotFoundToChallengeError(t *testing.T) {
 	}
 }
 
+func TestHTTPControllerClientPreservesProblemStatusOnReconcileFailure(t *testing.T) {
+	client := NewHTTPControllerClient("http://controller.internal", "controller-token")
+	httpClient := client.(*httpControllerClient)
+	httpClient.client = &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header: http.Header{
+					"Content-Type": []string{"application/problem+json"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"title":"Deployment reconcile failed","status":502,"detail":"runtime converge completed but controller access reconcile failed, so host access truth was not established."}`)),
+			}, nil
+		}),
+	}
+
+	_, err := client.ReconcileDeployments(context.Background())
+	var problemErr *controllerProblemError
+	if !errors.As(err, &problemErr) {
+		t.Fatalf("expected typed controller problem error, got %v", err)
+	}
+	if problemErr.StatusCode() != http.StatusBadGateway {
+		t.Fatalf("unexpected status %d", problemErr.StatusCode())
+	}
+	if problemErr.Detail() != "runtime converge completed but controller access reconcile failed, so host access truth was not established." {
+		t.Fatalf("unexpected detail %q", problemErr.Detail())
+	}
+}
+
 func TestHTTPControllerClientAccessStatusUsesExpectedRoute(t *testing.T) {
 	var requestedPath string
 	client := NewHTTPControllerClient("http://controller.internal", "controller-token")

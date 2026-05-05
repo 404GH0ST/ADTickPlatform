@@ -15,6 +15,40 @@ import (
 
 var errControllerDisabled = errors.New("controller is not configured")
 
+type controllerProblemError struct {
+	statusCode int
+	title      string
+	detail     string
+}
+
+func (e *controllerProblemError) Error() string {
+	if trimmed := strings.TrimSpace(e.detail); trimmed != "" {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(e.title); trimmed != "" {
+		return trimmed
+	}
+	return fmt.Sprintf("controller request failed with status %d", e.statusCode)
+}
+
+func (e *controllerProblemError) StatusCode() int {
+	return e.statusCode
+}
+
+func (e *controllerProblemError) Title() string {
+	if trimmed := strings.TrimSpace(e.title); trimmed != "" {
+		return trimmed
+	}
+	return "Controller request failed"
+}
+
+func (e *controllerProblemError) Detail() string {
+	if trimmed := strings.TrimSpace(e.detail); trimmed != "" {
+		return trimmed
+	}
+	return e.Title()
+}
+
 type controllerClient interface {
 	ReconcileDeployments(ctx context.Context) (adminReconcileResult, error)
 	FactoryResetService(ctx context.Context, teamID, challengeID int) error
@@ -171,17 +205,18 @@ func (c *httpControllerClient) postJSON(ctx context.Context, path string, body a
 		}
 		return nil
 	}
-	message, err := decodeProblemBody(resp.Body)
+	problem, err := decodeProblemDetails(resp.Body)
 	if err != nil {
 		return fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrChallengeNotFound
 	}
-	if message != "" {
-		return fmt.Errorf("controller request failed: %s", message)
+	return &controllerProblemError{
+		statusCode: resp.StatusCode,
+		title:      problem.Title,
+		detail:     problem.Detail,
 	}
-	return fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 }
 
 func requestControllerJSON[T any](ctx context.Context, c *httpControllerClient, method, path string, body any) (T, error) {
@@ -218,35 +253,34 @@ func requestControllerJSON[T any](ctx context.Context, c *httpControllerClient, 
 		}
 		return zero, nil
 	}
-	message, err := decodeProblemBody(resp.Body)
+	problem, err := decodeProblemDetails(resp.Body)
 	if err != nil {
 		return zero, fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 	}
-	if message != "" {
-		return zero, fmt.Errorf("controller request failed: %s", message)
+	return zero, &controllerProblemError{
+		statusCode: resp.StatusCode,
+		title:      problem.Title,
+		detail:     problem.Detail,
 	}
-	return zero, fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 }
 
-func decodeProblemBody(body io.Reader) (string, error) {
+func decodeProblemDetails(body io.Reader) (httpapi.ProblemDetails, error) {
 	data, err := io.ReadAll(body)
 	if err != nil {
-		return "", err
+		return httpapi.ProblemDetails{}, err
 	}
 	var problem httpapi.ProblemDetails
 	if err := json.Unmarshal(data, &problem); err == nil {
-		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
-			return trimmed, nil
-		}
-		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
-			return trimmed, nil
-		}
+		return problem, nil
 	}
 	var payload struct {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", err
+		return httpapi.ProblemDetails{}, err
 	}
-	return strings.TrimSpace(payload.Message), nil
+	return httpapi.ProblemDetails{
+		Title:  "Controller request failed",
+		Detail: strings.TrimSpace(payload.Message),
+	}, nil
 }

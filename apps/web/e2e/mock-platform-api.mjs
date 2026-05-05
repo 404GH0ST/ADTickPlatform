@@ -550,6 +550,7 @@ function createInitialState() {
     nextChallengeID: 2,
     nextDeploymentJobID: 89,
     nextSchedulerEventID: 4,
+    deploymentReconcileProblem: null,
   };
 }
 
@@ -628,6 +629,18 @@ function createStateForScenario(scenario = "default") {
           }
         : challenge,
     );
+  }
+
+  if (scenario === "deployment-reconcile-access-failure") {
+    nextState.deployments = pendingDeployments.map((deployment) => ({
+      ...deployment,
+    }));
+    nextState.deploymentReconcileProblem = {
+      statusCode: 502,
+      title: "Deployment reconcile failed",
+      detail:
+        "runtime converge completed but controller access reconcile failed, so host access truth was not established.",
+    };
   }
 
   if (scenario === "redeploy") {
@@ -1795,6 +1808,14 @@ function handleAdminMetricsRoutes({ res, url, method }) {
 }
 
 function reconcileDeployments(res) {
+  if (state.deploymentReconcileProblem) {
+    return writeFailure(
+      res,
+      state.deploymentReconcileProblem.statusCode,
+      state.deploymentReconcileProblem.detail,
+    );
+  }
+
   let processedJobs = 0;
   let processedInstances = 0;
   let completedJobs = 0;

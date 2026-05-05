@@ -801,7 +801,7 @@ export function useOrganizerDashboard({
 
       setWireGuardGatewayStatus(payload);
       setActionNote(
-        `WireGuard gateway applied revision ${payload.revision ?? "n/a"} with ${payload.peers_active} active peer(s) and ${payload.peers_revoked} revoked peer(s).`,
+        `Maintenance reconcile applied WireGuard revision ${payload.revision ?? "n/a"} with ${payload.peers_active} active peer(s) and ${payload.peers_revoked} revoked peer(s).`,
       );
     } catch (error) {
       setActionError(
@@ -829,7 +829,7 @@ export function useOrganizerDashboard({
       );
       setAccessStatus(payload);
       setActionNote(
-        `Controller access applied revision ${payload.revision ?? "n/a"} across ${payload.policies_total} service policy row(s).`,
+        `Maintenance reconcile applied controller access revision ${payload.revision ?? "n/a"} across ${payload.policies_total} service policy row(s).`,
       );
     } catch (error) {
       setActionError(
@@ -1205,7 +1205,7 @@ export function useOrganizerDashboard({
 
       setActionNote(
         payload.status === "queued"
-          ? `Queued ${payload.challenge_name} for ${payload.deployed_team_count} team runtimes. Reconcile to mark the rollout ready.`
+          ? `Queued ${payload.challenge_name} for ${payload.deployed_team_count} team runtimes. Run trusted reconcile to verify rollout, SSH access, and WireGuard state.`
           : `${payload.challenge_name} was already fully deployed across all teams.`,
       );
     } catch (error) {
@@ -1240,7 +1240,7 @@ export function useOrganizerDashboard({
       setDeploymentRows(deploymentsPayload);
 
       setActionNote(
-        `Controller reconcile processed ${payload.processed_jobs} job(s), advanced ${payload.processed_instances} team service instance(s), and refreshed the deployment queue.`,
+        `Trusted reconcile processed ${payload.processed_jobs} job(s), advanced ${payload.processed_instances} team service instance(s), and refreshed deployment, SSH access, and WireGuard truth.`,
       );
     } catch (error) {
       setActionError(

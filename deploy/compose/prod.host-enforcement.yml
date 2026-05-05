@@ -40,6 +40,8 @@ services:
       CONTROLLER_ACCESS_RULES_PATH: /runtime/controller/access.nft
       CONTROLLER_ACCESS_STATUS_PATH: /runtime/controller/access-status.json
       CONTROLLER_ACCESS_TIMEOUT: ${CONTROLLER_ACCESS_TIMEOUT:-10s}
+      WIREGUARD_GATEWAY_INTERNAL_URL: ${CONTROLLER_WIREGUARD_GATEWAY_INTERNAL_URL_HOST:-http://127.0.0.1:18087}
+      WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
 
   wireguard-gateway:
     networks: !reset []

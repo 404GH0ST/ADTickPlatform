@@ -300,12 +300,30 @@ test("organizer deployments reconcile completes queued jobs", async ({
 
   await expect(
     page.getByText(
-      "Controller reconcile processed 1 job(s), advanced 2 team service instance(s), and refreshed the deployment queue.",
+      "Trusted reconcile processed 1 job(s), advanced 2 team service instance(s), and refreshed deployment, SSH access, and WireGuard truth.",
     ),
   ).toBeVisible();
   await expect(deploymentRow.getByText("completed")).toBeVisible();
   await expect(deploymentRow.getByText("3/3")).toBeVisible();
   await expect(queuedCountCell).toHaveText("0");
+});
+
+test("organizer deployments reconcile surfaces trusted-truth failure details", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "deployment-reconcile-access-failure" },
+  });
+
+  await page.goto("/admin/deployments");
+  await page.getByRole("button", { name: "Reconcile Deployments" }).click();
+
+  await expect(
+    page.getByText(
+      "runtime converge completed but controller access reconcile failed, so host access truth was not established.",
+    ),
+  ).toBeVisible();
 });
 
 test("organizer match controls handle manual match operations and recompute logic", async ({

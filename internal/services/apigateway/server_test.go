@@ -27,6 +27,11 @@ type testControllerClient struct {
 	accessErr             error
 }
 
+type storeBackedControllerClient struct {
+	store Store
+	now   func() time.Time
+}
+
 type testWireGuardClient struct {
 	status WireGuardGatewayStatus
 	err    error
@@ -83,6 +88,68 @@ func (c testControllerClient) ReconcileDeployments(_ context.Context) (adminReco
 		return adminReconcileResult{}, errControllerDisabled
 	}
 	return c.deployReconcileResult, nil
+}
+
+func (c storeBackedControllerClient) ReconcileDeployments(ctx context.Context) (adminReconcileResult, error) {
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	return c.store.ReconcileAdminDeployments(ctx, now())
+}
+
+func (storeBackedControllerClient) FactoryResetService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (storeBackedControllerClient) RestartService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (storeBackedControllerClient) ReconcileServiceAccess(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (storeBackedControllerClient) ApplySSHCredential(_ context.Context, _, _ int, _ ControllerSSHCredential) error {
+	return nil
+}
+
+func (storeBackedControllerClient) ValidateChallengeRuntime(_ context.Context, request ChallengeValidationRequest) (ChallengeValidationResult, error) {
+	return ChallengeValidationResult{
+		ChallengeID:           request.ChallengeID,
+		Name:                  request.Name,
+		BaselineImage:         request.BaselineImage,
+		CheckerImage:          request.CheckerImage,
+		Status:                "valid",
+		BaselineSSHContractOK: true,
+		CheckerContractOK:     true,
+		CheckedAt:             "2026-03-10T10:00:00Z",
+		Message:               "challenge package validated by store-backed test controller",
+	}, nil
+}
+
+func (storeBackedControllerClient) AccessStatus(_ context.Context) (ControllerAccessStatus, error) {
+	return ControllerAccessStatus{State: "applied", Mode: "dry-run"}, nil
+}
+
+func (storeBackedControllerClient) ReconcileAccessPolicies(_ context.Context) (ControllerAccessStatus, error) {
+	return ControllerAccessStatus{State: "applied", Mode: "dry-run"}, nil
+}
+
+func (storeBackedControllerClient) TeardownAccessPolicies(_ context.Context) error {
+	return nil
+}
+
+func (storeBackedControllerClient) RemoveService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (storeBackedControllerClient) RemoveTeamServices(_ context.Context, _ int) error {
+	return nil
+}
+
+func (storeBackedControllerClient) RemoveChallengeServices(_ context.Context, _ int) error {
+	return nil
 }
 
 func (c testControllerClient) FactoryResetService(_ context.Context, _, _ int) error {
@@ -618,13 +685,15 @@ func (c testScoringClient) RecomputeScoring(_ context.Context) ([]scoreRow, erro
 
 func newTestMux() *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
-	NewWithDeps("dev-team-token", "dev-admin-token", 101, NewMemoryStore(101), testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+	store := NewMemoryStore(101)
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
 	return mux
 }
 
 func newTestMuxWithGameCore(game gameCoreClient) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
-	NewWithDeps("dev-team-token", "dev-admin-token", 101, NewMemoryStore(101), testControllerClient{}, noopWireGuardClient{}, game).RegisterRoutes(mux)
+	store := NewMemoryStore(101)
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}, game).RegisterRoutes(mux)
 	return mux
 }
 
@@ -1731,6 +1800,60 @@ func TestAdminReconcileDeploymentsUsesControllerWhenConfigured(t *testing.T) {
 	payload := decodeCompat[adminReconcileResult](t, response.Body.Bytes())
 	if payload.ProcessedJobs != 7 || payload.ProcessedInstances != 21 || payload.CompletedJobs != 3 {
 		t.Fatalf("unexpected reconcile payload %+v", payload)
+	}
+}
+
+func TestAdminReconcileDeploymentsReturnsServiceUnavailableWhenControllerDisabled(t *testing.T) {
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps(
+		"dev-team-token",
+		"dev-admin-token",
+		101,
+		NewMemoryStore(101),
+		noopControllerClient{},
+		noopWireGuardClient{},
+	).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/deployments/reconcile", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected reconcile 503, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Title != "Deployment reconcile unavailable" || problem.Detail != "controller deployment reconcile is not configured." {
+		t.Fatalf("unexpected problem payload %+v", problem)
+	}
+}
+
+func TestAdminReconcileDeploymentsReturnsControllerProblemStatus(t *testing.T) {
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps(
+		"dev-team-token",
+		"dev-admin-token",
+		101,
+		NewMemoryStore(101),
+		testControllerClient{deployReconcileErr: &controllerProblemError{
+			statusCode: http.StatusBadGateway,
+			title:      "Deployment reconcile failed",
+			detail:     "runtime and controller access converged but WireGuard converge/verification failed, so host access truth was not established.",
+		}},
+		noopWireGuardClient{},
+	).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/deployments/reconcile", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected reconcile 502, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Title != "Deployment reconcile failed" || problem.Detail != "runtime and controller access converged but WireGuard converge/verification failed, so host access truth was not established." {
+		t.Fatalf("unexpected problem payload %+v", problem)
 	}
 }
 

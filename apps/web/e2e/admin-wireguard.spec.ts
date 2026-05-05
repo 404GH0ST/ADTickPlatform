@@ -44,7 +44,7 @@ test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard 
   await page.getByRole("button", { name: "Reconcile Gateway" }).click();
   await expect(
     page.getByText(
-      "WireGuard gateway applied revision mock-wireguard-revision-1-1 with 1 active peer(s) and 1 revoked peer(s).",
+      "Maintenance reconcile applied WireGuard revision mock-wireguard-revision-1-1 with 1 active peer(s) and 1 revoked peer(s).",
     ),
   ).toBeVisible();
 });
@@ -64,7 +64,7 @@ test("organizer can teardown and recover gateway and access runtime controls", a
 
   await page.getByTestId("reconcile-wireguard-gateway").click();
   await expect(
-    page.getByText(/WireGuard gateway applied revision mock-wireguard-revision-/),
+    page.getByText(/Maintenance reconcile applied WireGuard revision mock-wireguard-revision-/),
   ).toBeVisible();
 
   await page.getByTestId("teardown-access").click();
@@ -75,6 +75,6 @@ test("organizer can teardown and recover gateway and access runtime controls", a
 
   await page.getByTestId("reconcile-access").click();
   await expect(
-    page.getByText(/Controller access applied revision mock-access-revision-/),
+    page.getByText(/Maintenance reconcile applied controller access revision mock-access-revision-/),
   ).toBeVisible();
 });

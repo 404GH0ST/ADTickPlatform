@@ -545,15 +545,16 @@ func (s *Server) handleAdminReconcileDeployments(w http.ResponseWriter, r *http.
 	result, err := s.controller.ReconcileDeployments(r.Context())
 	if err != nil {
 		if errors.Is(err, errControllerDisabled) {
-			result, err = s.store.ReconcileAdminDeployments(r.Context(), s.now())
-			if err != nil {
-				writeStoreFailure(w, err)
-				return
-			}
-		} else {
-			writeProblem(w, http.StatusBadGateway, "Deployment reconcile unavailable", "controller deployment reconcile failed.")
+			writeProblem(w, http.StatusServiceUnavailable, "Deployment reconcile unavailable", "controller deployment reconcile is not configured.")
 			return
 		}
+		var problemErr *controllerProblemError
+		if errors.As(err, &problemErr) {
+			writeProblem(w, problemErr.StatusCode(), problemErr.Title(), problemErr.Detail())
+			return
+		}
+		writeProblem(w, http.StatusBadGateway, "Deployment reconcile unavailable", "controller deployment reconcile failed.")
+		return
 	}
 	s.recordAdminAudit(r.Context(), "deployment.reconcile", "deployment", "deployment-jobs", "reconciled deployment jobs", map[string]any{
 		"processed_jobs":      result.ProcessedJobs,

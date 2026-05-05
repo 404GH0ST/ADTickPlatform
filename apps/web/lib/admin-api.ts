@@ -83,12 +83,6 @@ function adminBaseUrl() {
   );
 }
 
-function controllerBaseUrl() {
-  return trimBaseUrl(
-    process.env.AD_PLATFORM_CONTROLLER_URL ?? "http://127.0.0.1:8084",
-  );
-}
-
 function gameCoreBaseUrl() {
   return trimBaseUrl(
     process.env.AD_PLATFORM_GAME_CORE_URL ?? "http://127.0.0.1:8081",
@@ -138,12 +132,20 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return authenticatedFetch<T>(adminBaseUrl(), path, token, init);
 }
 
-async function controllerFetch<T>(
+export async function adminProxyFetch(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<Response> {
   const token = await getAdminToken();
-  return authenticatedFetch<T>(controllerBaseUrl(), path, token, init);
+  return fetch(`${adminBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+    cache: "no-store",
+  });
 }
 
 async function publicFetch<T>(path: string): Promise<T> {
@@ -598,21 +600,9 @@ export async function listAdminAuditLogs(
 }
 
 export async function reconcileAdminDeployments() {
-  try {
-    return await controllerFetch<AdminReconcileResult>(
-      "/internal/v1/deployments/reconcile",
-      {
-        method: "POST",
-      },
-    );
-  } catch {
-    return adminFetch<AdminReconcileResult>(
-      "/api/v2/admin/deployments/reconcile",
-      {
-        method: "POST",
-      },
-    );
-  }
+  return adminFetch<AdminReconcileResult>("/api/v2/admin/deployments/reconcile", {
+    method: "POST",
+  });
 }
 
 export async function getAdminGameStatus() {
