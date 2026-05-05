@@ -46,7 +46,7 @@ BASELINE_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-prod-host-bas
 GO_LIVE_METRICS_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-go-live-metrics.sh"
 
 curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
-  "${edge_base_url}/api/v2/admin/operations/status" | jq '.data' > "${operations_status_file}"
+  "${edge_base_url}/api/v2/admin/operations/status" > "${operations_status_file}"
 if ! jq -e '.healthy == true and ((.alerts | length) == 0)' "${operations_status_file}" >/dev/null; then
   echo "go-live check finished with active runtime alerts" >&2
   cat "${operations_status_file}" >&2

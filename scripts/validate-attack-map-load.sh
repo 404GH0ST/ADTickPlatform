@@ -80,10 +80,10 @@ operations_status_json="$(
     "${EDGE_BASE_URL}/api/v2/admin/operations/status" \
     -H "Authorization: Bearer ${ADMIN_API_TOKEN}"
 )"
-printf '%s\n' "${operations_status_json}" | jq '.data' > "${OUTPUT_DIR}/operations-status.json"
-if ! printf '%s\n' "${operations_status_json}" | jq -e '.data.healthy == true and (.data.alerts | length == 0)' >/dev/null; then
+printf '%s\n' "${operations_status_json}" > "${OUTPUT_DIR}/operations-status.json"
+if ! printf '%s\n' "${operations_status_json}" | jq -e '.healthy == true and (.alerts | length == 0)' >/dev/null; then
   echo "attack-map load validation finished with active runtime alerts" >&2
-  printf '%s\n' "${operations_status_json}" | jq '.data' >&2
+  printf '%s\n' "${operations_status_json}" >&2
   exit 1
 fi
 

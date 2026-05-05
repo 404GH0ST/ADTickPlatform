@@ -82,13 +82,13 @@ capture_admin_data() {
   local path="$1"
   local destination="$2"
   curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
-    "${EDGE_BASE_URL}${path}" | jq '.data' > "${destination}"
+    "${EDGE_BASE_URL}${path}" > "${destination}"
 }
 
 capture_public_data() {
   local path="$1"
   local destination="$2"
-  curl -fsS "${EDGE_BASE_URL}${path}" | jq '.data' > "${destination}"
+  curl -fsS "${EDGE_BASE_URL}${path}" > "${destination}"
 }
 
 normalized_game_status() {

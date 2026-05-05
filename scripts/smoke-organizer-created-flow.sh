@@ -74,8 +74,8 @@ wait_for_target_tick() {
       curl_json "game status" "${API_URL}/api/v2/admin/game/status" \
         -H "Authorization: Bearer ${ADMIN_TOKEN}"
     )"
-    current_tick="$(printf '%s\n' "${status_json}" | jq -r '.data.current_tick.id // 0')"
-    tick_status="$(printf '%s\n' "${status_json}" | jq -r '.data.current_tick.status // ""')"
+    current_tick="$(printf '%s\n' "${status_json}" | jq -r '.current_tick.id // 0')"
+    tick_status="$(printf '%s\n' "${status_json}" | jq -r '.current_tick.status // ""')"
     if [[ "${current_tick}" =~ ^[0-9]+$ ]] && (( current_tick >= target_tick )) && [[ "${tick_status}" == "completed" ]]; then
       printf '%s\n' "${status_json}"
       return 0
@@ -175,7 +175,7 @@ CHALLENGE_NAME="college-http-${UNIQUE_SUFFIX}"
 
 existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
 SERVICE_SUBNET_OCTET=""
-used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.data[].service_subnet_octet')"
+used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.[].service_subnet_octet')"
 for candidate in $(seq 50 254); do
   if ! printf '%s\n' "${used_subnets}" | grep -qx "${candidate}"; then
     SERVICE_SUBNET_OCTET="${candidate}"
@@ -198,8 +198,8 @@ team_two_response="$(curl_json "create team two" -X POST "${API_URL}/api/v2/admi
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg name "${TEAM_TWO_NAME}" --arg email "${TEAM_TWO_EMAIL}" '{name:$name,contact_email:$email}')")"
 
-team_one_id="$(printf '%s' "${team_one_response}" | jq -er '.data.id')"
-team_two_id="$(printf '%s' "${team_two_response}" | jq -er '.data.id')"
+team_one_id="$(printf '%s' "${team_one_response}" | jq -er '.id')"
+team_two_id="$(printf '%s' "${team_two_response}" | jq -er '.id')"
 
 curl_json "create team one player" -X POST "${API_URL}/api/v2/admin/players" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -235,7 +235,7 @@ challenge_response="$(curl_json "create challenge" -X POST "${API_URL}/api/v2/ad
     --argjson service_port "${SERVICE_PORT}" \
     --argjson service_subnet_octet "${SERVICE_SUBNET_OCTET}" \
     '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,weight:$weight,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')")"
-challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.data.id')"
+challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 
 curl_json "validate challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
@@ -245,19 +245,19 @@ curl_json "deploy challenge" -X POST "${API_URL}/api/v2/admin/challenges/${chall
 
 reconcile_response="$(curl_json "reconcile deployments" -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}")"
-printf '%s\n' "${reconcile_response}" | jq -c '.data | {processed_jobs,processed_instances,completed_jobs}'
+printf '%s\n' "${reconcile_response}" | jq -c '{processed_jobs,processed_instances,completed_jobs}'
 
 team_one_token="$(
   curl_json "authenticate team one" -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg email "${TEAM_ONE_PLAYER_EMAIL}" --arg password "${TEAM_ONE_PASSWORD}" '{email:$email,password:$password}')" |
-    jq -er '.data'
+    jq -er '.token'
 )"
 
 team_one_state="$(
   curl_json "read team one services" "${API_URL}/api/v2/team/services" \
     -H "Authorization: Bearer ${team_one_token}" |
-    jq -ec --argjson challenge_id "${challenge_id}" '.data | map(select(.challenge_id == $challenge_id)) | first'
+    jq -ec --argjson challenge_id "${challenge_id}" 'map(select(.challenge_id == $challenge_id)) | first'
 )"
 printf '%s\n' "${team_one_state}" | jq -c '{challenge_id,name,endpoint,status,checker}'
 team_one_endpoint="$(printf '%s' "${team_one_state}" | jq -er '.endpoint')"
@@ -268,7 +268,7 @@ public_services="$(
 )"
 team_two_endpoint="$(
   printf '%s\n' "${public_services}" |
-    jq -er --arg challenge_id "${challenge_id}" --arg team_id "${team_two_id}" '.data[$challenge_id][$team_id][0]'
+    jq -er --arg challenge_id "${challenge_id}" --arg team_id "${team_two_id}" '.[$challenge_id][$team_id][0]'
 )"
 
 container_name="svc-$(slug_name "${CHALLENGE_NAME}")-team-${team_one_id}"
@@ -305,11 +305,11 @@ curl_json "unlock team one service" -X POST "${API_URL}/api/v2/services/${challe
   -H "Authorization: Bearer ${team_one_token}" \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
-  jq -c '.data | {challenge_id,team_id,unlocked}'
+  jq -c '{challenge_id,team_id,unlocked}'
 
 curl_json "request ssh credential" -X POST "${API_URL}/api/v2/services/${challenge_id}/ssh-session" \
   -H "Authorization: Bearer ${team_one_token}" |
-  jq -c '.data | {challenge_id,host,port,username,password_present:(.password | length > 0)}'
+  jq -c '{host,port,username,password_present:(.password | length > 0)}'
 
 curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
@@ -326,8 +326,8 @@ if [[ "${USE_SCHEDULER}" == "true" ]]; then
     -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
 
   status_response="$(wait_for_target_tick "${TARGET_TICKS}")"
-  printf '%s\n' "${status_response}" | jq -c '.data | {match:.match.state,scheduler:.scheduler.state,current_tick:(.current_tick.id // 0),total_checker_runs}'
-  tick_id="$(printf '%s\n' "${status_response}" | jq -er '.data.current_tick.id')"
+  printf '%s\n' "${status_response}" | jq -c '{match:.match.state,scheduler:.scheduler.state,current_tick:(.current_tick.id // 0),total_checker_runs}'
+  tick_id="$(printf '%s\n' "${status_response}" | jq -er '.current_tick.id')"
 
   curl_json "stop scheduler" -X POST "${API_URL}/api/v2/admin/game/scheduler/stop" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
@@ -336,19 +336,19 @@ else
     curl_json "advance tick" -X POST "${API_URL}/api/v2/admin/game/ticks/advance" \
       -H "Authorization: Bearer ${ADMIN_TOKEN}"
   )"
-  printf '%s\n' "${tick_response}" | jq -c '.data | {id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
-  tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.data.id')"
+  printf '%s\n' "${tick_response}" | jq -c '{id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
+  tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
 fi
 
 checker_runs_response="$(
   curl_json "checker runs" "${API_URL}/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=20" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${checker_runs_response}" | jq -c '.data | {total_count,has_next}'
+printf '%s\n' "${checker_runs_response}" | jq -c '{total_count,has_next}'
 
-if ! printf '%s\n' "${checker_runs_response}" | jq -e '.data.items | length == 6 and all(.[]; .status == "success")' >/dev/null; then
+if ! printf '%s\n' "${checker_runs_response}" | jq -e '.items | length == 6 and all(.[]; .status == "success")' >/dev/null; then
   echo "checker runs were not all successful for the organizer-created smoke" >&2
-  printf '%s\n' "${checker_runs_response}" | jq -c '.data.items[] | {team_id,phase,status,message}' >&2
+  printf '%s\n' "${checker_runs_response}" | jq -c '.items[] | {team_id,phase,status,message}' >&2
   exit 1
 fi
 
@@ -370,8 +370,8 @@ submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${submit_response}" | jq -c '.data[] | {flag,verdict}'
-if ! printf '%s\n' "${submit_response}" | jq -e '.data | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,verdict}'
+if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
   echo "stolen flag submission was not accepted" >&2
   exit 1
 fi
@@ -380,7 +380,7 @@ scoreboard_response="$(
   curl_json "recompute scoring" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${scoreboard_response}" | jq -c '.data[] | {team,attack,defense,sla,total}'
+printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {team,attack,defense,sla,total}'
 
 expected_team_one_attack=10
 expected_team_one_defense=$((10 * TARGET_TICKS))
@@ -402,9 +402,8 @@ if ! printf '%s\n' "${scoreboard_response}" | jq -e \
   --argjson team_two_defense "${expected_team_two_defense}" \
   --argjson team_two_sla "${expected_team_two_sla}" \
   --argjson team_two_total "${expected_team_two_total}" '
-  .data
-  | any(.[]; .team == $team_one and .attack == $team_one_attack and .defense == $team_one_defense and .sla == $team_one_sla and .total == $team_one_total)
-    and any(.[]; .team == $team_two and .attack == $team_two_attack and .defense == $team_two_defense and .sla == $team_two_sla and .total == $team_two_total)
+  any(.[]; .team == $team_one and .attack == $team_one_attack and .defense == $team_one_defense and .sla == $team_one_sla and .total == $team_one_total)
+  and any(.[]; .team == $team_two and .attack == $team_two_attack and .defense == $team_two_defense and .sla == $team_two_sla and .total == $team_two_total)
 ' >/dev/null; then
   echo "unexpected scoreboard after organizer-created attack flow" >&2
   exit 1

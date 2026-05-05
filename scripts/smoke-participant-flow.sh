@@ -23,7 +23,7 @@ token="$(
   curl -fsS -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
     -d "${auth_payload}" |
-    jq -er '.data'
+    jq -er '.token'
 )"
 
 team_services_json="$(
@@ -35,7 +35,7 @@ CHALLENGE_ID="${REQUESTED_CHALLENGE_ID}"
 if [[ -z "${CHALLENGE_ID}" ]]; then
   CHALLENGE_ID="$(
     printf '%s\n' "${team_services_json}" |
-      jq -er '.data | first | .challenge_id'
+      jq -er 'first | .challenge_id'
   )"
 fi
 
@@ -52,14 +52,14 @@ echo "authenticate:"
 printf '  token: %s\n' "${token:0:16}..."
 
 echo "challenges:"
-curl -fsS "${API_URL}/api/v2/challenges" | jq -c '.data | map({id,name})'
+curl -fsS "${API_URL}/api/v2/challenges" | jq -c 'map({id,name})'
 
 echo "scoreboard:"
-curl -fsS "${API_URL}/api/v2/scoreboard" | jq -c '.data | map({rank,team,total})'
+curl -fsS "${API_URL}/api/v2/scoreboard" | jq -c 'map({rank,team,total})'
 
 echo "team services before:"
 printf '%s\n' "${team_services_json}" |
-  jq -c --argjson challenge_id "${CHALLENGE_ID}" '.data | map(select(.challenge_id == $challenge_id))'
+  jq -c --argjson challenge_id "${CHALLENGE_ID}" 'map(select(.challenge_id == $challenge_id))'
 
 echo "unlock:"
 unlock_payload="$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')"
@@ -67,19 +67,19 @@ curl -fsS -X POST "${API_URL}/api/v2/services/${CHALLENGE_ID}/unlock" \
   -H "Authorization: Bearer ${token}" \
   -H 'Content-Type: application/json' \
   -d "${unlock_payload}" |
-  jq -c '.data | {challenge_id,team_id,unlocked,ssh_credential_ttl_seconds}'
+  jq -c '{challenge_id,team_id,unlocked}'
 
 echo "ssh session:"
 curl -fsS -X POST "${API_URL}/api/v2/services/${CHALLENGE_ID}/ssh-session" \
   -H "Authorization: Bearer ${token}" |
-  jq -c '.data | {challenge_id,host,port,username,password_present:(.password | length > 0),expires_at}'
+  jq -c '{host,port,username,password_present:(.password | length > 0)}'
 
 echo "factory reset:"
 curl -fsS -X POST "${API_URL}/api/v2/services/${CHALLENGE_ID}/reset/factory" \
   -H "Authorization: Bearer ${token}" |
-  jq -c '.data | {challenge_id,action,unlock_preserved}'
+  jq -c '{challenge_id,action,unlock_preserved}'
 
 echo "team services after:"
 curl -fsS "${API_URL}/api/v2/team/services" \
   -H "Authorization: Bearer ${token}" |
-  jq -c --argjson challenge_id "${CHALLENGE_ID}" '.data | map(select(.challenge_id == $challenge_id) | {challenge_id,unlocked,status,checker,ssh_hint,last_event,reset_cooldown})'
+  jq -c --argjson challenge_id "${CHALLENGE_ID}" 'map(select(.challenge_id == $challenge_id) | {challenge_id,unlocked,status,checker,ssh_hint,last_event,reset_cooldown})'

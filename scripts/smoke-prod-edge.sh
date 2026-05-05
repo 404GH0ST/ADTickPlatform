@@ -28,7 +28,7 @@ curl -fsS "${EDGE_BASE_URL}/healthz" | jq -c '.'
 
 echo "challenges:"
 curl -fsS "${EDGE_BASE_URL}/api/v2/challenges" |
-  jq -c '.data | map({id,name})'
+  jq -c 'map({id,name})'
 
 echo "participant overview:"
 curl -fsS "${EDGE_BASE_URL}/" >"${root_response_file}"

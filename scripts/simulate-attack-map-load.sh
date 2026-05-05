@@ -257,7 +257,7 @@ participant_auth() {
   curl_json "authenticate ${email}" -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg email "${email}" --arg password "${password}" '{email:$email,password:$password}')" |
-    jq -er '.data'
+    jq -er '.token'
 }
 
 prefix_slug="$(slug_name "${TEAM_PREFIX}")"
@@ -296,7 +296,7 @@ fi
 
 existing_challenges="$(curl_json "list challenges" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
 SERVICE_SUBNET_OCTET=""
-used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.data[].service_subnet_octet')"
+used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.[].service_subnet_octet')"
 for candidate in $(seq 50 254); do
   if ! printf '%s\n' "${used_subnets}" | grep -qx "${candidate}"; then
     SERVICE_SUBNET_OCTET="${candidate}"
@@ -327,7 +327,7 @@ for ((i = 0; i < TEAM_COUNT; i++)); do
       -H 'Content-Type: application/json' \
       -d "$(jq -nc --arg name "${team_name}" --arg email "${contact_email}" '{name:$name,contact_email:$email}')"
   )"
-  team_id="$(printf '%s' "${team_response}" | jq -er '.data.id')"
+  team_id="$(printf '%s' "${team_response}" | jq -er '.id')"
 
   curl_json "create player ${player_email}" -X POST "${API_URL}/api/v2/admin/players" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -360,7 +360,7 @@ challenge_response="$(
       --argjson service_subnet_octet "${SERVICE_SUBNET_OCTET}" \
       '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,weight:$weight,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')"
 )"
-challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.data.id')"
+challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 
 curl_json "validate challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
@@ -372,7 +372,7 @@ reconcile_response="$(
   curl_json "reconcile deployments" -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${reconcile_response}" | jq -c '.data | {processed_jobs,processed_instances,completed_jobs}'
+printf '%s\n' "${reconcile_response}" | jq -c '{processed_jobs,processed_instances,completed_jobs}'
 
 echo "authenticating participants and reading public service targets"
 for ((i = 0; i < TEAM_COUNT; i++)); do
@@ -400,17 +400,17 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
       -H "Authorization: Bearer ${ADMIN_TOKEN}"
   )"
   tick_advance_latencies_ms+=("${CURL_LAST_TIME_MS}")
-  tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.data.id')"
-  tick_status="$(printf '%s\n' "${tick_response}" | jq -er '.data.status')"
-  tick_total_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.total_checker_runs // 0')"
-  tick_successful_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.successful_checker_runs // 0')"
-  tick_failed_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.failed_checker_runs // 0')"
-  tick_skipped_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.data.skipped_checker_runs // 0')"
+  tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
+  tick_status="$(printf '%s\n' "${tick_response}" | jq -er '.status')"
+  tick_total_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.total_checker_runs // 0')"
+  tick_successful_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.successful_checker_runs // 0')"
+  tick_failed_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.failed_checker_runs // 0')"
+  tick_skipped_checker_runs="$(printf '%s\n' "${tick_response}" | jq -er '.skipped_checker_runs // 0')"
   tick_checker_totals+=("${tick_total_checker_runs}")
   tick_checker_successes+=("${tick_successful_checker_runs}")
   tick_checker_failures+=("${tick_failed_checker_runs}")
   tick_checker_skips+=("${tick_skipped_checker_runs}")
-  printf '%s\n' "${tick_response}" | jq -c '.data | {id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
+  printf '%s\n' "${tick_response}" | jq -c '{id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
 
   if [[ "${ATTACK_MAP_LOAD_VALIDATE_CHECKER_RUNS}" == "true" ]]; then
     checker_runs_response="$(
@@ -420,13 +420,13 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
     )"
     if ! printf '%s\n' "${checker_runs_response}" | jq -e \
       --argjson expected_total "${tick_total_checker_runs}" '
-        .data.total_count == $expected_total and
-        .data.has_next == false and
-        (.data.items | length == $expected_total) and
-        all(.data.items[]?; .status == "success")
+        .total_count == $expected_total and
+        .has_next == false and
+        (.items | length == $expected_total) and
+        all(.items[]?; .status == "success")
       ' >/dev/null; then
       echo "checker runs validation failed for tick ${tick_id}" >&2
-      printf '%s\n' "${checker_runs_response}" | jq -c '.data.items[]? | {tick_id,team_id,phase,status,message}' >&2
+      printf '%s\n' "${checker_runs_response}" | jq -c '.items[]? | {tick_id,team_id,phase,status,message}' >&2
       exit 1
     fi
   fi
@@ -443,7 +443,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
 
     victim_endpoint="$(
       printf '%s\n' "${public_services}" |
-        jq -er --arg challenge_id "${challenge_id}" --arg team_id "${victim_id}" '.data[$challenge_id][$team_id][0]'
+        jq -er --arg challenge_id "${challenge_id}" --arg team_id "${victim_id}" '.[$challenge_id][$team_id][0]'
     )"
 
     stolen_flag="$(
@@ -459,7 +459,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
     )"
     submission_latencies_ms+=("${CURL_LAST_TIME_MS}")
 
-    if ! printf '%s\n' "${submit_response}" | jq -e '.data | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+    if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
       echo "attack submission failed for ${attacker_name} -> ${victim_name}" >&2
       printf '%s\n' "${submit_response}" >&2
       exit 1
@@ -479,7 +479,7 @@ scoreboard_response="$(
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
 scoreboard_recompute_ms="${CURL_LAST_TIME_MS}"
-scoreboard_rows="$(printf '%s\n' "${scoreboard_response}" | jq '.data | length')"
+scoreboard_rows="$(printf '%s\n' "${scoreboard_response}" | jq 'length')"
 
 attack_feed_poll_started_ms="$(now_ms)"
 attack_feed_deadline_ms=$((attack_feed_poll_started_ms + ATTACK_MAP_LOAD_ATTACK_FEED_TIMEOUT_MS))
@@ -490,7 +490,7 @@ while true; do
     curl_json "attack feed summary" "${API_URL}/api/v2/attacks?service=${CHALLENGE_NAME}&limit=200" \
       -H "Authorization: Bearer ${participant_tokens[0]}"
   )"
-  attack_feed_count="$(printf '%s\n' "${attack_feed_response}" | jq -r '.data.total_count')"
+  attack_feed_count="$(printf '%s\n' "${attack_feed_response}" | jq -r '.total_count')"
   if [[ "${attack_feed_count}" == "${total_submissions}" ]]; then
     break
   fi

@@ -102,15 +102,7 @@ for ((i = 0; i < TEAM_COUNT; i++)); do
       -d "$(jq -nc --arg name "${team_name}" --arg email "${contact_email}" '{name:$name,contact_email:$email}')"
   )"
 
-  status="$(printf '%s' "${response}" | jq -r '.status')"
-  if [[ "${status}" != "success" ]]; then
-    message="$(printf '%s' "${response}" | jq -r '.message // "unknown error"')"
-    echo "failed to create ${team_name}: ${message}" >&2
-    printf '%s\n' "${response}" >&2
-    exit 1
-  fi
-
-  printf '%s\n' "${response}" | jq -c '.data | {id,name,contact_email}'
+  printf '%s\n' "${response}" | jq -c '{id,name,contact_email}'
 done
 
 echo "created ${TEAM_COUNT} team(s) successfully."

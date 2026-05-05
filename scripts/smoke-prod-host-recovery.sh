@@ -35,7 +35,7 @@ echo "production host recovery smoke: base_url=${EDGE_BASE_URL}"
 
 echo "pre-restart control-plane snapshot:"
 pre_game_status="$(admin_get /api/v2/admin/game/status)"
-echo "${pre_game_status}" | jq -c '.data.match as $match | .data.scheduler as $scheduler | {match_state:$match.state,scheduler_state:$scheduler.state,current_tick:.data.current_tick.id}'
+echo "${pre_game_status}" | jq -c '.match as $match | .scheduler as $scheduler | {match_state:$match.state,scheduler_state:$scheduler.state,current_tick:.current_tick.id}'
 
 echo "restarting controller-service, wireguard-gateway, and game-core:"
 compose_cmd restart controller-service wireguard-gateway game-core
@@ -63,9 +63,9 @@ echo "re-running host enforcement smoke:"
 
 echo "post-restart control-plane snapshot:"
 post_game_status="$(admin_get /api/v2/admin/game/status)"
-echo "${post_game_status}" | jq -c '.data.match as $match | .data.scheduler as $scheduler | {match_state:$match.state,scheduler_state:$scheduler.state,current_tick:.data.current_tick.id}'
-admin_get /api/v2/admin/wireguard/status | jq -c '.data | {mode,state,peers_active,revision}'
-admin_get /api/v2/admin/access/status | jq -c '.data | {mode,state,policies_total,ssh_open_services,revision}'
+echo "${post_game_status}" | jq -c '.match as $match | .scheduler as $scheduler | {match_state:$match.state,scheduler_state:$scheduler.state,current_tick:.current_tick.id}'
+admin_get /api/v2/admin/wireguard/status | jq -c '{mode,state,peers_active,revision}'
+admin_get /api/v2/admin/access/status | jq -c '{mode,state,policies_total,ssh_open_services,revision}'
 
 echo "host recovery smoke passed:"
 printf '  compose_project=%s edge=%s\n' "${COMPOSE_PROJECT}" "${EDGE_BASE_URL}"

@@ -135,7 +135,7 @@ team_token="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
     -d "${auth_payload}" |
-    jq -er '.data'
+    jq -er '.token'
 )"
 
 echo "fetching unlock proof from deployed service"
@@ -172,56 +172,56 @@ curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/unlock"
   -H "Authorization: Bearer ${team_token}" \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
-  jq -c '.data | {challenge_id,team_id,unlocked}'
+  jq -c '{challenge_id,team_id,unlocked}'
 
 echo "requesting one-time ssh credential"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/ssh-session" \
   -H "Authorization: Bearer ${team_token}" |
-  jq -c '.data | {challenge_id,host,port,username,password_present:(.password | length > 0)}'
+  jq -c '{host,port,username,password_present:(.password | length > 0)}'
 
 echo "starting match"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/match/start" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" |
-  jq -c '.data | {state,accepting_submissions,started_at}'
+  jq -c '{state,accepting_submissions,started_at}'
 
 echo "advancing authoritative game tick"
 tick_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/ticks/advance" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${tick_response}" | jq -c '.data | {id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs,message}'
+printf '%s\n' "${tick_response}" | jq -c '{id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs,message}'
 
-tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.data.id')"
+tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
 
 echo "reading persisted checker runs for deployed challenge"
 checker_runs_response="$(
   curl -fsS "http://127.0.0.1:8080/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=20" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${checker_runs_response}" | jq -c '.data | {total_count,has_next}'
+printf '%s\n' "${checker_runs_response}" | jq -c '{total_count,has_next}'
 
-checker_run_count="$(printf '%s\n' "${checker_runs_response}" | jq -er '.data.total_count')"
+checker_run_count="$(printf '%s\n' "${checker_runs_response}" | jq -er '.total_count')"
 if [[ "${checker_run_count}" -ne 12 ]]; then
   echo "unexpected checker run count for clean sample tick: got ${checker_run_count}, want 12" >&2
   exit 1
 fi
 
-if ! printf '%s\n' "${checker_runs_response}" | jq -e '.data.items | length == 12 and all(.[]; .status == "success")' >/dev/null; then
+if ! printf '%s\n' "${checker_runs_response}" | jq -e '.items | length == 12 and all(.[]; .status == "success")' >/dev/null; then
   echo "checker runs were not all successful for the clean sample tick" >&2
-  printf '%s\n' "${checker_runs_response}" | jq -c '.data.items[] | {team_id,phase,status,message}' >&2
+  printf '%s\n' "${checker_runs_response}" | jq -c '.items[] | {team_id,phase,status,message}' >&2
   exit 1
 fi
 
-printf '%s\n' "${checker_runs_response}" | jq -c '.data.items[] | {team_id,phase,status,target}'
+printf '%s\n' "${checker_runs_response}" | jq -c '.items[] | {team_id,phase,status,target}'
 
 echo "recomputing scoreboard from authoritative tick state"
 scoreboard_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/scoring/recompute" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${scoreboard_response}" | jq -c '.data[] | {rank,team,attack,defense,sla,total,delta}'
+printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {rank,team,attack,defense,sla,total,delta}'
 
-if ! printf '%s\n' "${scoreboard_response}" | jq -e '.data | length == 4 and all(.[]; .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)' >/dev/null; then
+if ! printf '%s\n' "${scoreboard_response}" | jq -e 'length == 4 and all(.[]; .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)' >/dev/null; then
   echo "unexpected scoreboard after clean sample tick" >&2
   exit 1
 fi
@@ -233,7 +233,7 @@ public_services="$(
 )"
 victim_endpoint="$(
   printf '%s\n' "${public_services}" |
-    jq -er --arg challenge_id "${challenge_id}" '.data[$challenge_id]["102"][0]'
+    jq -er --arg challenge_id "${challenge_id}" '.[$challenge_id]["102"][0]'
 )"
 stolen_flag="$(
   docker exec -i "${container_name}" python3 - <<PY
@@ -256,8 +256,8 @@ submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${submit_response}" | jq -c '.data[] | {flag,verdict}'
-if ! printf '%s\n' "${submit_response}" | jq -e '.data | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,verdict}'
+if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
   echo "stolen flag submission did not return the expected success verdict" >&2
   exit 1
 fi
@@ -269,8 +269,8 @@ duplicate_submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${duplicate_submit_response}" | jq -c '.data[] | {flag,verdict}'
-if ! printf '%s\n' "${duplicate_submit_response}" | jq -e '.data | length == 1 and .[0].verdict == "flag already submitted."' >/dev/null; then
+printf '%s\n' "${duplicate_submit_response}" | jq -c '.results[] | {flag,verdict}'
+if ! printf '%s\n' "${duplicate_submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag already submitted."' >/dev/null; then
   echo "duplicate stolen flag submission did not return the expected duplicate verdict" >&2
   exit 1
 fi
@@ -279,13 +279,13 @@ echo "reading public attack feed for the accepted attack"
 attack_feed_response="$(
   curl -fsS "http://127.0.0.1:8080/api/v2/attacks?service=${CHALLENGE_NAME}&tick_from=${tick_id}&tick_to=${tick_id}" 
 )"
-printf '%s\n' "${attack_feed_response}" | jq -c '.data.items[] | {attacker,victim,service,tick,verdict}'
+printf '%s\n' "${attack_feed_response}" | jq -c '.items[] | {attacker,victim,service,tick,verdict}'
 if ! printf '%s\n' "${attack_feed_response}" | jq -e '
-  .data.total_count == 1 and
-  .data.items[0].attacker == "Team Alpha" and
-  .data.items[0].victim == "Team Delta" and
-  .data.items[0].service == "'"${CHALLENGE_NAME}"'" and
-  .data.items[0].tick == '"${tick_id}"'
+  .total_count == 1 and
+  .items[0].attacker == "Team Alpha" and
+  .items[0].victim == "Team Delta" and
+  .items[0].service == "'"${CHALLENGE_NAME}"'" and
+  .items[0].tick == '"${tick_id}"'
 ' >/dev/null; then
   echo "accepted attack feed did not match the expected stolen-flag event" >&2
   exit 1
@@ -296,10 +296,10 @@ post_submit_scoreboard="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/scoring/recompute" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}"
 )"
-printf '%s\n' "${post_submit_scoreboard}" | jq -c '.data[] | {rank,team,attack,defense,sla,total,delta}'
+printf '%s\n' "${post_submit_scoreboard}" | jq -c '.[] | {rank,team,attack,defense,sla,total,delta}'
 
 if ! printf '%s\n' "${post_submit_scoreboard}" | jq -e '
-  .data | length == 4 and
+  length == 4 and
   any(.[]; .team == "Team Alpha" and .attack == 10 and .defense == 1000 and .sla == 11 and .total == 1021) and
   any(.[]; .team == "Team Delta" and .attack == 0 and .defense == 100 and .sla == 11 and .total == 111) and
   any(.[]; .team == "Team Orchid" and .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011) and

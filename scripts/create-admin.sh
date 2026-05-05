@@ -38,27 +38,40 @@ fi
 
 echo "creating organizer account: ${EMAIL} (${DISPLAY_NAME})"
 
-RESPONSE=$(curl -s -X POST "${API_URL}/api/v2/admin/players" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"team_id\": 0,
-    \"display_name\": \"${DISPLAY_NAME}\",
-    \"email\": \"${EMAIL}\",
-    \"password\": \"${PASSWORD}\",
-    \"role\": \"organizer\"
-  }")
+curl_json() {
+  local label="$1"
+  shift
 
-STATUS=$(echo "${RESPONSE}" | jq -r '.status')
+  local response_file
+  response_file="$(mktemp)"
 
-if [[ "${STATUS}" != "success" ]]; then
-  MESSAGE=$(echo "${RESPONSE}" | jq -r '.message // "unknown error"')
-  echo "failed to create organizer: ${MESSAGE}" >&2
-  echo "response: ${RESPONSE}" >&2
-  exit 1
-fi
+  local status
+  status="$(curl -sS -o "${response_file}" -w '%{http_code}' "$@")"
+  if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
+    echo "${label} failed (status=${status}):" >&2
+    cat "${response_file}" >&2
+    rm -f "${response_file}"
+    exit 1
+  fi
 
-PLAYER_ID="$(echo "${RESPONSE}" | jq -r '.data.id // empty')"
+  cat "${response_file}"
+  rm -f "${response_file}"
+}
+
+RESPONSE="$(
+  curl_json "create organizer" -X POST "${API_URL}/api/v2/admin/players" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"team_id\": 0,
+      \"display_name\": \"${DISPLAY_NAME}\",
+      \"email\": \"${EMAIL}\",
+      \"password\": \"${PASSWORD}\",
+      \"role\": \"organizer\"
+    }"
+)"
+
+PLAYER_ID="$(echo "${RESPONSE}" | jq -r '.id // empty')"
 if [[ -z "${PLAYER_ID}" ]]; then
   echo "failed to parse organizer player id from response" >&2
   echo "response: ${RESPONSE}" >&2
@@ -66,24 +79,18 @@ if [[ -z "${PLAYER_ID}" ]]; then
 fi
 
 echo "fetching WireGuard config for organizer player ${PLAYER_ID}..."
-WIREGUARD_RESPONSE="$(curl -s -X GET "${API_URL}/api/v2/admin/players/${PLAYER_ID}/wireguard" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}")"
-
-WIREGUARD_STATUS="$(echo "${WIREGUARD_RESPONSE}" | jq -r '.status')"
-if [[ "${WIREGUARD_STATUS}" != "success" ]]; then
-  MESSAGE="$(echo "${WIREGUARD_RESPONSE}" | jq -r '.message // "unknown error"')"
-  echo "failed to fetch organizer WireGuard config: ${MESSAGE}" >&2
-  echo "response: ${WIREGUARD_RESPONSE}" >&2
-  exit 1
-fi
+WIREGUARD_RESPONSE="$(
+  curl_json "fetch organizer wireguard" -X GET "${API_URL}/api/v2/admin/players/${PLAYER_ID}/wireguard" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+)"
 
 mkdir -p "${WIREGUARD_OUTPUT_DIR}"
-WIREGUARD_FILE_NAME="$(echo "${WIREGUARD_RESPONSE}" | jq -r '.data.download_name // empty')"
+WIREGUARD_FILE_NAME="$(echo "${WIREGUARD_RESPONSE}" | jq -r '.download_name // empty')"
 if [[ -z "${WIREGUARD_FILE_NAME}" ]]; then
   WIREGUARD_FILE_NAME="organizer-player-${PLAYER_ID}.conf"
 fi
 WIREGUARD_CONFIG_PATH="${WIREGUARD_OUTPUT_DIR}/${WIREGUARD_FILE_NAME}"
-echo "${WIREGUARD_RESPONSE}" | jq -r '.data.config' > "${WIREGUARD_CONFIG_PATH}"
+echo "${WIREGUARD_RESPONSE}" | jq -r '.config' > "${WIREGUARD_CONFIG_PATH}"
 
 if [[ "${AUTO_RECONCILE}" == "true" ]]; then
   echo "reconciling wireguard/access runtime state..."
