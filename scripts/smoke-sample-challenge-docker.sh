@@ -174,7 +174,7 @@ curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/unlock"
   -d "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
   jq -c '{challenge_id,team_id,unlocked}'
 
-echo "requesting one-time ssh credential"
+echo "requesting ssh credential"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/ssh-session" \
   -H "Authorization: Bearer ${team_token}" |
   jq -c '{host,port,username,password_present:(.password | length > 0)}'
