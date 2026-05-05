@@ -31,3 +31,8 @@ __pycache__/
 *.pyc
 
 .agent/
+
+dupes.json
+fallow.json
+health.json
+schema.json
