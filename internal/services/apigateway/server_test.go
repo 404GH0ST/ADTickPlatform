@@ -1572,6 +1572,79 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 	}
 }
 
+func TestAdminCreateChallengeRejectsInvalidSourceBundlePath(t *testing.T) {
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", t.TempDir())
+
+	mux := newTestMux()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/admin/challenges",
+		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"missing-source","weight":2}`),
+	)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected challenge create 400, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "challenge source path is invalid." {
+		t.Fatalf("unexpected problem payload %+v", problem)
+	}
+}
+
+func TestAdminCreateChallengeAcceptsValidSourceBundlePath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", root)
+	if err := os.WriteFile(filepath.Join(root, "sample-lfi-challenge.tar.gz"), []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("write source bundle: %v", err)
+	}
+
+	mux := newTestMux()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/admin/challenges",
+		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"sample-lfi-challenge.tar.gz","weight":2}`),
+	)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected challenge create 200, got %d", response.Code)
+	}
+	challenge := decodeCompat[adminChallenge](t, response.Body.Bytes())
+	if challenge.SourceBundlePath != "sample-lfi-challenge.tar.gz" {
+		t.Fatalf("unexpected source bundle path %+v", challenge)
+	}
+}
+
+func TestAdminUpdateChallengeRejectsInvalidSourceBundlePath(t *testing.T) {
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", t.TempDir())
+
+	mux := newTestMux()
+	updateRequest := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/admin/challenges/1",
+		bytes.NewBufferString(`{"name":"banking","baseline_image":"registry.local/banking:baseline","checker_image":"registry.local/banking-checker:latest","source_bundle_path":"missing-source","weight":1}`),
+	)
+	updateRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	updateResponse := httptest.NewRecorder()
+
+	mux.ServeHTTP(updateResponse, updateRequest)
+
+	if updateResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected challenge update 400, got %d", updateResponse.Code)
+	}
+	problem := decodeProblemCompat(t, updateResponse.Body.Bytes())
+	if problem.Detail != "challenge source path is invalid." {
+		t.Fatalf("unexpected problem payload %+v", problem)
+	}
+}
+
 func TestAdminDeployUsesConfiguredServiceSubnetAndPort(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"

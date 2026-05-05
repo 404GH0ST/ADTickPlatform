@@ -23,6 +23,15 @@ type challengeSourceDescriptor struct {
 
 var errChallengeSourceUnavailable = errors.New("challenge source unavailable")
 
+func validateChallengeSourceReference(sourceBundlePath string) error {
+	trimmed := sanitizeSourceBundlePath(sourceBundlePath)
+	if trimmed == "" {
+		return nil
+	}
+	_, _, err := resolveChallengeSourcePath(trimmed)
+	return err
+}
+
 func (s *Server) handleChallengeSourceDownload(w http.ResponseWriter, r *http.Request) {
 	teamID, ok := s.requireTeamAuth(w, r, "please authenticate before source access.")
 	if !ok {

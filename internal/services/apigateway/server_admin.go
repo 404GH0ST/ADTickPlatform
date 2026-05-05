@@ -356,6 +356,10 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge request is invalid.")
 		return
 	}
+	if err := validateChallengeSourceReference(req.SourceBundlePath); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid source path", "challenge source path is invalid.")
+		return
+	}
 	challenge, err := s.store.CreateAdminChallenge(r.Context(), req, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -406,6 +410,10 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 	var req adminUpdateChallengeRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge update request is invalid.")
+		return
+	}
+	if err := validateChallengeSourceReference(req.SourceBundlePath); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid source path", "challenge source path is invalid.")
 		return
 	}
 	challenge, err := s.store.UpdateAdminChallenge(r.Context(), challengeID, req)
