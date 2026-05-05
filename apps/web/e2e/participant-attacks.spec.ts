@@ -212,8 +212,27 @@ test("participant service actions update the service card through unlock, ssh, r
 
   await serviceCard.getByRole("button", { name: "SSH Access" }).click();
   const sshDialog = page.getByRole("dialog", { name: "SSH Access" });
-  await expect(sshDialog.getByText("ssh root@10.80.50.11 -p 22")).toBeVisible();
-  await expect(sshDialog.getByText("Adp-team-credential-Aa1!")).toBeVisible();
+  await expect(
+    sshDialog.getByText("ssh root@10.80.50.11 -p 22").first(),
+  ).toBeVisible();
+  await expect(
+    sshDialog.getByText("Adp-team-credential-Aa1!").first(),
+  ).toBeVisible();
+  await expect(sshDialog.getByText("Patch Workflow")).toBeVisible();
+  await expect(
+    sshDialog.getByText(
+      "Participant patching happens directly inside the owned service container.",
+    ),
+  ).toBeVisible();
+  await expect(
+    sshDialog.getByRole("link", { name: "Download Source Bundle" }),
+  ).toHaveAttribute("href", "/api/platform/challenges/1/source");
+  await expect(
+    sshDialog.getByText("Use Restart after a live patch"),
+  ).toBeVisible();
+  await expect(
+    sshDialog.getByText("Use Factory Reset to discard the current patch state"),
+  ).toBeVisible();
   await sshDialog.getByRole("button", { name: "Close" }).first().click();
 
   await serviceCard.getByRole("button", { name: "Restart" }).click();

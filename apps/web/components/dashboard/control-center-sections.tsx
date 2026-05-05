@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { Download, LoaderCircle } from "lucide-react";
+import { Download, LoaderCircle, Wrench } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
@@ -414,7 +414,7 @@ export function SSHSessionDialog({
   issuedSession,
   open,
   pendingAction,
-
+  target,
   onClose,
   onConfirm,
 }: SSHSessionDialogProps): ReactElement {
@@ -445,11 +445,14 @@ export function SSHSessionDialog({
             </div>
           ) : null}
           {issuedSession ? (
-            <IssuedRootCredentialBlock issuedSession={issuedSession} />
+            <IssuedRootCredentialBlock
+              issuedSession={issuedSession}
+              target={target}
+            />
           ) : null}
         </div>
       }
-      description="Connect over WireGuard with the stable team root credential."
+      description="Connect over WireGuard with the stable team root credential, patch live files in the owned container, and use restart or factory reset for recovery."
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -696,21 +699,83 @@ function ServiceTargetBlock({
 
 function IssuedRootCredentialBlock({
   issuedSession,
+  target,
 }: {
   issuedSession: SSHSessionData;
+  target: ServiceRow | null;
 }): ReactElement {
   return (
-    <InfoPanel compact>
-      <p className="font-mono text-sm text-foreground">
-        {issuedSession.connection_hint}
+    <div className="space-y-4">
+      <InfoPanel compact>
+        <p className="font-mono text-sm text-foreground">
+          {issuedSession.connection_hint}
+        </p>
+        <InfoLine
+          className="mt-2"
+          label="password"
+          value={issuedSession.password}
+          valueClassName="font-mono"
+        />
+      </InfoPanel>
+      <PatchWorkflowBlock issuedSession={issuedSession} target={target} />
+    </div>
+  );
+}
+
+function PatchWorkflowBlock({
+  issuedSession,
+  target,
+}: {
+  issuedSession: SSHSessionData;
+  target: ServiceRow | null;
+}): ReactElement {
+  return (
+    <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <Wrench className="h-4 w-4" />
+        Patch Workflow
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Participant patching happens directly inside the owned service
+        container. There is no participant image redeploy path.
       </p>
-      <InfoLine
-        className="mt-2"
-        label="password"
-        value={issuedSession.password}
-        valueClassName="font-mono"
-      />
-    </InfoPanel>
+      {target?.hasSourceDownload ? (
+        <Button asChild size="sm" variant="outline">
+          <a
+            href={`/api/platform/challenges/${target.challengeId}/source`}
+            download
+          >
+            <Download className="h-4 w-4" />
+            Download Source Bundle
+          </a>
+        </Button>
+      ) : null}
+      <ol className="space-y-2 text-sm text-muted-foreground">
+        <li>
+          <span className="font-medium text-foreground">1.</span> Review the
+          whitebox source bundle and identify the file or config you need to
+          change.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">2.</span> Connect with{" "}
+          <span className="font-mono text-foreground">
+            {issuedSession.connection_hint}
+          </span>{" "}
+          and edit files directly inside the running container.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">3.</span> Use{" "}
+          <span className="font-medium text-foreground">Restart</span> after a
+          live patch when you want to keep the current filesystem changes.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">4.</span> Use{" "}
+          <span className="font-medium text-foreground">Factory Reset</span> to
+          discard the current patch state and restore the organizer baseline
+          image.
+        </li>
+      </ol>
+    </div>
   );
 }
 

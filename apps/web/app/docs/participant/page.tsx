@@ -24,7 +24,7 @@ const participantSteps = [
   {
     step: '4',
     title: 'Patch Or Recover',
-    detail: 'Open the stable team SSH credential, patch safely, or use restart and factory reset when needed.',
+    detail: 'Open the stable team SSH credential, patch live files inside the owned container, restart to keep changes, or factory reset to discard them.',
   },
   {
     step: '5',
@@ -88,6 +88,20 @@ export default async function ParticipantManualPage() {
                   </li>
                 ))}
               </ul>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Direct Patch Workflow</CardTitle>
+              <CardDescription>
+                Participant patching uses direct container access after unlock. There is no participant image redeploy endpoint.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>Download the whitebox source bundle for the challenge, recover the unlock proof from your own service, and request the stable SSH credential.</p>
+              <p>Patch files directly inside the running service container, then use <code>POST /api/v2/services/{'{challenge_id}'}/reset/restart</code> when you want to keep the current filesystem changes.</p>
+              <p>Use <code>POST /api/v2/services/{'{challenge_id}'}/reset/factory</code> only when you want to throw away the current patch state and return to the organizer baseline image.</p>
             </CardContent>
           </Card>
         </div>
