@@ -190,13 +190,20 @@ Behavior:
 
 ### POST `/api/v2/admin/deployments/reconcile`
 
-Advance queued deployment jobs to ready.
+Run the trusted deployment converge path.
 
 Behavior:
 
+- asks the controller to converge runtime state, deployment rows, controller access truth, and WireGuard truth
 - marks queued `service_instances` as `ready`
 - updates `team_service_states` from `provisioning` to `stable`
 - completes the matching `deployment_jobs`
+- does not fall back to store-only success when the controller path is unavailable
+
+Failure semantics:
+
+- `503` when the controller-owned trusted reconcile path is unavailable
+- `502` when runtime convergence finishes but access or WireGuard truth is still not established
 
 ### GET `/api/v2/admin/audit-logs`
 
@@ -376,7 +383,7 @@ The repository now also exposes controller-facing endpoints:
 
 These use the same bearer token for now and operate on the same Postgres-backed state.
 
-The organizer Next.js route prefers the controller service for reconcile and falls back to the gateway-side state transition if the controller is unavailable.
+The organizer Next.js route now preserves controller and gateway reconcile statuses directly; it does not flatten trusted reconcile failures into a generic success path.
 
 Unlock operations in the participant API now also trigger controller-side access reconcile so SSH access can be opened for the owning team's active peers immediately after unlock.
 

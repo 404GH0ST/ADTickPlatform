@@ -15,10 +15,12 @@ ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
 EMAIL="${AD_PLATFORM_EMAIL:-alpha.captain@example.com}"
 PASSWORD="${AD_PLATFORM_PASSWORD:-alpha-secret}"
 TEAM_ID="${AD_PLATFORM_TEAM_ID:-}"
+KEEP_CHALLENGE="${RUNTIME_SMOKE_KEEP_CHALLENGE:-0}"
 UNIQUE_SUFFIX="$(date +%s)"
 CHALLENGE_NAME="${RUNTIME_SMOKE_CHALLENGE_NAME:-runtime-smoke-${UNIQUE_SUFFIX}}"
 BASELINE_IMAGE="${RUNTIME_SMOKE_BASELINE_IMAGE:-registry.local/${CHALLENGE_NAME}:baseline}"
 CHECKER_IMAGE="${RUNTIME_SMOKE_CHECKER_IMAGE:-registry.local/${CHALLENGE_NAME}-checker:latest}"
+challenge_id=""
 
 curl_json() {
   local label="$1"
@@ -39,6 +41,47 @@ curl_json() {
   cat "${response_file}"
   rm -f "${response_file}"
 }
+
+cleanup_runtime_smoke() {
+  local cleanup_status=0
+
+  if [[ -z "${challenge_id}" ]]; then
+    return 0
+  fi
+
+  if [[ "${KEEP_CHALLENGE}" == "1" ]]; then
+    echo "cleanup skipped: retaining challenge ${challenge_id} (${CHALLENGE_NAME})"
+    return 0
+  fi
+
+  echo "cleanup:"
+  if curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+    "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+    grep -qx '204'; then
+    echo "  deleted challenge_id=${challenge_id}"
+  else
+    echo "  failed to delete challenge_id=${challenge_id}" >&2
+    cleanup_status=1
+  fi
+
+  return "${cleanup_status}"
+}
+
+finish() {
+  local exit_code=$?
+  trap - EXIT
+
+  if ! cleanup_runtime_smoke; then
+    if [[ "${exit_code}" -eq 0 ]]; then
+      exit_code=1
+    fi
+  fi
+
+  exit "${exit_code}"
+}
+
+trap finish EXIT
 
 existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
 
