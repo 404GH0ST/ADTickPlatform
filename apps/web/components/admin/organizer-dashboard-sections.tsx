@@ -216,6 +216,7 @@ type GameTabProps = {
   onApplySchedulerEventFilters: () => void;
   onAttackFilterChange: (next: GameFilters["attack"]) => void;
   onCheckerRunFilterChange: (next: GameFilters["checkerRun"]) => void;
+  onCopyRuntimeHealthSummary: () => void;
   onDownloadRuntimeHealthReport: () => void;
   onPageAttacks: (direction: "prev" | "next") => void;
   onPageCheckerRuns: (direction: "prev" | "next") => void;
@@ -1365,6 +1366,7 @@ export function GameTab({
   onApplySchedulerEventFilters,
 
   onCheckerRunFilterChange,
+  onCopyRuntimeHealthSummary,
   onDownloadRuntimeHealthReport,
 
   onPageCheckerRuns,
@@ -1439,6 +1441,7 @@ export function GameTab({
           pendingAction={pendingAction}
           serviceMetrics={serviceMetrics}
           wireGuardGatewayStatus={wireGuardGatewayStatus}
+          onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
           onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
           onRefreshDeploymentRows={onRefreshDeploymentRows}
           onRefreshOperationsStatus={onRefreshOperationsStatus}
@@ -2020,6 +2023,7 @@ type RuntimeHealthSnapshot = {
 function RuntimeHealthCard({
   accessStatus,
   deploymentRows,
+  onCopyRuntimeHealthSummary,
   onDownloadRuntimeHealthReport,
   operationsStatus,
   pendingAction,
@@ -2031,6 +2035,7 @@ function RuntimeHealthCard({
 }: {
   accessStatus: AdminControllerAccessStatus | null;
   deploymentRows: AdminDeploymentJob[];
+  onCopyRuntimeHealthSummary: () => void;
   onDownloadRuntimeHealthReport: () => void;
   operationsStatus: AdminOperationsStatus | null;
   pendingAction: string | null;
@@ -2149,6 +2154,20 @@ function RuntimeHealthCard({
               <RefreshCw className="h-4 w-4" />
             )}
             Refresh Jobs
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="copy-runtime-health-summary"
+            disabled={pendingAction !== null}
+            onClick={onCopyRuntimeHealthSummary}
+          >
+            {pendingAction === "runtime:summary" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Copy Summary
           </Button>
           <Button
             size="sm"

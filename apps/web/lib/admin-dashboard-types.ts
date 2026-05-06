@@ -390,6 +390,7 @@ export type AdminRuntimeEvidenceFailure = {
 export type AdminRuntimeEvidenceReport = {
   generated_at: string;
   failures: AdminRuntimeEvidenceFailure[];
+  summary: string;
   access_status: AdminControllerAccessStatus | null;
   deployments: AdminDeploymentJob[] | null;
   game_status: AdminGameStatus | null;

@@ -124,6 +124,18 @@ test("organizer game page refreshes runtime alerts on focus", async ({
   ).toBeVisible();
 });
 
+test("organizer game page can copy a concise runtime summary", async ({
+  page,
+}) => {
+  await page.goto("/admin/game");
+
+  await page.getByTestId("copy-runtime-health-summary").click();
+
+  await expect(
+    page.getByText("Copied runtime summary to clipboard."),
+  ).toBeVisible();
+});
+
 test("organizer game page shows live service metrics and refreshes derived health", async ({
   page,
   request,

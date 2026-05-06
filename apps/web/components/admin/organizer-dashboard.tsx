@@ -106,6 +106,9 @@ export function OrganizerDashboard({
         onConfirmDelete: () => {
           void state.confirmDelete();
         },
+        onCopyRuntimeHealthSummary: () => {
+          void state.copyRuntimeHealthSummary();
+        },
         onDownloadRuntimeHealthReport: () => {
           void state.downloadRuntimeHealthReport();
         },
@@ -275,6 +278,7 @@ function renderOrganizerPanel({
   onCloseDeleteDialog,
   onCloseWireGuardDialog,
   onConfirmDelete,
+  onCopyRuntimeHealthSummary,
   onDownloadRuntimeHealthReport,
   onOpenCreateDialog,
   onOpenEditDialog,
@@ -358,6 +362,7 @@ function renderOrganizerPanel({
   onCloseDeleteDialog: () => void;
   onCloseWireGuardDialog: () => void;
   onConfirmDelete: () => void;
+  onCopyRuntimeHealthSummary: () => void;
   onDownloadRuntimeHealthReport: () => void;
   onOpenCreateDialog: (entity: "team" | "player" | "challenge") => void;
   onOpenEditDialog: (
@@ -555,6 +560,7 @@ function renderOrganizerPanel({
           onRefreshRuntimeHealth={onRefreshRuntimeHealth}
           onRefreshServiceMetrics={onRefreshServiceMetrics}
           onRefreshSchedulerEvents={onRefreshSchedulerEvents}
+          onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
           onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
       onResetAttackFilters={onResetAttackFilters}
       onResetCheckerRunFilters={onResetCheckerRunFilters}

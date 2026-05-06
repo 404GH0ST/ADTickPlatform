@@ -16,6 +16,7 @@ import type {
   AdminGameStatus,
   AdminGameTickStatus,
   AdminOperationsStatus,
+  AdminRuntimeEvidenceReport,
   AdminServiceMetricSnapshot,
   AdminPlayer,
   AdminReconcileResult,
@@ -79,6 +80,34 @@ const defaultSchedulerEventFilters = {
   source: "",
   state: "",
 };
+
+async function writeTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back to document copy for browsers or harnesses without clipboard permission.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("clipboard write failed");
+  }
+}
 
 type TeamDraft = {
   contactEmail: string;
@@ -149,6 +178,7 @@ export type OrganizerDashboardState = {
   createChallenge: () => Promise<void>;
   createPlayer: () => Promise<void>;
   createTeam: () => Promise<void>;
+  copyRuntimeHealthSummary: () => Promise<void>;
   deleteTarget: DeleteTarget | null;
   downloadRuntimeHealthReport: () => Promise<void>;
   editingId: number | null;
@@ -772,6 +802,30 @@ export function useOrganizerDashboard({
         error instanceof Error
           ? error.message
           : "runtime health report download failed",
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function copyRuntimeHealthSummary(): Promise<void> {
+    setPendingAction("runtime:summary");
+    setActionError(null);
+    setActionNote(null);
+
+    try {
+      const response = await fetch("/api/admin/runtime-health/report", {
+        cache: "no-store",
+      });
+      const payload = await processApiResponse<AdminRuntimeEvidenceReport>(
+        response,
+        "/api/admin/runtime-health/report",
+      );
+      await writeTextToClipboard(payload.summary);
+      setActionNote("Copied runtime summary to clipboard.");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "runtime summary copy failed",
       );
     } finally {
       setPendingAction(null);
@@ -2122,6 +2176,7 @@ export function useOrganizerDashboard({
     createTeam: async () => {
       await createTeam();
     },
+    copyRuntimeHealthSummary,
     deleteTarget,
     downloadRuntimeHealthReport,
     editingId,

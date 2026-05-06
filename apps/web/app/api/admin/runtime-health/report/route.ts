@@ -40,6 +40,32 @@ function readSettled<T>(
   return null;
 }
 
+function buildSummary(report: Omit<AdminRuntimeEvidenceReport, "summary">): string {
+  const deployments = report.deployments ?? [];
+  const pendingDeployments = deployments.filter(
+    (deployment) =>
+      !["completed", "failed", "superseded"].includes(deployment.status),
+  ).length;
+  const failedDeployments = deployments.filter(
+    (deployment) =>
+      deployment.status === "failed" || deployment.failed_team_count > 0,
+  ).length;
+  const operationsAlerts = report.operations_status?.alerts ?? [];
+  const criticalAlerts = operationsAlerts.filter(
+    (alert) => alert.severity === "critical",
+  ).length;
+  const warningAlerts = operationsAlerts.length - criticalAlerts;
+
+  return [
+    `Runtime summary generated ${report.generated_at}`,
+    `Deployments: ${pendingDeployments} pending, ${failedDeployments} failed`,
+    `Access: ${report.access_status?.state ?? "unavailable"}${report.access_status?.revision ? ` (${report.access_status.revision})` : ""}`,
+    `WireGuard: ${report.wireguard_status?.state ?? "unavailable"}${report.wireguard_status?.revision ? ` (${report.wireguard_status.revision})` : ""}`,
+    `Operations alerts: ${criticalAlerts} critical, ${warningAlerts} warning`,
+    `Report failures: ${report.failures.length}`,
+  ].join("\n");
+}
+
 export async function GET() {
   const [
     deploymentsResult,
@@ -59,7 +85,7 @@ export async function GET() {
 
   const failures: AdminRuntimeEvidenceFailure[] = [];
 
-  const report: AdminRuntimeEvidenceReport = {
+  const partialReport = {
     generated_at: new Date().toISOString(),
     failures,
     deployments: readSettled<AdminDeploymentJob[]>(
@@ -92,6 +118,11 @@ export async function GET() {
       gameStatusResult,
       failures,
     ),
+  };
+
+  const report: AdminRuntimeEvidenceReport = {
+    ...partialReport,
+    summary: buildSummary(partialReport),
   };
 
   const timestamp = report.generated_at.replace(/[:.]/g, "-");
