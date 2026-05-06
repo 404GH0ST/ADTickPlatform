@@ -782,6 +782,9 @@ export function useOrganizerDashboard({
         );
       }
 
+      const report = (await response
+        .clone()
+        .json()) as AdminRuntimeEvidenceReport;
       const blob = await response.blob();
       const contentDisposition =
         response.headers.get("content-disposition") ?? "";
@@ -796,7 +799,13 @@ export function useOrganizerDashboard({
       anchor.click();
       URL.revokeObjectURL(objectUrl);
 
-      setActionNote(`Downloaded runtime evidence report as ${downloadName}.`);
+      setActionNote(
+        report.failures.length === 0
+          ? `Downloaded complete runtime evidence report as ${downloadName}.`
+          : `Downloaded partial runtime evidence report as ${downloadName}; missing ${report.failures
+              .map((failure) => failure.section)
+              .join(", ")}.`,
+      );
     } catch (error) {
       setActionError(
         error instanceof Error

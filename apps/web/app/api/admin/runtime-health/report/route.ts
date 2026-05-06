@@ -55,6 +55,7 @@ function buildSummary(report: Omit<AdminRuntimeEvidenceReport, "summary">): stri
     (alert) => alert.severity === "critical",
   ).length;
   const warningAlerts = operationsAlerts.length - criticalAlerts;
+  const failedSections = report.failures.map((failure) => failure.section);
 
   return [
     `Runtime summary generated ${report.generated_at}`,
@@ -62,7 +63,9 @@ function buildSummary(report: Omit<AdminRuntimeEvidenceReport, "summary">): stri
     `Access: ${report.access_status?.state ?? "unavailable"}${report.access_status?.revision ? ` (${report.access_status.revision})` : ""}`,
     `WireGuard: ${report.wireguard_status?.state ?? "unavailable"}${report.wireguard_status?.revision ? ` (${report.wireguard_status.revision})` : ""}`,
     `Operations alerts: ${criticalAlerts} critical, ${warningAlerts} warning`,
-    `Report failures: ${report.failures.length}`,
+    report.failures.length === 0
+      ? "Report completeness: all sections loaded"
+      : `Report completeness: partial, missing ${failedSections.join(", ")}`,
   ].join("\n");
 }
 

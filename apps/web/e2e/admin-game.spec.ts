@@ -368,6 +368,10 @@ test("organizer game page shows aggregated runtime drift warnings and refreshes 
   await expect(runtimeHealthCard).toContainText(
     "Runtime drift warnings are active. Review deployments, access, and gateway state before assuming the stack is converged.",
   );
+  await expect(runtimeHealthCard).toContainText("Incident workflow");
+  await expect(runtimeHealthCard).toContainText("1. Refresh truth");
+  await expect(runtimeHealthCard).toContainText("2. Inspect drift");
+  await expect(runtimeHealthCard).toContainText("3. Capture evidence");
   await expect(runtimeHealthCard).toContainText("1 pending / 0 failed");
   await expect(runtimeHealthCard).toContainText("idle (host)");
   await expect(runtimeHealthCard).toContainText(
@@ -402,6 +406,41 @@ test("organizer game page can download a runtime evidence report", async ({
   expect(report.access_status?.state).toBe("applied");
   expect(report.wireguard_status?.state).toBe("applied");
   expect(report.operations_status?.healthy).toBe(true);
+  expect(report.summary).toContain("Report completeness: all sections loaded");
+  await expect(
+    page.getByText("Downloaded complete runtime evidence report as"),
+  ).toBeVisible();
+});
+
+test("organizer game page names missing sections in partial runtime evidence", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/admin/game");
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "runtime-report-partial" },
+  });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByTestId("download-runtime-health-report").click(),
+  ]);
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+
+  const report = JSON.parse(await readFile(downloadPath!, "utf8"));
+  expect(report.failures).toEqual([
+    expect.objectContaining({ section: "wireguard_status" }),
+  ]);
+  expect(report.summary).toContain(
+    "Report completeness: partial, missing wireguard_status",
+  );
+  await expect(
+    page.getByText(
+      "Downloaded partial runtime evidence report as",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("missing wireguard_status")).toBeVisible();
 });
 
 test("organizer match controls handle manual match operations and recompute logic", async ({

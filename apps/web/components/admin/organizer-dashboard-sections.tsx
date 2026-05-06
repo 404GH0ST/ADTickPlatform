@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import { useState, useEffect } from "react";
 import {
+  Copy,
   Download,
   Flag,
   LoaderCircle,
@@ -2107,91 +2108,179 @@ function RuntimeHealthCard({
           />
         </InfoPanel>
         {snapshot.warnings.length > 0 ? (
-          <div className="rounded-md border border-border/70 bg-muted/20 p-3">
-            <p className="text-sm font-medium text-foreground">
-              Operator attention points
-            </p>
-            <ul className="mt-2 grid gap-2 text-sm text-muted-foreground">
-              {snapshot.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
+          <RuntimeRemediationPanel
+            pendingAction={pendingAction}
+            severity={snapshot.severity}
+            warnings={snapshot.warnings}
+            onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
+            onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
+            onRefreshRuntimeHealth={onRefreshRuntimeHealth}
+          />
+        ) : null}
+        {snapshot.warnings.length === 0 ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between">
+            <RuntimeActionButton
+              actionID="runtime:health"
+              label="Refresh Runtime"
+              pendingAction={pendingAction}
+              testID="refresh-runtime-health"
+              onClick={onRefreshRuntimeHealth}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <EvidenceActions
+                pendingAction={pendingAction}
+                onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
+                onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
+              />
+            </div>
           </div>
         ) : null}
-        <CardActionRow>
-          <RuntimeActionButton
-            actionID="runtime:health"
-            label="Refresh Runtime"
-            pendingAction={pendingAction}
-            testID="refresh-runtime-health"
-            variant="outline"
-            onClick={onRefreshRuntimeHealth}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="refresh-runtime-alerts"
-            disabled={pendingAction !== null}
-            onClick={onRefreshOperationsStatus}
-          >
-            {pendingAction === "operations:status" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh Alerts
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="refresh-runtime-deployments"
-            disabled={pendingAction !== null}
-            onClick={onRefreshDeploymentRows}
-          >
-            {pendingAction === "deployments:list" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh Jobs
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="copy-runtime-health-summary"
-            disabled={pendingAction !== null}
-            onClick={onCopyRuntimeHealthSummary}
-          >
-            {pendingAction === "runtime:summary" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            Copy Summary
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="download-runtime-health-report"
-            disabled={pendingAction !== null}
-            onClick={onDownloadRuntimeHealthReport}
-          >
-            {pendingAction === "runtime:report" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            Download Evidence
-          </Button>
-          <Button asChild size="sm" variant="outline" className="ml-auto">
-            <Link href="/admin/deployments">Open Deployments</Link>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <Link href="/admin/players">Open Access Controls</Link>
-          </Button>
-        </CardActionRow>
+        <details className="rounded-md border border-border/70 bg-muted/10 p-3 text-sm">
+          <summary className="cursor-pointer font-medium text-foreground">
+            Inspect or refresh individual sources
+          </summary>
+          <CardActionRow className="mt-3">
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="refresh-runtime-alerts"
+              disabled={pendingAction !== null}
+              onClick={onRefreshOperationsStatus}
+            >
+              {pendingAction === "operations:status" ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Refresh Alerts
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="refresh-runtime-deployments"
+              disabled={pendingAction !== null}
+              onClick={onRefreshDeploymentRows}
+            >
+              {pendingAction === "deployments:list" ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Refresh Jobs
+            </Button>
+            <Button asChild size="sm" variant="ghost">
+              <Link href="/admin/deployments">Open Deployments</Link>
+            </Button>
+            <Button asChild size="sm" variant="ghost">
+              <Link href="/admin/players">Open Access Controls</Link>
+            </Button>
+          </CardActionRow>
+        </details>
       </div>
     </AdminRuntimeCard>
+  );
+}
+
+function RuntimeRemediationPanel({
+  pendingAction,
+  severity,
+  warnings,
+  onCopyRuntimeHealthSummary,
+  onDownloadRuntimeHealthReport,
+  onRefreshRuntimeHealth,
+}: {
+  pendingAction: string | null;
+  severity: RuntimeHealthSeverity;
+  warnings: string[];
+  onCopyRuntimeHealthSummary: () => void;
+  onDownloadRuntimeHealthReport: () => void;
+  onRefreshRuntimeHealth: () => void;
+}): ReactElement {
+  return (
+    <div
+      className={cn(
+        "rounded-md border p-3",
+        severity === "critical" ? "tone-danger" : "tone-warning",
+      )}
+    >
+      <p className="text-sm font-medium text-foreground">Incident workflow</p>
+      <ol className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-3">
+        <li>
+          <span className="font-medium text-foreground">1. Refresh truth:</span>{" "}
+          reload deployments, access, gateway, alerts, and metrics together.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">2. Inspect drift:</span>{" "}
+          use the warning list below to open the failing runtime area.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">3. Capture evidence:</span>{" "}
+          copy the summary or download the full report before state changes.
+        </li>
+      </ol>
+      <CardActionRow>
+        <RuntimeActionButton
+          actionID="runtime:health"
+          label="Refresh Runtime"
+          pendingAction={pendingAction}
+          testID="incident-refresh-runtime"
+          onClick={onRefreshRuntimeHealth}
+        />
+        <EvidenceActions
+          pendingAction={pendingAction}
+          onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
+          onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
+        />
+      </CardActionRow>
+      <ul className="mt-3 grid gap-2 text-sm text-muted-foreground">
+        {warnings.map((warning) => (
+          <li key={warning}>{warning}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function EvidenceActions({
+  pendingAction,
+  onCopyRuntimeHealthSummary,
+  onDownloadRuntimeHealthReport,
+}: {
+  pendingAction: string | null;
+  onCopyRuntimeHealthSummary: () => void;
+  onDownloadRuntimeHealthReport: () => void;
+}): ReactElement {
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="copy-runtime-health-summary"
+        disabled={pendingAction !== null}
+        onClick={onCopyRuntimeHealthSummary}
+      >
+        {pendingAction === "runtime:summary" ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <Copy className="h-4 w-4" />
+        )}
+        Copy Summary
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="download-runtime-health-report"
+        disabled={pendingAction !== null}
+        onClick={onDownloadRuntimeHealthReport}
+      >
+        {pendingAction === "runtime:report" ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <Download className="h-4 w-4" />
+        )}
+        Download Evidence
+      </Button>
+    </>
   );
 }
 

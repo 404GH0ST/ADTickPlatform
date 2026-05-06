@@ -751,6 +751,10 @@ function createStateForScenario(scenario = "default") {
     };
   }
 
+  if (scenario === "runtime-report-partial") {
+    nextState.failedRoutes = ["GET /api/v2/admin/wireguard/status"];
+  }
+
   if (scenario === "metrics-attention") {
     nextState.gameStatus.match = {
       ...nextState.gameStatus.match,
