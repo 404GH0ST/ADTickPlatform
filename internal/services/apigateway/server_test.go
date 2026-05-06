@@ -2375,6 +2375,38 @@ func TestAdminOperationsStatusFlagsOperationalDrift(t *testing.T) {
 	}
 }
 
+func TestEvaluateAccessOperationsAlertsDeduplicatesSharedPeersAcrossPolicies(t *testing.T) {
+	status := ControllerAccessStatus{
+		State:             "applied",
+		Mode:              "host",
+		PoliciesTotal:     2,
+		SSHOpenServices:   2,
+		SSHLockedServices: 0,
+		AllowedPeersTotal: 4,
+	}
+	policies := []ControllerServiceAccessPolicy{
+		{
+			TeamID:               101,
+			ChallengeID:          1,
+			SSHUnlocked:          true,
+			AllowedPeerAddresses: []string{"10.70.11.20", "10.70.11.21", "10.70.12.22"},
+		},
+		{
+			TeamID:               102,
+			ChallengeID:          1,
+			SSHUnlocked:          true,
+			AllowedPeerAddresses: []string{"10.70.11.20", "10.70.12.23"},
+		},
+	}
+
+	alerts := evaluateAccessOperationsAlerts(status, policies)
+	for _, alert := range alerts {
+		if alert.ID == "access-policy-drift" {
+			t.Fatalf("did not expect false drift alert for shared peers across policies: %+v", alerts)
+		}
+	}
+}
+
 func TestEvaluateGameOperationsAlertsSchedulerOverdueBoundary(t *testing.T) {
 	now := time.Date(2026, 3, 27, 15, 30, 0, 0, time.UTC)
 	status := GameStatus{

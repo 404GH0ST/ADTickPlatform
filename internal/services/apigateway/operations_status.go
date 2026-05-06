@@ -403,13 +403,16 @@ func expectedWireGuardPeerCounts(peers []WireGuardGatewayPeer) (active int, revo
 }
 
 func expectedAccessPolicyCounts(policies []ControllerServiceAccessPolicy) (open int, locked int, allowed int) {
+	allowedPeers := make(map[string]struct{})
 	for _, policy := range policies {
 		if policy.SSHUnlocked {
 			open++
 		} else {
 			locked++
 		}
-		allowed += len(policy.AllowedPeerAddresses)
+		for _, peer := range policy.AllowedPeerAddresses {
+			allowedPeers[peer] = struct{}{}
+		}
 	}
-	return open, locked, allowed
+	return open, locked, len(allowedPeers)
 }
