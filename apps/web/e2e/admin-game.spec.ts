@@ -153,8 +153,7 @@ test("organizer game page shows live service metrics and refreshes derived healt
   await expect(metricsCard.getByText("Game Core: healthy")).toBeVisible();
   await expect(metricsCard.getByText("Submission: healthy")).toBeVisible();
   await expect(metricsCard.getByText("WireGuard: healthy")).toBeVisible();
-  await expect(metricsCard.getByText("Checker runs")).toBeVisible();
-  await expect(metricsCard.getByText("72")).toBeVisible();
+  await expect(metricsCard.getByText("Checker runs: 72")).toBeVisible();
 
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "metrics-attention" },
@@ -171,11 +170,14 @@ test("organizer game page shows live service metrics and refreshes derived healt
   await expect(metricsCard.getByText("Submission: attention")).toBeVisible();
   await expect(metricsCard.getByText("Realtime: attention")).toBeVisible();
   await expect(metricsCard.getByText("WireGuard: attention")).toBeVisible();
-  await expect(metricsCard.getByText("scheduler stopped")).toBeVisible();
-  await expect(metricsCard.getByText("2 checker failures")).toBeVisible();
-  await expect(metricsCard.getByText("3 submit failures")).toBeVisible();
   await expect(
-    metricsCard.getByText("last sync failed, 4 sync errors"),
+    metricsCard.getByText("Game Core: scheduler stopped, 2 checker failures"),
+  ).toBeVisible();
+  await expect(
+    metricsCard.getByText("Submission: 3 submit failures"),
+  ).toBeVisible();
+  await expect(
+    metricsCard.getByText("Realtime: last sync failed, 4 sync errors"),
   ).toBeVisible();
 });
 

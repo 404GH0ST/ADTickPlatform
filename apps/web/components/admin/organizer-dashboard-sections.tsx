@@ -1448,15 +1448,12 @@ export function GameTab({
           onRefreshOperationsStatus={onRefreshOperationsStatus}
           onRefreshRuntimeHealth={onRefreshRuntimeHealth}
         />
-        <OperationsAlertsCard
+        <OperationsSupportPanel
           operationsStatus={operationsStatus}
           pendingAction={pendingAction}
-          onRefresh={onRefreshOperationsStatus}
-        />
-        <OperationsMetricsCard
-          pendingAction={pendingAction}
           serviceMetrics={serviceMetrics}
-          onRefresh={onRefreshServiceMetrics}
+          onRefreshAlerts={onRefreshOperationsStatus}
+          onRefreshMetrics={onRefreshServiceMetrics}
         />
         <div className="grid gap-4">
           <SchedulerCard
@@ -2417,6 +2414,45 @@ function formatRuntimeHealthTimestamp(value?: string): string {
   return formatIndonesianDate(value) || "n/a";
 }
 
+function OperationsSupportPanel({
+  operationsStatus,
+  pendingAction,
+  serviceMetrics,
+  onRefreshAlerts,
+  onRefreshMetrics,
+}: {
+  operationsStatus: AdminOperationsStatus | null;
+  pendingAction: string | null;
+  serviceMetrics: AdminServiceMetricSnapshot | null;
+  onRefreshAlerts: () => void;
+  onRefreshMetrics: () => void;
+}): ReactElement {
+  return (
+    <div className="rounded-md border border-border/70 bg-card p-4">
+      <div className="mb-4 flex flex-col gap-1">
+        <h3 className="text-base font-semibold text-foreground">
+          Operational Signals
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Alert pressure and live service health in one operator band.
+        </p>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <OperationsAlertsCard
+          operationsStatus={operationsStatus}
+          pendingAction={pendingAction}
+          onRefresh={onRefreshAlerts}
+        />
+        <OperationsMetricsCard
+          pendingAction={pendingAction}
+          serviceMetrics={serviceMetrics}
+          onRefresh={onRefreshMetrics}
+        />
+      </div>
+    </div>
+  );
+}
+
 function OperationsAlertsCard({
   operationsStatus,
   pendingAction,
@@ -2429,31 +2465,34 @@ function OperationsAlertsCard({
   const alerts = operationsStatus?.alerts ?? [];
 
   return (
-    <Card data-testid="operations-alerts-card">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle>Runtime Alerts</CardTitle>
-            <CardDescription>
-              Consolidated scheduler, checker, deployment, WireGuard, and access warnings for operator triage.
-            </CardDescription>
-          </div>
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant="outline"
-            onClick={onRefresh}
-          >
-            {pendingAction === "operations:status" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh
-          </Button>
+    <section
+      data-testid="operations-alerts-card"
+      className="rounded-md border border-border/70 bg-muted/10 p-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">
+            Runtime Alerts
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            Scheduler, checker, deployment, gateway, and access warnings.
+          </p>
         </div>
-      </CardHeader>
-      <CardContent>
+        <Button
+          disabled={pendingAction !== null}
+          size="sm"
+          variant="outline"
+          onClick={onRefresh}
+        >
+          {pendingAction === "operations:status" ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Refresh
+        </Button>
+      </div>
+      <div className="mt-4">
         {alerts.length === 0 ? (
           <StatusBanner
             message="No runtime alerts are currently active."
@@ -2466,7 +2505,7 @@ function OperationsAlertsCard({
               return (
                 <div
                   key={alert.id}
-                  className="rounded-md border border-border/70 bg-muted/20 p-3"
+                  className="rounded-md border border-border/70 bg-background p-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -2483,7 +2522,7 @@ function OperationsAlertsCard({
                       <Badge variant="secondary">{alert.source}</Badge>
                     </div>
                     {action ? (
-                      <Button asChild size="sm" variant="outline">
+                      <Button asChild size="sm" variant="ghost">
                         <Link href={action.href}>{action.label}</Link>
                       </Button>
                     ) : null}
@@ -2501,8 +2540,8 @@ function OperationsAlertsCard({
             })}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -2523,32 +2562,35 @@ function OperationsMetricsCard({
   ).length;
 
   return (
-    <Card data-testid="operations-metrics-card">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle>Service Metrics</CardTitle>
-            <CardDescription>
-              Live counters and gauges from game-core, submission-service,
-              controller-service, realtime-gateway, and wireguard-gateway.
-            </CardDescription>
-          </div>
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant="outline"
-            onClick={onRefresh}
-          >
-            {pendingAction === "operations:metrics" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh
-          </Button>
+    <section
+      data-testid="operations-metrics-card"
+      className="rounded-md border border-border/70 bg-muted/10 p-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">
+            Service Metrics
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            Live counters from game-core, submission, controller, realtime, and
+            WireGuard.
+          </p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        <Button
+          disabled={pendingAction !== null}
+          size="sm"
+          variant="outline"
+          onClick={onRefresh}
+        >
+          {pendingAction === "operations:metrics" ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Refresh
+        </Button>
+      </div>
+      <div className="mt-4 space-y-4">
         {serviceMetrics === null ? (
           <StatusBanner
             message="Live service metrics are currently unavailable."
@@ -2556,7 +2598,7 @@ function OperationsMetricsCard({
           />
         ) : (
           <>
-            <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="grid gap-3">
               <StatusBanner
                 message={
                   unhealthyCount === 0
@@ -2565,7 +2607,7 @@ function OperationsMetricsCard({
                 }
                 variant={unhealthyCount === 0 ? "success" : "warning"}
               />
-              <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="rounded-md border border-border/70 bg-background p-3">
                 <div className="flex flex-wrap gap-2">
                   {serviceHealth.map((entry) => (
                     <Badge
@@ -2588,184 +2630,236 @@ function OperationsMetricsCard({
                 .
               </p>
             </InfoPanel>
-            <div className="grid gap-4 xl:grid-cols-[1fr_1fr] 2xl:grid-cols-[1fr_1fr_1fr]">
-              <MetricsServicePanel
-                title="Game Core"
-                health={serviceHealth[0]}
-                lines={[
-                  {
-                    label: "Match state",
-                    value: serviceMetrics.game_core.match_state,
-                  },
-                  {
-                    label: "Total ticks",
-                    value: formatMetricNumber(serviceMetrics.game_core.total_ticks),
-                  },
-                  {
-                    label: "Checker runs",
-                    value: formatMetricNumber(
-                      serviceMetrics.game_core.checker_runs_total,
-                    ),
-                  },
-                  {
-                    label: "Checker failures",
-                    value: formatMetricNumber(
-                      serviceMetrics.game_core.checker_runs_failed,
-                    ),
-                  },
-                  {
-                    label: "Scheduler running",
-                    value: formatMetricBool(
-                      serviceMetrics.game_core.scheduler_running,
-                    ),
-                  },
-                ]}
-              />
-              <MetricsServicePanel
-                title="Submission Service"
-                health={serviceHealth[1]}
-                lines={[
-                  {
-                    label: "Submit requests",
-                    value: formatMetricNumber(
-                      serviceMetrics.submission_service.submit_requests_total,
-                    ),
-                  },
-                  {
-                    label: "Submit failures",
-                    value: formatMetricNumber(
-                      serviceMetrics.submission_service.submit_failures_total,
-                    ),
-                  },
-                  {
-                    label: "Attack-feed requests",
-                    value: formatMetricNumber(
-                      serviceMetrics.submission_service.attack_feed_requests_total,
-                    ),
-                  },
-                  {
-                    label: "Correct verdicts",
-                    value: formatMetricNumber(
-                      serviceMetrics.submission_service.verdicts.correct,
-                    ),
-                  },
-                  {
-                    label: "Invalid verdicts",
-                    value: formatMetricNumber(
-                      serviceMetrics.submission_service.verdicts.invalid,
-                    ),
-                  },
-                ]}
-              />
-              <MetricsServicePanel
-                title="Controller Service"
-                health={serviceHealth[2]}
-                lines={[
-                  {
-                    label: "Deployment reconciles",
-                    value: formatMetricNumber(
-                      serviceMetrics.controller_service
-                        .deployment_reconcile_requests,
-                    ),
-                  },
-                  {
-                    label: "Access reconciles",
-                    value: formatMetricNumber(
-                      serviceMetrics.controller_service.access_reconcile_requests,
-                    ),
-                  },
-                  {
-                    label: "Service access reconciles",
-                    value: formatMetricNumber(
-                      serviceMetrics.controller_service
-                        .service_access_reconcile_requests,
-                    ),
-                  },
-                  {
-                    label: "SSH credentials",
-                    value: formatMetricNumber(
-                      serviceMetrics.controller_service.ssh_credential_requests,
-                    ),
-                  },
-                  {
-                    label: "Last apply success",
-                    value: formatMetricBool(
-                      serviceMetrics.controller_service.access_last_apply_success,
-                    ),
-                  },
-                ]}
-              />
-              <MetricsServicePanel
-                title="Realtime Gateway"
-                health={serviceHealth[3]}
-                lines={[
-                  {
-                    label: "Last sync success",
-                    value: formatMetricBool(
-                      serviceMetrics.realtime_gateway.last_sync_success,
-                    ),
-                  },
-                  {
-                    label: "Sync errors",
-                    value: formatMetricNumber(
-                      serviceMetrics.realtime_gateway.sync_errors_total,
-                    ),
-                  },
-                  {
-                    label: "Subscribers",
-                    value: formatMetricNumber(
-                      serviceMetrics.realtime_gateway.subscribers_total,
-                    ),
-                  },
-                  {
-                    label: "Snapshot bytes",
-                    value: formatMetricNumber(
-                      serviceMetrics.realtime_gateway.snapshot_bytes_total,
-                    ),
-                  },
-                ]}
-              />
-              <MetricsServicePanel
-                title="WireGuard Gateway"
-                health={serviceHealth[4]}
-                lines={[
-                  {
-                    label: "Reconcile requests",
-                    value: formatMetricNumber(
-                      serviceMetrics.wireguard_gateway.reconcile_requests,
-                    ),
-                  },
-                  {
-                    label: "Total peers",
-                    value: formatMetricNumber(
-                      serviceMetrics.wireguard_gateway.peers_total,
-                    ),
-                  },
-                  {
-                    label: "Active peers",
-                    value: formatMetricNumber(
-                      serviceMetrics.wireguard_gateway.peers_active,
-                    ),
-                  },
-                  {
-                    label: "Revoked peers",
-                    value: formatMetricNumber(
-                      serviceMetrics.wireguard_gateway.peers_revoked,
-                    ),
-                  },
-                  {
-                    label: "Last apply success",
-                    value: formatMetricBool(
-                      serviceMetrics.wireguard_gateway.last_apply_success,
-                    ),
-                  },
-                ]}
-              />
+            <div className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+              <InfoPanel layout="grid" tone="surface">
+                <InfoLine
+                  label="Checker runs"
+                  value={formatMetricNumber(
+                    serviceMetrics.game_core.checker_runs_total,
+                  )}
+                  valueClassName="font-mono"
+                />
+                <InfoLine
+                  label="Submit requests"
+                  value={formatMetricNumber(
+                    serviceMetrics.submission_service.submit_requests_total,
+                  )}
+                  valueClassName="font-mono"
+                />
+                <InfoLine
+                  label="Active peers"
+                  value={formatMetricNumber(
+                    serviceMetrics.wireguard_gateway.peers_active,
+                  )}
+                  valueClassName="font-mono"
+                />
+                <InfoLine
+                  label="Sync errors"
+                  value={formatMetricNumber(
+                    serviceMetrics.realtime_gateway.sync_errors_total,
+                  )}
+                  valueClassName="font-mono"
+                />
+              </InfoPanel>
+              <div className="rounded-md border border-border/70 bg-background p-3">
+                <p className="text-sm font-medium text-foreground">
+                  Service watchlist
+                </p>
+                <div className="mt-2 grid gap-2 text-sm text-muted-foreground">
+                  {serviceHealth.map((entry) => (
+                    <p key={`${entry.title}-detail`}>
+                      <span className="font-medium text-foreground">
+                        {entry.title}
+                      </span>
+                      : {entry.detail}
+                    </p>
+                  ))}
+                </div>
+              </div>
             </div>
+            <details className="rounded-md border border-border/70 bg-background p-3">
+              <summary className="cursor-pointer text-sm font-medium text-foreground">
+                Inspect per-service metrics
+              </summary>
+              <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr] 2xl:grid-cols-[1fr_1fr_1fr]">
+                <MetricsServicePanel
+                  title="Game Core"
+                  health={serviceHealth[0]}
+                  lines={[
+                    {
+                      label: "Match state",
+                      value: serviceMetrics.game_core.match_state,
+                    },
+                    {
+                      label: "Total ticks",
+                      value: formatMetricNumber(serviceMetrics.game_core.total_ticks),
+                    },
+                    {
+                      label: "Checker runs",
+                      value: formatMetricNumber(
+                        serviceMetrics.game_core.checker_runs_total,
+                      ),
+                    },
+                    {
+                      label: "Checker failures",
+                      value: formatMetricNumber(
+                        serviceMetrics.game_core.checker_runs_failed,
+                      ),
+                    },
+                    {
+                      label: "Scheduler running",
+                      value: formatMetricBool(
+                        serviceMetrics.game_core.scheduler_running,
+                      ),
+                    },
+                  ]}
+                />
+                <MetricsServicePanel
+                  title="Submission Service"
+                  health={serviceHealth[1]}
+                  lines={[
+                    {
+                      label: "Submit requests",
+                      value: formatMetricNumber(
+                        serviceMetrics.submission_service.submit_requests_total,
+                      ),
+                    },
+                    {
+                      label: "Submit failures",
+                      value: formatMetricNumber(
+                        serviceMetrics.submission_service.submit_failures_total,
+                      ),
+                    },
+                    {
+                      label: "Attack-feed requests",
+                      value: formatMetricNumber(
+                        serviceMetrics.submission_service.attack_feed_requests_total,
+                      ),
+                    },
+                    {
+                      label: "Correct verdicts",
+                      value: formatMetricNumber(
+                        serviceMetrics.submission_service.verdicts.correct,
+                      ),
+                    },
+                    {
+                      label: "Invalid verdicts",
+                      value: formatMetricNumber(
+                        serviceMetrics.submission_service.verdicts.invalid,
+                      ),
+                    },
+                  ]}
+                />
+                <MetricsServicePanel
+                  title="Controller Service"
+                  health={serviceHealth[2]}
+                  lines={[
+                    {
+                      label: "Deployment reconciles",
+                      value: formatMetricNumber(
+                        serviceMetrics.controller_service
+                          .deployment_reconcile_requests,
+                      ),
+                    },
+                    {
+                      label: "Access reconciles",
+                      value: formatMetricNumber(
+                        serviceMetrics.controller_service.access_reconcile_requests,
+                      ),
+                    },
+                    {
+                      label: "Service access reconciles",
+                      value: formatMetricNumber(
+                        serviceMetrics.controller_service
+                          .service_access_reconcile_requests,
+                      ),
+                    },
+                    {
+                      label: "SSH credentials",
+                      value: formatMetricNumber(
+                        serviceMetrics.controller_service.ssh_credential_requests,
+                      ),
+                    },
+                    {
+                      label: "Last apply success",
+                      value: formatMetricBool(
+                        serviceMetrics.controller_service.access_last_apply_success,
+                      ),
+                    },
+                  ]}
+                />
+                <MetricsServicePanel
+                  title="Realtime Gateway"
+                  health={serviceHealth[3]}
+                  lines={[
+                    {
+                      label: "Last sync success",
+                      value: formatMetricBool(
+                        serviceMetrics.realtime_gateway.last_sync_success,
+                      ),
+                    },
+                    {
+                      label: "Sync errors",
+                      value: formatMetricNumber(
+                        serviceMetrics.realtime_gateway.sync_errors_total,
+                      ),
+                    },
+                    {
+                      label: "Subscribers",
+                      value: formatMetricNumber(
+                        serviceMetrics.realtime_gateway.subscribers_total,
+                      ),
+                    },
+                    {
+                      label: "Snapshot bytes",
+                      value: formatMetricNumber(
+                        serviceMetrics.realtime_gateway.snapshot_bytes_total,
+                      ),
+                    },
+                  ]}
+                />
+                <MetricsServicePanel
+                  title="WireGuard Gateway"
+                  health={serviceHealth[4]}
+                  lines={[
+                    {
+                      label: "Reconcile requests",
+                      value: formatMetricNumber(
+                        serviceMetrics.wireguard_gateway.reconcile_requests,
+                      ),
+                    },
+                    {
+                      label: "Total peers",
+                      value: formatMetricNumber(
+                        serviceMetrics.wireguard_gateway.peers_total,
+                      ),
+                    },
+                    {
+                      label: "Active peers",
+                      value: formatMetricNumber(
+                        serviceMetrics.wireguard_gateway.peers_active,
+                      ),
+                    },
+                    {
+                      label: "Revoked peers",
+                      value: formatMetricNumber(
+                        serviceMetrics.wireguard_gateway.peers_revoked,
+                      ),
+                    },
+                    {
+                      label: "Last apply success",
+                      value: formatMetricBool(
+                        serviceMetrics.wireguard_gateway.last_apply_success,
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            </details>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
