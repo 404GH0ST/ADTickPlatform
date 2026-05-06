@@ -130,7 +130,9 @@ export function ScoreboardPanel({
     <Card data-testid="participant-scoreboard-card">
       <CardHeader>
         <CardTitle>Scoreboard</CardTitle>
-        <CardDescription>Attack, defense, SLA, and total score.</CardDescription>
+        <CardDescription>
+          Dense team rankings with per-service scoring cells and overall totals.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ScoreboardTable

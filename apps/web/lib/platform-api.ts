@@ -21,6 +21,14 @@ type ScoreRow = {
   sla: number;
   total: number;
   delta: string;
+  services?: Array<{
+    challenge_id: number;
+    service: string;
+    attack: number;
+    defense: number;
+    sla: number;
+    total: number;
+  }>;
 };
 
 type AttackEvent = {

@@ -814,6 +814,12 @@ func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
 	if payload[0].Team != "Team Alpha" || payload[0].Attack != 10 || payload[0].Defense != 1000 || payload[0].SLA != 33 || payload[0].Total != 1043 {
 		t.Fatalf("unexpected leading score row %+v", payload[0])
 	}
+	if len(payload[0].Services) != 3 {
+		t.Fatalf("expected service breakdown on leading row, got %+v", payload[0].Services)
+	}
+	if payload[0].Services[0].Service != "banking" || payload[0].Services[0].Attack != 10 {
+		t.Fatalf("unexpected leading service breakdown %+v", payload[0].Services[0])
+	}
 }
 
 func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {

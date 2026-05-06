@@ -323,15 +323,29 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 	}
 
 	type teamScore struct {
-		Name    string
-		Attack  int
-		Defense int
-		SLA     int
+		Name     string
+		Attack   int
+		Defense  int
+		SLA      int
+		Services map[int]*apigateway.ServiceScoreBreakdownAlias
 	}
 
+	challengeIDs := sortedChallengeIDs(s.challenges)
 	scores := make(map[int]*teamScore, len(s.teamNames))
 	for teamID, teamName := range s.teamNames {
-		scores[teamID] = &teamScore{Name: teamName, Defense: defenseMaxPoints}
+		services := make(map[int]*apigateway.ServiceScoreBreakdownAlias, len(challengeIDs))
+		for _, challengeID := range challengeIDs {
+			challenge := s.challenges[challengeID]
+			services[challengeID] = &apigateway.ServiceScoreBreakdownAlias{
+				ChallengeID: challengeID,
+				Service:     challenge.Name,
+			}
+		}
+		scores[teamID] = &teamScore{
+			Name:     teamName,
+			Defense:  defenseMaxPoints,
+			Services: services,
+		}
 	}
 
 	acceptedByFlag := make(map[string][]acceptedFlagSubmission)
@@ -343,20 +357,43 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 		flag := s.flags[flagValue]
 		weight := s.challenges[flag.ChallengeID].Weight
 		for index, submission := range submissions {
-			scores[submission.SubmittingTeam].Attack += attackSubmissionValue(weight, index+1)
+			value := attackSubmissionValue(weight, index+1)
+			scores[submission.SubmittingTeam].Attack += value
+			scores[submission.SubmittingTeam].Services[flag.ChallengeID].Attack += value
 		}
 	}
 
 	issuedByTeam := make(map[int]int)
 	stolenByTeam := make(map[int]int)
+	defenseByTeamService := make(map[int]map[int]defenseScoreInput)
 	for _, flag := range s.flags {
 		issuedByTeam[flag.OwnerTeamID]++
+		if _, ok := defenseByTeamService[flag.OwnerTeamID]; !ok {
+			defenseByTeamService[flag.OwnerTeamID] = make(map[int]defenseScoreInput)
+		}
+		input := defenseByTeamService[flag.OwnerTeamID][flag.ChallengeID]
+		input.Issued++
 		if len(acceptedByFlag[flag.Flag]) > 0 {
 			stolenByTeam[flag.OwnerTeamID]++
+			input.Stolen++
 		}
+		defenseByTeamService[flag.OwnerTeamID][flag.ChallengeID] = input
 	}
 	for teamID, score := range scores {
 		score.Defense = boundedDefenseScore(issuedByTeam[teamID], stolenByTeam[teamID])
+		inputs := make([]serviceDefenseAllocationInput, 0, len(challengeIDs))
+		for _, challengeID := range challengeIDs {
+			input := defenseByTeamService[teamID][challengeID]
+			inputs = append(inputs, serviceDefenseAllocationInput{
+				ChallengeID: challengeID,
+				Weight:      s.challenges[challengeID].Weight,
+				Issued:      input.Issued,
+				Stolen:      input.Stolen,
+			})
+		}
+		for challengeID, allocation := range allocateServiceDefenseShares(score.Defense, inputs) {
+			score.Services[challengeID].Defense = allocation
+		}
 	}
 
 	type checkerGroup struct {
@@ -388,17 +425,27 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 		var tickID, teamID, challengeID int
 		fmt.Sscanf(key, "%d:%d:%d", &tickID, &teamID, &challengeID)
 		weight := s.challenges[challengeID].Weight
-		scores[teamID].SLA += weight * (boolToInt(group.PutOK)*slaPutPoints + boolToInt(group.GetOK)*slaGetPoints + boolToInt(group.CheckOK)*slaCheckPoints)
+		value := weight * (boolToInt(group.PutOK)*slaPutPoints + boolToInt(group.GetOK)*slaGetPoints + boolToInt(group.CheckOK)*slaCheckPoints)
+		scores[teamID].SLA += value
+		scores[teamID].Services[challengeID].SLA += value
 	}
 
 	rows := make([]apigateway.ScoreRowAlias, 0, len(scores))
 	for _, score := range scores {
+		services := make([]apigateway.ServiceScoreBreakdownAlias, 0, len(challengeIDs))
+		for _, challengeID := range challengeIDs {
+			service := *score.Services[challengeID]
+			service.Total = service.Attack + service.Defense + service.SLA
+			services = append(services, service)
+		}
 		rows = append(rows, apigateway.ScoreRowAlias{
-			Team:    score.Name,
-			Attack:  score.Attack,
-			Defense: score.Defense,
-			SLA:     score.SLA,
-			Total:   score.Attack + score.Defense + score.SLA,
+			Rank:     0,
+			Team:     score.Name,
+			Attack:   score.Attack,
+			Defense:  score.Defense,
+			SLA:      score.SLA,
+			Total:    score.Attack + score.Defense + score.SLA,
+			Services: services,
 		})
 	}
 
@@ -1295,14 +1342,113 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 		return nil, err
 	}
 
+	attackByTeamService, err := s.sumIntByTeamAndChallenge(ctx, `
+		SELECT ranked.team_id,
+		       f.challenge_id,
+		       COALESCE(SUM(
+			       CASE
+			           WHEN c.weight * $1 <= 0 THEN 0
+			           ELSE GREATEST(1, ((c.weight * $1) + (ranked.capture_index / 2)) / ranked.capture_index)
+			       END
+		       ), 0)
+		FROM (
+			SELECT
+				sf.flag,
+				sf.team_id,
+				ROW_NUMBER() OVER (PARTITION BY sf.flag ORDER BY sf.submitted_at, sf.team_id) AS capture_index
+			FROM submitted_flags sf
+		) ranked
+		JOIN issued_flags f ON f.flag = ranked.flag
+		JOIN challenges c ON c.id = f.challenge_id
+		GROUP BY ranked.team_id, f.challenge_id
+	`, serviceScoreUnit)
+	if err != nil {
+		return nil, err
+	}
+
+	slaByTeamService, err := s.sumIntByTeamAndChallenge(ctx, `
+		SELECT runs.team_id,
+		       runs.challenge_id,
+		       COALESCE(SUM(c.weight * ($1 * runs.put_ok + $2 * runs.get_ok + $3 * runs.check_ok)), 0)
+		FROM (
+			SELECT
+				tick_id,
+				team_id,
+				challenge_id,
+				MAX(CASE WHEN phase = 'put' AND status = 'success' THEN 1 ELSE 0 END) AS put_ok,
+				MAX(CASE WHEN phase = 'get' AND status = 'success' THEN 1 ELSE 0 END) AS get_ok,
+				MAX(CASE WHEN phase = 'check' AND status = 'success' THEN 1 ELSE 0 END) AS check_ok
+			FROM checker_runs
+			GROUP BY tick_id, team_id, challenge_id
+		) runs
+		JOIN challenges c ON c.id = runs.challenge_id
+		GROUP BY runs.team_id, runs.challenge_id
+	`, slaPutPoints, slaGetPoints, slaCheckPoints)
+	if err != nil {
+		return nil, err
+	}
+
+	defenseByTeamService, err := s.defenseCountsByTeamAndChallenge(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	challengeRows, err := s.db.QueryContext(ctx, `SELECT id, name, weight FROM challenges ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	type challengeRecord struct {
+		ID     int
+		Name   string
+		Weight int
+	}
+	challenges := make([]challengeRecord, 0)
+	for challengeRows.Next() {
+		var challenge challengeRecord
+		if err := challengeRows.Scan(&challenge.ID, &challenge.Name, &challenge.Weight); err != nil {
+			challengeRows.Close()
+			return nil, err
+		}
+		challenges = append(challenges, challenge)
+	}
+	if err := challengeRows.Err(); err != nil {
+		challengeRows.Close()
+		return nil, err
+	}
+	challengeRows.Close()
+
 	scoreboard := make([]teamScoreSnapshot, 0, len(teams))
 	for _, team := range teams {
+		services := make([]apigateway.ServiceScoreBreakdownAlias, 0, len(challenges))
+		challengeInputs := make([]serviceDefenseAllocationInput, 0, len(challenges))
+		for _, challenge := range challenges {
+			services = append(services, apigateway.ServiceScoreBreakdownAlias{
+				ChallengeID: challenge.ID,
+				Service:     challenge.Name,
+				Attack:      nestedInt(attackByTeamService, team.ID, challenge.ID),
+				SLA:         nestedInt(slaByTeamService, team.ID, challenge.ID),
+			})
+			input := nestedDefenseInput(defenseByTeamService, team.ID, challenge.ID)
+			challengeInputs = append(challengeInputs, serviceDefenseAllocationInput{
+				ChallengeID: challenge.ID,
+				Weight:      challenge.Weight,
+				Issued:      input.Issued,
+				Stolen:      input.Stolen,
+			})
+		}
+		defenseTotal := boundedDefenseScore(defenseInputs[team.ID].Issued, defenseInputs[team.ID].Stolen)
+		defenseAllocations := allocateServiceDefenseShares(defenseTotal, challengeInputs)
+		for index := range services {
+			services[index].Defense = defenseAllocations[services[index].ChallengeID]
+			services[index].Total = services[index].Attack + services[index].Defense + services[index].SLA
+		}
 		scoreboard = append(scoreboard, teamScoreSnapshot{
-			TeamID:  team.ID,
-			Team:    team.Name,
-			Attack:  attackByTeam[team.ID],
-			Defense: boundedDefenseScore(defenseInputs[team.ID].Issued, defenseInputs[team.ID].Stolen),
-			SLA:     slaByTeam[team.ID],
+			TeamID:   team.ID,
+			Team:     team.Name,
+			Attack:   attackByTeam[team.ID],
+			Defense:  defenseTotal,
+			SLA:      slaByTeam[team.ID],
+			Services: services,
 		})
 	}
 
@@ -1328,13 +1474,14 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 
 	for index, snapshot := range scoreboard {
 		row := apigateway.ScoreRowAlias{
-			Rank:    index + 1,
-			Team:    snapshot.Team,
-			Attack:  snapshot.Attack,
-			Defense: snapshot.Defense,
-			SLA:     snapshot.SLA,
-			Total:   snapshot.Total(),
-			Delta:   rankDelta(previousRanks[snapshot.TeamID], index+1),
+			Rank:     index + 1,
+			Team:     snapshot.Team,
+			Attack:   snapshot.Attack,
+			Defense:  snapshot.Defense,
+			SLA:      snapshot.SLA,
+			Total:    snapshot.Total(),
+			Delta:    rankDelta(previousRanks[snapshot.TeamID], index+1),
+			Services: append([]apigateway.ServiceScoreBreakdownAlias(nil), snapshot.Services...),
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO scoreboard_entries (team_id, rank, team_name, attack_points, defense_points, sla_points, total_points, delta)
@@ -1599,11 +1746,12 @@ func nullTimeValue(raw string) any {
 }
 
 type teamScoreSnapshot struct {
-	TeamID  int
-	Team    string
-	Attack  int
-	Defense int
-	SLA     int
+	TeamID   int
+	Team     string
+	Attack   int
+	Defense  int
+	SLA      int
+	Services []apigateway.ServiceScoreBreakdownAlias
 }
 
 type defenseScoreInput struct {
@@ -1634,6 +1782,27 @@ func (s *postgresGameStore) sumIntByTeam(ctx context.Context, query string, args
 	return result, rows.Err()
 }
 
+func (s *postgresGameStore) sumIntByTeamAndChallenge(ctx context.Context, query string, args ...any) (map[int]map[int]int, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int]map[int]int)
+	for rows.Next() {
+		var teamID, challengeID, value int
+		if err := rows.Scan(&teamID, &challengeID, &value); err != nil {
+			return nil, err
+		}
+		if _, ok := result[teamID]; !ok {
+			result[teamID] = make(map[int]int)
+		}
+		result[teamID][challengeID] = value
+	}
+	return result, rows.Err()
+}
+
 func (s *postgresGameStore) defenseCountsByTeam(ctx context.Context) (map[int]defenseScoreInput, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
@@ -1657,6 +1826,37 @@ func (s *postgresGameStore) defenseCountsByTeam(ctx context.Context) (map[int]de
 			return nil, err
 		}
 		result[teamID] = input
+	}
+	return result, rows.Err()
+}
+
+func (s *postgresGameStore) defenseCountsByTeamAndChallenge(ctx context.Context) (map[int]map[int]defenseScoreInput, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			f.owner_team_id,
+			f.challenge_id,
+			COUNT(DISTINCT f.flag) AS issued_count,
+			COUNT(DISTINCT CASE WHEN sf.flag IS NOT NULL THEN f.flag END) AS stolen_count
+		FROM issued_flags f
+		LEFT JOIN submitted_flags sf ON sf.flag = f.flag
+		GROUP BY f.owner_team_id, f.challenge_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int]map[int]defenseScoreInput)
+	for rows.Next() {
+		var teamID, challengeID int
+		var input defenseScoreInput
+		if err := rows.Scan(&teamID, &challengeID, &input.Issued, &input.Stolen); err != nil {
+			return nil, err
+		}
+		if _, ok := result[teamID]; !ok {
+			result[teamID] = make(map[int]defenseScoreInput)
+		}
+		result[teamID][challengeID] = input
 	}
 	return result, rows.Err()
 }
@@ -1713,6 +1913,105 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+type serviceDefenseAllocationInput struct {
+	ChallengeID int
+	Weight      int
+	Issued      int
+	Stolen      int
+}
+
+func allocateServiceDefenseShares(total int, inputs []serviceDefenseAllocationInput) map[int]int {
+	result := make(map[int]int, len(inputs))
+	if total <= 0 || len(inputs) == 0 {
+		return result
+	}
+
+	rawWeights := make([]int, len(inputs))
+	totalRaw := 0
+	for index, input := range inputs {
+		weight := input.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		switch {
+		case input.Issued <= 0:
+			rawWeights[index] = weight
+		case input.Stolen >= input.Issued:
+			rawWeights[index] = 0
+		default:
+			rawWeights[index] = weight * maxInt(input.Issued-input.Stolen, 0)
+		}
+		totalRaw += rawWeights[index]
+	}
+	if totalRaw <= 0 {
+		totalRaw = 0
+		for index, input := range inputs {
+			weight := input.Weight
+			if weight <= 0 {
+				weight = 1
+			}
+			rawWeights[index] = weight
+			totalRaw += weight
+		}
+	}
+
+	type remainder struct {
+		Index int
+		Value int
+	}
+	remainders := make([]remainder, 0, len(inputs))
+	distributed := 0
+	for index, input := range inputs {
+		scaled := total * rawWeights[index]
+		base := scaled / totalRaw
+		rem := scaled % totalRaw
+		result[input.ChallengeID] = base
+		distributed += base
+		remainders = append(remainders, remainder{Index: index, Value: rem})
+	}
+	sort.Slice(remainders, func(i, j int) bool {
+		if remainders[i].Value != remainders[j].Value {
+			return remainders[i].Value > remainders[j].Value
+		}
+		return inputs[remainders[i].Index].ChallengeID < inputs[remainders[j].Index].ChallengeID
+	})
+	for index := 0; index < total-distributed; index++ {
+		choice := remainders[index%len(remainders)]
+		result[inputs[choice.Index].ChallengeID]++
+	}
+	return result
+}
+
+func sortedChallengeIDs(challenges map[int]memoryChallenge) []int {
+	result := make([]int, 0, len(challenges))
+	for challengeID := range challenges {
+		result = append(result, challengeID)
+	}
+	slices.Sort(result)
+	return result
+}
+
+func nestedInt(values map[int]map[int]int, teamID, challengeID int) int {
+	if byChallenge, ok := values[teamID]; ok {
+		return byChallenge[challengeID]
+	}
+	return 0
+}
+
+func nestedDefenseInput(values map[int]map[int]defenseScoreInput, teamID, challengeID int) defenseScoreInput {
+	if byChallenge, ok := values[teamID]; ok {
+		return byChallenge[challengeID]
+	}
+	return defenseScoreInput{}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func rankDelta(previousRank, currentRank int) string {

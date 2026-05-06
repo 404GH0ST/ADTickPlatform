@@ -13,7 +13,10 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
       "The match has finished at tick #12. Participant submissions are closed.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Attack, defense, SLA, and total score.")).toBeVisible();
+  await expect(
+    page.getByText("Dense team rankings with per-service scoring cells and overall totals."),
+  ).toBeVisible();
+  await expect(page.getByText("Floppcraft")).toBeVisible();
   await expect(page.getByText("College Alpha")).toBeVisible();
   await expect(page.getByText("440")).toBeVisible();
 });

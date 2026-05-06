@@ -13,6 +13,11 @@ const scoreboard = [
     sla: 120,
     total: 440,
     delta: "+2",
+    services: [
+      { challenge_id: 1, service: "Floppcraft", attack: 70, defense: 50, sla: 40, total: 160 },
+      { challenge_id: 2, service: "QuickR Maps", attack: 55, defense: 45, sla: 42, total: 142 },
+      { challenge_id: 3, service: "SecretChannel", attack: 55, defense: 45, sla: 38, total: 138 },
+    ],
   },
   {
     rank: 2,
@@ -22,6 +27,11 @@ const scoreboard = [
     sla: 110,
     total: 360,
     delta: "-1",
+    services: [
+      { challenge_id: 1, service: "Floppcraft", attack: 40, defense: 46, sla: 34, total: 120 },
+      { challenge_id: 2, service: "QuickR Maps", attack: 45, defense: 38, sla: 41, total: 124 },
+      { challenge_id: 3, service: "SecretChannel", attack: 45, defense: 36, sla: 35, total: 116 },
+    ],
   },
   {
     rank: 3,
@@ -31,6 +41,11 @@ const scoreboard = [
     sla: 100,
     total: 295,
     delta: "+0",
+    services: [
+      { challenge_id: 1, service: "Floppcraft", attack: 30, defense: 38, sla: 32, total: 100 },
+      { challenge_id: 2, service: "QuickR Maps", attack: 28, defense: 35, sla: 35, total: 98 },
+      { challenge_id: 3, service: "SecretChannel", attack: 32, defense: 32, sla: 33, total: 97 },
+    ],
   },
 ];
 

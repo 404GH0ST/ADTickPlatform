@@ -3717,8 +3717,8 @@ function GameScoreboardCard({
           <div>
             <CardTitle>Authoritative Scoreboard</CardTitle>
             <CardDescription>
-              Ranked attack, defense, and SLA totals derived from persisted
-              game-core state.
+              Dense service-by-service rankings derived from persisted
+              game-core scoring state.
             </CardDescription>
           </div>
           <Button

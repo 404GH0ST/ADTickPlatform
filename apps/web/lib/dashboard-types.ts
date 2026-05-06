@@ -1,3 +1,12 @@
+export type ScoreServiceRow = {
+  challenge_id: number;
+  service: string;
+  attack: number;
+  defense: number;
+  sla: number;
+  total: number;
+};
+
 export type ScoreRow = {
   rank: number;
   team: string;
@@ -6,6 +15,7 @@ export type ScoreRow = {
   sla: number;
   total: number;
   delta: string;
+  services?: ScoreServiceRow[];
 };
 
 export type ServiceRow = {

@@ -240,6 +240,15 @@ export type AdminSchedulerEventQuery = {
   state?: string;
 };
 
+export type AdminGameScoreServiceRow = {
+  challenge_id: number;
+  service: string;
+  attack: number;
+  defense: number;
+  sla: number;
+  total: number;
+};
+
 export type AdminGameScoreRow = {
   rank: number;
   team: string;
@@ -248,6 +257,7 @@ export type AdminGameScoreRow = {
   sla: number;
   total: number;
   delta: string;
+  services?: AdminGameScoreServiceRow[];
 };
 
 export type AdminAttackEvent = {
