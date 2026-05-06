@@ -83,21 +83,21 @@ type serviceState struct {
 type ScoreRowAlias struct {
 	Rank     int                          `json:"rank"`
 	Team     string                       `json:"team"`
-	Attack   int                          `json:"attack"`
-	Defense  int                          `json:"defense"`
-	SLA      int                          `json:"sla"`
-	Total    int                          `json:"total"`
+	Attack   float64                      `json:"attack"`
+	Defense  float64                      `json:"defense"`
+	SLA      float64                      `json:"sla"`
+	Total    float64                      `json:"total"`
 	Delta    string                       `json:"delta"`
 	Services []ServiceScoreBreakdownAlias `json:"services,omitempty"`
 }
 
 type ServiceScoreBreakdownAlias struct {
-	ChallengeID int    `json:"challenge_id"`
-	Service     string `json:"service"`
-	Attack      int    `json:"attack"`
-	Defense     int    `json:"defense"`
-	SLA         int    `json:"sla"`
-	Total       int    `json:"total"`
+	ChallengeID int     `json:"challenge_id"`
+	Service     string  `json:"service"`
+	Attack      float64 `json:"attack"`
+	Defense     float64 `json:"defense"`
+	SLA         float64 `json:"sla"`
+	Total       float64 `json:"total"`
 }
 
 type AttackEventAlias struct {

@@ -76,8 +76,8 @@ function serviceLookup(row: ScoreboardRow): Map<string, ScoreboardServiceRow> {
 
 function compactNumber(value: number): string {
   return Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 

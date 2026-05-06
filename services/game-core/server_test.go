@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -688,14 +689,14 @@ func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
 
 	scoreboard := decodeResponse[[]apigateway.ScoreRowAlias](t, scoreboardResponse.Body.Bytes())
 	rows := scoreRowsByTeam(scoreboard)
-	if rows["Team Alpha"].Attack != 10 {
-		t.Fatalf("expected first capture to be worth 10, got %+v", rows["Team Alpha"])
+	if !approxScore(rows["Team Alpha"].Attack, 1.5) {
+		t.Fatalf("expected first attacker to receive 1.5 Faust attack points, got %+v", rows["Team Alpha"])
 	}
-	if rows["Team Sigma"].Attack != 5 {
-		t.Fatalf("expected second capture to be worth 5, got %+v", rows["Team Sigma"])
+	if !approxScore(rows["Team Sigma"].Attack, 1.5) {
+		t.Fatalf("expected second attacker to receive 1.5 Faust attack points, got %+v", rows["Team Sigma"])
 	}
-	if rows["Team Delta"].Defense != 700 {
-		t.Fatalf("expected victim defense to drop once for the stolen flag, got %+v", rows["Team Delta"])
+	if !approxScore(rows["Team Delta"].Defense, -math.Pow(2, 0.75)) {
+		t.Fatalf("expected victim defense to use Faust penalty, got %+v", rows["Team Delta"])
 	}
 }
 
@@ -811,15 +812,19 @@ func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
 	if len(payload) != 4 {
 		t.Fatalf("expected 4 score rows, got %d", len(payload))
 	}
-	if payload[0].Team != "Team Alpha" || payload[0].Attack != 10 || payload[0].Defense != 1000 || payload[0].SLA != 33 || payload[0].Total != 1043 {
+	if payload[0].Team != "Team Alpha" || !approxScore(payload[0].Attack, 2.0) || !approxScore(payload[0].Defense, 0.0) || !approxScore(payload[0].SLA, 6.0) || !approxScore(payload[0].Total, 8.0) {
 		t.Fatalf("unexpected leading score row %+v", payload[0])
 	}
 	if len(payload[0].Services) != 3 {
 		t.Fatalf("expected service breakdown on leading row, got %+v", payload[0].Services)
 	}
-	if payload[0].Services[0].Service != "banking" || payload[0].Services[0].Attack != 10 {
+	if payload[0].Services[0].Service != "banking" || !approxScore(payload[0].Services[0].Attack, 2.0) || !approxScore(payload[0].Services[0].SLA, 2.0) {
 		t.Fatalf("unexpected leading service breakdown %+v", payload[0].Services[0])
 	}
+}
+
+func approxScore(value, expected float64) bool {
+	return math.Abs(value-expected) < 0.000001
 }
 
 func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {

@@ -7,8 +7,8 @@ async function assertScoreboardUpdates(page: Page) {
   });
 
   await expect(alphaRow).toBeVisible();
-  await expect(alphaRow).toContainText("440");
-  await expect(alphaRow).toContainText("455");
+  await expect(alphaRow).toContainText("440.00");
+  await expect(alphaRow).toContainText("455.00");
 }
 
 test("participant scoreboard page applies realtime scoreboard updates", async ({

@@ -18,7 +18,7 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
   ).toBeVisible();
   await expect(page.getByText("Floppcraft")).toBeVisible();
   await expect(page.getByText("College Alpha")).toBeVisible();
-  await expect(page.getByText("440")).toBeVisible();
+  await expect(page.getByText("440.00")).toBeVisible();
 });
 
 test("participant scoreboard page shows an explicit empty state when no scores exist", async ({
@@ -59,7 +59,7 @@ test("organizer scoreboard page filters and sorts authoritative rankings", async
   }).first();
   const firstDataRow = scoreboardTable.locator("tbody tr").first();
   await expect(firstDataRow).toContainText("College Gamma");
-  await expect(firstDataRow).toContainText("295");
+  await expect(firstDataRow).toContainText("295.00");
 });
 
 test("organizer scoreboard page shows degraded warning and empty state when the authoritative feed fails", async ({
