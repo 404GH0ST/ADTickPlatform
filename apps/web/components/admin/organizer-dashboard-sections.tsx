@@ -1393,6 +1393,11 @@ export function GameTab({
   onUpdateMatchSchedule,
   onUpdateScheduler,
 }: GameTabProps): ReactElement {
+  const checkerAttentionActive =
+    (operationsStatus?.alerts ?? []).some((alert) => alert.source === "checker") ||
+    !checkerRunsLiveMode ||
+    hasCheckerRunFiltersApplied(filters.checkerRun);
+
   if (focusPanel === "attacks") {
     return (
       <GameAttacksCard
@@ -1406,33 +1411,15 @@ export function GameTab({
   }
 
   return (
-    <div className="grid gap-4">
-      <GameControlCard
-        gameState={gameState}
-        pendingAction={pendingAction}
-        scoreRowCount={scoreRows.length}
-        onAdvanceTick={onAdvanceTick}
-        onRefreshGameStatus={onRefreshGameStatus}
-        onRecomputeScores={onRecomputeScores}
-        onStartMatch={onStartMatch}
-        onStopMatch={onStopMatch}
-        onUpdateMatchSchedule={onUpdateMatchSchedule}
-      />
-
-      <div className="grid items-start gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <CurrentTickCard currentTick={gameState.current_tick} />
-        <ScoreboardSnapshotCard
-          pendingAction={pendingAction}
-          scoreRows={scoreRows}
-          onRefresh={onRefreshGameScoreboard}
-        />
-      </div>
-
+    <div className="grid gap-6">
       <section className="grid gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Operations</h2>
+          <h2 className="text-base font-semibold text-foreground">
+            Incident Response
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Runtime controls, audit history, and recent checker execution.
+            Trusted runtime truth first, then the supporting signals that explain
+            why reconcile can or cannot be trusted.
           </p>
         </div>
         <RuntimeHealthCard
@@ -1455,6 +1442,60 @@ export function GameTab({
           onRefreshAlerts={onRefreshOperationsStatus}
           onRefreshMetrics={onRefreshServiceMetrics}
         />
+      </section>
+
+      <section className="grid gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Match Controls
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Manual match, schedule, and scoring controls that change live state.
+          </p>
+        </div>
+        <GameControlCard
+          gameState={gameState}
+          pendingAction={pendingAction}
+          scoreRowCount={scoreRows.length}
+          onAdvanceTick={onAdvanceTick}
+          onRefreshGameStatus={onRefreshGameStatus}
+          onRecomputeScores={onRecomputeScores}
+          onStartMatch={onStartMatch}
+          onStopMatch={onStopMatch}
+          onUpdateMatchSchedule={onUpdateMatchSchedule}
+        />
+      </section>
+
+      <section className="grid gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Match Observation
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Current tick progress and a compact scoreboard snapshot before you
+            drill into the full ranking view.
+          </p>
+        </div>
+        <div className="grid items-start gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+          <CurrentTickCard currentTick={gameState.current_tick} />
+          <ScoreboardSnapshotCard
+            pendingAction={pendingAction}
+            scoreRows={scoreRows}
+            onRefresh={onRefreshGameScoreboard}
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Diagnostics
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Scheduler state and checker evidence stay available, but only expand
+            when you need to investigate the runtime path.
+          </p>
+        </div>
         <div className="grid gap-4">
           <SchedulerCard
             filters={filters.schedulerEvent}
@@ -1471,17 +1512,32 @@ export function GameTab({
             onStopScheduler={onStopScheduler}
             onUpdateScheduler={onUpdateScheduler}
           />
-          <CheckerRunsCard
-            checkerRunPage={checkerRunPage}
-            checkerRunsLiveMode={checkerRunsLiveMode}
-            filters={filters.checkerRun}
-            pendingAction={pendingAction}
-            onApplyFilters={onApplyCheckerRunFilters}
-            onFilterChange={onCheckerRunFilterChange}
-            onPage={onPageCheckerRuns}
-            onRefresh={onRefreshCheckerRuns}
-            onResetFilters={onResetCheckerRunFilters}
-          />
+          <details
+            className="rounded-md border border-border/70 bg-muted/10 p-3"
+            data-testid="checker-investigation-disclosure"
+            open={checkerAttentionActive}
+          >
+            <summary className="cursor-pointer font-medium text-foreground">
+              Checker investigation
+            </summary>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Phase-level checker evidence stays available here when runtime
+              health or alerts point to checker drift.
+            </p>
+            <div className="mt-3">
+              <CheckerRunsCard
+                checkerRunPage={checkerRunPage}
+                checkerRunsLiveMode={checkerRunsLiveMode}
+                filters={filters.checkerRun}
+                pendingAction={pendingAction}
+                onApplyFilters={onApplyCheckerRunFilters}
+                onFilterChange={onCheckerRunFilterChange}
+                onPage={onPageCheckerRuns}
+                onRefresh={onRefreshCheckerRuns}
+                onResetFilters={onResetCheckerRunFilters}
+              />
+            </div>
+          </details>
         </div>
       </section>
     </div>
@@ -2056,7 +2112,11 @@ function RuntimeHealthCard({
       title="Runtime Health"
       description="Aggregated drift view for trusted reconcile, controller access, WireGuard, deployment backlog, and the latest runtime alerts."
     >
-      <div className="space-y-4 p-4" data-testid="runtime-health-card">
+      <div
+        className="space-y-4 p-4"
+        data-testid="runtime-health-card"
+        id="runtime-health-card"
+      >
         <StatusBanner
           message={snapshot.summary}
           variant={
@@ -2067,9 +2127,9 @@ function RuntimeHealthCard({
                 : "warning"
           }
         />
-        <InfoPanel layout="grid">
+        <InfoPanel layout="grid" tone="surface">
           <InfoLine
-            label="Trusted reconcile"
+            label="Runtime trust"
             value={runtimeHealthSeverityLabel(snapshot.severity)}
             valueClassName="font-mono"
           />
@@ -2086,21 +2146,6 @@ function RuntimeHealthCard({
           <InfoLine
             label="WireGuard"
             value={snapshot.wireGuardLabel}
-            valueClassName="font-mono"
-          />
-          <InfoLine
-            label="Ops alerts"
-            value={`${snapshot.operationsCriticalCount} critical / ${snapshot.operationsWarningCount} warning`}
-            valueClassName="font-mono"
-          />
-          <InfoLine
-            label="Metric attention"
-            value={String(snapshot.metricsAttentionCount)}
-            valueClassName="font-mono"
-          />
-          <InfoLine
-            label="Snapshot"
-            value={snapshot.generatedAt}
             valueClassName="font-mono"
           />
         </InfoPanel>
@@ -2134,8 +2179,25 @@ function RuntimeHealthCard({
         ) : null}
         <details className="rounded-md border border-border/70 bg-muted/10 p-3 text-sm">
           <summary className="cursor-pointer font-medium text-foreground">
-            Inspect or refresh individual sources
+            Inspect trust inputs
           </summary>
+          <InfoPanel className="mt-3" compact layout="grid" tone="surface">
+            <InfoLine
+              label="Active alerts"
+              value={`${snapshot.operationsCriticalCount} critical / ${snapshot.operationsWarningCount} warning`}
+              valueClassName="font-mono"
+            />
+            <InfoLine
+              label="Metrics needing attention"
+              value={String(snapshot.metricsAttentionCount)}
+              valueClassName="font-mono"
+            />
+            <InfoLine
+              label="Snapshot"
+              value={snapshot.generatedAt}
+              valueClassName="font-mono"
+            />
+          </InfoPanel>
           <CardActionRow className="mt-3">
             <Button
               size="sm"
@@ -2193,6 +2255,11 @@ function RuntimeRemediationPanel({
   onDownloadRuntimeHealthReport: () => void;
   onRefreshRuntimeHealth: () => void;
 }): ReactElement {
+  const nextActionSummary =
+    severity === "critical"
+      ? "Inspect scheduler and checker state after runtime truth is refreshed."
+      : "Inspect deployment and access truth before trusting SSH or runtime state.";
+
   return (
     <div
       className={cn(
@@ -2215,6 +2282,7 @@ function RuntimeRemediationPanel({
           copy the summary or download the full report before state changes.
         </li>
       </ol>
+      <p className="mt-3 text-sm text-muted-foreground">{nextActionSummary}</p>
       <CardActionRow>
         <RuntimeActionButton
           actionID="runtime:health"
@@ -2228,6 +2296,32 @@ function RuntimeRemediationPanel({
           onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
           onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
         />
+        <Button asChild size="sm" variant="ghost">
+          <Link
+            href={
+              severity === "critical"
+                ? "/admin/game#scheduler-card"
+                : "/admin/deployments"
+            }
+          >
+            {severity === "critical"
+              ? "Inspect Scheduler"
+              : "Inspect Deployments"}
+          </Link>
+        </Button>
+        <Button asChild size="sm" variant="ghost">
+          <Link
+            href={
+              severity === "critical"
+                ? "/admin/game#checker-runs-card"
+                : "/admin/players"
+            }
+          >
+            {severity === "critical"
+              ? "Inspect Checker Runs"
+              : "Inspect Access Controls"}
+          </Link>
+        </Button>
       </CardActionRow>
       <ul className="mt-3 grid gap-2 text-sm text-muted-foreground">
         {warnings.map((warning) => (
@@ -2428,9 +2522,9 @@ function OperationsSupportPanel({
   onRefreshMetrics: () => void;
 }): ReactElement {
   return (
-    <div className="rounded-md border border-border/70 bg-card p-4">
+    <div className="grid gap-4">
       <div className="mb-4 flex flex-col gap-1">
-        <h3 className="text-base font-semibold text-foreground">
+        <h3 className="text-sm font-semibold text-foreground">
           Operational Signals
         </h3>
         <p className="text-sm text-muted-foreground">
@@ -2467,7 +2561,7 @@ function OperationsAlertsCard({
   return (
     <section
       data-testid="operations-alerts-card"
-      className="rounded-md border border-border/70 bg-muted/10 p-4"
+      className="rounded-md border border-border/50 bg-muted/5 p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -2564,7 +2658,7 @@ function OperationsMetricsCard({
   return (
     <section
       data-testid="operations-metrics-card"
-      className="rounded-md border border-border/70 bg-muted/10 p-4"
+      className="rounded-md border border-border/50 bg-muted/5 p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -3051,6 +3145,8 @@ function SchedulerCard({
   const [draftInterval, setDraftInterval] = useState<string>(
     String(scheduler?.interval_seconds ?? 60),
   );
+  const auditExpanded =
+    !schedulerEventsLiveMode || hasSchedulerFiltersApplied(filters);
 
   useEffect(() => {
     setDraftInterval(String(scheduler?.interval_seconds ?? 60));
@@ -3067,8 +3163,8 @@ function SchedulerCard({
           <div>
             <CardTitle>Scheduler</CardTitle>
             <CardDescription>
-              Background interval state for automatic tick advancement plus
-              persisted audit history.
+              Core cadence controls stay visible. Audit history expands only when
+              you need to inspect or filter it.
             </CardDescription>
           </div>
           <Button
@@ -3103,16 +3199,31 @@ function SchedulerCard({
             onStartScheduler={onStartScheduler}
             onStopScheduler={onStopScheduler}
           />
-          <SchedulerAuditPanel
-            filters={filters}
-            pendingAction={pendingAction}
-            schedulerEventPage={schedulerEventPage}
-            schedulerEventsLiveMode={schedulerEventsLiveMode}
-            onApplyFilters={onApplyFilters}
-            onFilterChange={onFilterChange}
-            onPage={onPage}
-            onResetFilters={onResetFilters}
-          />
+          <details
+            className="rounded-md border border-border/70 bg-muted/10 p-3"
+            data-testid="scheduler-audit-disclosure"
+            open={auditExpanded}
+          >
+            <summary className="cursor-pointer font-medium text-foreground">
+              Scheduler Audit Trail
+            </summary>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Event history, filters, and paging for scheduler state changes and
+              tick execution.
+            </p>
+            <div className="mt-3">
+              <SchedulerAuditPanel
+                filters={filters}
+                pendingAction={pendingAction}
+                schedulerEventPage={schedulerEventPage}
+                schedulerEventsLiveMode={schedulerEventsLiveMode}
+                onApplyFilters={onApplyFilters}
+                onFilterChange={onFilterChange}
+                onPage={onPage}
+                onResetFilters={onResetFilters}
+              />
+            </div>
+          </details>
         </div>
       </CardContent>
     </Card>
@@ -3256,7 +3367,7 @@ function SchedulerActionRow({
   onStopScheduler: () => void;
 }): ReactElement {
   return (
-    <CardActionRow>
+    <CardActionRow className="rounded-md border border-border/70 bg-muted/10 p-3 pt-3">
       <Button
         disabled={pendingAction !== null || schedulerState === "running"}
         variant="outline"
@@ -3520,14 +3631,18 @@ function CurrentTickCard({
   currentTick?: AdminGameTickStatus;
 }): ReactElement {
   return (
-    <Card data-testid="checker-runs-card" id="checker-runs-card">
-      <CardHeader>
-        <CardTitle>Current Tick</CardTitle>
-        <CardDescription>
+    <section
+      className="rounded-md border border-border/70 bg-muted/10 p-4"
+      data-testid="current-tick-card"
+      id="current-tick-card"
+    >
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-foreground">Current Tick</h3>
+        <p className="text-sm text-muted-foreground">
           The latest persisted tick snapshot from game-core.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+        </p>
+      </div>
+      <div>
         {currentTick ? (
           <InfoPanel layout="grid" tone="surface">
             <div className="flex items-center justify-between gap-3">
@@ -3564,8 +3679,8 @@ function CurrentTickCard({
         ) : (
           <EmptyStateText message="No persisted tick yet." />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -3582,14 +3697,14 @@ function ScoreboardSnapshotCard({
   const lastPlace = scoreRows[scoreRows.length - 1];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Scoreboard</CardTitle>
-        <CardDescription>
+    <section className="rounded-md border border-border/70 bg-muted/10 p-4">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-foreground">Scoreboard</h3>
+        <p className="text-sm text-muted-foreground">
           The full authoritative ranking now lives on its own organizer page.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        </p>
+      </div>
+      <div className="space-y-4">
         <InfoPanel layout="grid">
           <InfoLine
             label="Rows"
@@ -3626,8 +3741,8 @@ function ScoreboardSnapshotCard({
             </Link>
           </Button>
         </CardActionRow>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -3768,16 +3883,25 @@ function CheckerRunsCard({
   onResetFilters: () => void;
 }): ReactElement {
   const checkerRunRows = checkerRunPage.items;
+  const sliceStatusCounts = checkerRunRows.reduce(
+    (counts, run) => {
+      counts[run.status] = (counts[run.status] ?? 0) + 1;
+      return counts;
+    },
+    {} as Record<string, number>,
+  );
+  const detailExpanded =
+    !checkerRunsLiveMode || hasCheckerRunFiltersApplied(filters);
 
   return (
-    <Card>
+    <Card data-testid="checker-runs-card" id="checker-runs-card">
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>Recent Checker Runs</CardTitle>
+            <CardTitle>Checker Investigation</CardTitle>
             <CardDescription>
-              Latest checker phases persisted by game-core. Filtered views
-              pause live stream overwrite.
+              Summary-first checker diagnostics. Expand the history only
+              when runtime health points you here.
             </CardDescription>
           </div>
           <Button
@@ -3795,85 +3919,30 @@ function CheckerRunsCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="mb-4 space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Field label="Page Size" htmlFor="checker-limit">
-              <select
-                id="checker-limit"
-                className={selectClassName}
-                value={filters.limit}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, limit: event.target.value })
-                }
-              >
-                <option value="18">18 per page</option>
-                <option value="36">36 per page</option>
-                <option value="72">72 per page</option>
-                <option value="144">144 per page</option>
-              </select>
-            </Field>
-            <Field label="Tick ID" htmlFor="checker-tick">
-              <Input
-                id="checker-tick"
-                type="number"
-                min="1"
-                value={filters.tickId}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, tickId: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Team ID" htmlFor="checker-team">
-              <Input
-                id="checker-team"
-                type="number"
-                min="1"
-                value={filters.teamId}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, teamId: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Challenge ID" htmlFor="checker-challenge">
-              <Input
-                id="checker-challenge"
-                type="number"
-                min="1"
-                value={filters.challengeId}
-                onChange={(event) =>
-                  onFilterChange({
-                    ...filters,
-                    challengeId: event.target.value,
-                  })
-                }
-              />
-            </Field>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:max-w-xl">
-            <Field label="Phase" htmlFor="checker-phase">
-              <Input
-                id="checker-phase"
-                placeholder="put"
-                value={filters.phase}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, phase: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Status" htmlFor="checker-status">
-              <Input
-                id="checker-status"
-                placeholder="failed"
-                value={filters.status}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, status: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-        </div>
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <CardContent className="space-y-4">
+        <InfoPanel layout="grid" tone="surface">
+          <InfoLine
+            label="Visible runs"
+            value={`${checkerRunRows.length} of ${checkerRunPage.total_count}`}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Failed on slice"
+            value={String(sliceStatusCounts.failed ?? 0)}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Skipped on slice"
+            value={String(sliceStatusCounts.skipped ?? 0)}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Stream mode"
+            value={checkerRunsLiveMode ? "live stream" : "filters applied"}
+            valueClassName="font-mono"
+          />
+        </InfoPanel>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
             <SliceCountBadge
               totalCount={checkerRunPage.total_count}
@@ -3881,88 +3950,204 @@ function CheckerRunsCard({
               offset={checkerRunPage.offset}
             />
             <LiveModeBadge
-              filteredLabel="Filtered"
-              liveLabel="Live"
+              filteredLabel="Filters applied"
+              liveLabel="Live stream"
               liveMode={checkerRunsLiveMode}
             />
           </div>
-          <PagedFilterActions
-            applyLabel="Apply Run Filters"
-            canPageNext={checkerRunPage.has_next}
-            canPagePrev={checkerRunPage.has_prev}
-            disabled={pendingAction !== null}
-            liveMode={checkerRunsLiveMode}
-            onApply={onApplyFilters}
-            onPage={onPage}
-            onReset={onResetFilters}
-            resetLabel="Reset Run Filters"
-          />
+          <Button asChild size="sm" variant="ghost">
+            <Link href="/admin/game#runtime-health-card">Back to Runtime Health</Link>
+          </Button>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px]">Tick</TableHead>
-              <TableHead>Team</TableHead>
-              <TableHead>Challenge</TableHead>
-              <TableHead>Phase</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Target</TableHead>
-              <TableHead>Checked</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {checkerRunRows.length === 0 ? (
-              <EmptyTableRow
-                colSpan={7}
-                message="No checker runs persisted yet."
-              />
-            ) : (
-              checkerRunRows.map((run) => (
-                <TableRow key={run.id}>
-                  <TableCell className="font-semibold">
-                    #{run.tick_id}
-                  </TableCell>
-                  <TableCell>{run.team_name}</TableCell>
-                  <TableCell>
-                    <div>
-                      <p>{run.challenge_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        #{run.challenge_id}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs uppercase">
-                    {run.phase}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      className={getCheckerRunStatusTone(run.status)}
-                      variant="outline"
-                    >
-                      {run.status}
-                    </Badge>
-                    {run.message ? (
-                      <p className="mt-2 max-w-[16rem] text-xs leading-5 text-muted-foreground">
-                        {run.message}
-                      </p>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {run.target}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    <div>
-                      <p>{formatIndonesianDate(run.checked_at)}</p>
-                      <p>exit {run.exit_code}</p>
-                    </div>
-                  </TableCell>
+        <details
+          className="rounded-md border border-border/70 bg-muted/10 p-3"
+          data-testid="checker-runs-disclosure"
+          open={detailExpanded}
+        >
+          <summary className="cursor-pointer font-medium text-foreground">
+            Checker history
+          </summary>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Phase-level history, filters, and paging for checker investigation.
+          </p>
+          <div className="mt-3 space-y-4">
+            <div className="space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="Page Size" htmlFor="checker-limit">
+                  <select
+                    id="checker-limit"
+                    className={selectClassName}
+                    value={filters.limit}
+                    onChange={(event) =>
+                      onFilterChange({ ...filters, limit: event.target.value })
+                    }
+                  >
+                    <option value="18">18 per page</option>
+                    <option value="36">36 per page</option>
+                    <option value="72">72 per page</option>
+                    <option value="144">144 per page</option>
+                  </select>
+                </Field>
+                <Field label="Tick ID" htmlFor="checker-tick">
+                  <Input
+                    id="checker-tick"
+                    type="number"
+                    min="1"
+                    value={filters.tickId}
+                    onChange={(event) =>
+                      onFilterChange({ ...filters, tickId: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Team ID" htmlFor="checker-team">
+                  <Input
+                    id="checker-team"
+                    type="number"
+                    min="1"
+                    value={filters.teamId}
+                    onChange={(event) =>
+                      onFilterChange({ ...filters, teamId: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Challenge ID" htmlFor="checker-challenge">
+                  <Input
+                    id="checker-challenge"
+                    type="number"
+                    min="1"
+                    value={filters.challengeId}
+                    onChange={(event) =>
+                      onFilterChange({
+                        ...filters,
+                        challengeId: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:max-w-xl">
+                <Field label="Phase" htmlFor="checker-phase">
+                  <Input
+                    id="checker-phase"
+                    placeholder="put"
+                    value={filters.phase}
+                    onChange={(event) =>
+                      onFilterChange({ ...filters, phase: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Status" htmlFor="checker-status">
+                  <Input
+                    id="checker-status"
+                    placeholder="failed"
+                    value={filters.status}
+                    onChange={(event) =>
+                      onFilterChange({ ...filters, status: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
+            <PagedFilterActions
+              applyLabel="Apply Run Filters"
+              canPageNext={checkerRunPage.has_next}
+              canPagePrev={checkerRunPage.has_prev}
+              disabled={pendingAction !== null}
+              liveMode={checkerRunsLiveMode}
+              onApply={onApplyFilters}
+              onPage={onPage}
+              onReset={onResetFilters}
+              resetLabel="Reset Run Filters"
+            />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[100px]">Tick</TableHead>
+                  <TableHead>Team</TableHead>
+                  <TableHead>Challenge</TableHead>
+                  <TableHead>Phase</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Target</TableHead>
+                  <TableHead>Checked</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              </TableHeader>
+              <TableBody>
+                {checkerRunRows.length === 0 ? (
+                  <EmptyTableRow
+                    colSpan={7}
+                    message="No checker runs persisted yet."
+                  />
+                ) : (
+                  checkerRunRows.map((run) => (
+                    <TableRow key={run.id}>
+                      <TableCell className="font-semibold">
+                        #{run.tick_id}
+                      </TableCell>
+                      <TableCell>{run.team_name}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p>{run.challenge_name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            #{run.challenge_id}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs uppercase">
+                        {run.phase}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={getCheckerRunStatusTone(run.status)}
+                          variant="outline"
+                        >
+                          {run.status}
+                        </Badge>
+                        {run.message ? (
+                          <p className="mt-2 max-w-[16rem] text-xs leading-5 text-muted-foreground">
+                            {run.message}
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {run.target}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <div>
+                          <p>{formatIndonesianDate(run.checked_at)}</p>
+                          <p>exit {run.exit_code}</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </details>
       </CardContent>
     </Card>
+  );
+}
+
+function hasSchedulerFiltersApplied(
+  filters: GameFilters["schedulerEvent"],
+): boolean {
+  return (
+    filters.eventType.trim() !== "" ||
+    filters.source.trim() !== "" ||
+    filters.state.trim() !== ""
+  );
+}
+
+function hasCheckerRunFiltersApplied(
+  filters: GameFilters["checkerRun"],
+): boolean {
+  return (
+    filters.tickId.trim() !== "" ||
+    filters.teamId.trim() !== "" ||
+    filters.challengeId.trim() !== "" ||
+    filters.phase.trim() !== "" ||
+    filters.status.trim() !== ""
   );
 }
 

@@ -15,6 +15,15 @@ export async function expectSchedulerFiltersVisible(schedulerFilters: Locator) {
   await expect(schedulerFilters.getByLabel("State")).toBeVisible();
 }
 
+export async function openDisclosureIfNeeded(disclosure: Locator) {
+  const expanded = await disclosure.evaluate((element) =>
+    element.hasAttribute("open"),
+  );
+  if (!expanded) {
+    await disclosure.locator("summary").first().click();
+  }
+}
+
 export async function assertEmptyAttacksState(page: Page) {
   await expect(
     page.getByText("No accepted attacks in the current slice to plot."),

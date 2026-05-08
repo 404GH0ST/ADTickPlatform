@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { expectNoHorizontalOverflow, expectSchedulerFiltersVisible } from "./test-layout-utils";
+import {
+  expectNoHorizontalOverflow,
+  expectSchedulerFiltersVisible,
+  openDisclosureIfNeeded,
+} from "./test-layout-utils";
 
 const mockApiBaseUrl = "http://127.0.0.1:4010";
 
@@ -32,6 +36,7 @@ test("organizer game scheduler filters stay inside the page width on mobile", as
   await page.goto("/admin/game");
 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
+  await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
   const schedulerFilters = page.getByTestId("scheduler-audit-filters");
   await expectSchedulerFiltersVisible(schedulerFilters);
 

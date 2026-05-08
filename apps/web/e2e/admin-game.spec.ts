@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 
 import { expect } from "@playwright/test";
-import { expectNoHorizontalOverflow, expectSchedulerFiltersVisible } from "./test-layout-utils";
+import {
+  expectNoHorizontalOverflow,
+  expectSchedulerFiltersVisible,
+  openDisclosureIfNeeded,
+} from "./test-layout-utils";
 import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
 
@@ -11,7 +15,10 @@ test("organizer game page keeps scheduler audit filters inside the card width", 
   await page.goto("/admin/game");
 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
-  await expect(page.getByText("Scheduler Audit Trail")).toBeVisible();
+  await expect(
+    page.getByTestId("scheduler-audit-disclosure").locator("summary"),
+  ).toBeVisible();
+  await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
   const schedulerFilters = page.getByTestId("scheduler-audit-filters");
   await expectSchedulerFiltersVisible(schedulerFilters);
 
@@ -22,6 +29,7 @@ test("organizer game page renders mocked scheduler audit data", async ({
   page,
 }) => {
   await page.goto("/admin/game");
+  await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
 
   await expect(page.getByText("scheduler started")).toBeVisible();
   await expect(page.getByText("tick #12 completed")).toBeVisible();
@@ -40,7 +48,14 @@ test("organizer game page shows explicit empty states for scheduler and checker 
   });
   await page.goto("/admin/game");
 
-  await expect(page.getByText("Scheduler Audit Trail")).toBeVisible();
+  await expect(
+    page.getByTestId("scheduler-audit-disclosure").locator("summary"),
+  ).toBeVisible();
+  await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
+  await openDisclosureIfNeeded(
+    page.getByTestId("checker-investigation-disclosure"),
+  );
+  await openDisclosureIfNeeded(page.getByTestId("checker-runs-disclosure"));
   await expect(
     page.getByText("No scheduler events recorded yet."),
   ).toBeVisible();
@@ -58,6 +73,11 @@ test("organizer game page shows degraded warning when scheduler and checker hist
   });
   await page.goto("/admin/game");
 
+  await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
+  await openDisclosureIfNeeded(
+    page.getByTestId("checker-investigation-disclosure"),
+  );
+  await openDisclosureIfNeeded(page.getByTestId("checker-runs-disclosure"));
   await expect(
     page.getByText(
       "Organizer data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
