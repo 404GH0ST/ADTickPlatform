@@ -92,6 +92,9 @@ type GameCheckerRun struct {
 	ExitCode      int    `json:"exit_code"`
 	Message       string `json:"message,omitempty"`
 	Output        string `json:"output,omitempty"`
+	ServiceState  string `json:"service_state,omitempty"`
+	StatePhase    string `json:"state_phase,omitempty"`
+	StateMessage  string `json:"state_message,omitempty"`
 	CheckedAt     string `json:"checked_at"`
 }
 

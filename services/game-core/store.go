@@ -82,6 +82,12 @@ type schedulerEventRecord struct {
 	CreatedAt time.Time
 }
 
+type checkerRunGroupKey struct {
+	TickID      int
+	TeamID      int
+	ChallengeID int
+}
+
 type gameStore interface {
 	ListCheckerTargets(ctx context.Context) ([]checkerTarget, error)
 	LookupTeamName(ctx context.Context, teamID int) (string, error)
@@ -578,6 +584,7 @@ func (s *memoryGameStore) ListCheckerRuns(_ context.Context, query apigateway.Ga
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	summaries := buildCheckerRunSummaryMap(s.runs)
 	filtered := make([]apigateway.GameCheckerRun, 0, len(s.runs))
 	for _, run := range s.runs {
 		if query.TickID > 0 && run.TickID != query.TickID {
@@ -595,6 +602,7 @@ func (s *memoryGameStore) ListCheckerRuns(_ context.Context, query apigateway.Ga
 		if query.Status != "" && !strings.EqualFold(run.Status, query.Status) {
 			continue
 		}
+		applyCheckerRunSummary(&run, summaries[checkerRunKey(run)])
 		filtered = append(filtered, run)
 	}
 
@@ -998,6 +1006,13 @@ func (s *postgresGameStore) ListCheckerRuns(ctx context.Context, query apigatewa
 	if err := rows.Err(); err != nil {
 		return apigateway.GameCheckerRunPage{}, err
 	}
+	summaries, err := s.loadCheckerRunSummaries(ctx, result)
+	if err != nil {
+		return apigateway.GameCheckerRunPage{}, err
+	}
+	for i := range result {
+		applyCheckerRunSummary(&result[i], summaries[checkerRunKey(result[i])])
+	}
 	return apigateway.GameCheckerRunPage{
 		Items:      result,
 		Limit:      limit,
@@ -1006,6 +1021,91 @@ func (s *postgresGameStore) ListCheckerRuns(ctx context.Context, query apigatewa
 		HasPrev:    offset > 0,
 		HasNext:    offset+len(result) < totalCount,
 	}, nil
+}
+
+func checkerRunKey(run apigateway.GameCheckerRun) checkerRunGroupKey {
+	return checkerRunGroupKey{
+		TickID:      run.TickID,
+		TeamID:      run.TeamID,
+		ChallengeID: run.ChallengeID,
+	}
+}
+
+func buildCheckerRunSummaryMap(runs []apigateway.GameCheckerRun) map[checkerRunGroupKey]apigateway.GameServiceStateSummary {
+	grouped := make(map[checkerRunGroupKey][]apigateway.GameCheckerRun)
+	for _, run := range runs {
+		key := checkerRunKey(run)
+		grouped[key] = append(grouped[key], run)
+	}
+	summaries := make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary, len(grouped))
+	for key, group := range grouped {
+		summaries[key] = apigateway.SummarizeCheckerRunsForTick(group, key.TickID)
+	}
+	return summaries
+}
+
+func applyCheckerRunSummary(run *apigateway.GameCheckerRun, summary apigateway.GameServiceStateSummary) {
+	run.ServiceState = summary.Status
+	run.StatePhase = summary.Phase
+	run.StateMessage = summary.Message
+}
+
+func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []apigateway.GameCheckerRun) (map[checkerRunGroupKey]apigateway.GameServiceStateSummary, error) {
+	if len(runs) == 0 {
+		return map[checkerRunGroupKey]apigateway.GameServiceStateSummary{}, nil
+	}
+
+	keys := make([]checkerRunGroupKey, 0, len(runs))
+	seen := make(map[checkerRunGroupKey]struct{}, len(runs))
+	for _, run := range runs {
+		key := checkerRunKey(run)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+
+	args := make([]any, 0, len(keys)*3)
+	clauses := make([]string, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key.TickID, key.TeamID, key.ChallengeID)
+		base := len(args) - 2
+		clauses = append(clauses, fmt.Sprintf("(tick_id = $%d AND team_id = $%d AND challenge_id = $%d)", base, base+1, base+2))
+	}
+
+	query := `
+		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
+		FROM checker_runs
+		WHERE ` + strings.Join(clauses, " OR ") + `
+		ORDER BY tick_id DESC, id DESC
+	`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	grouped := make(map[checkerRunGroupKey][]apigateway.GameCheckerRun, len(keys))
+	for rows.Next() {
+		var run apigateway.GameCheckerRun
+		var checkedAt time.Time
+		if err := rows.Scan(&run.TickID, &run.TeamID, &run.ChallengeID, &run.Phase, &run.Status, &run.Message, &checkedAt); err != nil {
+			return nil, err
+		}
+		run.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		key := checkerRunKey(run)
+		grouped[key] = append(grouped[key], run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	summaries := make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary, len(keys))
+	for _, key := range keys {
+		summaries[key] = apigateway.SummarizeCheckerRunsForTick(grouped[key], key.TickID)
+	}
+	return summaries, nil
 }
 
 func (s *postgresGameStore) LoadSchedulerState(ctx context.Context, intervalSeconds int) (apigateway.GameSchedulerStatus, error) {

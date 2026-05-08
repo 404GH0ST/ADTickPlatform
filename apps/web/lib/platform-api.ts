@@ -101,7 +101,7 @@ export type TeamServiceState = {
   ssh_hint: string;
   last_event: string;
   reset_cooldown: string;
-  sla_status?: "passing" | "failing" | "unknown";
+  sla_status?: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
   sla_phase?: string;
   sla_tick_id?: number;
   sla_message?: string;

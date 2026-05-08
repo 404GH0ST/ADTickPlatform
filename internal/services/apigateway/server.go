@@ -561,14 +561,7 @@ func (s *Server) enrichServiceStatesWithSLADetails(ctx context.Context, teamID i
 	return states
 }
 
-type slaSummary struct {
-	Status  string
-	Phase   string
-	TickID  int
-	Message string
-}
-
-func applySLASummary(states []serviceState, challengeID int, summary slaSummary) {
+func applySLASummary(states []serviceState, challengeID int, summary GameServiceStateSummary) {
 	for i := range states {
 		if states[i].ChallengeID != challengeID {
 			continue
@@ -581,81 +574,20 @@ func applySLASummary(states []serviceState, challengeID int, summary slaSummary)
 	}
 }
 
-func summarizeSLARuns(runs []GameCheckerRun, tickID int) slaSummary {
-	selected := chooseSLARun(runs)
-	if selected == nil {
-		return slaSummary{
-			Status:  "unknown",
-			TickID:  tickID,
-			Message: "awaiting first checker run",
-		}
-	}
-
-	summary := slaSummary{
-		Phase:  selected.Phase,
-		TickID: tickID,
-	}
-	switch strings.ToLower(strings.TrimSpace(selected.Status)) {
-	case "success":
-		summary.Status = "passing"
-		summary.Message = "latest SLA cycle passed"
-	default:
-		summary.Status = "failing"
-		summary.Message = strings.TrimSpace(selected.Message)
-		if summary.Message == "" {
-			summary.Message = "checker reported a failed SLA phase"
-		}
-	}
-	return summary
-}
-
-func chooseSLARun(runs []GameCheckerRun) *GameCheckerRun {
-	if len(runs) == 0 {
-		return nil
-	}
-
-	var firstFailed *GameCheckerRun
-	var firstSkipped *GameCheckerRun
-	var lastSuccess *GameCheckerRun
+func summarizeSLARuns(runs []GameCheckerRun, tickID int) GameServiceStateSummary {
 	for i := range runs {
-		run := &runs[i]
-		switch strings.ToLower(strings.TrimSpace(run.Status)) {
-		case "failed":
-			if firstFailed == nil || shouldPreferPhase(run, firstFailed) {
-				firstFailed = run
-			}
-		case "skipped":
-			if firstSkipped == nil || shouldPreferPhase(run, firstSkipped) {
-				firstSkipped = run
-			}
-		case "success":
-			if lastSuccess == nil || shouldPreferLaterPhase(run, lastSuccess) {
-				lastSuccess = run
-			}
-		default:
-			if firstSkipped == nil || shouldPreferPhase(run, firstSkipped) {
-				firstSkipped = run
-			}
+		run := runs[i]
+		if strings.TrimSpace(run.ServiceState) == "" {
+			continue
+		}
+		return GameServiceStateSummary{
+			Status:  strings.TrimSpace(run.ServiceState),
+			Phase:   strings.TrimSpace(run.StatePhase),
+			TickID:  tickID,
+			Message: strings.TrimSpace(run.StateMessage),
 		}
 	}
-	if firstFailed != nil {
-		return firstFailed
-	}
-	if firstSkipped != nil {
-		return firstSkipped
-	}
-	if lastSuccess != nil {
-		return lastSuccess
-	}
-	return &runs[0]
-}
-
-func shouldPreferPhase(candidate, current *GameCheckerRun) bool {
-	return phaseOrder(candidate.Phase) < phaseOrder(current.Phase)
-}
-
-func shouldPreferLaterPhase(candidate, current *GameCheckerRun) bool {
-	return phaseOrder(candidate.Phase) > phaseOrder(current.Phase)
+	return SummarizeCheckerRunsForTick(runs, tickID)
 }
 
 func phaseOrder(phase string) int {
@@ -673,22 +605,22 @@ func phaseOrder(phase string) int {
 
 func fallbackSLAStatus(checker string) string {
 	if strings.EqualFold(strings.TrimSpace(checker), "warning") {
-		return "failing"
+		return "down"
 	}
 	if strings.TrimSpace(checker) == "" {
 		return "unknown"
 	}
-	return "passing"
+	return "ok"
 }
 
 func fallbackSLAMessage(checker string) string {
 	if strings.EqualFold(strings.TrimSpace(checker), "warning") {
-		return "checker warning; per-phase detail unavailable"
+		return "checker warning; service state detail unavailable"
 	}
 	if strings.TrimSpace(checker) == "" {
 		return "awaiting first checker run"
 	}
-	return "checker passing; per-phase detail unavailable"
+	return "checker passing; service state detail unavailable"
 }
 
 func matchSubmissionState(match *GameMatchStatus) string {

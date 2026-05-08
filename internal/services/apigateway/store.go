@@ -287,8 +287,8 @@ func defaultServiceStateForConfig(challengeID, teamID int, challengeName string,
 		SSHHint:       "solve service to generate SSH credential",
 		LastEvent:     "no patch applied yet",
 		ResetCooldown: "ready",
-		SLAStatus:     "passing",
-		SLAMessage:    "checker passing; per-phase detail unavailable",
+		SLAStatus:     "ok",
+		SLAMessage:    "checker passing; service state detail unavailable",
 	}
 }
 

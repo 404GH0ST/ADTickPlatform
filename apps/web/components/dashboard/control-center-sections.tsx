@@ -573,7 +573,7 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <DetailRow label="Challenge" value={`#${service.challengeId}`} />
       <DetailRow label="Checker" value={service.checker} />
-      <DetailRow label="SLA" value={formatSLAState(service)} />
+      <DetailRow label="Service state" value={formatSLAState(service)} />
       <DetailRow label="Reset" value={service.resetCooldown} />
       <DetailRow label="SSH" value={service.unlocked ? "unlocked" : "locked"} />
       <DetailRow label="Last event" value={service.lastEvent} />
@@ -588,33 +588,37 @@ function formatSLAState(service: ServiceRow): string {
   const phase = formatSLAPhaseLabel(service.slaPhase);
   const tick = service.slaTickId;
 
-  if (status === "passing") {
-    if (phase && tick) {
-      return `${phase} passed on tick #${tick}`;
-    }
-    if (tick) {
-      return `passing on tick #${tick}`;
-    }
-    return "passing";
-  }
+  const tickSuffix = tick ? ` on tick #${tick}` : "";
 
-  if (status === "failing") {
-    if (phase && tick) {
-      return `${phase} failed on tick #${tick}`;
-    }
-    if (phase) {
-      return `${phase} failed`;
-    }
-    if (tick) {
-      return `failing on tick #${tick}`;
-    }
-    return "failing";
+  switch (status) {
+    case "ok":
+      return `ok${tickSuffix}`;
+    case "recovering":
+      if (phase) {
+        return `recovering after ${phase}${tickSuffix}`;
+      }
+      return `recovering${tickSuffix}`;
+    case "flag_not_found":
+      if (phase) {
+        return `flag not found during ${phase}${tickSuffix}`;
+      }
+      return `flag not found${tickSuffix}`;
+    case "faulty":
+      if (phase) {
+        return `faulty during ${phase}${tickSuffix}`;
+      }
+      return `faulty${tickSuffix}`;
+    case "down":
+      if (phase) {
+        return `down during ${phase}${tickSuffix}`;
+      }
+      return `down${tickSuffix}`;
+    default:
+      if (tick) {
+        return `awaiting detail after tick #${tick}`;
+      }
+      return "awaiting checker detail";
   }
-
-  if (tick) {
-    return `awaiting detail after tick #${tick}`;
-  }
-  return "awaiting checker detail";
 }
 
 function formatSLAPhaseLabel(phase: string): string {

@@ -136,6 +136,15 @@ Returns readable state for the authenticated team's services, including:
 - `sla_tick_id`
 - `sla_message`
 
+`sla_status` uses Faust-style state names:
+
+- `ok`
+- `recovering`
+- `flag_not_found`
+- `faulty`
+- `down`
+- `unknown`
+
 Example:
 
 ```json
@@ -151,10 +160,10 @@ Example:
     "ssh_hint": "ssh root@10.80.1.11 -p 22",
     "last_event": "nginx.conf hotfix deployed 2m ago",
     "reset_cooldown": "ready",
-    "sla_status": "passing",
+    "sla_status": "ok",
     "sla_phase": "check",
     "sla_tick_id": 248,
-    "sla_message": "latest SLA cycle passed"
+    "sla_message": "service passed storage, retrieval, and functionality checks"
   }
 ]
 ```

@@ -4065,6 +4065,7 @@ function CheckerRunsCard({
                   <TableHead className="w-[100px]">Tick</TableHead>
                   <TableHead>Team</TableHead>
                   <TableHead>Challenge</TableHead>
+                  <TableHead>Service State</TableHead>
                   <TableHead>Phase</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Target</TableHead>
@@ -4074,7 +4075,7 @@ function CheckerRunsCard({
               <TableBody>
                 {checkerRunRows.length === 0 ? (
                   <EmptyTableRow
-                    colSpan={7}
+                    colSpan={8}
                     message="No checker runs persisted yet."
                   />
                 ) : (
@@ -4094,6 +4095,19 @@ function CheckerRunsCard({
                       </TableCell>
                       <TableCell className="font-mono text-xs uppercase">
                         {run.phase}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={getServiceStateTone(run.service_state)}
+                          variant="outline"
+                        >
+                          {formatServiceStateLabel(run.service_state)}
+                        </Badge>
+                        {run.state_message ? (
+                          <p className="mt-2 max-w-[16rem] text-xs leading-5 text-muted-foreground">
+                            {run.state_message}
+                          </p>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -4343,6 +4357,38 @@ function getCheckerRunStatusTone(status: string): string {
     return checkerRunTone.skipped;
   }
   return validationTone.unchecked;
+}
+
+function getServiceStateTone(status: string | undefined): string {
+  switch ((status ?? "").trim().toLowerCase()) {
+    case "ok":
+      return checkerRunTone.success;
+    case "recovering":
+      return challengeTone.deploying;
+    case "flag_not_found":
+    case "faulty":
+    case "down":
+      return checkerRunTone.failed;
+    default:
+      return validationTone.unchecked;
+  }
+}
+
+function formatServiceStateLabel(status: string | undefined): string {
+  switch ((status ?? "").trim().toLowerCase()) {
+    case "ok":
+      return "ok";
+    case "recovering":
+      return "recovering";
+    case "flag_not_found":
+      return "flag not found";
+    case "faulty":
+      return "faulty";
+    case "down":
+      return "down";
+    default:
+      return "unknown";
+  }
 }
 
 type ChallengeDraftField =

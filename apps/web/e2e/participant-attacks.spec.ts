@@ -195,9 +195,13 @@ test("participant service actions update the service card through unlock, ssh, r
     serviceCard.getByText("unlock required before requesting root access"),
   ).toBeVisible();
   await expect(
-    serviceCard.getByText("service functionality passed on tick #12"),
+    serviceCard.getByText("ok on tick #12"),
   ).toBeVisible();
-  await expect(serviceCard.getByText("latest SLA cycle passed")).toBeVisible();
+  await expect(
+    serviceCard.getByText(
+      "service passed storage, retrieval, and functionality checks",
+    ),
+  ).toBeVisible();
   await expect(
     serviceCard.getByRole("link", { name: "Download Source" }),
   ).toHaveAttribute("href", "/api/platform/challenges/1/source");

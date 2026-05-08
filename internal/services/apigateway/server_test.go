@@ -1318,8 +1318,8 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 		if state.ChallengeID != 1 {
 			continue
 		}
-		if state.SLAStatus != "failing" {
-			t.Fatalf("expected failing SLA status, got %q", state.SLAStatus)
+		if state.SLAStatus != "flag_not_found" {
+			t.Fatalf("expected flag_not_found SLA status, got %q", state.SLAStatus)
 		}
 		if state.SLAPhase != "get" {
 			t.Fatalf("expected get SLA phase, got %q", state.SLAPhase)
@@ -1333,6 +1333,90 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 		return
 	}
 	t.Fatal("expected service state for challenge 1")
+}
+
+func TestSummarizeSLARunsMapsFaustServiceStates(t *testing.T) {
+	testCases := []struct {
+		name    string
+		runs    []GameCheckerRun
+		status  string
+		phase   string
+		message string
+	}{
+		{
+			name: "ok",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "success"},
+				{Phase: "get", Status: "success"},
+				{Phase: "check", Status: "success"},
+			},
+			status:  "ok",
+			phase:   "check",
+			message: "service passed storage, retrieval, and functionality checks",
+		},
+		{
+			name: "recovering",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "failed", Message: "flag write failed"},
+				{Phase: "get", Status: "success"},
+				{Phase: "check", Status: "success"},
+			},
+			status:  "recovering",
+			phase:   "put",
+			message: "flag write failed",
+		},
+		{
+			name: "flag not found",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "success"},
+				{Phase: "get", Status: "failed", Message: "flag retrieval failed"},
+				{Phase: "check", Status: "success"},
+			},
+			status:  "flag_not_found",
+			phase:   "get",
+			message: "flag retrieval failed",
+		},
+		{
+			name: "faulty",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "success"},
+				{Phase: "get", Status: "success"},
+				{Phase: "check", Status: "failed", Message: "health endpoint timeout"},
+			},
+			status:  "faulty",
+			phase:   "check",
+			message: "health endpoint timeout",
+		},
+		{
+			name: "down",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "failed", Message: "target unreachable"},
+				{Phase: "get", Status: "skipped"},
+				{Phase: "check", Status: "skipped"},
+			},
+			status:  "down",
+			phase:   "put",
+			message: "target unreachable",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := summarizeSLARuns(tc.runs, 44)
+			if summary.Status != tc.status {
+				t.Fatalf("expected status %q, got %q", tc.status, summary.Status)
+			}
+			if summary.Phase != tc.phase {
+				t.Fatalf("expected phase %q, got %q", tc.phase, summary.Phase)
+			}
+			if summary.TickID != 44 {
+				t.Fatalf("expected tick 44, got %d", summary.TickID)
+			}
+			if summary.Message != tc.message {
+				t.Fatalf("expected message %q, got %q", tc.message, summary.Message)
+			}
+		})
+	}
 }
 
 func TestParticipantCanDownloadChallengeSourceBundle(t *testing.T) {

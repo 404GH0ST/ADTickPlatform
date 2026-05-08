@@ -468,10 +468,10 @@ paths:
                       ssh_hint: ssh root@10.80.1.11 -p 22
                       last_event: nginx.conf hotfix deployed 2m ago
                       reset_cooldown: ready
-                      sla_status: passing
+                      sla_status: ok
                       sla_phase: check
                       sla_tick_id: 248
-                      sla_message: latest SLA cycle passed
+                      sla_message: service passed storage, retrieval, and functionality checks
         '403':
           description: Authentication required
           content:
@@ -1037,8 +1037,11 @@ components:
         sla_status:
           type: string
           enum:
-            - passing
-            - failing
+            - ok
+            - recovering
+            - flag_not_found
+            - faulty
+            - down
             - unknown
         sla_phase:
           type: string

@@ -39,6 +39,25 @@ test("organizer game page renders mocked scheduler audit data", async ({
   await expect(page.getByText("stopped").first()).toBeVisible();
 });
 
+test("organizer game page shows checker history with faust service state summaries", async ({
+  page,
+}) => {
+  await page.goto("/admin/game");
+  await openDisclosureIfNeeded(
+    page.getByTestId("checker-investigation-disclosure"),
+  );
+  await openDisclosureIfNeeded(page.getByTestId("checker-runs-disclosure"));
+
+  const checkerCard = page.getByTestId("checker-runs-card");
+  await expect(checkerCard.getByText("Service State")).toBeVisible();
+  await expect(checkerCard.getByText("ok").first()).toBeVisible();
+  await expect(
+    checkerCard.getByText(
+      "service passed storage, retrieval, and functionality checks",
+    ).first(),
+  ).toBeVisible();
+});
+
 test("organizer game page shows explicit empty states for scheduler and checker history", async ({
   page,
   request,

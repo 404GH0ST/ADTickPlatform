@@ -210,6 +210,9 @@ export type AdminCheckerRun = {
   exit_code: number;
   message?: string;
   output?: string;
+  service_state?: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
+  state_phase?: string;
+  state_message?: string;
   checked_at: string;
 };
 

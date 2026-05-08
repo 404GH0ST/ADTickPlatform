@@ -322,6 +322,13 @@ Response shape:
 - `has_prev`
 - `has_next`
 
+Each checker run item also exposes the synthesized per-tick service state for the same
+`team x challenge x tick` group:
+
+- `service_state`
+- `state_phase`
+- `state_message`
+
 ### GET `/api/v2/admin/game/scheduler`
 
 Read the automatic tick scheduler state, interval, and last run metadata from `game-core`.

@@ -290,6 +290,9 @@ func TestCheckerRunsEndpointHonorsLimit(t *testing.T) {
 	if payload.Items[0].TickID != 1 {
 		t.Fatalf("expected latest runs from tick 1, got tick %d", payload.Items[0].TickID)
 	}
+	if payload.Items[0].ServiceState != "ok" {
+		t.Fatalf("expected checker run to expose ok service state, got %+v", payload.Items[0])
+	}
 }
 
 func TestMetricsEndpointIncludesGameCoreMetrics(t *testing.T) {
@@ -361,6 +364,9 @@ func TestCheckerRunsEndpointSupportsFiltersAndOffset(t *testing.T) {
 	filteredPayload := decodeResponse[apigateway.GameCheckerRunPage](t, filteredResponse.Body.Bytes())
 	if len(filteredPayload.Items) != 1 || filteredPayload.Items[0].Phase != "get" || filteredPayload.Items[0].Status != "failed" {
 		t.Fatalf("unexpected filtered checker runs payload %+v", filteredPayload)
+	}
+	if filteredPayload.Items[0].ServiceState != "flag_not_found" {
+		t.Fatalf("expected filtered checker run to expose flag_not_found state, got %+v", filteredPayload.Items[0])
 	}
 	if filteredPayload.TotalCount != 1 || filteredPayload.HasNext || filteredPayload.HasPrev {
 		t.Fatalf("unexpected filtered checker run page metadata %+v", filteredPayload)
