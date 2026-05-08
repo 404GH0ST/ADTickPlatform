@@ -114,21 +114,22 @@ type gameStore interface {
 }
 
 type memoryGameStore struct {
-	mu         sync.Mutex
-	targets    []checkerTarget
-	teamNames  map[int]string
-	challenges map[int]memoryChallenge
-	ticks      []apigateway.GameTickStatus
-	runs       []apigateway.GameCheckerRun
-	flags      map[string]issuedFlagRecord
-	accepted   map[string]acceptedFlagSubmission
-	attackFeed []apigateway.AttackEventAlias
-	scoreboard []apigateway.ScoreRowAlias
-	match      apigateway.GameMatchStatus
-	scheduler  apigateway.GameSchedulerStatus
-	events     []apigateway.GameSchedulerEvent
-	nextRun    int64
-	nextEvent  int64
+	mu            sync.Mutex
+	targets       []checkerTarget
+	teamNames     map[int]string
+	challenges    map[int]memoryChallenge
+	ticks         []apigateway.GameTickStatus
+	runs          []apigateway.GameCheckerRun
+	serviceStates map[checkerRunGroupKey]apigateway.GameServiceStateSummary
+	flags         map[string]issuedFlagRecord
+	accepted      map[string]acceptedFlagSubmission
+	attackFeed    []apigateway.AttackEventAlias
+	scoreboard    []apigateway.ScoreRowAlias
+	match         apigateway.GameMatchStatus
+	scheduler     apigateway.GameSchedulerStatus
+	events        []apigateway.GameSchedulerEvent
+	nextRun       int64
+	nextEvent     int64
 }
 
 type memoryChallenge struct {
@@ -187,15 +188,16 @@ func newMemoryGameStore() gameStore {
 	}
 
 	return &memoryGameStore{
-		targets:    targets,
-		teamNames:  teamNames,
-		challenges: challengeMap,
-		ticks:      make([]apigateway.GameTickStatus, 0),
-		runs:       make([]apigateway.GameCheckerRun, 0),
-		flags:      make(map[string]issuedFlagRecord),
-		accepted:   make(map[string]acceptedFlagSubmission),
-		attackFeed: make([]apigateway.AttackEventAlias, 0),
-		scoreboard: make([]apigateway.ScoreRowAlias, 0),
+		targets:       targets,
+		teamNames:     teamNames,
+		challenges:    challengeMap,
+		ticks:         make([]apigateway.GameTickStatus, 0),
+		runs:          make([]apigateway.GameCheckerRun, 0),
+		serviceStates: make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary),
+		flags:         make(map[string]issuedFlagRecord),
+		accepted:      make(map[string]acceptedFlagSubmission),
+		attackFeed:    make([]apigateway.AttackEventAlias, 0),
+		scoreboard:    make([]apigateway.ScoreRowAlias, 0),
 		match: apigateway.GameMatchStatus{
 			State:                "not_started",
 			AcceptingSubmissions: false,
@@ -271,6 +273,7 @@ func (s *memoryGameStore) RecordCheckerRun(_ context.Context, run checkerRunReco
 	}
 	s.nextRun++
 	s.runs = append([]apigateway.GameCheckerRun{record}, s.runs...)
+	s.refreshMemoryServiceState(record.TickID, record.TeamID, record.ChallengeID)
 	return record, nil
 }
 
@@ -374,35 +377,10 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 		scores[flag.OwnerTeamID].Services[flag.ChallengeID].Defense -= penalty
 	}
 
-	type checkerGroup struct {
-		PutOK   bool
-		GetOK   bool
-		CheckOK bool
-	}
-	grouped := make(map[string]*checkerGroup)
-	for _, run := range s.runs {
-		key := fmt.Sprintf("%d:%d:%d", run.TickID, run.TeamID, run.ChallengeID)
-		group := grouped[key]
-		if group == nil {
-			group = &checkerGroup{}
-			grouped[key] = group
-		}
-		if run.Status != "success" {
-			continue
-		}
-		switch run.Phase {
-		case "put":
-			group.PutOK = true
-		case "get":
-			group.GetOK = true
-		case "check":
-			group.CheckOK = true
-		}
-	}
-	for key, group := range grouped {
-		var tickID, teamID, challengeID int
-		fmt.Sscanf(key, "%d:%d:%d", &tickID, &teamID, &challengeID)
-		value := faustSLAValue(group.PutOK, group.GetOK, group.CheckOK)
+	for key, summary := range s.serviceStates {
+		teamID := key.TeamID
+		challengeID := key.ChallengeID
+		value := faustSLAValueForStatus(summary.Status)
 		scores[teamID].SLA += value
 		scores[teamID].Services[challengeID].SLA += value
 	}
@@ -820,12 +798,23 @@ func (s *postgresGameStore) RecordCheckerRun(ctx context.Context, run checkerRun
 		Output:        run.Output,
 		CheckedAt:     run.CheckedAt.UTC().Format(time.RFC3339),
 	}
-	if err := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return apigateway.GameCheckerRun{}, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO checker_runs (
 			tick_id, team_id, team_name, challenge_id, challenge_name, phase, target, checker_image, status, exit_code, message, output, checked_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id
 	`, run.TickID, run.TeamID, run.TeamName, run.ChallengeID, run.ChallengeName, run.Phase, run.Target, run.CheckerImage, run.Status, run.ExitCode, run.Message, run.Output, run.CheckedAt.UTC()).Scan(&record.ID); err != nil {
+		return apigateway.GameCheckerRun{}, err
+	}
+	if err := refreshPostgresServiceStateTx(ctx, tx, run.TickID, run.TeamID, run.ChallengeID); err != nil {
+		return apigateway.GameCheckerRun{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return apigateway.GameCheckerRun{}, err
 	}
 	return record, nil
@@ -1031,6 +1020,14 @@ func checkerRunKey(run apigateway.GameCheckerRun) checkerRunGroupKey {
 	}
 }
 
+func checkerRunKeyFromIDs(tickID, teamID, challengeID int) checkerRunGroupKey {
+	return checkerRunGroupKey{
+		TickID:      tickID,
+		TeamID:      teamID,
+		ChallengeID: challengeID,
+	}
+}
+
 func buildCheckerRunSummaryMap(runs []apigateway.GameCheckerRun) map[checkerRunGroupKey]apigateway.GameServiceStateSummary {
 	grouped := make(map[checkerRunGroupKey][]apigateway.GameCheckerRun)
 	for _, run := range runs {
@@ -1048,6 +1045,18 @@ func applyCheckerRunSummary(run *apigateway.GameCheckerRun, summary apigateway.G
 	run.ServiceState = summary.Status
 	run.StatePhase = summary.Phase
 	run.StateMessage = summary.Message
+}
+
+func (s *memoryGameStore) refreshMemoryServiceState(tickID, teamID, challengeID int) {
+	group := make([]apigateway.GameCheckerRun, 0, 3)
+	for _, run := range s.runs {
+		if run.TickID != tickID || run.TeamID != teamID || run.ChallengeID != challengeID {
+			continue
+		}
+		group = append(group, run)
+	}
+	key := checkerRunKeyFromIDs(tickID, teamID, challengeID)
+	s.serviceStates[key] = apigateway.SummarizeCheckerRunsForTick(group, tickID)
 }
 
 func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []apigateway.GameCheckerRun) (map[checkerRunGroupKey]apigateway.GameServiceStateSummary, error) {
@@ -1106,6 +1115,46 @@ func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []
 		summaries[key] = apigateway.SummarizeCheckerRunsForTick(grouped[key], key.TickID)
 	}
 	return summaries, nil
+}
+
+func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, tickID, teamID, challengeID int) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
+		FROM checker_runs
+		WHERE tick_id = $1 AND team_id = $2 AND challenge_id = $3
+		ORDER BY id DESC
+	`, tickID, teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	group := make([]apigateway.GameCheckerRun, 0, 3)
+	for rows.Next() {
+		var run apigateway.GameCheckerRun
+		var checkedAt time.Time
+		if err := rows.Scan(&run.TickID, &run.TeamID, &run.ChallengeID, &run.Phase, &run.Status, &run.Message, &checkedAt); err != nil {
+			return err
+		}
+		run.CheckedAt = checkedAt.UTC().Format(time.RFC3339)
+		group = append(group, run)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	summary := apigateway.SummarizeCheckerRunsForTick(group, tickID)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO checker_service_states (
+			tick_id, team_id, challenge_id, service_state, state_phase, state_message, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (tick_id, team_id, challenge_id) DO UPDATE SET
+			service_state = EXCLUDED.service_state,
+			state_phase = EXCLUDED.state_phase,
+			state_message = EXCLUDED.state_message,
+			updated_at = EXCLUDED.updated_at
+	`, tickID, teamID, challengeID, summary.Status, summary.Phase, summary.Message)
+	return err
 }
 
 func (s *postgresGameStore) LoadSchedulerState(ctx context.Context, intervalSeconds int) (apigateway.GameSchedulerStatus, error) {
@@ -1408,26 +1457,16 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 	}
 
 	slaByTeam, err := s.sumFloatByTeam(ctx, `
-		SELECT runs.team_id,
+		SELECT states.team_id,
 		       COALESCE(SUM(
 			       CASE
-			           WHEN runs.put_ok = 1 AND runs.get_ok = 1 AND runs.check_ok = 1 THEN 1.0
-			           WHEN runs.put_ok = 0 AND runs.get_ok = 1 AND runs.check_ok = 1 THEN 0.5
+			           WHEN states.service_state = 'ok' THEN 1.0
+			           WHEN states.service_state = 'recovering' THEN 0.5
 			           ELSE 0.0
 			       END
 		       ) * $1, 0.0)
-		FROM (
-			SELECT
-				tick_id,
-				team_id,
-				challenge_id,
-				MAX(CASE WHEN phase = 'put' AND status = 'success' THEN 1 ELSE 0 END) AS put_ok,
-				MAX(CASE WHEN phase = 'get' AND status = 'success' THEN 1 ELSE 0 END) AS get_ok,
-				MAX(CASE WHEN phase = 'check' AND status = 'success' THEN 1 ELSE 0 END) AS check_ok
-			FROM checker_runs
-			GROUP BY tick_id, team_id, challenge_id
-		) runs
-		GROUP BY runs.team_id
+		FROM checker_service_states states
+		GROUP BY states.team_id
 	`, slaFactor)
 	if err != nil {
 		return nil, err
@@ -1452,27 +1491,17 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 	}
 
 	slaByTeamService, err := s.sumFloatByTeamAndChallenge(ctx, `
-		SELECT runs.team_id,
-		       runs.challenge_id,
+		SELECT states.team_id,
+		       states.challenge_id,
 		       COALESCE(SUM(
 			       CASE
-			           WHEN runs.put_ok = 1 AND runs.get_ok = 1 AND runs.check_ok = 1 THEN 1.0
-			           WHEN runs.put_ok = 0 AND runs.get_ok = 1 AND runs.check_ok = 1 THEN 0.5
+			           WHEN states.service_state = 'ok' THEN 1.0
+			           WHEN states.service_state = 'recovering' THEN 0.5
 			           ELSE 0.0
 			       END
 		       ) * $1, 0.0)
-		FROM (
-			SELECT
-				tick_id,
-				team_id,
-				challenge_id,
-				MAX(CASE WHEN phase = 'put' AND status = 'success' THEN 1 ELSE 0 END) AS put_ok,
-				MAX(CASE WHEN phase = 'get' AND status = 'success' THEN 1 ELSE 0 END) AS get_ok,
-				MAX(CASE WHEN phase = 'check' AND status = 'success' THEN 1 ELSE 0 END) AS check_ok
-			FROM checker_runs
-			GROUP BY tick_id, team_id, challenge_id
-		) runs
-		GROUP BY runs.team_id, runs.challenge_id
+		FROM checker_service_states states
+		GROUP BY states.team_id, states.challenge_id
 	`, slaFactor)
 	if err != nil {
 		return nil, err
@@ -1940,6 +1969,17 @@ func faustSLAValue(putOK, getOK, checkOK bool) float64 {
 	case putOK && getOK && checkOK:
 		return 1.0
 	case !putOK && getOK && checkOK:
+		return faustRecoveringValue
+	default:
+		return 0.0
+	}
+}
+
+func faustSLAValueForStatus(status string) float64 {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "ok":
+		return 1.0
+	case "recovering":
 		return faustRecoveringValue
 	default:
 		return 0.0
