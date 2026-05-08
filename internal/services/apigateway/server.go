@@ -15,8 +15,6 @@ import (
 
 type Server struct {
 	teamTokenSecret     string
-	legacyTeamToken     string
-	legacyTeamID        int
 	adminToken          string
 	sshCredentialSecret string
 	store               Store
@@ -45,8 +43,6 @@ func NewWithDeps(teamToken, adminToken string, teamID int, store Store, controll
 	}
 	return &Server{
 		teamTokenSecret:     teamToken,
-		legacyTeamToken:     teamToken,
-		legacyTeamID:        teamID,
 		adminToken:          adminToken,
 		sshCredentialSecret: teamToken,
 		store:               store,
@@ -859,9 +855,6 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 	if !ok {
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return 0, false
-	}
-	if token == s.legacyTeamToken {
-		return s.legacyTeamID, true
 	}
 	claims, err := verifyTeamJWT(s.teamTokenSecret, token, s.now())
 	if err != nil {

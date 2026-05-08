@@ -724,6 +724,28 @@ func testUnlockProof(teamID, challengeID int) string {
 	return unlockproof.Issue("dev-team-token", teamID, challengeID)
 }
 
+func testTeamBearerToken(t *testing.T, teamID int) string {
+	t.Helper()
+
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    teamID,
+		TeamID:      teamID,
+		TeamName:    fmt.Sprintf("Team %d", teamID),
+		DisplayName: fmt.Sprintf("Captain %d", teamID),
+		Email:       fmt.Sprintf("captain.%d@example.com", teamID),
+		Role:        "captain",
+	}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue team jwt: %v", err)
+	}
+	return "Bearer " + token
+}
+
+func setTestTeamAuthHeader(t *testing.T, request *http.Request) {
+	t.Helper()
+	request.Header.Set("Authorization", testTeamBearerToken(t, 101))
+}
+
 func decodeCompat[T any](t *testing.T, body []byte) T {
 	t.Helper()
 
@@ -822,6 +844,20 @@ func TestSubmitRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestSubmitRejectsRawTeamSecretBearer(t *testing.T) {
+	mux := newTestMux()
+	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
+	request.Header.Set("Authorization", "Bearer dev-team-token")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+}
+
 func TestSubmitReturnsRateLimit429(t *testing.T) {
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{
@@ -831,7 +867,7 @@ func TestSubmitReturnsRateLimit429(t *testing.T) {
 	})
 	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -865,7 +901,7 @@ func TestSubmitReturnsDuplicateVerdict(t *testing.T) {
 	})
 	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo","FLAGv1.demo","bad"]}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -900,7 +936,7 @@ func TestSubmitReturnsServiceUnavailableWithoutAuthoritativeBackend(t *testing.T
 	mux := newTestMux()
 	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -960,7 +996,7 @@ func TestServicesReturnsRateLimit429(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/services", nil)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -1189,7 +1225,7 @@ func TestUnlockRejectsInvalidProof(t *testing.T) {
 	mux := newTestMux()
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"wrong-proof"}`))
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -1210,7 +1246,7 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	mux := newTestMux()
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 2)+`"}`))
-	unlockRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
 	mux.ServeHTTP(unlockResponse, unlockRequest)
 	if unlockResponse.Code != http.StatusOK {
@@ -1218,7 +1254,7 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	}
 
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/reset/factory", nil)
-	resetRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, resetRequest)
 	resetResponse := httptest.NewRecorder()
 	mux.ServeHTTP(resetResponse, resetRequest)
 	if resetResponse.Code != http.StatusOK {
@@ -1226,7 +1262,7 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	servicesRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, servicesRequest)
 	servicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(servicesResponse, servicesRequest)
 	if servicesResponse.Code != http.StatusOK {
@@ -1266,7 +1302,7 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -1307,7 +1343,7 @@ func TestParticipantCanDownloadChallengeSourceBundle(t *testing.T) {
 	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", filepath.Clean(filepath.Join(wd, "..", "..", "..")))
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/challenges/1/source", nil)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 
 	newTestMux().ServeHTTP(response, request)
@@ -1334,7 +1370,7 @@ func TestTeamServicesReturnsRateLimit429(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -1349,7 +1385,7 @@ func TestTeamServicesReturnsRateLimit429(t *testing.T) {
 func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	mux := newTestMux()
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	unlockRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
 	mux.ServeHTTP(unlockResponse, unlockRequest)
 	if unlockResponse.Code != http.StatusOK {
@@ -1357,7 +1393,7 @@ func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	}
 
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
-	resetRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, resetRequest)
 	resetResponse := httptest.NewRecorder()
 	mux.ServeHTTP(resetResponse, resetRequest)
 	if resetResponse.Code != http.StatusOK {
@@ -1365,7 +1401,7 @@ func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	}
 
 	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
-	sshRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, sshRequest)
 	sshResponse := httptest.NewRecorder()
 	mux.ServeHTTP(sshResponse, sshRequest)
 	if sshResponse.Code != http.StatusOK {
@@ -1399,7 +1435,7 @@ func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{sshApplyErr: fmt.Errorf("runtime apply failed")}, noopWireGuardClient{}).RegisterRoutes(mux)
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	unlockRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
 	mux.ServeHTTP(unlockResponse, unlockRequest)
 	if unlockResponse.Code != http.StatusOK {
@@ -1407,7 +1443,7 @@ func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	}
 
 	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
-	sshRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, sshRequest)
 	sshResponse := httptest.NewRecorder()
 	mux.ServeHTTP(sshResponse, sshRequest)
 	if sshResponse.Code != http.StatusBadGateway {
@@ -1415,7 +1451,7 @@ func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	servicesRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, servicesRequest)
 	servicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(servicesResponse, servicesRequest)
 	if servicesResponse.Code != http.StatusOK {
@@ -1444,7 +1480,7 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 	mux := newTestMux()
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	unlockRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
 	mux.ServeHTTP(unlockResponse, unlockRequest)
 	if unlockResponse.Code != http.StatusOK {
@@ -1452,7 +1488,7 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 	}
 
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
-	resetRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, resetRequest)
 	resetResponse := httptest.NewRecorder()
 	mux.ServeHTTP(resetResponse, resetRequest)
 	if resetResponse.Code != http.StatusOK {
@@ -1460,7 +1496,7 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 	}
 
 	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
-	sshRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, sshRequest)
 	sshResponse := httptest.NewRecorder()
 	mux.ServeHTTP(sshResponse, sshRequest)
 	if sshResponse.Code != http.StatusOK {
@@ -1585,7 +1621,7 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/services", nil)
-	servicesRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, servicesRequest)
 	servicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(servicesResponse, servicesRequest)
 	if servicesResponse.Code != http.StatusOK {
@@ -1618,7 +1654,7 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 	}
 
 	teamServicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	teamServicesRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, teamServicesRequest)
 	teamServicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(teamServicesResponse, teamServicesRequest)
 	if teamServicesResponse.Code != http.StatusOK {
@@ -1748,7 +1784,7 @@ func TestAdminDeployUsesConfiguredServiceSubnetAndPort(t *testing.T) {
 	}
 
 	teamServicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
-	teamServicesRequest.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, teamServicesRequest)
 	teamServicesResponse := httptest.NewRecorder()
 	mux.ServeHTTP(teamServicesResponse, teamServicesRequest)
 	if teamServicesResponse.Code != http.StatusOK {
@@ -2719,7 +2755,7 @@ func TestSubmitPrefersGameCoreWhenConfigured(t *testing.T) {
 	).RegisterRoutes(mux)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewBufferString(`{"flags":["FLAGv1.authoritative","FLAGv1.dupe"]}`))
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -2757,7 +2793,7 @@ func TestSubmitRejectsWhenContestHasNotStarted(t *testing.T) {
 	).RegisterRoutes(mux)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewBufferString(`{"flags":["FLAGv1.authoritative"]}`))
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -2790,7 +2826,7 @@ func TestSubmitPrefersSubmissionServiceWhenConfigured(t *testing.T) {
 	)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewBufferString(`{"flags":["FLAGv1.worker"]}`))
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -2829,7 +2865,7 @@ func TestSubmitRejectsWhenContestIsOver(t *testing.T) {
 	).RegisterRoutes(mux)
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewBufferString(`{"flags":["FLAGv1.authoritative"]}`))
-	request.Header.Set("Authorization", "Bearer dev-team-token")
+	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
