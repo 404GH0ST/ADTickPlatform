@@ -26,7 +26,7 @@ The platform must also provide:
 3. The control plane is isolated from the team service runtime plane.
 4. Reset operations must have explicit semantics, especially when teams patch the live service container directly.
 5. Patch access is exploit-gated and scoped to the exact `team x service` container.
-6. SSH access must use short-lived credentials; the current model uses the same service IP, issues one-time root passwords, and restricts port 22 to the owning team after unlock, while a separate maintenance path remains a future hardening option.
+6. SSH access must stay tightly scoped; the current model uses the same service IP, derives a stable per-team/per-service root password, reapplies it on demand, and restricts port 22 to the owning team after unlock, while a separate maintenance path remains a future hardening option.
 7. Every team member gets an individual WireGuard identity so access can be revoked and audited without affecting the whole team.
 8. Services are isolated from each other; compromise of one service must not grant lateral movement into sibling services.
 9. All score-affecting events and privileged operations are auditable and replayable.
@@ -265,7 +265,7 @@ Redis pub/sub or streams are appropriate here, but replayable streams are prefer
 
 Responsibilities:
 
-- issue short-lived SSH certificates, ephemeral keys, or one-time root passwords after unlock
+- issue the current stable per-team/per-service SSH credential after unlock, or move later to ephemeral SSH certificates or keys
 - map each credential to exactly one `team x service` container
 - enforce owner-only SSH access to the same service IP after unlock
 - record session open and close events for audit
@@ -303,7 +303,7 @@ Direct SSH access to the exact service container is acceptable here because it m
 Required controls:
 
 - SSH is disabled until unlock
-- credentials are short-lived and bound to one team and one service
+- credentials are bound to one team and one service
 - access is available only to the owning team over WireGuard; future hardening may split a dedicated maintenance subnet
 - reset behavior is explicit and visible to teams
 - the service is isolated from all other services, including the same team's other services
@@ -395,7 +395,7 @@ The requirement says teams must solve their own service to unlock patch access. 
 1. every `team x service` image contains a team-specific unlock secret or challenge path
 2. the team obtains that secret by exploiting or solving its own service
 3. the team submits the unlock proof to the platform
-4. the platform issues short-lived SSH credentials for the matching service container
+4. the platform exposes the stable team SSH credential for the matching service container
 5. a later factory reset preserves unlock status for that team/service during the same match
 
 Implementation options:
@@ -408,7 +408,7 @@ Implementation options:
 
 Once unlocked, the team receives:
 
-- a short-lived one-time root password or equivalent ephemeral SSH credential
+- the stable per-team/per-service root password or a future equivalent ephemeral SSH credential
 - access only to that `team x service` container
 - owner-only SSH rules on the same service IP, with an optional future maintenance subnet or bastion route
 - a reset control for that exact service
@@ -422,7 +422,7 @@ Implementation options:
 
 Recommended controls:
 
-- SSH credential TTL, for example `15` to `30` minutes
+- stable credential material today, with an optional future move to expiring credentials
 - per-session audit logs
 - access limited to the owning team only
 - optional IP or VPN binding to the requesting WireGuard peer
@@ -536,7 +536,7 @@ Use Redis for:
 - submission dedup hot path
 - checker job queues
 - websocket/SSE fanout
-- short-lived SSH credential material and rate-limit counters
+- SSH credential material and rate-limit counters
 
 Do not rely on Redis as the sole record for score-affecting events.
 
@@ -653,7 +653,7 @@ Attack map event payload should contain:
 ## 14. Security And Fairness Controls
 
 - strong service-to-service authentication inside the control plane
-- signed unlock tokens and short-lived SSH credentials
+- signed unlock tokens and tightly scoped SSH credentials
 - auditable admin actions with persistent audit log
 - team-less organizer accounts to isolate administrative access from game infrastructure
 - immutable score event history

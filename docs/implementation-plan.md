@@ -176,7 +176,7 @@ Exit criteria:
 Deliverables:
 
 - unlock proof validation
-- one-time root password issuance and owner-only SSH policy on the service IP
+- stable per-team/per-service SSH credential issuance and owner-only SSH policy on the service IP
 - factory reset preserving unlock state
 - optional soft restart
 

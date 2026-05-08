@@ -44,69 +44,75 @@ The platform does not need to expose these as separate user-visible phases, but 
 
 ## 4. Default Scoring Formula
 
-The scoring engine should support per-service weights. Let `W(service)` be the configured weight.
+The current platform now uses a Faust-style scoring model. Score is computed
+per `team x service`, and team totals are derived by summing those service rows.
 
 ### 4.1 Attack Score
 
-For each accepted flag submission:
+For each accepted flag submission on a flag `F`:
 
 ```text
-attack_points = W(service)
+attack_points(F) = 1 + 1 / capture_count(F)
 ```
 
 Rules:
 
-- only the first valid submission for a flag scores
-- the attacker must not be the owning team
+- accepted submissions are always by a non-owning team
 - the flag must still be within its validity window
-- duplicate or replayed submissions score `0`
+- `capture_count(F)` is the total number of accepted captures of the same flag
+- the first accepted capture is worth `2.0`
+- later accepted captures are worth less, but always more than `1.0`
 
 Per tick:
 
 ```text
-attack_score(team, tick) = sum(attack_points for all accepted first-valid submissions by team in tick)
+attack_score(team, tick) = sum(attack_points for all accepted submissions by team in tick)
 ```
 
 ### 4.2 Defense Score
 
-Defense should reward teams for retaining their issued flags.
+Defense is a loss function over issued flags.
 
 For a specific `team x service x tick`:
 
 ```text
-defense_ratio = 1 - (stolen_valid_flags / issued_valid_flags)
-defense_score = W(service) * max(defense_ratio, 0)
+defense_penalty(flag) = -(capture_count(flag) ^ 0.75)
 ```
 
 Interpretation:
 
-- if no issued flag is stolen, defense score is full weight
-- if all issued flags are stolen, defense score is `0`
-- partial theft reduces defense proportionally
+- an un-stolen flag contributes `0`
+- a stolen flag contributes a negative value
+- repeated steals of the same flag increase the penalty sublinearly
+
+Per service:
+
+```text
+defense_score(team, service) = sum(defense_penalty for all flags issued to that team and service)
+```
 
 ### 4.3 SLA Score
 
-SLA should reflect service availability and integrity as measured by the checker only.
+SLA is derived from checker outcomes and multiplied by `sqrt(active_team_count)`.
 
-Suggested phase weights:
+The current implementation does **not** yet store a first-class Faust checker
+status enum like `ok`, `recovering`, `flag not found`, `faulty`, and `down`.
+Instead, it maps persisted `put/get/check` phase results into the current SLA
+classes:
 
-- `put`: `0.3`
-- `get`: `0.5`
-- `check`: `0.2`
-
-For each checker phase:
-
-- success = `1`
-- failure = `0`
+- `OK = 1.0` when `put && get && check`
+- `RECOVERING = 0.5` when `!put && get && check`
+- all other phase combinations score `0.0`
 
 Then:
 
 ```text
-sla_ratio = 0.3 * put_ok + 0.5 * get_ok + 0.2 * check_ok
-sla_score = W(service) * sla_ratio
+sla_score(team, service) = sum(tick_value) * sqrt(active_team_count)
 ```
 
-If a service does not use a distinct `check` phase, redistribute the weight between `put` and `get`.
+This is intentionally Faust-like in score shape, but it is still phase-derived.
+The future hardening path is to promote a canonical per-tick service status enum
+and score directly from that enum.
 
 ### 4.4 Total Score
 
@@ -200,7 +206,7 @@ Teams must solve their own service before they can patch it.
 2. a team extracts its own unlock proof by solving the service
 3. the team submits the proof to the platform
 4. the platform validates the proof against expected team/service state
-5. the platform issues short-lived SSH credentials for that exact `team x service` container
+5. the platform exposes the stable team SSH credential for that exact `team x service` container
 
 ## 7.3 Patch Session
 
@@ -213,7 +219,7 @@ During an active patch session, a team may:
 
 Recommended access controls:
 
-1. credential is short-lived
+1. credential is stable for the team and service until organizer-side policy changes it
 2. access is scoped to one `team x service`
 3. SSH uses the same service IP, but port 22 is opened only for the owning team after unlock over WireGuard
 4. every unlock and session is audited
@@ -223,7 +229,7 @@ Recommended access controls:
 Recommended defaults:
 
 - unlock persists for the whole match for that `team x service`
-- patch credentials are short-lived and renewable
+- patch credentials are stable for the team and service until organizer-side policy changes them
 - every SSH session is audited
 - teams can patch multiple times after unlock
 - factory reset does not revoke unlock for that `team x service`

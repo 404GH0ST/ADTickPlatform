@@ -387,7 +387,7 @@ The organizer Next.js route now preserves controller and gateway reconcile statu
 
 Unlock operations in the participant API now also trigger controller-side access reconcile so SSH access can be opened for the owning team's active peers immediately after unlock.
 
-SSH session issuance in the participant API now also calls the controller so a fresh one-time `root` password is applied inside the target Docker container. In Docker mode the default implementation uses `docker exec` and a shell script that prefers `chpasswd` and falls back to `passwd root`.
+SSH session issuance in the participant API now also calls the controller so the stable per-team/per-service `root` password is applied inside the target Docker container. In Docker mode the default implementation uses `docker exec` and a shell script that prefers `chpasswd` and falls back to `passwd root`.
 
 Before deploy/restart/password-apply actions are accepted in Docker mode, the controller now probes the container for the baseline SSH contract:
 
@@ -541,7 +541,7 @@ Implemented now:
 - deploy-to-all-teams queueing
 - deployment job listing and reconcile
 - controller-side service access policy rendering and reconcile
-- controller-side one-time SSH password application for Docker runtimes
+- controller-side stable SSH password application for Docker runtimes
 - controller-side SSH contract verification for Docker service containers
 - checker-runner internal validate/execute endpoints plus controller delegation for checker-image validation
 - Next.js organizer dashboard integration
