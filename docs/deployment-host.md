@@ -56,6 +56,9 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    **Critical values to set**:
    - `EDGE_SITE_ADDRESS`: Your public domain or IP (e.g., `http://1.2.3.4`).
    - `ADMIN_API_TOKEN`: A long, random string.
+   - `TEAM_JWT_SECRET`: A long, random string used to sign participant bearer tokens.
+   - `UNLOCK_PROOF_SECRET`: A separate long, random string for unlock proof verification.
+   - `SSH_CREDENTIAL_SECRET`: A separate long, random string for stable per-team SSH credentials.
    - `WIREGUARD_SERVER_ENDPOINT`: Your public IP (e.g., `1.2.3.4`).
    - `WIREGUARD_SERVER_PRIVATE_KEY`: Generate this in the next step.
    - `AD_PLATFORM_EMAIL` / `AD_PLATFORM_PASSWORD`: Set these to a real participant account if you want to use the host smoke scripts. The example alpha credentials only work on seeded/demo data.
