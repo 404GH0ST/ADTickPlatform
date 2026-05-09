@@ -746,6 +746,10 @@ func setTestTeamAuthHeader(t *testing.T, request *http.Request) {
 	request.Header.Set("Authorization", testTeamBearerToken(t, 101))
 }
 
+func setTestAdminAuthHeader(request *http.Request) {
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+}
+
 func decodeCompat[T any](t *testing.T, body []byte) T {
 	t.Helper()
 
@@ -855,6 +859,38 @@ func TestSubmitRejectsRawTeamSecretBearer(t *testing.T) {
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", response.Code)
+	}
+}
+
+func TestParticipantTokenCannotAccessAdminRoutes(t *testing.T) {
+	mux := newTestMux()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/admin/teams", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "please authenticate as organizer") {
+		t.Fatalf("expected organizer auth failure, got %s", response.Body.String())
+	}
+}
+
+func TestAdminTokenCannotAccessParticipantRoutes(t *testing.T) {
+	mux := newTestMux()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	setTestAdminAuthHeader(request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "please authenticate before access") {
+		t.Fatalf("expected participant auth failure, got %s", response.Body.String())
 	}
 }
 
@@ -1442,6 +1478,40 @@ func TestParticipantCanDownloadChallengeSourceBundle(t *testing.T) {
 	}
 	if response.Body.Len() == 0 {
 		t.Fatal("expected non-empty source bundle response body")
+	}
+}
+
+func TestParticipantCannotDownloadDraftChallengeSourceBundle(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", filepath.Clean(filepath.Join(wd, "..", "..", "..")))
+
+	mux := newTestMux()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{
+		"name":"draft-only",
+		"baseline_image":"registry.local/draft:baseline",
+		"checker_image":"registry.local/draft-checker:latest",
+		"source_bundle_path":"examples/sample-lfi-challenge"
+	}`))
+	setTestAdminAuthHeader(createRequest)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	mux.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge create 200, got %d: %s", createResponse.Code, createResponse.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/challenges/4/source", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected draft source download 404, got %d", response.Code)
 	}
 }
 
