@@ -2,6 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
+import { validateParticipantSessionWithAPI } from "@/lib/session-validation";
 import {
   decodeJWTClaims,
   type ParticipantSessionClaims,
@@ -216,7 +217,10 @@ export const getParticipantSession = cache(
   async (): Promise<ParticipantSession> => {
     const directToken = process.env.AD_PLATFORM_TEAM_JWT?.trim();
     if (directToken) {
-      return authenticatedSession(directToken, "env");
+      const validated = await validateParticipantSessionWithAPI(directToken);
+      return validated
+        ? authenticatedSession(directToken, "env", validated)
+        : { authenticated: false, source: "none" };
     }
 
     const cookieToken = await cookieParticipantToken();
@@ -226,8 +230,12 @@ export const getParticipantSession = cache(
 
     const cookieSecret = process.env.TEAM_JWT_SECRET?.trim() ?? "";
     const claims = await verifyParticipantSessionToken(cookieToken, cookieSecret);
-    return claims
-      ? authenticatedSession(cookieToken, "cookie", claims)
+    if (!claims) {
+      return { authenticated: false, source: "none" };
+    }
+    const validated = await validateParticipantSessionWithAPI(cookieToken);
+    return validated
+      ? authenticatedSession(cookieToken, "cookie", validated)
       : { authenticated: false, source: "none" };
   },
 );

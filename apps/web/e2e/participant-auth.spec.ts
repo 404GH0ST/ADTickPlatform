@@ -3,6 +3,7 @@ import {
   loginAsOrganizer,
   loginAsParticipant as setParticipantSession,
   mockApiBaseUrl,
+  organizerSessionToken,
 } from "./test-utils";
 
 test.use({
@@ -115,4 +116,60 @@ test("organizer session can use admin api proxies", async ({
   await expect(payload.healthy).toBe(true);
   await expect(typeof payload.generated_at).toBe("string");
   await expect(Array.isArray(payload.alerts)).toBe(true);
+});
+
+test("demoted organizer session loses admin api proxy access", async ({
+  page,
+  context,
+  request,
+}) => {
+  await loginAsOrganizer(context);
+
+  const demoteResponse = await request.post(`${mockApiBaseUrl}/__set-player-role`, {
+    data: { player_id: 1, role: "captain" },
+  });
+  expect(demoteResponse.ok()).toBeTruthy();
+
+  const sessionResponse = await request.get(`${mockApiBaseUrl}/api/v2/session`, {
+    headers: {
+      Authorization: `Bearer ${organizerSessionToken}`,
+    },
+  });
+  expect(sessionResponse.status()).toBe(403);
+
+  const response = await page.request.get("/api/admin/operations/status");
+  expect(response.status()).toBe(403);
+  await expect(await response.json()).toEqual({
+    title: "Authentication required",
+    status: 403,
+    detail: "please authenticate before accessing organizer routes.",
+  });
+});
+
+test("deleted organizer session loses admin api proxy access", async ({
+  page,
+  context,
+  request,
+}) => {
+  await loginAsOrganizer(context);
+
+  const deleteResponse = await request.post(`${mockApiBaseUrl}/__delete-player`, {
+    data: { player_id: 1 },
+  });
+  expect(deleteResponse.ok()).toBeTruthy();
+
+  const sessionResponse = await request.get(`${mockApiBaseUrl}/api/v2/session`, {
+    headers: {
+      Authorization: `Bearer ${organizerSessionToken}`,
+    },
+  });
+  expect(sessionResponse.status()).toBe(403);
+
+  const response = await page.request.get("/api/admin/operations/status");
+  expect(response.status()).toBe(403);
+  await expect(await response.json()).toEqual({
+    title: "Authentication required",
+    status: 403,
+    detail: "please authenticate before accessing organizer routes.",
+  });
 });

@@ -176,6 +176,19 @@ const teams = [
 
 const players = [
   {
+    id: 1,
+    team_id: 101,
+    team_name: "College Alpha",
+    display_name: "Organizer",
+    email: "organizer@college.local",
+    role: "organizer",
+    wireguard_peer: "wg-organizer",
+    wireguard_address: "10.70.11.19/32",
+    wireguard_status: "active",
+    wireguard_issued_at: "2026-03-20T08:55:00Z",
+    created_at: "2026-03-20T07:55:00Z",
+  },
+  {
     id: 1001,
     team_id: 101,
     team_name: "College Alpha",
@@ -431,6 +444,38 @@ function buildParticipantToken(player) {
     .update(`${header}.${payload}`)
     .digest("base64url");
   return `${header}.${payload}.${signature}`;
+}
+
+function decodeParticipantToken(token) {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parts = trimmed.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const signature = createHmac("sha256", teamJWTSecret)
+    .update(`${parts[0]}.${parts[1]}`)
+    .digest("base64url");
+  if (signature !== parts[2]) {
+    return null;
+  }
+  try {
+    const claims = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    );
+    if (
+      typeof claims?.player_id !== "number" ||
+      typeof claims?.team_id !== "number" ||
+      typeof claims?.role !== "string"
+    ) {
+      return null;
+    }
+    return claims;
+  } catch {
+    return null;
+  }
 }
 
 function createInitialState() {
@@ -1310,6 +1355,29 @@ async function handleSystemRoutes({ req, res, url, method }) {
     return writeSuccess(res, { reset: true });
   }
 
+  if (method === "POST" && url.pathname === "/__set-player-role") {
+    const body = await readJsonBody(req);
+    const playerID = Number(body?.player_id || 0);
+    const role = typeof body?.role === "string" ? body.role : "";
+    const player = state.players.find((item) => item.id === playerID);
+    if (!player || !role) {
+      return writeFailure(res, 400, "mock player role update is invalid.");
+    }
+    player.role = role;
+    return writeSuccess(res, { updated: true });
+  }
+
+  if (method === "POST" && url.pathname === "/__delete-player") {
+    const body = await readJsonBody(req);
+    const playerID = Number(body?.player_id || 0);
+    const player = state.players.find((item) => item.id === playerID);
+    if (!player) {
+      return writeFailure(res, 404, "mock player was not found.");
+    }
+    state.players = state.players.filter((item) => item.id !== playerID);
+    return writeSuccess(res, { deleted: true });
+  }
+
   if (shouldFailRoute(method, url.pathname)) {
     return writeFailure(res, 503, `mock degraded route: ${url.pathname}`);
   }
@@ -1318,6 +1386,31 @@ async function handleSystemRoutes({ req, res, url, method }) {
 }
 
 async function handleAuthenticationRoutes({ req, res, url, method }) {
+  if (method === "GET" && url.pathname === "/api/v2/session") {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+    const claims = decodeParticipantToken(token);
+    const player = claims
+      ? state.players.find((item) => item.id === claims.player_id)
+      : null;
+    if (
+      !claims ||
+      !player ||
+      player.team_id !== claims.team_id ||
+      player.role !== claims.role
+    ) {
+      return writeFailure(res, 403, "please authenticate before access.", "forbidden");
+    }
+    return writeSuccess(res, {
+      player_id: player.id,
+      team_id: player.team_id,
+      team_name: player.team_name,
+      display_name: player.display_name,
+      email: player.email,
+      role: player.role,
+    });
+  }
+
   if (method !== "POST" || url.pathname !== "/api/v2/authenticate") {
     return false;
   }
@@ -1328,6 +1421,7 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
   const knownPasswords = {
     "alpha.captain@college.local": "alpha-password",
     "beta.member@college.local": "beta-password",
+    "organizer@college.local": "organizer-password",
   };
   const player = state.players.find((item) => item.email === email);
 

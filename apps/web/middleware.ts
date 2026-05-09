@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
+import { validateParticipantSessionWithAPI } from "@/lib/session-validation";
 import { verifyParticipantSessionToken } from "@/lib/session-token";
 
 function unauthorizedApi(detail: string) {
@@ -14,23 +15,27 @@ function unauthorizedApi(detail: string) {
   );
 }
 
-async function organizerRole(request: NextRequest) {
+async function organizerSession(request: NextRequest) {
   const token = request.cookies.get(participantSessionCookieName)?.value?.trim();
   const secret = process.env.TEAM_JWT_SECRET?.trim() ?? "";
   if (!token || !secret) {
     return null;
   }
-  return verifyParticipantSessionToken(token, secret);
+  const claims = await verifyParticipantSessionToken(token, secret);
+  if (!claims) {
+    return null;
+  }
+  return validateParticipantSessionWithAPI(token);
 }
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-  const claims = await organizerRole(request);
-  const organizer = claims?.role === "organizer";
+  const session = await organizerSession(request);
+  const organizer = session?.role === "organizer";
 
   if (pathname.startsWith("/api/admin/")) {
     if (!organizer) {
-      const detail = claims
+      const detail = session
         ? "please authenticate as organizer."
         : "please authenticate before accessing organizer routes.";
       return unauthorizedApi(detail);
@@ -42,7 +47,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!claims) {
+  if (!session) {
     const loginURL = new URL("/login", request.url);
     return NextResponse.redirect(loginURL);
   }
