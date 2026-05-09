@@ -125,6 +125,7 @@ def main() -> int:
             if payload.get("body") != "normal user content":
                 print(body, file=sys.stderr)
                 return 1
+            print('ADPLATFORM_SERVICE_STATE={"status":"ok","message":"sample-lfi checker verified storage, retrieval, and functionality"}')
             print(json.dumps({"status": "ok", "slot": slot}))
             return 0
     except (HTTPError, URLError, ValueError, json.JSONDecodeError) as exc:

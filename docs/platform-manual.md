@@ -108,6 +108,18 @@ Failure:
 }
 ```
 
+The participant service state surface now uses Faust-style labels:
+
+- `ok`
+- `recovering`
+- `flag_not_found`
+- `faulty`
+- `down`
+
+Those states come from the persisted per-tick service-state table. When a
+checker reports a canonical state directly, that value is used; otherwise the
+platform falls back to the current `put/get/check` phase mapping.
+
 `GET /api/v2/game/status` returns the public match, scheduler, and current tick
 state.
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -135,7 +136,7 @@ func (dryRunCheckerExecutor) ValidateChecker(_ context.Context, request apigatew
 }
 
 func (dryRunCheckerExecutor) ExecuteChecker(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
-	return apigateway.CheckerExecutionResult{
+	result := apigateway.CheckerExecutionResult{
 		ChallengeID: request.ChallengeID,
 		TeamID:      request.TeamID,
 		Phase:       request.Phase,
@@ -144,7 +145,12 @@ func (dryRunCheckerExecutor) ExecuteChecker(_ context.Context, request apigatewa
 		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
 		Message:     "checker execution assumed in dry-run mode.",
 		Output:      "dry-run checker execution",
-	}, nil
+	}
+	if strings.EqualFold(request.Phase, "check") {
+		result.ServiceState = "ok"
+		result.StateMessage = "dry-run checker reported the service healthy."
+	}
+	return result, nil
 }
 
 func (e *dockerCheckerExecutor) ValidateChecker(ctx context.Context, request apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
@@ -190,17 +196,20 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 		return apigateway.CheckerExecutionResult{}, err
 	}
 	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, request)...)
+	trimmedOutput, serviceState, stateMessage := parseCheckerServiceStateOutput(output)
 	result := apigateway.CheckerExecutionResult{
-		ChallengeID: request.ChallengeID,
-		TeamID:      request.TeamID,
-		Phase:       request.Phase,
-		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
-		Output:      strings.TrimSpace(string(output)),
-		ExitCode:    exitCode,
+		ChallengeID:  request.ChallengeID,
+		TeamID:       request.TeamID,
+		Phase:        request.Phase,
+		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
+		Output:       trimmedOutput,
+		ExitCode:     exitCode,
+		ServiceState: serviceState,
+		StateMessage: stateMessage,
 	}
 	if err != nil {
 		result.Status = "failed"
-		result.Message = commandFailureMessage(err, output, exitCode)
+		result.Message = commandFailureMessage(err, []byte(trimmedOutput), exitCode)
 		return result, nil
 	}
 	result.Status = "success"
@@ -347,6 +356,52 @@ func commandFailureMessage(err error, output []byte, exitCode int) string {
 		return fmt.Sprintf("checker command exited with status %d", exitCode)
 	}
 	return err.Error()
+}
+
+type checkerReportedServiceState struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+func parseCheckerServiceStateOutput(output []byte) (string, string, string) {
+	lines := strings.Split(string(output), "\n")
+	filtered := make([]string, 0, len(lines))
+	reportedStatus := ""
+	reportedMessage := ""
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "ADPLATFORM_SERVICE_STATE=") {
+			filtered = append(filtered, line)
+			continue
+		}
+
+		raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "ADPLATFORM_SERVICE_STATE="))
+		if raw == "" {
+			continue
+		}
+
+		var payload checkerReportedServiceState
+		if strings.HasPrefix(raw, "{") {
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				filtered = append(filtered, line)
+				continue
+			}
+		} else {
+			payload.Status = raw
+		}
+
+		normalized := apigateway.NormalizeServiceStateStatus(payload.Status)
+		if normalized == "" {
+			filtered = append(filtered, line)
+			continue
+		}
+
+		reportedStatus = normalized
+		reportedMessage = strings.TrimSpace(payload.Message)
+	}
+
+	return strings.TrimSpace(strings.Join(filtered, "\n")), reportedStatus, reportedMessage
 }
 
 func firstNonEmpty(values ...string) string {

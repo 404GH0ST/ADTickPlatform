@@ -93,12 +93,20 @@ defense_score(team, service) = sum(defense_penalty for all flags issued to that 
 
 ### 4.3 SLA Score
 
-SLA is derived from checker outcomes and multiplied by `sqrt(active_team_count)`.
+SLA is derived from canonical service states and multiplied by
+`sqrt(active_team_count)`.
 
-The current implementation does **not** yet store a first-class Faust checker
-status enum like `ok`, `recovering`, `flag not found`, `faulty`, and `down`.
-Instead, it maps persisted `put/get/check` phase results into the current SLA
-classes:
+The platform now persists a per-tick service state for each team and challenge.
+Checker integrations may report a canonical Faust-style state directly:
+
+- `ok`
+- `recovering`
+- `flag_not_found`
+- `faulty`
+- `down`
+
+When a checker does not report a canonical state explicitly, the platform falls
+back to the current phase-derived mapping from persisted `put/get/check` runs:
 
 - `OK = 1.0` when `put && get && check`
 - `RECOVERING = 0.5` when `!put && get && check`
@@ -110,9 +118,8 @@ Then:
 sla_score(team, service) = sum(tick_value) * sqrt(active_team_count)
 ```
 
-This is intentionally Faust-like in score shape, but it is still phase-derived.
-The future hardening path is to promote a canonical per-tick service status enum
-and score directly from that enum.
+SLA is then scored directly from the persisted service-state table. Explicit
+checker-reported states take precedence over inferred states for the same tick.
 
 ### 4.4 Total Score
 

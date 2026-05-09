@@ -179,6 +179,47 @@ func TestDockerCheckerExecutorExecuteCheckerRunsPhase(t *testing.T) {
 	}
 }
 
+func TestDockerCheckerExecutorExecuteCheckerCapturesReportedServiceState(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"printf 'ADPLATFORM_SERVICE_STATE={\"status\":\"faulty\",\"message\":\"explicit checker status\"}\\n'\n" +
+		"printf 'checker ok\\n'\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCheckerExecutor{
+		binary:        binPath,
+		network:       "adplatform_game",
+		networkLayout: "per-service",
+		timeout:       5 * time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	result, err := executor.ExecuteChecker(context.Background(), apigateway.CheckerExecutionRequest{
+		ChallengeID:  7,
+		TeamID:       101,
+		CheckerImage: "registry.local/proxy-checker:latest",
+		Phase:        "check",
+		Target:       "10.80.7.11:10007",
+		TickID:       19,
+	})
+	if err != nil {
+		t.Fatalf("execute checker failed: %v", err)
+	}
+	if result.ServiceState != "faulty" {
+		t.Fatalf("expected reported faulty service state, got %+v", result)
+	}
+	if result.StateMessage != "explicit checker status" {
+		t.Fatalf("unexpected state message %+v", result)
+	}
+	if result.Output != "checker ok" {
+		t.Fatalf("expected service-state marker stripped from output, got %q", result.Output)
+	}
+}
+
 func TestCheckerRunnerValidateEndpoint(t *testing.T) {
 	server := newCheckerRunnerServer("dev-admin-token", dryRunCheckerExecutor{})
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "checker-runner", Version: "dev", Addr: ":0"})

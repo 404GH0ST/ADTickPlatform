@@ -34,12 +34,14 @@ type CheckerExecutionRequest struct {
 }
 
 type CheckerExecutionResult struct {
-	ChallengeID int    `json:"challenge_id"`
-	TeamID      int    `json:"team_id"`
-	Phase       string `json:"phase"`
-	Status      string `json:"status"`
-	ExitCode    int    `json:"exit_code"`
-	CheckedAt   string `json:"checked_at"`
-	Message     string `json:"message,omitempty"`
-	Output      string `json:"output,omitempty"`
+	ChallengeID  int    `json:"challenge_id"`
+	TeamID       int    `json:"team_id"`
+	Phase        string `json:"phase"`
+	Status       string `json:"status"`
+	ExitCode     int    `json:"exit_code"`
+	CheckedAt    string `json:"checked_at"`
+	Message      string `json:"message,omitempty"`
+	Output       string `json:"output,omitempty"`
+	ServiceState string `json:"service_state,omitempty"`
+	StateMessage string `json:"state_message,omitempty"`
 }

@@ -24,6 +24,11 @@ type capturingCheckerClient struct {
 	requests []apigateway.CheckerExecutionRequest
 }
 
+type explicitStateCheckerClient struct {
+	state   string
+	message string
+}
+
 type testGameScheduler struct {
 	status apigateway.GameSchedulerStatus
 	events []apigateway.GameSchedulerEvent
@@ -145,6 +150,20 @@ func (c *capturingCheckerClient) Execute(_ context.Context, request apigateway.C
 		CheckedAt:   "2026-03-10T10:01:00Z",
 		Output:      request.Phase + "-output",
 		Message:     "captured",
+	}, nil
+}
+
+func (c explicitStateCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	return apigateway.CheckerExecutionResult{
+		ChallengeID:  request.ChallengeID,
+		TeamID:       request.TeamID,
+		Phase:        request.Phase,
+		Status:       "failed",
+		ExitCode:     1,
+		CheckedAt:    "2026-03-10T10:01:00Z",
+		Message:      "checker phase failed in test",
+		ServiceState: c.state,
+		StateMessage: c.message,
 	}, nil
 }
 
@@ -386,6 +405,41 @@ func TestCheckerRunsEndpointSupportsFiltersAndOffset(t *testing.T) {
 	}
 	if !filteredPayload.HasPrev {
 		t.Fatalf("expected checker run offset page to expose previous page %+v", filteredPayload)
+	}
+}
+
+func TestCheckerReportedServiceStateOverridesPhaseInference(t *testing.T) {
+	mux := newTestGameCoreMux(explicitStateCheckerClient{
+		state:   "recovering",
+		message: "put failed but the checker still classified the service as recovering",
+	})
+	startTestMatch(t, mux)
+
+	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
+	advanceRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	advanceResponse := httptest.NewRecorder()
+	mux.ServeHTTP(advanceResponse, advanceRequest)
+	if advanceResponse.Code != http.StatusOK {
+		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
+	}
+
+	filteredRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/checker-runs?team_id=101&challenge_id=1&limit=1", nil)
+	filteredRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	filteredResponse := httptest.NewRecorder()
+	mux.ServeHTTP(filteredResponse, filteredRequest)
+	if filteredResponse.Code != http.StatusOK {
+		t.Fatalf("expected checker runs 200, got %d", filteredResponse.Code)
+	}
+
+	payload := decodeResponse[apigateway.GameCheckerRunPage](t, filteredResponse.Body.Bytes())
+	if len(payload.Items) != 1 {
+		t.Fatalf("expected one checker run row, got %+v", payload)
+	}
+	if payload.Items[0].ServiceState != "recovering" || payload.Items[0].StatePhase != "put" {
+		t.Fatalf("expected checker-reported recovering state, got %+v", payload.Items[0])
+	}
+	if payload.Items[0].StateMessage != "put failed but the checker still classified the service as recovering" {
+		t.Fatalf("unexpected checker-reported state message %+v", payload.Items[0])
 	}
 }
 

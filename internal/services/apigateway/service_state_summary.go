@@ -58,6 +58,25 @@ func SummarizeCheckerRunsForTick(runs []GameCheckerRun, tickID int) GameServiceS
 	return summary
 }
 
+func NormalizeServiceStateStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "ok":
+		return "ok"
+	case "recovering":
+		return "recovering"
+	case "flag_not_found", "flag-not-found":
+		return "flag_not_found"
+	case "faulty":
+		return "faulty"
+	case "down":
+		return "down"
+	case "unknown":
+		return "unknown"
+	default:
+		return ""
+	}
+}
+
 func collectTickPhaseStates(runs []GameCheckerRun) map[string]tickPhaseState {
 	phases := map[string]tickPhaseState{}
 	for i := range runs {

@@ -594,6 +594,8 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 					run.ExitCode = result.ExitCode
 					run.Message = strings.TrimSpace(result.Message)
 					run.Output = strings.TrimSpace(result.Output)
+					run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
+					run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
 					if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
 						run.CheckedAt = parsed.UTC()
 					}

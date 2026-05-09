@@ -477,6 +477,9 @@ Current behavior:
 - tick advance can be manual or interval-scheduled through organizer controls
 - scheduler state can resume automatically after process restart when the last persisted state was `running`
 - checker failures produce persisted `failed` rows
+- checker executions may also report a canonical service state directly
+- persisted `checker_service_states` prefer checker-reported states and fall back
+  to the current phase-derived summary when a checker does not emit one
 - later phases on the same target become `skipped`
 
 This is now authoritative for tick history, checker history, flag validation, scoreboard recomputation, and attack-feed reads.

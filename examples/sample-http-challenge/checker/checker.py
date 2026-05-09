@@ -56,6 +56,7 @@ def main() -> int:
             if status != 200:
                 print(body, file=sys.stderr)
                 return 1
+            print('ADPLATFORM_SERVICE_STATE={"status":"ok","message":"sample-http checker verified the public health route"}')
             print(body)
             return 0
     except HTTPError as exc:

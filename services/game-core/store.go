@@ -37,19 +37,21 @@ type checkerTarget struct {
 }
 
 type checkerRunRecord struct {
-	TickID        int
-	TeamID        int
-	TeamName      string
-	ChallengeID   int
-	ChallengeName string
-	Phase         string
-	Target        string
-	CheckerImage  string
-	Status        string
-	ExitCode      int
-	Message       string
-	Output        string
-	CheckedAt     time.Time
+	TickID               int
+	TeamID               int
+	TeamName             string
+	ChallengeID          int
+	ChallengeName        string
+	Phase                string
+	Target               string
+	CheckerImage         string
+	Status               string
+	ExitCode             int
+	Message              string
+	Output               string
+	ReportedServiceState string
+	ReportedStateMessage string
+	CheckedAt            time.Time
 }
 
 type issuedFlagRecord struct {
@@ -273,7 +275,7 @@ func (s *memoryGameStore) RecordCheckerRun(_ context.Context, run checkerRunReco
 	}
 	s.nextRun++
 	s.runs = append([]apigateway.GameCheckerRun{record}, s.runs...)
-	s.refreshMemoryServiceState(record.TickID, record.TeamID, record.ChallengeID)
+	s.refreshMemoryServiceState(run)
 	return record, nil
 }
 
@@ -562,7 +564,6 @@ func (s *memoryGameStore) ListCheckerRuns(_ context.Context, query apigateway.Ga
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	summaries := buildCheckerRunSummaryMap(s.runs)
 	filtered := make([]apigateway.GameCheckerRun, 0, len(s.runs))
 	for _, run := range s.runs {
 		if query.TickID > 0 && run.TickID != query.TickID {
@@ -580,7 +581,9 @@ func (s *memoryGameStore) ListCheckerRuns(_ context.Context, query apigateway.Ga
 		if query.Status != "" && !strings.EqualFold(run.Status, query.Status) {
 			continue
 		}
-		applyCheckerRunSummary(&run, summaries[checkerRunKey(run)])
+		if summary, ok := s.serviceStates[checkerRunKey(run)]; ok {
+			applyCheckerRunSummary(&run, summary)
+		}
 		filtered = append(filtered, run)
 	}
 
@@ -811,7 +814,7 @@ func (s *postgresGameStore) RecordCheckerRun(ctx context.Context, run checkerRun
 	`, run.TickID, run.TeamID, run.TeamName, run.ChallengeID, run.ChallengeName, run.Phase, run.Target, run.CheckerImage, run.Status, run.ExitCode, run.Message, run.Output, run.CheckedAt.UTC()).Scan(&record.ID); err != nil {
 		return apigateway.GameCheckerRun{}, err
 	}
-	if err := refreshPostgresServiceStateTx(ctx, tx, run.TickID, run.TeamID, run.ChallengeID); err != nil {
+	if err := refreshPostgresServiceStateTx(ctx, tx, run); err != nil {
 		return apigateway.GameCheckerRun{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1028,26 +1031,35 @@ func checkerRunKeyFromIDs(tickID, teamID, challengeID int) checkerRunGroupKey {
 	}
 }
 
-func buildCheckerRunSummaryMap(runs []apigateway.GameCheckerRun) map[checkerRunGroupKey]apigateway.GameServiceStateSummary {
-	grouped := make(map[checkerRunGroupKey][]apigateway.GameCheckerRun)
-	for _, run := range runs {
-		key := checkerRunKey(run)
-		grouped[key] = append(grouped[key], run)
-	}
-	summaries := make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary, len(grouped))
-	for key, group := range grouped {
-		summaries[key] = apigateway.SummarizeCheckerRunsForTick(group, key.TickID)
-	}
-	return summaries
-}
-
 func applyCheckerRunSummary(run *apigateway.GameCheckerRun, summary apigateway.GameServiceStateSummary) {
 	run.ServiceState = summary.Status
 	run.StatePhase = summary.Phase
 	run.StateMessage = summary.Message
 }
 
-func (s *memoryGameStore) refreshMemoryServiceState(tickID, teamID, challengeID int) {
+func (s *memoryGameStore) refreshMemoryServiceState(run checkerRunRecord) {
+	tickID := run.TickID
+	teamID := run.TeamID
+	challengeID := run.ChallengeID
+	key := checkerRunKeyFromIDs(tickID, teamID, challengeID)
+
+	if existing, ok := s.serviceStates[key]; ok && run.Status == "skipped" && strings.TrimSpace(run.ReportedServiceState) == "" {
+		s.serviceStates[key] = existing
+		return
+	}
+
+	reportedState := run.ReportedServiceState
+	reportedMessage := run.ReportedStateMessage
+	if normalized := apigateway.NormalizeServiceStateStatus(reportedState); normalized != "" {
+		s.serviceStates[key] = apigateway.GameServiceStateSummary{
+			Status:  normalized,
+			Phase:   inferReportedStatePhase(normalized),
+			TickID:  tickID,
+			Message: fallbackReportedStateMessage(normalized, reportedMessage),
+		}
+		return
+	}
+
 	group := make([]apigateway.GameCheckerRun, 0, 3)
 	for _, run := range s.runs {
 		if run.TickID != tickID || run.TeamID != teamID || run.ChallengeID != challengeID {
@@ -1055,7 +1067,6 @@ func (s *memoryGameStore) refreshMemoryServiceState(tickID, teamID, challengeID 
 		}
 		group = append(group, run)
 	}
-	key := checkerRunKeyFromIDs(tickID, teamID, challengeID)
 	s.serviceStates[key] = apigateway.SummarizeCheckerRunsForTick(group, tickID)
 }
 
@@ -1084,12 +1095,66 @@ func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []
 	}
 
 	query := `
-		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
-		FROM checker_runs
+		SELECT tick_id, team_id, challenge_id, service_state, state_phase, state_message
+		FROM checker_service_states
 		WHERE ` + strings.Join(clauses, " OR ") + `
-		ORDER BY tick_id DESC, id DESC
 	`
 	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summaries := make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary, len(keys))
+	for rows.Next() {
+		var tickID, teamID, challengeID int
+		var summary apigateway.GameServiceStateSummary
+		if err := rows.Scan(&tickID, &teamID, &challengeID, &summary.Status, &summary.Phase, &summary.Message); err != nil {
+			return nil, err
+		}
+		key := checkerRunGroupKey{TickID: tickID, TeamID: teamID, ChallengeID: challengeID}
+		summary.TickID = tickID
+		summaries[key] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	missing := make([]checkerRunGroupKey, 0)
+	for _, key := range keys {
+		if _, ok := summaries[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return summaries, nil
+	}
+
+	fallbacks, err := s.loadCheckerRunSummariesFromRuns(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	for key, summary := range fallbacks {
+		summaries[key] = summary
+	}
+	return summaries, nil
+}
+
+func (s *postgresGameStore) loadCheckerRunSummariesFromRuns(ctx context.Context, keys []checkerRunGroupKey) (map[checkerRunGroupKey]apigateway.GameServiceStateSummary, error) {
+	args := make([]any, 0, len(keys)*3)
+	clauses := make([]string, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key.TickID, key.TeamID, key.ChallengeID)
+		base := len(args) - 2
+		clauses = append(clauses, fmt.Sprintf("(tick_id = $%d AND team_id = $%d AND challenge_id = $%d)", base, base+1, base+2))
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
+		FROM checker_runs
+		WHERE `+strings.Join(clauses, " OR ")+`
+		ORDER BY tick_id DESC, id DESC
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1117,13 +1182,43 @@ func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []
 	return summaries, nil
 }
 
-func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, tickID, teamID, challengeID int) error {
+func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, run checkerRunRecord) error {
+	if normalized := apigateway.NormalizeServiceStateStatus(run.ReportedServiceState); normalized != "" {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO checker_service_states (
+				tick_id, team_id, challenge_id, service_state, state_phase, state_message, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+			ON CONFLICT (tick_id, team_id, challenge_id) DO UPDATE SET
+				service_state = EXCLUDED.service_state,
+				state_phase = EXCLUDED.state_phase,
+				state_message = EXCLUDED.state_message,
+				updated_at = EXCLUDED.updated_at
+		`, run.TickID, run.TeamID, run.ChallengeID, normalized, inferReportedStatePhase(normalized), fallbackReportedStateMessage(normalized, run.ReportedStateMessage))
+		return err
+	}
+
+	if run.Status == "skipped" {
+		var existingState string
+		err := tx.QueryRowContext(ctx, `
+			SELECT service_state
+			FROM checker_service_states
+			WHERE tick_id = $1 AND team_id = $2 AND challenge_id = $3
+		`, run.TickID, run.TeamID, run.ChallengeID).Scan(&existingState)
+		switch {
+		case err == nil && strings.TrimSpace(existingState) != "":
+			return nil
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		}
+	}
+
 	rows, err := tx.QueryContext(ctx, `
 		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
 		FROM checker_runs
 		WHERE tick_id = $1 AND team_id = $2 AND challenge_id = $3
 		ORDER BY id DESC
-	`, tickID, teamID, challengeID)
+	`, run.TickID, run.TeamID, run.ChallengeID)
 	if err != nil {
 		return err
 	}
@@ -1143,7 +1238,7 @@ func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, tickID, team
 		return err
 	}
 
-	summary := apigateway.SummarizeCheckerRunsForTick(group, tickID)
+	summary := apigateway.SummarizeCheckerRunsForTick(group, run.TickID)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO checker_service_states (
 			tick_id, team_id, challenge_id, service_state, state_phase, state_message, updated_at
@@ -1153,8 +1248,42 @@ func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, tickID, team
 			state_phase = EXCLUDED.state_phase,
 			state_message = EXCLUDED.state_message,
 			updated_at = EXCLUDED.updated_at
-	`, tickID, teamID, challengeID, summary.Status, summary.Phase, summary.Message)
+	`, run.TickID, run.TeamID, run.ChallengeID, summary.Status, summary.Phase, summary.Message)
 	return err
+}
+
+func inferReportedStatePhase(status string) string {
+	switch status {
+	case "recovering":
+		return "put"
+	case "flag_not_found":
+		return "get"
+	case "faulty", "ok", "down":
+		return "check"
+	default:
+		return ""
+	}
+}
+
+func fallbackReportedStateMessage(status, message string) string {
+	message = strings.TrimSpace(message)
+	if message != "" {
+		return message
+	}
+	switch status {
+	case "ok":
+		return "checker reported the service healthy."
+	case "recovering":
+		return "checker reported a recovering service state."
+	case "flag_not_found":
+		return "checker reported the stored flag missing."
+	case "faulty":
+		return "checker reported the service functionality degraded."
+	case "down":
+		return "checker reported the service unavailable."
+	default:
+		return "checker reported the latest service state."
+	}
 }
 
 func (s *postgresGameStore) LoadSchedulerState(ctx context.Context, intervalSeconds int) (apigateway.GameSchedulerStatus, error) {
