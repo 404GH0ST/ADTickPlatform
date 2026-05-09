@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 GOCACHE := $(CURDIR)/.cache/go-build
 
-.PHONY: fmt test build ci e2e release-notes run-api-gateway run-api-gateway-postgres run-game-core run-submission-service run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway run-wireguard-gateway run-backend-stack run-backend-stack-postgres bootstrap-clean-match bootstrap-faust-target-shape finalize-faust-target-shape validate-faust-target-shape smoke-participant smoke-participant-authz smoke-admin-realtime-authz smoke-admin-runtime smoke-sample-challenge-docker smoke-organizer-created smoke-prod-edge smoke-prod-host-enforcement smoke-prod-host-recovery smoke-prod-short-match smoke-prod-db-restore capture-prod-host-baseline capture-go-live-metrics summarize-validation-artifacts render-validation-report check-validation-alerts go-live-check validate-prod-release-candidate render-event-ready-note verify-event-ready-note verify-release-candidate tag-release create-admin create-teams simulate-attack-map-load validate-attack-map-load compose-config prod-config prod-host-config preflight-prod-host prod-web-artifacts up-prod up-prod-host down-prod down-prod-host logs-prod logs-prod-host wg-host-keygen wg-host-render wg-host-install wg-host-up wg-host-down wg-host-show wg-host-setup
+.PHONY: fmt test build ci e2e release-notes run-api-gateway run-api-gateway-postgres run-game-core run-submission-service run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway run-wireguard-gateway run-backend-stack run-backend-stack-postgres bootstrap-clean-match bootstrap-faust-target-shape finalize-faust-target-shape validate-faust-target-shape smoke-participant smoke-participant-authz smoke-participant-rate-limits smoke-admin-realtime-authz smoke-admin-runtime smoke-sample-challenge-docker smoke-organizer-created smoke-prod-edge smoke-prod-host-enforcement smoke-prod-host-recovery smoke-prod-short-match smoke-prod-db-restore capture-prod-host-baseline capture-go-live-metrics summarize-validation-artifacts render-validation-report check-validation-alerts go-live-check validate-prod-release-candidate render-event-ready-note verify-event-ready-note verify-release-candidate tag-release create-admin create-teams simulate-attack-map-load validate-attack-map-load compose-config prod-config prod-host-config preflight-prod-host prod-web-artifacts up-prod up-prod-host down-prod down-prod-host logs-prod logs-prod-host wg-host-keygen wg-host-render wg-host-install wg-host-up wg-host-down wg-host-show wg-host-setup
 
 PROD_ENV ?= deploy/compose/prod.env
 PROD_HOST_OVERRIDE ?= deploy/compose/prod.host-enforcement.yml
@@ -90,6 +90,9 @@ smoke-participant:
 
 smoke-participant-authz:
 	./scripts/smoke-participant-authz-boundaries.sh
+
+smoke-participant-rate-limits:
+	./scripts/smoke-participant-rate-limits.sh
 
 smoke-admin-realtime-authz:
 	./scripts/smoke-admin-realtime-authz.sh
