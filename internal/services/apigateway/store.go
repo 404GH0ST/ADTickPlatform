@@ -39,6 +39,7 @@ type authenticatedPlayer struct {
 
 type Store interface {
 	AuthenticatePlayer(ctx context.Context, email, password string) (authenticatedPlayer, error)
+	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) error
 	ListChallenges(ctx context.Context) ([]challenge, error)
 	ListPublicServices(ctx context.Context) (map[string]map[string][]string, error)
 	ListScoreboard(ctx context.Context) ([]scoreRow, error)

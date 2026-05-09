@@ -793,6 +793,10 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return 0, false
 	}
+	if err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role); err != nil {
+		writeProblem(w, http.StatusForbidden, "Authentication required", message)
+		return 0, false
+	}
 	return claims.TeamID, true
 }
 

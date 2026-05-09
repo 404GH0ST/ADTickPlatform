@@ -727,14 +727,25 @@ func testUnlockProof(teamID, challengeID int) string {
 func testTeamBearerToken(t *testing.T, teamID int) string {
 	t.Helper()
 
-	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
-		PlayerID:    teamID,
-		TeamID:      teamID,
-		TeamName:    fmt.Sprintf("Team %d", teamID),
-		DisplayName: fmt.Sprintf("Captain %d", teamID),
-		Email:       fmt.Sprintf("captain.%d@example.com", teamID),
+	player := authenticatedPlayer{
+		PlayerID:    1,
+		TeamID:      101,
+		TeamName:    "Team Alpha",
+		DisplayName: "Alpha Captain",
+		Email:       "alpha.captain@example.com",
 		Role:        "captain",
-	}, time.Now().Add(-time.Hour))
+	}
+	if teamID != 101 {
+		player = authenticatedPlayer{
+			PlayerID:    teamID,
+			TeamID:      teamID,
+			TeamName:    fmt.Sprintf("Team %d", teamID),
+			DisplayName: fmt.Sprintf("Captain %d", teamID),
+			Email:       fmt.Sprintf("captain.%d@example.com", teamID),
+			Role:        "captain",
+		}
+	}
+	token, err := issueTeamJWT("dev-team-token", player, time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("issue team jwt: %v", err)
 	}
@@ -799,6 +810,38 @@ func TestAuthenticate(t *testing.T) {
 	}
 	if payload.Token == "" || bytes.Count([]byte(payload.Token), []byte(".")) != 2 {
 		t.Fatalf("expected jwt-like token, got %q", payload.Token)
+	}
+}
+
+func TestDeletedPlayerTokenIsRejected(t *testing.T) {
+	store := NewMemoryStore(101)
+	player, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", "alpha-secret")
+	if err != nil {
+		t.Fatalf("authenticate player: %v", err)
+	}
+	token, err := issueTeamJWT("dev-team-token", player, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue jwt: %v", err)
+	}
+	if err := store.DeleteAdminPlayer(context.Background(), player.PlayerID); err != nil {
+		t.Fatalf("delete player: %v", err)
+	}
+
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "please authenticate before access." {
+		t.Fatalf("unexpected detail: %q", problem.Detail)
 	}
 }
 

@@ -111,6 +111,28 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	return player, nil
 }
 
+func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) error {
+	var currentTeamID sql.NullInt64
+	var currentRole string
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT team_id, role
+		FROM players
+		WHERE id = $1
+	`, playerID).Scan(&currentTeamID, &currentRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidCredentials
+		}
+		return err
+	}
+	if !currentTeamID.Valid || int(currentTeamID.Int64) != teamID {
+		return ErrInvalidCredentials
+	}
+	if strings.TrimSpace(currentRole) != strings.TrimSpace(role) {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(source_bundle_path, '') <> '' FROM challenges WHERE published = TRUE ORDER BY id`)
 	if err != nil {

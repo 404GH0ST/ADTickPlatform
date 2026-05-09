@@ -182,6 +182,23 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 	return authenticatedPlayer{}, ErrInvalidCredentials
 }
 
+func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID int, role string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.players[playerID]
+	if !ok {
+		return ErrInvalidCredentials
+	}
+	if record.Player.TeamID != teamID {
+		return ErrInvalidCredentials
+	}
+	if strings.TrimSpace(record.Player.Role) != strings.TrimSpace(role) {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
