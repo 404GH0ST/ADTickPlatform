@@ -111,26 +111,34 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	return player, nil
 }
 
-func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) error {
+func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error) {
+	var player authenticatedPlayer
 	var currentTeamID sql.NullInt64
-	var currentRole string
+	var currentTeamName sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT team_id, role
-		FROM players
-		WHERE id = $1
-	`, playerID).Scan(&currentTeamID, &currentRole); err != nil {
+		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.role
+		FROM players p
+		LEFT JOIN teams t ON t.id = p.team_id
+		WHERE p.id = $1
+	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &player.DisplayName, &player.Email, &player.Role); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrInvalidCredentials
+			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
-		return err
+		return authenticatedPlayer{}, err
 	}
 	if !currentTeamID.Valid || int(currentTeamID.Int64) != teamID {
-		return ErrInvalidCredentials
+		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	if strings.TrimSpace(currentRole) != strings.TrimSpace(role) {
-		return ErrInvalidCredentials
+	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
+		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	return nil
+	player.TeamID = teamID
+	if currentTeamName.Valid {
+		player.TeamName = currentTeamName.String
+	} else {
+		player.TeamName = "Organizer"
+	}
+	return player, nil
 }
 
 func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error) {

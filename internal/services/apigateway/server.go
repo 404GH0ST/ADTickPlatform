@@ -96,6 +96,7 @@ func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
+	mux.HandleFunc("GET /api/v2/session", s.handleSession)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
 	mux.HandleFunc("GET /api/v2/challenges/{challenge_id}/source", s.handleChallengeSourceDownload)
 	mux.HandleFunc("GET /api/v2/services", s.handleServices)
@@ -220,6 +221,21 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, services)
+}
+
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before access.")
+	if !ok {
+		return
+	}
+	writeData(w, http.StatusOK, map[string]any{
+		"player_id":     player.PlayerID,
+		"team_id":       player.TeamID,
+		"team_name":     player.TeamName,
+		"display_name":  player.DisplayName,
+		"email":         player.Email,
+		"role":          player.Role,
+	})
 }
 
 func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
@@ -783,21 +799,30 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message string) (int, bool) {
+	player, ok := s.requirePlayerAuth(w, r, message)
+	if !ok {
+		return 0, false
+	}
+	return player.TeamID, true
+}
+
+func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, message string) (authenticatedPlayer, bool) {
 	token, ok := httpapi.BearerToken(r)
 	if !ok {
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
-		return 0, false
+		return authenticatedPlayer{}, false
 	}
 	claims, err := verifyTeamJWT(s.teamTokenSecret, token, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
-		return 0, false
+		return authenticatedPlayer{}, false
 	}
-	if err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role); err != nil {
+	player, err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role)
+	if err != nil {
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
-		return 0, false
+		return authenticatedPlayer{}, false
 	}
-	return claims.TeamID, true
+	return player, true
 }
 
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
