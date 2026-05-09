@@ -172,6 +172,42 @@ func TestAttackStreamEmitsInitialSnapshot(t *testing.T) {
 	<-done
 }
 
+func TestPublicScoreboardStreamWorksThroughInstrumentedMux(t *testing.T) {
+	info := httpapi.ServiceInfo{Name: "realtime-gateway-stream-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Version: "test", Addr: ":0"}
+	client := &testSnapshotClient{
+		scoreboard: []apigateway.ScoreRowAlias{
+			{Rank: 1, Team: "Team Alpha", Attack: 40, Defense: 30, SLA: 28, Total: 98, Delta: "+1"},
+		},
+	}
+
+	gateway := newRealtimeGateway(client, 25*time.Millisecond, "dev-admin-token")
+	if err := gateway.syncOnce(context.Background()); err != nil {
+		t.Fatalf("failed to prime gateway: %v", err)
+	}
+
+	mux := httpapi.NewBaseMux(info)
+	gateway.RegisterRoutes(mux)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	request := httptest.NewRequest(http.MethodGet, "/public/v1/scoreboard/stream", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mux.ServeHTTP(response, request)
+	}()
+
+	waitForBodyContains(t, response, `"team":"Team Alpha"`)
+	cancel()
+	<-done
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+}
+
 func TestAdminGameStatusStreamRequiresAuth(t *testing.T) {
 	gateway := newRealtimeGateway(&testSnapshotClient{}, 25*time.Millisecond, "dev-admin-token")
 
