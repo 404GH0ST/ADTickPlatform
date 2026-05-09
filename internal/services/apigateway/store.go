@@ -20,6 +20,7 @@ var (
 	ErrDeploymentActive      = errors.New("deployment job is still active")
 	ErrDeploymentNotFound    = errors.New("deployment job not found")
 	ErrServiceLocked         = errors.New("service locked")
+	ErrServiceUnavailable    = errors.New("service unavailable")
 	ErrTeamNotFound          = errors.New("team not found")
 	ErrPlayerNotFound        = errors.New("player not found")
 	ErrDuplicateResource     = errors.New("duplicate resource")
@@ -46,6 +47,7 @@ type Store interface {
 	ListAttackFeed(ctx context.Context) ([]attackEvent, error)
 	ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error)
 	SubmitFlags(ctx context.Context, teamID int, flags []string) ([]submissionVerdict, error)
+	ValidateServiceAction(ctx context.Context, teamID, challengeID int) error
 	UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error)
 	CreateSSHSession(ctx context.Context, teamID, challengeID int, now time.Time) (sshSessionData, error)
 	MarkSSHSessionApplyFailure(ctx context.Context, teamID, challengeID int) error

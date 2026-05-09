@@ -262,6 +262,33 @@ func (s *postgresStore) SubmitFlags(ctx context.Context, teamID int, flags []str
 	return nil, ErrSubmissionUnavailable
 }
 
+func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, challengeID int) error {
+	var published bool
+	var runtimeStatus sql.NullString
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT c.published, si.runtime_status
+		FROM team_service_states tss
+		JOIN challenges c ON c.id = tss.challenge_id
+		LEFT JOIN service_instances si ON si.team_id = tss.team_id AND si.challenge_id = tss.challenge_id
+		WHERE tss.team_id = $1 AND tss.challenge_id = $2
+	`, teamID, challengeID).Scan(&published, &runtimeStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrChallengeNotFound
+		}
+		return err
+	}
+	if !published {
+		return ErrChallengeNotFound
+	}
+	if !runtimeStatus.Valid {
+		return ErrChallengeNotFound
+	}
+	if strings.TrimSpace(runtimeStatus.String) != "ready" {
+		return ErrServiceUnavailable
+	}
+	return nil
+}
+
 func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error) {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
@@ -270,6 +297,14 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 		    ssh_hint = 'unlock accepted; use SSH Access to view the team credential',
 		    last_event = 'unlock granted via participant API'
 		WHERE team_id = $1 AND challenge_id = $2
+		  AND EXISTS (
+			SELECT 1
+			FROM challenges c
+			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			WHERE c.id = team_service_states.challenge_id
+			  AND c.published = TRUE
+			  AND si.runtime_status = 'ready'
+		  )
 	`, teamID, challengeID)
 	if err != nil {
 		return unlockData{}, err
@@ -293,6 +328,14 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 		SELECT unlocked, endpoint
 		FROM team_service_states
 		WHERE team_id = $1 AND challenge_id = $2
+		  AND EXISTS (
+			SELECT 1
+			FROM challenges c
+			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			WHERE c.id = team_service_states.challenge_id
+			  AND c.published = TRUE
+			  AND si.runtime_status = 'ready'
+		  )
 		FOR UPDATE
 	`, teamID, challengeID).Scan(&unlocked, &endpoint); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -347,6 +390,14 @@ func (s *postgresStore) FactoryResetService(ctx context.Context, teamID, challen
 		    reset_cooldown = 'cooldown: 90s',
 		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; open SSH Access to reapply the team credential' ELSE ssh_hint END
 		WHERE team_id = $1 AND challenge_id = $2
+		  AND EXISTS (
+			SELECT 1
+			FROM challenges c
+			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			WHERE c.id = team_service_states.challenge_id
+			  AND c.published = TRUE
+			  AND si.runtime_status = 'ready'
+		  )
 		RETURNING unlocked
 	`, teamID, challengeID).Scan(&unlocked); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -365,6 +416,14 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 		    last_event = 'service restart triggered via participant API',
 		    reset_cooldown = 'ready'
 		WHERE team_id = $1 AND challenge_id = $2
+		  AND EXISTS (
+			SELECT 1
+			FROM challenges c
+			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			WHERE c.id = team_service_states.challenge_id
+			  AND c.published = TRUE
+			  AND si.runtime_status = 'ready'
+		  )
 	`, teamID, challengeID)
 	if err != nil {
 		return resetData{}, err

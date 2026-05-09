@@ -281,6 +281,31 @@ func (s *memoryStore) SubmitFlags(_ context.Context, teamID int, flags []string)
 	return nil, ErrSubmissionUnavailable
 }
 
+func (s *memoryStore) ValidateServiceAction(_ context.Context, teamID, challengeID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.lookupTeamStateLocked(teamID, challengeID); err != nil {
+		return err
+	}
+	challenge, ok := s.challenges[challengeID]
+	if !ok || !challenge.Published {
+		return ErrChallengeNotFound
+	}
+	instances, ok := s.instances[teamID]
+	if !ok {
+		return ErrChallengeNotFound
+	}
+	instance, ok := instances[challengeID]
+	if !ok {
+		return ErrChallengeNotFound
+	}
+	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
+		return ErrServiceUnavailable
+	}
+	return nil
+}
+
 func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) (unlockData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -288,6 +313,17 @@ func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) 
 	state, err := s.lookupTeamStateLocked(teamID, challengeID)
 	if err != nil {
 		return unlockData{}, err
+	}
+	challenge, ok := s.challenges[challengeID]
+	if !ok || !challenge.Published {
+		return unlockData{}, ErrChallengeNotFound
+	}
+	instance, ok := s.instances[teamID][challengeID]
+	if !ok {
+		return unlockData{}, ErrChallengeNotFound
+	}
+	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
+		return unlockData{}, ErrServiceUnavailable
 	}
 	state.Unlocked = true
 	state.Status = demoteStatus(state.Status)
@@ -304,6 +340,17 @@ func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID in
 	state, err := s.lookupTeamStateLocked(teamID, challengeID)
 	if err != nil {
 		return sshSessionData{}, err
+	}
+	challenge, ok := s.challenges[challengeID]
+	if !ok || !challenge.Published {
+		return sshSessionData{}, ErrChallengeNotFound
+	}
+	instance, ok := s.instances[teamID][challengeID]
+	if !ok {
+		return sshSessionData{}, ErrChallengeNotFound
+	}
+	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
+		return sshSessionData{}, ErrServiceUnavailable
 	}
 	if !state.Unlocked {
 		return sshSessionData{}, ErrServiceLocked
@@ -338,6 +385,17 @@ func (s *memoryStore) FactoryResetService(_ context.Context, teamID, challengeID
 	if err != nil {
 		return resetData{}, err
 	}
+	challenge, ok := s.challenges[challengeID]
+	if !ok || !challenge.Published {
+		return resetData{}, ErrChallengeNotFound
+	}
+	instance, ok := s.instances[teamID][challengeID]
+	if !ok {
+		return resetData{}, ErrChallengeNotFound
+	}
+	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
+		return resetData{}, ErrServiceUnavailable
+	}
 	state.Status = "warming"
 	state.Checker = "warning"
 	state.LastEvent = "factory reset triggered via participant API"
@@ -356,6 +414,17 @@ func (s *memoryStore) RestartService(_ context.Context, teamID, challengeID int)
 	state, err := s.lookupTeamStateLocked(teamID, challengeID)
 	if err != nil {
 		return resetData{}, err
+	}
+	challenge, ok := s.challenges[challengeID]
+	if !ok || !challenge.Published {
+		return resetData{}, ErrChallengeNotFound
+	}
+	instance, ok := s.instances[teamID][challengeID]
+	if !ok {
+		return resetData{}, ErrChallengeNotFound
+	}
+	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
+		return resetData{}, ErrServiceUnavailable
 	}
 	state.Status = "stable"
 	state.Checker = "passing"

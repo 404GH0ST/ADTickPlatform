@@ -1558,6 +1558,79 @@ func TestParticipantCannotDownloadDraftChallengeSourceBundle(t *testing.T) {
 	}
 }
 
+func TestParticipantServiceActionsRejectQueuedDeployment(t *testing.T) {
+	mux := newTestMux()
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{
+		"name":"queued-only",
+		"baseline_image":"registry.local/queued:baseline",
+		"checker_image":"registry.local/queued-checker:latest"
+	}`))
+	setTestAdminAuthHeader(createRequest)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	mux.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge create 200, got %d: %s", createResponse.Code, createResponse.Body.String())
+	}
+
+	var created adminChallenge
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode created challenge: %v", err)
+	}
+
+	deployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", created.ID), nil)
+	setTestAdminAuthHeader(deployRequest)
+	deployResponse := httptest.NewRecorder()
+	mux.ServeHTTP(deployResponse, deployRequest)
+	if deployResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge deploy 200, got %d: %s", deployResponse.Code, deployResponse.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name string
+		req  *http.Request
+	}{
+		{
+			name: "unlock",
+			req: httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/unlock", created.ID), bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, created.ID)+`"}`)),
+		},
+		{
+			name: "ssh-session",
+			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/ssh-session", created.ID), nil),
+		},
+		{
+			name: "factory-reset",
+			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/reset/factory", created.ID), nil),
+		},
+		{
+			name: "restart",
+			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/reset/restart", created.ID), nil),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setTestTeamAuthHeader(t, tc.req)
+			if tc.name == "unlock" {
+				tc.req.Header.Set("Content-Type", "application/json")
+			}
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, tc.req)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+			}
+
+			var payload httpapi.ProblemDetails
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if payload.Detail != "service is not available yet." {
+				t.Fatalf("unexpected detail %q", payload.Detail)
+			}
+		})
+	}
+}
+
 func TestTeamServicesReturnsRateLimit429(t *testing.T) {
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{

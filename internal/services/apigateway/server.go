@@ -663,6 +663,10 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
 
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamChallengeKey("unlock", teamID, challengeID), unlockRateLimitPolicy)
 	if !allowed {
@@ -709,6 +713,10 @@ func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
+	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
 	data, err := s.store.CreateSSHSession(r.Context(), teamID, challengeID, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -745,6 +753,10 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
+	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
 	if err := s.controller.FactoryResetService(r.Context(), teamID, challengeID); err != nil {
 		if errors.Is(err, ErrChallengeNotFound) {
 			writeDomainFailure(w, err)
@@ -777,6 +789,10 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamChallengeKey("restart", teamID, challengeID), restartRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+		writeDomainFailure(w, err)
 		return
 	}
 	if err := s.controller.RestartService(r.Context(), teamID, challengeID); err != nil {
@@ -874,6 +890,8 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrServiceLocked):
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "service is not unlocked yet.")
+	case errors.Is(err, ErrServiceUnavailable):
+		writeProblem(w, http.StatusBadRequest, "Request rejected", "service is not available yet.")
 	case errors.Is(err, ErrChallengeNotFound):
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 	case errors.Is(err, ErrTeamNotFound):
