@@ -303,11 +303,17 @@ else
   exit 1
 fi
 if [ -n "$checker_arg0" ]; then
-  if "$checker_exec" "$checker_arg0" validate >/dev/null 2>&1 || "$checker_exec" "$checker_arg0" --help >/dev/null 2>&1; then
+  if "$checker_exec" "$checker_arg0" validate; then
+    exit 0
+  fi
+  if "$checker_exec" "$checker_arg0" --help >/dev/null 2>&1; then
     exit 0
   fi
 else
-  if "$checker_exec" validate >/dev/null 2>&1 || "$checker_exec" --help >/dev/null 2>&1; then
+  if "$checker_exec" validate; then
+    exit 0
+  fi
+  if "$checker_exec" --help >/dev/null 2>&1; then
     exit 0
   fi
 fi
