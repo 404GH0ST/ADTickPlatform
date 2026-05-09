@@ -242,6 +242,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       game-core:
         condition: service_started
       submission-service:
@@ -259,6 +261,8 @@ services:
       API_GATEWAY_AUTO_SEED: ${API_GATEWAY_AUTO_SEED:-false}
       DATABASE_INCLUDE_SEEDS: ${DATABASE_INCLUDE_SEEDS:-false}
       POSTGRES_DSN: ${POSTGRES_DSN}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       TEAM_JWT_SECRET: ${TEAM_JWT_SECRET}
       UNLOCK_PROOF_SECRET: ${UNLOCK_PROOF_SECRET}
       SSH_CREDENTIAL_SECRET: ${SSH_CREDENTIAL_SECRET}
