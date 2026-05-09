@@ -214,13 +214,14 @@ type ChallengeValidationRequest struct {
 }
 
 type ChallengeValidationResult struct {
-	ChallengeID           int    `json:"challenge_id"`
-	Name                  string `json:"name"`
-	BaselineImage         string `json:"baseline_image"`
-	CheckerImage          string `json:"checker_image"`
-	Status                string `json:"status"`
-	BaselineSSHContractOK bool   `json:"baseline_ssh_contract_ok"`
-	CheckerContractOK     bool   `json:"checker_contract_ok"`
-	CheckedAt             string `json:"checked_at"`
-	Message               string `json:"message,omitempty"`
+	ChallengeID            int    `json:"challenge_id"`
+	Name                   string `json:"name"`
+	BaselineImage          string `json:"baseline_image"`
+	CheckerImage           string `json:"checker_image"`
+	Status                 string `json:"status"`
+	BaselineSSHContractOK  bool   `json:"baseline_ssh_contract_ok"`
+	CheckerContractOK      bool   `json:"checker_contract_ok"`
+	ServiceStateContractOK bool   `json:"service_state_contract_ok"`
+	CheckedAt              string `json:"checked_at"`
+	Message                string `json:"message,omitempty"`
 }

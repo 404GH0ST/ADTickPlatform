@@ -64,15 +64,16 @@ func (dryRunExecutor) ApplySSHCredential(_ context.Context, _ apigateway.Control
 
 func (dryRunExecutor) ValidateChallengeRuntime(_ context.Context, request apigateway.ChallengeValidationRequest) (apigateway.ChallengeValidationResult, error) {
 	return apigateway.ChallengeValidationResult{
-		ChallengeID:           request.ChallengeID,
-		Name:                  request.Name,
-		BaselineImage:         request.BaselineImage,
-		CheckerImage:          request.CheckerImage,
-		Status:                "valid",
-		BaselineSSHContractOK: true,
-		CheckerContractOK:     true,
-		CheckedAt:             time.Now().UTC().Format(time.RFC3339),
-		Message:               "challenge package validation assumed in dry-run runtime mode.",
+		ChallengeID:            request.ChallengeID,
+		Name:                   request.Name,
+		BaselineImage:          request.BaselineImage,
+		CheckerImage:           request.CheckerImage,
+		Status:                 "valid",
+		BaselineSSHContractOK:  true,
+		CheckerContractOK:      true,
+		ServiceStateContractOK: true,
+		CheckedAt:              time.Now().UTC().Format(time.RFC3339),
+		Message:                "challenge package validation assumed in dry-run runtime mode.",
 	}, nil
 }
 
@@ -239,12 +240,18 @@ func (e *dockerCLIExecutor) ValidateChallengeRuntime(ctx context.Context, reques
 			result.Message = checkerResult.Message
 			return result, nil
 		}
+		if !checkerResult.ServiceStateContractOK {
+			result.Status = "invalid"
+			result.Message = "checker validation did not confirm canonical service-state support."
+			return result, nil
+		}
 	} else if _, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(checkerRequest)...); err != nil {
 		result.Status = "invalid"
 		result.Message = err.Error()
 		return result, nil
 	}
 	result.CheckerContractOK = true
+	result.ServiceStateContractOK = true
 	result.Status = "valid"
 	result.Message = "challenge package satisfies runtime validation."
 	return result, nil

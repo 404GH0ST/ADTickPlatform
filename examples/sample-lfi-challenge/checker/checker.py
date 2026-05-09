@@ -57,6 +57,7 @@ def main() -> int:
 
     phase = sys.argv[1]
     if phase == "validate":
+        print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}')
         print("ok")
         return 0
 

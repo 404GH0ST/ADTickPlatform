@@ -95,7 +95,8 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "docker.log")
 	binPath := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n"
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"printf 'ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true}\\n'\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate checker failed: %v", err)
 	}
-	if result.Status != "valid" || !result.ContractOK {
+	if result.Status != "valid" || !result.ContractOK || !result.ServiceStateContractOK {
 		t.Fatalf("unexpected validation result %+v", result)
 	}
 
@@ -130,6 +131,34 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "checker entrypoint does not support validate or --help") {
 		t.Fatalf("missing validation script in log %q", logOutput)
+	}
+}
+
+func TestDockerCheckerExecutorValidateCheckerRejectsMissingServiceStateCapability(t *testing.T) {
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf 'ok\\n'\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCheckerExecutor{
+		binary:        binPath,
+		network:       "adplatform_game",
+		networkLayout: "per-service",
+		timeout:       5 * time.Second,
+	}
+
+	result, err := executor.ValidateChecker(context.Background(), apigateway.CheckerValidationRequest{
+		ChallengeID:  7,
+		Name:         "proxy",
+		CheckerImage: "registry.local/proxy-checker:latest",
+	})
+	if err != nil {
+		t.Fatalf("validate checker failed: %v", err)
+	}
+	if result.Status != "invalid" || result.ContractOK || result.ServiceStateContractOK {
+		t.Fatalf("expected missing capability to invalidate checker, got %+v", result)
 	}
 }
 
@@ -239,8 +268,18 @@ func TestCheckerRunnerValidateEndpoint(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode validation response: %v", err)
 	}
-	if payload.Status != "valid" || !payload.ContractOK {
+	if payload.Status != "valid" || !payload.ContractOK || !payload.ServiceStateContractOK {
 		t.Fatalf("unexpected validation payload %+v", payload)
+	}
+}
+
+func TestParseCheckerValidationOutputDetectsServiceStateCapability(t *testing.T) {
+	output, ok := parseCheckerValidationOutput([]byte("ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true}\nok\n"))
+	if !ok {
+		t.Fatal("expected service-state capability to be detected")
+	}
+	if output != "ok" {
+		t.Fatalf("expected stripped output to be ok, got %q", output)
 	}
 }
 

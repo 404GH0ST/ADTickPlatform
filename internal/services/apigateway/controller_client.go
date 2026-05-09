@@ -79,15 +79,16 @@ func (noopControllerClient) ApplySSHCredential(context.Context, int, int, Contro
 }
 func (noopControllerClient) ValidateChallengeRuntime(_ context.Context, request ChallengeValidationRequest) (ChallengeValidationResult, error) {
 	return ChallengeValidationResult{
-		ChallengeID:           request.ChallengeID,
-		Name:                  request.Name,
-		BaselineImage:         request.BaselineImage,
-		CheckerImage:          request.CheckerImage,
-		Status:                "unavailable",
-		BaselineSSHContractOK: false,
-		CheckerContractOK:     false,
-		CheckedAt:             time.Now().UTC().Format(time.RFC3339),
-		Message:               "controller runtime validation is not configured.",
+		ChallengeID:            request.ChallengeID,
+		Name:                   request.Name,
+		BaselineImage:          request.BaselineImage,
+		CheckerImage:           request.CheckerImage,
+		Status:                 "unavailable",
+		BaselineSSHContractOK:  false,
+		CheckerContractOK:      false,
+		ServiceStateContractOK: false,
+		CheckedAt:              time.Now().UTC().Format(time.RFC3339),
+		Message:                "controller runtime validation is not configured.",
 	}, nil
 }
 func (noopControllerClient) AccessStatus(context.Context) (ControllerAccessStatus, error) {

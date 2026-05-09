@@ -449,10 +449,11 @@ func (s *Server) handleAdminValidateChallenge(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.recordAdminAudit(r.Context(), "challenge.validate", "challenge", auditChallengeTarget(result.ChallengeID, result.Name), "validated challenge runtime", map[string]any{
-		"challenge_id":             result.ChallengeID,
-		"status":                   result.Status,
-		"baseline_ssh_contract_ok": result.BaselineSSHContractOK,
-		"checker_contract_ok":      result.CheckerContractOK,
+		"challenge_id":              result.ChallengeID,
+		"status":                    result.Status,
+		"baseline_ssh_contract_ok":  result.BaselineSSHContractOK,
+		"checker_contract_ok":       result.CheckerContractOK,
+		"service_state_contract_ok": result.ServiceStateContractOK,
 	})
 	writeData(w, http.StatusOK, result)
 }
@@ -474,7 +475,7 @@ func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, http.StatusBadGateway, "Challenge deployment unavailable", "challenge runtime validation failed.")
 		return
 	}
-	if validation.Status != "valid" || !validation.BaselineSSHContractOK || !validation.CheckerContractOK {
+	if validation.Status != "valid" || !validation.BaselineSSHContractOK || !validation.CheckerContractOK || !validation.ServiceStateContractOK {
 		message := strings.TrimSpace(validation.Message)
 		if message == "" {
 			message = "challenge package failed runtime validation."

@@ -125,13 +125,14 @@ func newCheckerExecutor() checkerExecutor {
 
 func (dryRunCheckerExecutor) ValidateChecker(_ context.Context, request apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
 	return apigateway.CheckerValidationResult{
-		ChallengeID:  request.ChallengeID,
-		Name:         request.Name,
-		CheckerImage: request.CheckerImage,
-		Status:       "valid",
-		ContractOK:   true,
-		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
-		Message:      "checker contract validation assumed in dry-run mode.",
+		ChallengeID:            request.ChallengeID,
+		Name:                   request.Name,
+		CheckerImage:           request.CheckerImage,
+		Status:                 "valid",
+		ContractOK:             true,
+		ServiceStateContractOK: true,
+		CheckedAt:              time.Now().UTC().Format(time.RFC3339),
+		Message:                "checker contract validation assumed in dry-run mode.",
 	}, nil
 }
 
@@ -170,14 +171,22 @@ func (e *dockerCheckerExecutor) ValidateChecker(ctx context.Context, request api
 	}
 
 	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(request)...)
+	trimmedOutput, serviceStateContractOK := parseCheckerValidationOutput(output)
 	if err != nil {
 		result.Status = "invalid"
-		result.Message = commandFailureMessage(err, output, exitCode)
+		result.Message = commandFailureMessage(err, []byte(trimmedOutput), exitCode)
 		return result, nil
 	}
 
 	result.Status = "valid"
 	result.ContractOK = true
+	result.ServiceStateContractOK = serviceStateContractOK
+	if !serviceStateContractOK {
+		result.Status = "invalid"
+		result.ContractOK = false
+		result.Message = "checker validate output did not advertise canonical service-state support."
+		return result, nil
+	}
 	result.Message = "checker image satisfies runner contract."
 	return result, nil
 }
@@ -363,6 +372,10 @@ type checkerReportedServiceState struct {
 	Message string `json:"message,omitempty"`
 }
 
+type checkerCapabilities struct {
+	ServiceState bool `json:"service_state"`
+}
+
 func parseCheckerServiceStateOutput(output []byte) (string, string, string) {
 	lines := strings.Split(string(output), "\n")
 	filtered := make([]string, 0, len(lines))
@@ -402,6 +415,34 @@ func parseCheckerServiceStateOutput(output []byte) (string, string, string) {
 	}
 
 	return strings.TrimSpace(strings.Join(filtered, "\n")), reportedStatus, reportedMessage
+}
+
+func parseCheckerValidationOutput(output []byte) (string, bool) {
+	lines := strings.Split(string(output), "\n")
+	filtered := make([]string, 0, len(lines))
+	serviceStateContractOK := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "ADPLATFORM_CHECKER_CAPABILITIES=") {
+			filtered = append(filtered, line)
+			continue
+		}
+
+		raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "ADPLATFORM_CHECKER_CAPABILITIES="))
+		if raw == "" {
+			continue
+		}
+
+		var payload checkerCapabilities
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			filtered = append(filtered, line)
+			continue
+		}
+		serviceStateContractOK = payload.ServiceState
+	}
+
+	return strings.TrimSpace(strings.Join(filtered, "\n")), serviceStateContractOK
 }
 
 func firstNonEmpty(values ...string) string {

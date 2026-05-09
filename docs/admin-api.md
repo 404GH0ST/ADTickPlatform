@@ -158,6 +158,7 @@ Behavior:
 - loads the challenge metadata from authoritative platform state
 - asks the controller to validate the baseline service image against the SSH patch contract
 - asks the controller to validate the checker image against the standard checker entrypoint contract
+- requires the checker validation path to advertise canonical service-state support
 - returns a validation result even when the package is invalid, so organizers can inspect the failure reason
 
 ### POST `/api/v2/admin/challenges/{challenge_id}/deploy`

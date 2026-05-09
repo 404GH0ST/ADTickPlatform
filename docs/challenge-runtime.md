@@ -309,6 +309,7 @@ port = int(os.environ["AD_TARGET_PORT"])
 flag = os.environ.get("AD_FLAG", "")
 
 if phase == "validate":
+    print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}')
     print("ok")
     raise SystemExit(0)
 
@@ -327,6 +328,7 @@ with socket.create_connection((host, port), timeout=5) as sock:
 Checker expectations:
 
 - support `put`, `get`, `check`
-- optionally support `validate`
+- support `validate`
+- print `ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}` during `validate`
 - reach the target through `AD_TARGET_HOST` and `AD_TARGET_PORT`
 - treat `AD_FLAG` as the authoritative flag value for the current tick

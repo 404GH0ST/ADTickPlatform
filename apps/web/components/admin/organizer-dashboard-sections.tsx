@@ -1105,7 +1105,8 @@ function ChallengeCatalogRow({
           {validation ? (
             <p className="text-xs leading-5 text-muted-foreground">
               baseline {validation.baseline_ssh_contract_ok ? "ok" : "fail"} /
-              checker {validation.checker_contract_ok ? "ok" : "fail"}
+              checker {validation.checker_contract_ok ? "ok" : "fail"} /
+              state {validation.service_state_contract_ok ? "ok" : "fail"}
             </p>
           ) : null}
         </div>

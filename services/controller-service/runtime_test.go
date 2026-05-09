@@ -380,7 +380,8 @@ func TestDockerValidateChallengeRuntimeRunsEphemeralImageProbe(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "docker.log")
 	binPath := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n"
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"printf 'ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true}\\n'\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
@@ -400,7 +401,7 @@ func TestDockerValidateChallengeRuntimeRunsEphemeralImageProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate challenge runtime failed: %v", err)
 	}
-	if result.Status != "valid" || !result.BaselineSSHContractOK || !result.CheckerContractOK {
+	if result.Status != "valid" || !result.BaselineSSHContractOK || !result.CheckerContractOK || !result.ServiceStateContractOK {
 		t.Fatalf("unexpected validation result %+v", result)
 	}
 
@@ -449,9 +450,10 @@ func TestDockerValidateChallengeRuntimeUsesCheckerRunnerClientWhenConfigured(t *
 
 	checkerClient := &stubCheckerValidationClient{
 		result: apigateway.CheckerValidationResult{
-			Status:     "valid",
-			ContractOK: true,
-			Message:    "validated by checker-runner",
+			Status:                 "valid",
+			ContractOK:             true,
+			ServiceStateContractOK: true,
+			Message:                "validated by checker-runner",
 		},
 	}
 	executor := &dockerCLIExecutor{
@@ -470,7 +472,7 @@ func TestDockerValidateChallengeRuntimeUsesCheckerRunnerClientWhenConfigured(t *
 	if err != nil {
 		t.Fatalf("validate challenge runtime failed: %v", err)
 	}
-	if result.Status != "valid" || !checkerClient.called || !result.CheckerContractOK {
+	if result.Status != "valid" || !checkerClient.called || !result.CheckerContractOK || !result.ServiceStateContractOK {
 		t.Fatalf("unexpected validation result %+v", result)
 	}
 

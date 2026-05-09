@@ -1260,7 +1260,8 @@ export function useOrganizerDashboard({
       if (
         validation.status !== "valid" ||
         !validation.baseline_ssh_contract_ok ||
-        !validation.checker_contract_ok
+        !validation.checker_contract_ok ||
+        !validation.service_state_contract_ok
       ) {
         throw new Error(
           validation.message || "challenge package failed runtime validation",

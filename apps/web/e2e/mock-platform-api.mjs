@@ -244,6 +244,7 @@ const challengeValidationResult = {
   status: "valid",
   baseline_ssh_contract_ok: true,
   checker_contract_ok: true,
+  service_state_contract_ok: true,
   checked_at: "2026-03-20T10:19:00Z",
   message: "challenge package satisfies runtime policy.",
 };

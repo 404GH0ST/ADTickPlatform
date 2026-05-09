@@ -7,13 +7,14 @@ type CheckerValidationRequest struct {
 }
 
 type CheckerValidationResult struct {
-	ChallengeID  int    `json:"challenge_id"`
-	Name         string `json:"name"`
-	CheckerImage string `json:"checker_image"`
-	Status       string `json:"status"`
-	ContractOK   bool   `json:"contract_ok"`
-	CheckedAt    string `json:"checked_at"`
-	Message      string `json:"message,omitempty"`
+	ChallengeID            int    `json:"challenge_id"`
+	Name                   string `json:"name"`
+	CheckerImage           string `json:"checker_image"`
+	Status                 string `json:"status"`
+	ContractOK             bool   `json:"contract_ok"`
+	ServiceStateContractOK bool   `json:"service_state_contract_ok"`
+	CheckedAt              string `json:"checked_at"`
+	Message                string `json:"message,omitempty"`
 }
 
 type CheckerExecutionRequest struct {

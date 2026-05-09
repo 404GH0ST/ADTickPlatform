@@ -99,6 +99,7 @@ export type AdminChallengeValidationResult = {
   status: string;
   baseline_ssh_contract_ok: boolean;
   checker_contract_ok: boolean;
+  service_state_contract_ok: boolean;
   checked_at: string;
   message?: string;
 };

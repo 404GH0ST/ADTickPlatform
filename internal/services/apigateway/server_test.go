@@ -116,15 +116,16 @@ func (storeBackedControllerClient) ApplySSHCredential(_ context.Context, _, _ in
 
 func (storeBackedControllerClient) ValidateChallengeRuntime(_ context.Context, request ChallengeValidationRequest) (ChallengeValidationResult, error) {
 	return ChallengeValidationResult{
-		ChallengeID:           request.ChallengeID,
-		Name:                  request.Name,
-		BaselineImage:         request.BaselineImage,
-		CheckerImage:          request.CheckerImage,
-		Status:                "valid",
-		BaselineSSHContractOK: true,
-		CheckerContractOK:     true,
-		CheckedAt:             "2026-03-10T10:00:00Z",
-		Message:               "challenge package validated by store-backed test controller",
+		ChallengeID:            request.ChallengeID,
+		Name:                   request.Name,
+		BaselineImage:          request.BaselineImage,
+		CheckerImage:           request.CheckerImage,
+		Status:                 "valid",
+		BaselineSSHContractOK:  true,
+		CheckerContractOK:      true,
+		ServiceStateContractOK: true,
+		CheckedAt:              "2026-03-10T10:00:00Z",
+		Message:                "challenge package validated by store-backed test controller",
 	}, nil
 }
 
@@ -174,15 +175,16 @@ func (c testControllerClient) ValidateChallengeRuntime(_ context.Context, reques
 	}
 	if c.validationResult.Status == "" {
 		return ChallengeValidationResult{
-			ChallengeID:           request.ChallengeID,
-			Name:                  request.Name,
-			BaselineImage:         request.BaselineImage,
-			CheckerImage:          request.CheckerImage,
-			Status:                "valid",
-			BaselineSSHContractOK: true,
-			CheckerContractOK:     true,
-			CheckedAt:             "2026-03-10T10:00:00Z",
-			Message:               "challenge package validated by test controller",
+			ChallengeID:            request.ChallengeID,
+			Name:                   request.Name,
+			BaselineImage:          request.BaselineImage,
+			CheckerImage:           request.CheckerImage,
+			Status:                 "valid",
+			BaselineSSHContractOK:  true,
+			CheckerContractOK:      true,
+			ServiceStateContractOK: true,
+			CheckedAt:              "2026-03-10T10:00:00Z",
+			Message:                "challenge package validated by test controller",
 		}, nil
 	}
 	result := c.validationResult
@@ -1728,7 +1730,7 @@ func TestParticipantServiceActionsRejectQueuedDeployment(t *testing.T) {
 	}{
 		{
 			name: "unlock",
-			req: httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/unlock", created.ID), bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, created.ID)+`"}`)),
+			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/unlock", created.ID), bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, created.ID)+`"}`)),
 		},
 		{
 			name: "ssh-session",
@@ -2545,7 +2547,7 @@ func TestAdminCanValidateChallengeBeforeDeploy(t *testing.T) {
 	}
 
 	payload := decodeCompat[ChallengeValidationResult](t, response.Body.Bytes())
-	if payload.Status != "valid" || !payload.BaselineSSHContractOK || !payload.CheckerContractOK {
+	if payload.Status != "valid" || !payload.BaselineSSHContractOK || !payload.CheckerContractOK || !payload.ServiceStateContractOK {
 		t.Fatalf("unexpected validation result %+v", payload)
 	}
 }
@@ -2555,10 +2557,11 @@ func TestAdminDeployRejectsInvalidChallengeRuntime(t *testing.T) {
 	store := NewMemoryStore(101)
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{
 		validationResult: ChallengeValidationResult{
-			Status:                "invalid",
-			BaselineSSHContractOK: false,
-			CheckerContractOK:     false,
-			Message:               "missing ssh daemon binary inside image",
+			Status:                 "invalid",
+			BaselineSSHContractOK:  false,
+			CheckerContractOK:      false,
+			ServiceStateContractOK: false,
+			Message:                "missing ssh daemon binary inside image",
 		},
 	}, noopWireGuardClient{}).RegisterRoutes(mux)
 
@@ -2583,10 +2586,11 @@ func TestAdminDeployRejectsInvalidCheckerRuntime(t *testing.T) {
 	store := NewMemoryStore(101)
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{
 		validationResult: ChallengeValidationResult{
-			Status:                "invalid",
-			BaselineSSHContractOK: true,
-			CheckerContractOK:     false,
-			Message:               "missing standard checker entrypoint inside image",
+			Status:                 "invalid",
+			BaselineSSHContractOK:  true,
+			CheckerContractOK:      false,
+			ServiceStateContractOK: false,
+			Message:                "missing standard checker entrypoint inside image",
 		},
 	}, noopWireGuardClient{}).RegisterRoutes(mux)
 
