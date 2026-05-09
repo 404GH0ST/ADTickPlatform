@@ -187,6 +187,25 @@ make capture-prod-host-baseline
 ```
 This writes the current filter/raw iptables state, nft ruleset, WireGuard state, and compose service status into `.runtime/`.
 
+### Export Incident Bundle
+When runtime health is degraded and you need a first-response artifact:
+```bash
+make export-runtime-incident-bundle
+```
+This writes a timestamped `.runtime/incident-bundle-*` directory plus a `.tar.gz`
+archive containing runtime status snapshots, scoreboard and attack snapshots,
+scheduler and checker evidence, and recent service log tails.
+
+### Report Faust Balance
+To assess whether the staged or live match is currently offense-light or
+over-concentrated:
+```bash
+make report-faust-balance
+```
+This writes a machine-readable `.runtime/faust-balance-report-*` JSON snapshot
+with attack share, SLA share, defense spread, accepted attacks per hour, and
+per-service offense concentration.
+
 ### Common Issues
 - **Docker Network Mismatch**: Ensure `CONTROLLER_DOCKER_NETWORK` in `prod.env` matches the actual name created by Docker Compose (usually `ad-platform-prod_control`).
 - **IPv4 Forwarding**: If participants can connect to VPN but cannot reach services, double-check `net.ipv4.ip_forward=1`.

@@ -298,6 +298,18 @@ Inspect the machine-readable release-candidate summary:
 jq . .runtime/release-candidate-<timestamp>/summary.json
 ```
 
+Export a fresh runtime incident bundle from the current host:
+
+```bash
+make export-runtime-incident-bundle
+```
+
+Build a Faust balance snapshot from the current scoreboard and attack state:
+
+```bash
+make report-faust-balance
+```
+
 Latest attack-map load validation artifacts:
 
 ```bash
