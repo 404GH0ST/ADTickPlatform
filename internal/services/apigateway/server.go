@@ -819,6 +819,10 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 	if !ok {
 		return 0, false
 	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+		writeProblem(w, http.StatusForbidden, "Authentication required", message)
+		return 0, false
+	}
 	return player.TeamID, true
 }
 

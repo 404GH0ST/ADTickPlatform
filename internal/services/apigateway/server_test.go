@@ -937,6 +937,34 @@ func TestAdminTokenCannotAccessParticipantRoutes(t *testing.T) {
 	}
 }
 
+func TestOrganizerBearerTokenCannotAccessParticipantRoutes(t *testing.T) {
+	mux := newTestMux()
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    99,
+		TeamID:      101,
+		TeamName:    "Team Alpha",
+		DisplayName: "Organizer",
+		Email:       "organizer@example.com",
+		Role:        "organizer",
+	}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue organizer token: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "please authenticate before access") {
+		t.Fatalf("expected participant auth failure, got %s", response.Body.String())
+	}
+}
+
 func TestSubmitReturnsRateLimit429(t *testing.T) {
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{

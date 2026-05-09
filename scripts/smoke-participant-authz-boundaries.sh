@@ -18,9 +18,12 @@ SECURITY_TEAM_ID="${SECURITY_TEAM_ID:-101}"
 TEMP_STAMP="$(date +%s)"
 TEMP_EMAIL="security.probe.${TEMP_STAMP}@teams.local"
 TEMP_PASSWORD="security-probe-secret"
+ORGANIZER_EMAIL="security.organizer.${TEMP_STAMP}@teams.local"
+ORGANIZER_PASSWORD="security-organizer-secret"
 DRAFT_CHALLENGE_NAME="security-draft-source-${TEMP_STAMP}"
 QUEUED_CHALLENGE_NAME="security-queued-service-${TEMP_STAMP}"
 TEMP_PLAYER_ID=""
+TEMP_ORGANIZER_ID=""
 DRAFT_CHALLENGE_ID=""
 QUEUED_CHALLENGE_ID=""
 
@@ -33,6 +36,10 @@ cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
     curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
+  fi
+  if [[ -n "${TEMP_ORGANIZER_ID}" ]]; then
+    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_ORGANIZER_ID}" >/dev/null || true
   fi
   if [[ -n "${DRAFT_CHALLENGE_ID}" ]]; then
     curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -146,6 +153,46 @@ expect_problem \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   "${EDGE_BASE_URL}/api/v2/team/services"
 echo "admin token denied on participant route"
+
+create_organizer_body="$(
+  jq -nc \
+    --argjson team_id "${SECURITY_TEAM_ID}" \
+    --arg display_name "Security Organizer" \
+    --arg email "${ORGANIZER_EMAIL}" \
+    --arg password "${ORGANIZER_PASSWORD}" \
+    --arg role "organizer" \
+    '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
+)"
+create_organizer_response="$(
+  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d "${create_organizer_body}" \
+    "${EDGE_BASE_URL}/api/v2/admin/players"
+)"
+TEMP_ORGANIZER_ID="$(printf '%s' "${create_organizer_response}" | jq -er '.id')"
+echo "created temporary organizer id=${TEMP_ORGANIZER_ID}"
+
+organizer_auth_body="$(
+  jq -nc \
+    --arg email "${ORGANIZER_EMAIL}" \
+    --arg password "${ORGANIZER_PASSWORD}" \
+    '{email:$email,password:$password}'
+)"
+organizer_token="$(
+  curl_retry -H 'Content-Type: application/json' \
+    -d "${organizer_auth_body}" \
+    "${EDGE_BASE_URL}/api/v2/authenticate" |
+    jq -er '.token'
+)"
+printf 'organizer token prefix=%s...\n' "${organizer_token:0:16}"
+
+expect_problem \
+  "organizer token on participant route" \
+  "403" \
+  "please authenticate before access." \
+  -H "Authorization: Bearer ${organizer_token}" \
+  "${EDGE_BASE_URL}/api/v2/team/services"
+echo "organizer token denied on participant route"
 
 curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null
