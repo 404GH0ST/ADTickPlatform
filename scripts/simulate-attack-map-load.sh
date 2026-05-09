@@ -459,7 +459,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
     )"
     submission_latencies_ms+=("${CURL_LAST_TIME_MS}")
 
-    if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+    if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].status == "accepted" and .[0].detail == "flag is correct."' >/dev/null; then
       echo "attack submission failed for ${attacker_name} -> ${victim_name}" >&2
       printf '%s\n' "${submit_response}" >&2
       exit 1

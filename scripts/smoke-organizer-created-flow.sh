@@ -370,8 +370,8 @@ submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,verdict}'
-if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,status,detail}'
+if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].status == "accepted" and .[0].detail == "flag is correct."' >/dev/null; then
   echo "stolen flag submission was not accepted" >&2
   exit 1
 fi
@@ -382,14 +382,15 @@ scoreboard_response="$(
 )"
 printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {team,attack,defense,sla,total}'
 
-expected_team_one_attack=10
-expected_team_one_defense=$((10 * TARGET_TICKS))
-expected_team_one_sla=$((10 * TARGET_TICKS))
-expected_team_one_total=$((expected_team_one_attack + expected_team_one_defense + expected_team_one_sla))
+sqrt_two="$(awk 'BEGIN { printf "%.12f", sqrt(2) }')"
+expected_team_one_attack=2
+expected_team_one_defense=0
+expected_team_one_sla="${sqrt_two}"
+expected_team_one_total="$(awk -v sla="${sqrt_two}" 'BEGIN { printf "%.12f", 2 + sla }')"
 expected_team_two_attack=0
-expected_team_two_defense=$((10 * (TARGET_TICKS - 1)))
-expected_team_two_sla=$((10 * TARGET_TICKS))
-expected_team_two_total=$((expected_team_two_attack + expected_team_two_defense + expected_team_two_sla))
+expected_team_two_defense=-1
+expected_team_two_sla="${sqrt_two}"
+expected_team_two_total="$(awk -v sla="${sqrt_two}" 'BEGIN { printf "%.12f", -1 + sla }')"
 
 if ! printf '%s\n' "${scoreboard_response}" | jq -e \
   --arg team_one "${TEAM_ONE_NAME}" \
@@ -402,8 +403,9 @@ if ! printf '%s\n' "${scoreboard_response}" | jq -e \
   --argjson team_two_defense "${expected_team_two_defense}" \
   --argjson team_two_sla "${expected_team_two_sla}" \
   --argjson team_two_total "${expected_team_two_total}" '
-  any(.[]; .team == $team_one and .attack == $team_one_attack and .defense == $team_one_defense and .sla == $team_one_sla and .total == $team_one_total)
-  and any(.[]; .team == $team_two and .attack == $team_two_attack and .defense == $team_two_defense and .sla == $team_two_sla and .total == $team_two_total)
+  def close($left; $right): (($left - $right) | if . < 0 then -. else . end) < 0.000001;
+  any(.[]; .team == $team_one and close(.attack; $team_one_attack) and close(.defense; $team_one_defense) and close(.sla; $team_one_sla) and close(.total; $team_one_total))
+  and any(.[]; .team == $team_two and close(.attack; $team_two_attack) and close(.defense; $team_two_defense) and close(.sla; $team_two_sla) and close(.total; $team_two_total))
 ' >/dev/null; then
   echo "unexpected scoreboard after organizer-created attack flow" >&2
   exit 1
