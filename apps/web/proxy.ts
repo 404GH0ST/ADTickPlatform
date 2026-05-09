@@ -28,7 +28,7 @@ async function organizerSession(request: NextRequest) {
   return validateParticipantSessionWithAPI(token);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const session = await organizerSession(request);
   const organizer = session?.role === "organizer";
