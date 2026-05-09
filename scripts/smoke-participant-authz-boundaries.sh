@@ -19,8 +19,10 @@ TEMP_STAMP="$(date +%s)"
 TEMP_EMAIL="security.probe.${TEMP_STAMP}@teams.local"
 TEMP_PASSWORD="security-probe-secret"
 DRAFT_CHALLENGE_NAME="security-draft-source-${TEMP_STAMP}"
+QUEUED_CHALLENGE_NAME="security-queued-service-${TEMP_STAMP}"
 TEMP_PLAYER_ID=""
 DRAFT_CHALLENGE_ID=""
+QUEUED_CHALLENGE_ID=""
 
 if [[ -z "${ADMIN_TOKEN}" ]]; then
   echo "ADMIN_API_TOKEN must be set in ${PROD_ENV}." >&2
@@ -35,6 +37,10 @@ cleanup() {
   if [[ -n "${DRAFT_CHALLENGE_ID}" ]]; then
     curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/challenges/${DRAFT_CHALLENGE_ID}" >/dev/null || true
+  fi
+  if [[ -n "${QUEUED_CHALLENGE_ID}" ]]; then
+    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      "${EDGE_BASE_URL}/api/v2/admin/challenges/${QUEUED_CHALLENGE_ID}" >/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -225,5 +231,119 @@ expect_problem \
   -H "Authorization: Bearer ${participant_token}" \
   "${EDGE_BASE_URL}/api/v2/challenges/${DRAFT_CHALLENGE_ID}/source"
 echo "draft source denied"
+
+expect_problem \
+  "draft service unlock" \
+  "400" \
+  "challenge id is invalid." \
+  -X POST \
+  -H "Authorization: Bearer ${participant_token}" \
+  -H 'Content-Type: application/json' \
+  -d '{"proof":"definitely-not-valid"}' \
+  "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/unlock"
+echo "draft service unlock denied"
+
+expect_problem \
+  "draft service ssh" \
+  "400" \
+  "challenge id is invalid." \
+  -X POST \
+  -H "Authorization: Bearer ${participant_token}" \
+  "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/ssh-session"
+echo "draft service ssh denied"
+
+expect_problem \
+  "draft service factory reset" \
+  "400" \
+  "challenge id is invalid." \
+  -X POST \
+  -H "Authorization: Bearer ${participant_token}" \
+  "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/reset/factory"
+echo "draft service factory reset denied"
+
+expect_problem \
+  "draft service restart" \
+  "400" \
+  "challenge id is invalid." \
+  -X POST \
+  -H "Authorization: Bearer ${participant_token}" \
+  "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/reset/restart"
+echo "draft service restart denied"
+
+queued_challenge_body="$(
+  challenge_template="$(
+    curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      "${EDGE_BASE_URL}/api/v2/admin/challenges" |
+      jq -er 'first(.[] | {baseline_image, checker_image, source_bundle_path})'
+  )"
+  jq -nc \
+    --arg name "${QUEUED_CHALLENGE_NAME}" \
+    --argjson template "${challenge_template}" \
+    '{
+      name:$name,
+      baseline_image:$template.baseline_image,
+      checker_image:$template.checker_image,
+      source_bundle_path:($template.source_bundle_path // "")
+    }'
+)"
+queued_challenge_response="$(
+  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d "${queued_challenge_body}" \
+    "${EDGE_BASE_URL}/api/v2/admin/challenges"
+)"
+QUEUED_CHALLENGE_ID="$(printf '%s' "${queued_challenge_response}" | jq -er '.id')"
+echo "created queued challenge id=${QUEUED_CHALLENGE_ID}"
+
+curl_retry -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  "${EDGE_BASE_URL}/api/v2/admin/challenges/${QUEUED_CHALLENGE_ID}/deploy" >/dev/null
+echo "queued challenge deployed without reconcile"
+
+queued_state="$(
+  curl_retry -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/team/services" |
+    jq -r --argjson challenge_id "${QUEUED_CHALLENGE_ID}" 'first(.[] | select(.challenge_id == $challenge_id) | .reset_cooldown) // ""'
+)"
+if [[ "${queued_state}" == "deploying" ]]; then
+  expect_problem \
+    "queued service unlock" \
+    "400" \
+    "service is not available yet." \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    -H 'Content-Type: application/json' \
+    -d '{"proof":"definitely-not-valid"}' \
+    "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/unlock"
+  echo "queued service unlock denied"
+
+  expect_problem \
+    "queued service ssh" \
+    "400" \
+    "service is not available yet." \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/ssh-session"
+  echo "queued service ssh denied"
+
+  expect_problem \
+    "queued service factory reset" \
+    "400" \
+    "service is not available yet." \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/reset/factory"
+  echo "queued service factory reset denied"
+
+  expect_problem \
+    "queued service restart" \
+    "400" \
+    "service is not available yet." \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/reset/restart"
+  echo "queued service restart denied"
+else
+  echo "queued challenge reached ready state before denial checks; skipped queued-state assertions"
+fi
 
 echo "participant authz smoke passed"
