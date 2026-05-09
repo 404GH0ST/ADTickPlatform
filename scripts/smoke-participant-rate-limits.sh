@@ -20,6 +20,8 @@ TEMP_EMAIL="security.rate.${TEMP_STAMP}@teams.local"
 TEMP_PASSWORD="security-rate-secret"
 INVALID_EMAIL="security.rate.invalid.${TEMP_STAMP}@teams.local"
 TEMP_PLAYER_ID=""
+RATE_LIMIT_DRAFT_CHALLENGE_ID=""
+RATE_LIMIT_DRAFT_CHALLENGE_NAME="security-rate-draft-${TEMP_STAMP}"
 
 if [[ -z "${ADMIN_TOKEN}" ]]; then
   echo "ADMIN_API_TOKEN must be set in ${PROD_ENV}." >&2
@@ -32,6 +34,10 @@ cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
     curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
+  fi
+  if [[ -n "${RATE_LIMIT_DRAFT_CHALLENGE_ID}" ]]; then
+    curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      "${EDGE_BASE_URL}/api/v2/admin/challenges/${RATE_LIMIT_DRAFT_CHALLENGE_ID}" >/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -152,6 +158,28 @@ fi
 locked_challenge_id="$(printf '%s' "${team_services_body}" | jq -er 'first(.[] | select(.unlocked == false) | .challenge_id)')"
 echo "using locked challenge_id=${locked_challenge_id}"
 
+draft_challenge_body="$(
+  source_bundle_path="$(
+    curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      "${EDGE_BASE_URL}/api/v2/admin/challenges" |
+      jq -er 'first(.[] | select(.source_bundle_path != null and .source_bundle_path != "") | .source_bundle_path)'
+  )"
+  jq -nc \
+    --arg name "${RATE_LIMIT_DRAFT_CHALLENGE_NAME}" \
+    --arg baseline_image "registry.local/security-rate-draft:baseline" \
+    --arg checker_image "registry.local/security-rate-draft-checker:latest" \
+    --arg source_bundle_path "${source_bundle_path}" \
+    '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,source_bundle_path:$source_bundle_path}'
+)"
+draft_challenge_response="$(
+  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d "${draft_challenge_body}" \
+    "${EDGE_BASE_URL}/api/v2/admin/challenges"
+)"
+RATE_LIMIT_DRAFT_CHALLENGE_ID="$(printf '%s' "${draft_challenge_response}" | jq -er '.id')"
+echo "created rate-limit draft challenge id=${RATE_LIMIT_DRAFT_CHALLENGE_ID}"
+
 unlock_429_seen=0
 for attempt in 1 2 3 4 5 6 7 8 9 10 11; do
   response="$(http_status_body \
@@ -178,5 +206,80 @@ if [[ "${unlock_429_seen}" -ne 1 ]]; then
   exit 1
 fi
 echo "unlock rate limit triggered"
+
+ssh_429_seen=0
+for attempt in 1 2 3 4 5 6 7; do
+  response="$(http_status_body \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/ssh-session")"
+  status="$(printf '%s\n' "${response}" | sed -n '1p')"
+  body="$(printf '%s\n' "${response}" | tail -n +2)"
+  if [[ "${status}" == "400" ]]; then
+    continue
+  fi
+  if [[ "${status}" == "429" ]]; then
+    ssh_429_seen=1
+    break
+  fi
+  echo "ssh-session attempt ${attempt} failed with unexpected status ${status}" >&2
+  printf '%s\n' "${body}" >&2
+  exit 1
+done
+if [[ "${ssh_429_seen}" -ne 1 ]]; then
+  echo "ssh-session rate limit did not trigger within 7 attempts" >&2
+  exit 1
+fi
+echo "ssh-session rate limit triggered"
+
+factory_reset_429_seen=0
+for attempt in 1 2 3 4; do
+  response="$(http_status_body \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/factory")"
+  status="$(printf '%s\n' "${response}" | sed -n '1p')"
+  body="$(printf '%s\n' "${response}" | tail -n +2)"
+  if [[ "${status}" == "400" ]]; then
+    continue
+  fi
+  if [[ "${status}" == "429" ]]; then
+    factory_reset_429_seen=1
+    break
+  fi
+  echo "factory reset attempt ${attempt} failed with unexpected status ${status}" >&2
+  printf '%s\n' "${body}" >&2
+  exit 1
+done
+if [[ "${factory_reset_429_seen}" -ne 1 ]]; then
+  echo "factory reset rate limit did not trigger within 4 attempts" >&2
+  exit 1
+fi
+echo "factory reset rate limit triggered"
+
+restart_429_seen=0
+for attempt in 1 2 3 4 5 6 7; do
+  response="$(http_status_body \
+    -X POST \
+    -H "Authorization: Bearer ${participant_token}" \
+    "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/restart")"
+  status="$(printf '%s\n' "${response}" | sed -n '1p')"
+  body="$(printf '%s\n' "${response}" | tail -n +2)"
+  if [[ "${status}" == "400" ]]; then
+    continue
+  fi
+  if [[ "${status}" == "429" ]]; then
+    restart_429_seen=1
+    break
+  fi
+  echo "restart attempt ${attempt} failed with unexpected status ${status}" >&2
+  printf '%s\n' "${body}" >&2
+  exit 1
+done
+if [[ "${restart_429_seen}" -ne 1 ]]; then
+  echo "restart rate limit did not trigger within 7 attempts" >&2
+  exit 1
+fi
+echo "restart rate limit triggered"
 
 echo "participant rate-limit smoke passed"
