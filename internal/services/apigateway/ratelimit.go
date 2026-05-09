@@ -311,6 +311,7 @@ func rateLimitAuthKey(email, clientIP string) string {
 }
 
 var (
+	maxSubmitFlagsPerRequest       = 128
 	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0}
 	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2}
 	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}

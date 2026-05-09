@@ -905,6 +905,87 @@ func TestSubmitRejectsRawTeamSecretBearer(t *testing.T) {
 	}
 }
 
+func TestAdminTokenCannotSubmit(t *testing.T) {
+	mux := newTestMux()
+	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
+	setTestAdminAuthHeader(request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "please authenticate before submit." {
+		t.Fatalf("unexpected detail %q", problem.Detail)
+	}
+}
+
+func TestOrganizerTokenCannotSubmit(t *testing.T) {
+	mux := newTestMux()
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    99,
+		TeamID:      101,
+		TeamName:    "Team Alpha",
+		DisplayName: "Organizer",
+		Email:       "organizer@example.com",
+		Role:        "organizer",
+	}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue organizer token: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "please authenticate before submit." {
+		t.Fatalf("unexpected detail %q", problem.Detail)
+	}
+}
+
+func TestDeletedParticipantTokenCannotSubmit(t *testing.T) {
+	store := NewMemoryStore(101)
+	player, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", "alpha-secret")
+	if err != nil {
+		t.Fatalf("authenticate player: %v", err)
+	}
+	token, err := issueTeamJWT("dev-team-token", player, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue team token: %v", err)
+	}
+	if err := store.DeleteAdminPlayer(context.Background(), player.PlayerID); err != nil {
+		t.Fatalf("delete player: %v", err)
+	}
+
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	body := bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", body)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "please authenticate before submit." {
+		t.Fatalf("unexpected detail %q", problem.Detail)
+	}
+}
+
 func TestParticipantTokenCannotAccessAdminRoutes(t *testing.T) {
 	mux := newTestMux()
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/admin/teams", nil)
@@ -995,6 +1076,32 @@ func TestSubmitReturnsRateLimit429(t *testing.T) {
 	}
 	if payload.Detail != defaultRateLimit429Message {
 		t.Fatalf("unexpected rate-limit message %q", payload.Detail)
+	}
+}
+
+func TestSubmitRejectsOversizedBatch(t *testing.T) {
+	mux := newTestMux()
+	flags := make([]string, 0, maxSubmitFlagsPerRequest+1)
+	for i := 0; i < maxSubmitFlagsPerRequest+1; i++ {
+		flags = append(flags, fmt.Sprintf("FLAGv1.oversized.%d", i))
+	}
+	bodyBytes, err := json.Marshal(submitRequest{Flags: flags})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewReader(bodyBytes))
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.Code)
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Detail != "too many flags in one request." {
+		t.Fatalf("unexpected detail %q", problem.Detail)
 	}
 }
 

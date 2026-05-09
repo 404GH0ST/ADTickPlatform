@@ -456,6 +456,10 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "request body is invalid.")
 		return
 	}
+	if len(req.Flags) > maxSubmitFlagsPerRequest {
+		writeProblem(w, http.StatusBadRequest, "Submission rejected", "too many flags in one request.")
+		return
+	}
 
 	if s.gameCore != nil {
 		if status, statusErr := s.gameCore.Status(r.Context()); statusErr == nil {
