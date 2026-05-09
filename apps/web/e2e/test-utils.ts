@@ -4,12 +4,45 @@ import {
   expect,
   test as base,
 } from "@playwright/test";
+import { createHmac } from "node:crypto";
 
 export const mockApiBaseUrl = "http://127.0.0.1:4010";
-export const organizerSessionToken =
-  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ0ZWFtX2lkIjoxMDEsInBsYXllcl9pZCI6MSwidGVhbV9uYW1lIjoiQ29sbGVnZSBBbHBoYSIsImRpc3BsYXlfbmFtZSI6Ik9yZ2FuaXplciIsImVtYWlsIjoib3JnYW5pemVyQGNvbGxlZ2UubG9jYWwiLCJyb2xlIjoib3JnYW5pemVyIn0.";
-export const participantSessionToken =
-  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ0ZWFtX2lkIjoxMDEsInBsYXllcl9pZCI6MTAwMSwidGVhbV9uYW1lIjoiQ29sbGVnZSBBbHBoYSIsImRpc3BsYXlfbmFtZSI6IkFscGhhIENhcHRhaW4iLCJlbWFpbCI6ImFscGhhLmNhcHRhaW5AY29sbGVnZS5sb2NhbCIsInJvbGUiOiJjYXB0YWluIn0.";
+export const testTeamJWTSecret = "playwright-team-jwt-secret";
+
+function base64UrlJSON(value: unknown) {
+  return Buffer.from(JSON.stringify(value))
+    .toString("base64url");
+}
+
+function signTestSessionToken(claims: Record<string, unknown>) {
+  const header = base64UrlJSON({ alg: "HS256", typ: "JWT" });
+  const payload = base64UrlJSON({
+    ...claims,
+    iat: 1_777_777_777,
+    exp: 4_102_444_800,
+  });
+  const signature = createHmac("sha256", testTeamJWTSecret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
+export const organizerSessionToken = signTestSessionToken({
+  team_id: 101,
+  player_id: 1,
+  team_name: "College Alpha",
+  display_name: "Organizer",
+  email: "organizer@college.local",
+  role: "organizer",
+});
+export const participantSessionToken = signTestSessionToken({
+  team_id: 101,
+  player_id: 1001,
+  team_name: "College Alpha",
+  display_name: "Alpha Captain",
+  email: "alpha.captain@college.local",
+  role: "captain",
+});
 
 export const participantStorageState = {
   cookies: [

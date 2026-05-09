@@ -1,11 +1,37 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createHmac } from "node:crypto";
 
 const mockApiPort = 4010;
 const appPort = 3007;
 const mockApiUrl = `http://127.0.0.1:${mockApiPort}`;
 const appUrl = `http://127.0.0.1:${appPort}`;
-const organizerSessionToken =
-  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ0ZWFtX2lkIjoxMDEsInBsYXllcl9pZCI6MSwidGVhbV9uYW1lIjoiQ29sbGVnZSBBbHBoYSIsImRpc3BsYXlfbmFtZSI6Ik9yZ2FuaXplciIsImVtYWlsIjoib3JnYW5pemVyQGNvbGxlZ2UubG9jYWwiLCJyb2xlIjoib3JnYW5pemVyIn0.";
+const testTeamJWTSecret = "playwright-team-jwt-secret";
+
+function base64UrlJSON(value: unknown) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function signTestSessionToken(claims: Record<string, unknown>) {
+  const header = base64UrlJSON({ alg: "HS256", typ: "JWT" });
+  const payload = base64UrlJSON({
+    ...claims,
+    iat: 1_777_777_777,
+    exp: 4_102_444_800,
+  });
+  const signature = createHmac("sha256", testTeamJWTSecret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
+const organizerSessionToken = signTestSessionToken({
+  team_id: 101,
+  player_id: 1,
+  team_name: "College Alpha",
+  display_name: "Organizer",
+  email: "organizer@college.local",
+  role: "organizer",
+});
 const organizerStorageState = {
   cookies: [
     {
@@ -69,6 +95,7 @@ export default defineConfig({
         `AD_PLATFORM_CONTROLLER_METRICS_URL=${mockApiUrl}/controller-service`,
         `AD_PLATFORM_WIREGUARD_GATEWAY_URL=${mockApiUrl}/wireguard-gateway`,
         "ADMIN_API_TOKEN=dev-admin-token",
+        `TEAM_JWT_SECRET=${testTeamJWTSecret}`,
         "NEXT_TELEMETRY_DISABLED=1",
         `bun run start --hostname 127.0.0.1 --port ${appPort}`,
       ].join(" "),

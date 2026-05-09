@@ -2,6 +2,11 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
+import {
+  decodeJWTClaims,
+  type ParticipantSessionClaims,
+  verifyParticipantSessionToken,
+} from "@/lib/session-token";
 
 function trimBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
@@ -152,15 +157,6 @@ type ParticipantSession = {
   source: "cookie" | "env" | "none";
 };
 
-type ParticipantSessionClaims = Partial<{
-  team_id: number;
-  player_id: number;
-  team_name: string;
-  display_name: string;
-  email: string;
-  role: string;
-}>;
-
 type AuthenticatedSessionSource = Exclude<ParticipantSession["source"], "none">;
 
 function apiBaseUrl() {
@@ -175,28 +171,6 @@ export function participantApiBaseUrl() {
 
 export function participantRealtimeBaseUrl() {
   return "/api/platform/realtime";
-}
-
-function decodeJWTClaims(token: string): ParticipantSessionClaims | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) {
-    return null;
-  }
-
-  try {
-    const encodedPayload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padding =
-      encodedPayload.length % 4 === 0
-        ? ""
-        : "=".repeat(4 - (encodedPayload.length % 4));
-    const payload = Buffer.from(
-      `${encodedPayload}${padding}`,
-      "base64",
-    ).toString("utf8");
-    return JSON.parse(payload) as ParticipantSessionClaims;
-  } catch {
-    return null;
-  }
 }
 
 function claimNumber(
@@ -218,8 +192,8 @@ function claimString(
 function authenticatedSession(
   token: string,
   source: AuthenticatedSessionSource,
+  claims: ParticipantSessionClaims | null = decodeJWTClaims(token),
 ): ParticipantSession {
-  const claims = decodeJWTClaims(token);
   return {
     authenticated: true,
     token,
@@ -246,8 +220,14 @@ export const getParticipantSession = cache(
     }
 
     const cookieToken = await cookieParticipantToken();
-    return cookieToken
-      ? authenticatedSession(cookieToken, "cookie")
+    if (!cookieToken) {
+      return { authenticated: false, source: "none" };
+    }
+
+    const cookieSecret = process.env.TEAM_JWT_SECRET?.trim() ?? "";
+    const claims = await verifyParticipantSessionToken(cookieToken, cookieSecret);
+    return claims
+      ? authenticatedSession(cookieToken, "cookie", claims)
       : { authenticated: false, source: "none" };
   },
 );

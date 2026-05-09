@@ -1,5 +1,9 @@
 import { expect, test, Page } from "@playwright/test";
-import { mockApiBaseUrl } from "./test-utils";
+import {
+  loginAsOrganizer,
+  loginAsParticipant as setParticipantSession,
+  mockApiBaseUrl,
+} from "./test-utils";
 
 test.use({
   viewport: { width: 1280, height: 900 },
@@ -70,4 +74,45 @@ test("authenticated participants are redirected away from organizer routes and t
 
   await expect(page).toHaveURL(/\/services$/);
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
+});
+
+test("unauthenticated callers cannot use admin api proxies", async ({
+  page,
+}) => {
+  const response = await page.request.get("/api/admin/operations/status");
+  expect(response.status()).toBe(403);
+  await expect(await response.json()).toEqual({
+    title: "Authentication required",
+    status: 403,
+    detail: "please authenticate before accessing organizer routes.",
+  });
+});
+
+test("participant session cannot use admin api proxies", async ({
+  page,
+  context,
+}) => {
+  await setParticipantSession(context);
+
+  const response = await page.request.get("/api/admin/operations/status");
+  expect(response.status()).toBe(403);
+  await expect(await response.json()).toEqual({
+    title: "Authentication required",
+    status: 403,
+    detail: "please authenticate as organizer.",
+  });
+});
+
+test("organizer session can use admin api proxies", async ({
+  page,
+  context,
+}) => {
+  await loginAsOrganizer(context);
+
+  const response = await page.request.get("/api/admin/operations/status");
+  expect(response.status()).toBe(200);
+  const payload = await response.json();
+  await expect(payload.healthy).toBe(true);
+  await expect(typeof payload.generated_at).toBe("string");
+  await expect(Array.isArray(payload.alerts)).toBe(true);
 });

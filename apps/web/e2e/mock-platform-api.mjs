@@ -1,6 +1,8 @@
+import { createHmac } from "node:crypto";
 import http from "node:http";
 
 const port = Number(process.env.MOCK_PLATFORM_API_PORT || "4010");
+const teamJWTSecret = process.env.TEAM_JWT_SECRET || "playwright-team-jwt-secret";
 
 const challenges = [{ id: 1, name: "college-http", has_source_download: true }];
 
@@ -412,7 +414,7 @@ function encodeBase64Url(value) {
 }
 
 function buildParticipantToken(player) {
-  const header = encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const header = encodeBase64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = encodeBase64Url(
     JSON.stringify({
       team_id: player.team_id,
@@ -421,9 +423,14 @@ function buildParticipantToken(player) {
       display_name: player.display_name,
       email: player.email,
       role: player.role,
+      iat: 1_777_777_777,
+      exp: 4_102_444_800,
     }),
   );
-  return `${header}.${payload}.`;
+  const signature = createHmac("sha256", teamJWTSecret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
 }
 
 function createInitialState() {
