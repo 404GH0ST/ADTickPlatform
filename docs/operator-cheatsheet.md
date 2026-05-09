@@ -26,6 +26,7 @@ Manual alternatives:
 make smoke-prod-short-match
 make smoke-prod-host-recovery
 make validate-attack-map-load
+make smoke-realtime-health
 make smoke-prod-db-restore
 make capture-prod-host-baseline
 ```
@@ -308,6 +309,12 @@ Build a Faust balance snapshot from the current scoreboard and attack state:
 
 ```bash
 make report-faust-balance
+```
+
+Check that public and organizer realtime SSE routes are still healthy:
+
+```bash
+make smoke-realtime-health
 ```
 
 Latest attack-map load validation artifacts:

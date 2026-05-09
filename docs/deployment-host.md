@@ -164,12 +164,19 @@ make smoke-prod-short-match
 This resets the stack to a clean organizer-managed state, creates two teams plus a sample challenge, deploys it, starts the match and scheduler, waits for ticks to run, and checks checker/scoring behavior. For a longer scheduler run, set `ORGANIZER_SMOKE_TARGET_TICKS=10`.
 The wrapper also sets a short scheduler interval for the rehearsal by default; override it with `ORGANIZER_SMOKE_SCHEDULER_INTERVAL_SECONDS`.
 
+### Realtime Stream Health
+Check that both public and organizer realtime SSE routes are still healthy:
+```bash
+make smoke-realtime-health
+```
+This verifies `200` SSE responses on the public scoreboard and attacks streams and on the organizer realtime game status and scoreboard streams.
+
 ### One-Shot Go-Live Check
 Run the main host validation flow end to end:
 ```bash
 sudo make go-live-check
 ```
-This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
+This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, checks the realtime SSE routes, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
 The artifact directory also records the git revision, a `prod.env` SHA256 fingerprint, an `operator-summary.json` snapshot, and an `operator-report.html` status page for the validated run.
 
 ### Release-Candidate Validation

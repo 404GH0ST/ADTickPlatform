@@ -23,6 +23,7 @@ wireguard_metrics_file="${artifact_dir}/wireguard-gateway-metrics.prom"
 summary_file="${artifact_dir}/summary.json"
 operator_summary_file="${artifact_dir}/operator-summary.json"
 operator_report_file="${artifact_dir}/operator-report.html"
+realtime_health_file="${artifact_dir}/realtime-health.json"
 
 load_env_file "${prod_env}"
 edge_base_url="${GO_LIVE_CHECK_BASE_URL:-$(derive_edge_base_url)}"
@@ -41,6 +42,8 @@ export AD_PLATFORM_TEAM_ID="${SMOKE_TEAM_ONE_ID}"
 if [[ "${include_attack_map_load}" == "true" ]]; then
   ATTACK_MAP_LOAD_OUTPUT_DIR="${attack_map_load_output_dir}" "${ROOT_DIR}/scripts/validate-attack-map-load.sh"
 fi
+
+REALTIME_HEALTH_ARTIFACT_FILE="${realtime_health_file}" "${ROOT_DIR}/scripts/smoke-realtime-health.sh"
 
 BASELINE_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-prod-host-baseline.sh"
 GO_LIVE_METRICS_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-go-live-metrics.sh"
@@ -80,11 +83,13 @@ Commands run:
 - make smoke-prod-short-match
 - make smoke-prod-host-recovery
 ${attack_map_command}
+- make smoke-realtime-health
 - make capture-prod-host-baseline
 
 Artifacts in this directory:
 - short-match.env
 ${attack_map_artifacts}
+- realtime-health.json
 - operations-status.json
 - git-revision.txt
 - prod-env.sha256
@@ -132,15 +137,18 @@ jq -nc \
     commands: (if $include_attack_map_load then [
       "make smoke-prod-short-match",
       "make smoke-prod-host-recovery",
+      "make smoke-realtime-health",
       "make capture-prod-host-baseline",
       "make validate-attack-map-load"
     ] else [
       "make smoke-prod-short-match",
       "make smoke-prod-host-recovery",
+      "make smoke-realtime-health",
       "make capture-prod-host-baseline"
     ] end),
     artifacts: {
       short_match_env: $short_match_env,
+      realtime_health: "realtime-health.json",
       operations_status: $operations_status,
       operator_summary: $operator_summary,
       operator_report: $operator_report,
