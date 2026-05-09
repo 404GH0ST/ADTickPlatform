@@ -29,11 +29,11 @@ fi
 
 cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
-    curl -sS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
   fi
   if [[ -n "${DRAFT_CHALLENGE_ID}" ]]; then
-    curl -sS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/challenges/${DRAFT_CHALLENGE_ID}" >/dev/null || true
   fi
 }
@@ -46,6 +46,25 @@ http_request() {
   printf '%s\n' "${status}"
   cat "${body_file}"
   rm -f "${body_file}"
+}
+
+curl_retry() {
+  local attempts="${CURL_RETRY_ATTEMPTS:-5}"
+  local delay="${CURL_RETRY_DELAY_SECONDS:-1}"
+  local attempt exit_code=0
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if curl -sS "$@"; then
+      return 0
+    fi
+    exit_code=$?
+    if (( attempt == attempts )); then
+      return "${exit_code}"
+    fi
+    sleep "${delay}"
+  done
+
+  return "${exit_code}"
 }
 
 expect_problem() {
@@ -84,7 +103,7 @@ create_player_body="$(
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_player_response="$(
-  curl -sS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     -H 'Content-Type: application/json' \
     -d "${create_player_body}" \
     "${EDGE_BASE_URL}/api/v2/admin/players"
@@ -99,7 +118,7 @@ participant_auth_body="$(
     '{email:$email,password:$password}'
 )"
 participant_token="$(
-  curl -sS -H 'Content-Type: application/json' \
+  curl_retry -H 'Content-Type: application/json' \
     -d "${participant_auth_body}" \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
@@ -122,8 +141,34 @@ expect_problem \
   "${EDGE_BASE_URL}/api/v2/team/services"
 echo "admin token denied on participant route"
 
+curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null
+TEMP_PLAYER_ID=""
+expect_problem \
+  "deleted player token on participant route" \
+  "403" \
+  "please authenticate before access." \
+  -H "Authorization: Bearer ${participant_token}" \
+  "${EDGE_BASE_URL}/api/v2/team/services"
+echo "deleted player token denied"
+
+create_player_response="$(
+  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d "${create_player_body}" \
+    "${EDGE_BASE_URL}/api/v2/admin/players"
+)"
+TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"
+participant_token="$(
+  curl_retry -H 'Content-Type: application/json' \
+    -d "${participant_auth_body}" \
+    "${EDGE_BASE_URL}/api/v2/authenticate" |
+    jq -er '.token'
+)"
+printf 'replacement participant token prefix=%s...\n' "${participant_token:0:16}"
+
 team_services="$(
-  curl -sS -H "Authorization: Bearer ${participant_token}" \
+  curl_retry -H "Authorization: Bearer ${participant_token}" \
     "${EDGE_BASE_URL}/api/v2/team/services"
 )"
 locked_challenge_id="$(
@@ -153,7 +198,7 @@ echo "invalid unlock proof denied"
 
 draft_challenge_body="$(
   source_bundle_path="$(
-    curl -sS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}/api/v2/admin/challenges" |
       jq -er 'first(.[] | select(.source_bundle_path != null and .source_bundle_path != "") | .source_bundle_path)'
   )"
@@ -165,7 +210,7 @@ draft_challenge_body="$(
     '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,source_bundle_path:$source_bundle_path}'
 )"
 draft_challenge_response="$(
-  curl -sS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     -H 'Content-Type: application/json' \
     -d "${draft_challenge_body}" \
     "${EDGE_BASE_URL}/api/v2/admin/challenges"
