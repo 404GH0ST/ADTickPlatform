@@ -1702,6 +1702,69 @@ func TestUnlockReturnsRateLimit429(t *testing.T) {
 	}
 }
 
+func TestSSHSessionReturnsRateLimit429(t *testing.T) {
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			rateLimitTeamChallengeKey("ssh-session", 101, 1): true,
+		},
+		retryAfter: 2 * time.Second,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", response.Code)
+	}
+	if got := response.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("expected Retry-After 2, got %q", got)
+	}
+}
+
+func TestFactoryResetReturnsRateLimit429(t *testing.T) {
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			rateLimitTeamChallengeKey("factory-reset", 101, 1): true,
+		},
+		retryAfter: 2 * time.Second,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", response.Code)
+	}
+	if got := response.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("expected Retry-After 2, got %q", got)
+	}
+}
+
+func TestRestartReturnsRateLimit429(t *testing.T) {
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			rateLimitTeamChallengeKey("restart", 101, 1): true,
+		},
+		retryAfter: 2 * time.Second,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/restart", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", response.Code)
+	}
+	if got := response.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("expected Retry-After 2, got %q", got)
+	}
+}
+
 func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	mux := newTestMux()
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
