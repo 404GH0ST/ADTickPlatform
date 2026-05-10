@@ -1,4 +1,4 @@
-.PHONY: fmt test build ci e2e release-notes audit-checker-contracts \
+.PHONY: fmt test build ci e2e release-notes audit-checker-contracts import-local-challenges \
 	run-api-gateway run-api-gateway-postgres run-game-core run-submission-service \
 	run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway \
 	run-wireguard-gateway run-backend-stack run-backend-stack-postgres \
@@ -28,6 +28,9 @@ ci:
 
 audit-checker-contracts:
 	./scripts/audit-checker-contracts.sh
+
+import-local-challenges:
+	./scripts/import-local-challenges.sh
 
 e2e:
 	bun run web:e2e

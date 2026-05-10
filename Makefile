@@ -21,6 +21,7 @@ help:
 	  'Faust staging:' \
 	  '  make bootstrap-faust-target-shape | finalize-faust-target-shape | validate-faust-target-shape | report-faust-balance' \
 	  '  make export-runtime-incident-bundle' \
+	  '  make import-local-challenges' \
 	  '' \
 	  'Security and health smokes:' \
 	  '  make smoke-participant-authz | smoke-participant-rate-limits | smoke-participant-submission-abuse' \
