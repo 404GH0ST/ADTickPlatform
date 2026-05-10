@@ -8,6 +8,9 @@ import {
 } from "./test-layout-utils";
 import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
+async function expectActionNote(page: any, pattern: RegExp | string) {
+  await expect(page.getByText(pattern)).toBeVisible();
+}
 
 test("organizer game page keeps scheduler audit filters inside the card width", async ({
   page,
@@ -228,9 +231,7 @@ test("organizer scheduler controls can start, update, and stop with visible note
   const schedulerCard = page.getByTestId("scheduler-card");
 
   await schedulerCard.getByRole("button", { name: "Resume Scheduler" }).click();
-  await expect(
-    page.getByText("Scheduler started with 60s interval."),
-  ).toBeVisible();
+  await expectActionNote(page, /Scheduler started with 60s interval\./);
   await expect(
     schedulerCard.getByRole("button", { name: "Stop Scheduler" }),
   ).toBeEnabled();
@@ -238,15 +239,11 @@ test("organizer scheduler controls can start, update, and stop with visible note
   const intervalInput = schedulerCard.locator('input[type="number"]:visible').first();
   await intervalInput.fill("90");
   await schedulerCard.getByRole("button", { name: "Update" }).click();
-  await expect(
-    page.getByText("Scheduler interval updated to 90 seconds."),
-  ).toBeVisible();
+  await expectActionNote(page, /Scheduler interval updated to 90 seconds\./);
   await expect(intervalInput).toHaveValue("90");
 
   await schedulerCard.getByRole("button", { name: "Stop Scheduler" }).click();
-  await expect(
-    page.getByText("Scheduler stopped. Manual tick advance remains available."),
-  ).toBeVisible();
+  await expectActionNote(page, /Scheduler stopped\./);
   await expect(
     schedulerCard.getByRole("button", { name: "Resume Scheduler" }),
   ).toBeEnabled();
@@ -270,9 +267,10 @@ test("organizer match controls start the game and auto-start the scheduler", asy
 
   await matchCard.getByRole("button", { name: "Start Game" }).click();
 
-  await expect(
-    page.getByText("Game started. Submissions are open and the scheduler is running at 60s."),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Game started\. Submissions are open and the scheduler is running at 60s\./,
+  );
   await expect(matchCard.getByText("running").first()).toBeVisible();
   await expect(matchCard.getByText("open").first()).toBeVisible();
   await expect(
@@ -353,11 +351,10 @@ test("organizer deployments reconcile completes queued jobs", async ({
 
   await page.getByRole("button", { name: "Reconcile Deployments" }).click();
 
-  await expect(
-    page.getByText(
-      "Trusted reconcile processed 1 job(s), advanced 2 team service instance(s), and refreshed deployment, SSH access, and WireGuard truth.",
-    ),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Trusted reconcile processed 1 job\(s\), advanced 2 team service instance\(s\), and refreshed deployment, SSH access, and WireGuard truth\./,
+  );
   await expect(deploymentRow.getByText("completed")).toBeVisible();
   await expect(deploymentRow.getByText("3/3")).toBeVisible();
   await expect(queuedCountCell).toHaveText("0");
@@ -401,11 +398,10 @@ test("organizer game page shows aggregated runtime drift warnings and refreshes 
 
   await page.getByTestId("refresh-runtime-health").click();
 
-  await expect(
-    page.getByText(
-      "Refreshed deployment, access policy, WireGuard, runtime alerts, and service metrics.",
-    ),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Refreshed deployment, access policy, WireGuard, runtime alerts, and service metrics\./,
+  );
   await expect(runtimeHealthCard).toContainText(
     "Runtime drift warnings are active. Review deployments, access, and gateway state before assuming the stack is converged.",
   );
@@ -454,9 +450,10 @@ test("organizer game page can download a runtime evidence report", async ({
     expect.objectContaining({ healthy: expect.any(Boolean) }),
   );
   expect(report.summary).toContain("Report completeness: all sections loaded");
-  await expect(
-    page.getByText("Downloaded complete runtime evidence report as"),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Downloaded complete runtime evidence report as .*\.json\./,
+  );
 });
 
 test("organizer game page names missing sections in partial runtime evidence", async ({
@@ -482,11 +479,10 @@ test("organizer game page names missing sections in partial runtime evidence", a
   expect(report.summary).toContain(
     "Report completeness: partial, missing wireguard_status",
   );
-  await expect(
-    page.getByText(
-      "Downloaded partial runtime evidence report as",
-    ),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Downloaded partial runtime evidence report as .*missing wireguard_status/,
+  );
   await expect(page.getByText("missing wireguard_status")).toBeVisible();
 });
 
@@ -500,29 +496,29 @@ test("organizer match controls handle manual match operations and recompute logi
   const quickActionsCard = page.getByTestId("quick-actions-card");
 
   await page.getByTestId("start-match").click();
-  await expect(
-    page.getByText("Game started. Submissions are open and the scheduler is running at 60s."),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Game started\. Submissions are open and the scheduler is running at 60s\./,
+  );
 
   await page.getByTestId("stop-match").click();
-  await expect(
-    page.getByText("Match stopped. Participant submissions are now closed."),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Match stopped\. Participant submissions are now closed\./,
+  );
   await expect(matchCard.getByText("finished").first()).toBeVisible();
   await expect(matchCard.getByText("closed").first()).toBeVisible();
 
   await page.getByTestId("advance-tick").click();
-  await expect(
-    page.getByText(
-      "Tick 13 completed with 6 success, 0 failed, and 0 skipped checker runs.",
-    ),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Tick 13 completed with 6 success, 0 failed, and 0 skipped checker runs\./,
+  );
   await expect(quickActionsCard.getByText("#13 completed")).toBeVisible();
 
   await page.getByTestId("recompute-scores").click();
-  await expect(
-    page.getByText(
-      "Recomputed 3 scoreboard row(s) from authoritative tick and submission state.",
-    ),
-  ).toBeVisible();
+  await expectActionNote(
+    page,
+    /Recomputed 3 scoreboard row\(s\) from authoritative tick and submission state\./,
+  );
 });

@@ -8,6 +8,7 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "e2e": "bun run build && playwright test",
+    "e2e:smoke": "bun run build && playwright test e2e/participant-auth.spec.ts e2e/admin-game.spec.ts e2e/realtime-updates.spec.ts",
     "ui:add": "bunx --bun shadcn@latest add",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"
