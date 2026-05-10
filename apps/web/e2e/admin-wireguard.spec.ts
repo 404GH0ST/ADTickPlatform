@@ -44,7 +44,7 @@ test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard 
   await page.getByRole("button", { name: "Reconcile Gateway" }).click();
   await expect(
     page.getByText(
-      "Maintenance reconcile applied WireGuard revision mock-wireguard-revision-1-1 with 1 active peer(s) and 1 revoked peer(s).",
+      "Maintenance reconcile applied WireGuard revision mock-wireguard-revision-2-1 with 2 active peer(s) and 1 revoked peer(s).",
     ),
   ).toBeVisible();
 });

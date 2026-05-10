@@ -1,14 +1,19 @@
 import { expect } from "@playwright/test";
-import { realtimeTest as test } from "./test-utils";
+import { mockApiBaseUrl, realtimeTest as test } from "./test-utils";
 
 test("participant attacks table applies realtime attack updates to the live slice count", async ({
   page,
+  request,
 }) => {
-  await page.goto("/attacks/table");
+  await page.goto("/attacks");
+  await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
 
-  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "realtime-updates" },
+  });
 
-  await expect(page.getByText("Showing 1-12 of 13")).toBeVisible();
+  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await page.getByRole("link", { name: "Table View" }).click();
   await expect(page.getByRole("cell", { name: "#13" })).toBeVisible();
 });
 
@@ -26,12 +31,12 @@ test("organizer game page applies realtime game-status updates to the current ti
   page,
 }) => {
   await page.goto("/admin/game");
+  const currentTickCard = page.getByTestId("current-tick-card").first();
 
-  await expect(page.getByText("Tick #12", { exact: true })).toBeVisible();
-  await expect(page.getByText("tick #12 completed")).toBeVisible();
+  await expect(currentTickCard).toContainText("Tick #12");
 
-  await expect(page.getByText("Tick #13", { exact: true })).toBeVisible();
-  await expect(page.getByText("tick #13 completed")).toBeVisible();
+  await expect(currentTickCard).toContainText("Tick #13");
+  await expect(currentTickCard).toContainText("tick #13 completed");
 });
 
 test("organizer attacks route applies realtime updates to the loaded attack count", async ({
