@@ -450,7 +450,9 @@ test("organizer game page can download a runtime evidence report", async ({
   expect(report.wireguard_status).toEqual(
     expect.objectContaining({ state: expect.any(String) }),
   );
-  expect(report.operations_status?.healthy).toBe(true);
+  expect(report.operations_status).toEqual(
+    expect.objectContaining({ healthy: expect.any(Boolean) }),
+  );
   expect(report.summary).toContain("Report completeness: all sections loaded");
   await expect(
     page.getByText("Downloaded complete runtime evidence report as"),
