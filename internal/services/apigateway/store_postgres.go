@@ -126,10 +126,21 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 		}
 		return authenticatedPlayer{}, err
 	}
-	if !currentTeamID.Valid || int(currentTeamID.Int64) != teamID {
+	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
+
+	normalizedRole := strings.TrimSpace(strings.ToLower(player.Role))
+	if normalizedRole == "organizer" {
+		if teamID != 0 {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		player.TeamID = 0
+		player.TeamName = "Organizer"
+		return player, nil
+	}
+
+	if !currentTeamID.Valid || int(currentTeamID.Int64) != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	player.TeamID = teamID

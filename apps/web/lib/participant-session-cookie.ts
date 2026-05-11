@@ -10,7 +10,12 @@ function publicBaseHostname(): string | undefined {
 }
 
 function isLocalCookieHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1";
+  const value = hostname.trim().replace(/^\[|\]$/g, "");
+  return (
+    value === "localhost" ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value) ||
+    value.includes(":")
+  );
 }
 
 function sessionCookieDomain(): string | undefined {

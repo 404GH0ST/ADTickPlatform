@@ -48,3 +48,45 @@ func TestVerifyTeamJWTRejectsExpiredToken(t *testing.T) {
 		t.Fatal("expected expired token to be rejected")
 	}
 }
+
+func TestVerifyTeamJWTAcceptsOrganizerWithoutTeam(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    7,
+		TeamID:      0,
+		TeamName:    "Organizer",
+		DisplayName: "System Admin",
+		Email:       "admin@example.com",
+		Role:        "organizer",
+	}, now)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	claims, err := verifyTeamJWT("dev-team-token", token, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("verify organizer token: %v", err)
+	}
+	if claims.TeamID != 0 || claims.Role != "organizer" {
+		t.Fatalf("unexpected organizer claims: %+v", claims)
+	}
+}
+
+func TestVerifyTeamJWTRejectsParticipantWithoutTeam(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    8,
+		TeamID:      0,
+		TeamName:    "",
+		DisplayName: "Broken Captain",
+		Email:       "broken@example.com",
+		Role:        "captain",
+	}, now)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	if _, err := verifyTeamJWT("dev-team-token", token, now.Add(time.Hour)); err == nil {
+		t.Fatal("expected participant token without team to be rejected")
+	}
+}

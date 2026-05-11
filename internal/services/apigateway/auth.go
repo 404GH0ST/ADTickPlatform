@@ -102,7 +102,16 @@ func verifyTeamJWT(secret, token string, now time.Time) (teamTokenClaims, error)
 	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
 		return teamTokenClaims{}, ErrInvalidTeamToken
 	}
-	if claims.TeamID <= 0 || claims.PlayerID <= 0 || claims.ExpiresAt <= now.UTC().Unix() {
+	if claims.PlayerID <= 0 || claims.ExpiresAt <= now.UTC().Unix() {
+		return teamTokenClaims{}, ErrInvalidTeamToken
+	}
+	if strings.EqualFold(strings.TrimSpace(claims.Role), "organizer") {
+		if claims.TeamID != 0 {
+			return teamTokenClaims{}, ErrInvalidTeamToken
+		}
+		return claims, nil
+	}
+	if claims.TeamID <= 0 {
 		return teamTokenClaims{}, ErrInvalidTeamToken
 	}
 	return claims, nil
