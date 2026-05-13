@@ -101,6 +101,65 @@ test("seeded dense attack globe supports keyboard route inspection", async ({
   await expect(panel.getByText("Clear attack focus")).toBeVisible();
 });
 
+test("seeded dense attack globe supports pointer route inspection", async ({
+  page,
+}) => {
+  await page.goto("/attacks");
+
+  const panel = page.getByTestId("attack-map-panel");
+  const globe = page.getByTestId("cyber-attack-map");
+  const clickPoint = await globe.locator("[data-attack-arc-hit]").evaluateAll((paths) => {
+    for (const path of paths) {
+      if (!(path instanceof SVGPathElement)) {
+        continue;
+      }
+      const matrix = path.getScreenCTM();
+      if (!matrix) {
+        continue;
+      }
+      const totalLength = path.getTotalLength();
+      for (const fraction of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+        const point = path.getPointAtLength(totalLength * fraction).matrixTransform(matrix);
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit?.closest("[data-attack-arc-hit]") === path) {
+          return { x: point.x, y: point.y };
+        }
+      }
+    }
+    return null;
+  });
+
+  expect(clickPoint).not.toBeNull();
+  if (!clickPoint) {
+    return;
+  }
+  await page.mouse.click(clickPoint.x, clickPoint.y);
+
+  await expect(panel.getByText("Clear attack focus")).toBeVisible();
+});
+
+test("seeded dense attack globe releases pointer capture after drag", async ({
+  page,
+}) => {
+  await page.goto("/attacks");
+
+  const globe = page.getByTestId("cyber-attack-map");
+  await expect(globe).toBeVisible();
+  const box = await globe.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) {
+    return;
+  }
+
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 180, box.y + box.height + 120, { steps: 5 });
+  await page.mouse.up();
+
+  await page.getByRole("button", { name: "Present" }).click();
+  await expect(page.getByTestId("attack-map-audience-dialog")).toBeVisible();
+});
+
 test("seeded dense attack globe has audience mode for presentation screens", async ({
   page,
 }) => {

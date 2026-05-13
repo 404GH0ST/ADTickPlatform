@@ -193,6 +193,7 @@ export function CyberAttackMap({
 }): ReactElement {
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
   const mapRootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -520,8 +521,13 @@ export function CyberAttackMap({
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0 || isInteractivePointerTarget(event.target)) {
+      return;
+    }
     markUserActivity();
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
     dragRef.current = {
       pointerId: event.pointerId,
       startLat: rotation.lat,
@@ -547,7 +553,18 @@ export function CyberAttackMap({
   function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
     markUserActivity();
     if (dragRef.current?.pointerId === event.pointerId) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
       dragRef.current = null;
+      setDragging(false);
+    }
+  }
+
+  function handlePointerLostCapture(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      setDragging(false);
     }
   }
 
@@ -573,6 +590,7 @@ export function CyberAttackMap({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handlePointerLostCapture}
       onMouseMove={markUserActivity}
       style={{
         background:
@@ -580,7 +598,7 @@ export function CyberAttackMap({
             ? 'radial-gradient(circle at 50% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 18%, transparent) 0%, transparent 38%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 20%, transparent) 0%, transparent 64%), var(--attack-map-background)'
             : 'radial-gradient(circle at 48% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 14%, transparent) 0%, transparent 34%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 18%, transparent) 0%, transparent 62%), var(--attack-map-background)',
         borderColor: 'var(--attack-map-border)',
-        cursor: dragRef.current ? 'grabbing' : 'grab',
+        cursor: dragging ? 'grabbing' : 'grab',
       }}
     >
       <p id={`${mapId}-instructions`} className="sr-only">
@@ -1091,6 +1109,7 @@ function AttackArcPath({
         tabIndex={tabReachable ? 0 : -1}
         className="cursor-pointer"
         data-attack-arc-hit="true"
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={() => onSelectAttack?.(arc.selected ? null : arc.attackIds[0])}
         onKeyDown={(event) => {
           activateSvgButton(event, () => onSelectAttack?.(arc.selected ? null : arc.attackIds[0]));
@@ -1267,6 +1286,7 @@ function TeamNodeDot({
       data-attack-team-hit="true"
       role="button"
       tabIndex={tabReachable ? 0 : -1}
+      onPointerDown={(event) => event.stopPropagation()}
       onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
       onFocus={() => onHoverChange(node.id)}
       onBlur={() => onHoverChange(null)}
@@ -1342,6 +1362,15 @@ function activateSvgButton(
   event.preventDefault();
   event.stopPropagation();
   action();
+}
+
+function isInteractivePointerTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      'a,button,input,select,textarea,[data-attack-arc-hit],[data-attack-team-hit]',
+    ) !== null
+  );
 }
 
 function shouldShowTeamLabel(
