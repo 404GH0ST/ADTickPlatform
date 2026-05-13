@@ -46,7 +46,7 @@ export function InfoPanel({
       className={cn(
         layoutClassName[layout],
         compact ? 'p-3' : 'p-4',
-        'rounded-md text-sm',
+        'rounded-sm text-sm',
         toneClassName[tone],
         className,
       )}

@@ -58,10 +58,10 @@ export function SwaggerUIBrowser({ specURL }: Props) {
       />
 
       {error ? (
-        <div className="rounded-lg border px-4 py-3 text-sm text-muted-foreground">{error}</div>
+        <div className="rounded-sm border px-4 py-3 text-sm text-muted-foreground">{error}</div>
       ) : null}
 
-      <div className="rounded-lg border bg-card p-4">
+      <div className="rounded-sm border bg-card p-4">
         <div id="participant-swagger-ui" className="swagger-shell min-h-[44rem]" />
       </div>
     </>

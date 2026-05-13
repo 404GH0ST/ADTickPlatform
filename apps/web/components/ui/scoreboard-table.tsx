@@ -235,7 +235,7 @@ export function ScoreboardTable({
                   isCurrentTeam && "bg-primary/5",
                 )}
               >
-                <TableCell className="sticky left-0 z-20 bg-background/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <TableCell className="sticky left-0 z-20 bg-background px-3 py-3">
                   <ScoreboardRank
                     rank={score.rank}
                     delta={score.delta}
@@ -244,7 +244,7 @@ export function ScoreboardTable({
                 </TableCell>
                 <TableCell
                   className={cn(
-                    "sticky left-24 z-20 bg-background/95 px-3 py-3 font-semibold backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                    "sticky left-24 z-20 bg-background px-3 py-3 font-semibold",
                     isCurrentTeam && "text-primary",
                   )}
                 >
@@ -264,7 +264,7 @@ export function ScoreboardTable({
                 <TableCell className="px-3 py-3 font-mono text-sm">
                   {compactNumber(score.sla)}
                 </TableCell>
-                <TableCell className="sticky right-0 z-20 bg-background/95 px-3 py-3 font-mono text-sm font-semibold backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <TableCell className="sticky right-0 z-20 bg-background px-3 py-3 font-mono text-sm font-semibold">
                   {compactNumber(score.total)}
                 </TableCell>
               </TableRow>

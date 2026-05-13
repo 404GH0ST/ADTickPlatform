@@ -749,7 +749,7 @@ function PatchWorkflowBlock({
   target: ServiceRow | null;
 }): ReactElement {
   return (
-    <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+    <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-4">
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
         <Wrench className="h-4 w-4" />
         Patch Workflow

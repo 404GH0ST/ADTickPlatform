@@ -26,11 +26,11 @@ function SummaryItem({
 }) {
   return (
     <div
-      className="border-b p-3 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0"
+      className="border-b px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0"
       data-testid={testId}
     >
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'mt-1 break-all font-mono text-sm' : 'mt-1 text-sm font-medium'}>
+      <dd className={mono ? 'mt-1 break-all font-mono text-sm' : 'mt-1 text-sm font-semibold'}>
         {value}
       </dd>
     </div>
@@ -84,7 +84,7 @@ export function OrganizerStatusSummary({ overview }: Props) {
 
   return (
     <>
-      <section className="rounded-lg border bg-card" data-testid="organizer-summary">
+      <section className="surface-workroom rounded-sm border" data-testid="organizer-summary">
         <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-9">
           <SummaryItem label="Teams" value={String(overview.teamCount)} />
           <SummaryItem label="Players" value={String(overview.playerCount)} />

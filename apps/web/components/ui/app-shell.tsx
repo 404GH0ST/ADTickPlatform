@@ -32,11 +32,11 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-3 border-b pb-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold">{title}</h1>
-            <p className="text-sm text-muted-foreground">{description}</p>
+      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 px-3 py-4 sm:px-5 lg:px-6">
+        <header className="workroom-rule flex flex-col gap-3 border-b pb-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl space-y-1">
+            <h1 className="text-2xl font-semibold leading-8">{title}</h1>
+            <p className="text-sm leading-6 text-muted-foreground">{description}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <ThemeToggle />
@@ -44,14 +44,14 @@ export function AppShell({
           </div>
         </header>
 
-        <nav className="flex flex-wrap gap-2 border-b pb-3">
+        <nav className="workroom-rule flex flex-wrap gap-1 border-b pb-3">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                'rounded-md border px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground',
-                activePath === item.href && 'border-foreground bg-card text-foreground',
+                'rounded-sm border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground',
+                activePath === item.href && 'border-border bg-card text-foreground shadow-[0_1px_0_var(--border)]',
               )}
             >
               {item.label}

@@ -20,7 +20,7 @@ export function StatusBanner({
   variant,
 }: StatusBannerProps): ReactElement {
   return (
-    <div className={`rounded-md border p-3 text-sm ${bannerTone[variant]}`}>
+    <div className={`rounded-sm border px-3 py-2 text-sm ${bannerTone[variant]}`}>
       {message}
     </div>
   );

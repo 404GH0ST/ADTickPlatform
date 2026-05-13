@@ -57,7 +57,7 @@ export function ParticipantShell({
         </>
       }
       summarySection={
-        <section className="rounded-lg border bg-card">
+        <section className="surface-workroom rounded-sm border">
           <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-7">
             <SummaryItem label="Challenge Catalog" value={String(overview.challengeCount)} />
             <SummaryItem label="Owned Services" value={String(overview.ownServiceCount)} />
@@ -118,13 +118,13 @@ function SummaryItem({
   mono?: boolean;
 }) {
   return (
-    <div className="border-b p-3 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
+    <div className="border-b px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd
         className={
           mono
             ? "mt-1 break-all font-mono text-sm"
-            : "mt-1 text-sm font-medium"
+            : "mt-1 text-sm font-semibold"
         }
       >
         {value}

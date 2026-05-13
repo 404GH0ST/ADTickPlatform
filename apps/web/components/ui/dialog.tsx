@@ -17,7 +17,7 @@ function DialogPortal(props: React.ComponentProps<typeof DialogPrimitive.Portal>
 function DialogOverlay({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
-      className={cn('fixed inset-0 z-50 bg-black/35', className)}
+      className={cn('fixed inset-0 z-50 bg-foreground/35', className)}
       {...props}
     />
   );
@@ -29,13 +29,13 @@ function DialogContent({ className, children, ...props }: React.ComponentProps<t
       <DialogOverlay />
         <DialogPrimitive.Content
           className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-background p-5 shadow-lg',
+          'surface-workroom fixed top-1/2 left-1/2 z-50 grid w-[min(92vw,36rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-sm border border-border p-5',
           className,
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute top-3 right-3 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+        <DialogPrimitive.Close className="absolute top-3 right-3 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
           <X className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>

@@ -80,7 +80,7 @@ export default async function ParticipantManualPage() {
                 The participant API surface most teams automate against.
               </CardDescription>
             </CardHeader>
-            <CardContent className="rounded-lg border p-0">
+            <CardContent className="rounded-sm border p-0">
               <ul className="divide-y">
                 {participantEndpoints.map((endpoint) => (
                   <li key={endpoint} className="px-4 py-3 text-sm font-mono">

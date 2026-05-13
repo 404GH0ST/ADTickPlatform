@@ -279,7 +279,7 @@ const checkerRunTone = {
 } as const;
 
 const selectClassName =
-  "flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25";
 
 function toDateTimeLocalValue(isoString?: string): string {
   if (!isoString) {

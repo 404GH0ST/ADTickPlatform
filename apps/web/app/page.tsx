@@ -16,7 +16,7 @@ export default async function HomePage() {
       title="Participant Overview"
       description="Move between the live scoreboard, your services, recent attacks, and the participant manual."
     >
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="surface-workroom grid overflow-hidden rounded-sm border md:grid-cols-2 xl:grid-cols-4 [&>*]:border-b [&>*]:border-border [&>*:last-child]:border-b-0 md:[&>*:nth-child(odd)]:border-r md:[&>*:nth-last-child(-n+2)]:border-b-0 xl:[&>*]:border-b-0 xl:[&>*]:border-r xl:[&>*:last-child]:border-r-0">
         <ActionCard
           href="/scoreboard"
           title="Scoreboard"

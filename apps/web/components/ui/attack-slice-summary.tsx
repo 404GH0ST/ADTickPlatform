@@ -49,7 +49,7 @@ function AttackLeaderboardPanel({
   title: string;
 }): ReactElement {
   return (
-    <div className="rounded-md border border-border/70 bg-muted/20 p-3">
+    <div className="rounded-sm border border-border/70 bg-muted/20 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-foreground">{title}</p>
         <Badge variant="outline">{items.length}</Badge>

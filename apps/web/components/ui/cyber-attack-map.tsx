@@ -225,7 +225,7 @@ export function CyberAttackMap({
   return (
     <div
       className={cn(
-        'relative aspect-[2/1] w-full overflow-hidden rounded-xl border',
+        'relative aspect-[2/1] w-full overflow-hidden rounded-sm border',
         className,
       )}
       style={{
@@ -314,7 +314,7 @@ export function CyberAttackMap({
                     strokeWidth="4.5"
                     strokeDasharray="40, 960"
                     className={beamClassName}
-                    style={{ filter: `drop-shadow(0 0 3px ${arc.color})` }}
+                    style={{ filter: `drop-shadow(0 0 2px ${arc.color})` }}
                   />
                 </>
               ) : null}
@@ -347,7 +347,7 @@ export function CyberAttackMap({
         {services.map((service) => (
           <div
             key={service.name}
-            className="flex items-center gap-1.5 rounded border px-2 py-1 backdrop-blur-sm"
+            className="flex items-center gap-1.5 rounded-sm border px-2 py-1"
             style={{
               backgroundColor: 'var(--attack-map-legend-background)',
               borderColor: 'var(--attack-map-legend-border)',
