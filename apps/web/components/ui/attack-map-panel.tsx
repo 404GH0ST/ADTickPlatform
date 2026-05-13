@@ -49,7 +49,7 @@ const PLAYBACK_SPEEDS = [
 export function AttackMapPanel({
   attackRows,
   className,
-  description = 'Live visualization of successful exploits across the game network.',
+  description = 'Directional attack flow across teams, services, and match ticks.',
   highlightedAttackIDs = [],
   title = 'Attack map',
 }: {
@@ -347,9 +347,7 @@ export function AttackMapPanel({
         >
           {selectedTeamSummary.services.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Services
-              </p>
+              <p className="text-xs font-medium text-muted-foreground">Services</p>
               <div className="flex flex-wrap gap-2">
                 {selectedTeamSummary.services.map((service) => (
                   <Badge key={service} variant="secondary">
@@ -361,9 +359,7 @@ export function AttackMapPanel({
           ) : null}
           {selectedTeamSummary.opponents.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Frequent opponents
-              </p>
+              <p className="text-xs font-medium text-muted-foreground">Frequent opponents</p>
               <div className="space-y-1 text-sm text-muted-foreground">
                 {selectedTeamSummary.opponents.map(([opponent, count]) => (
                   <div
@@ -400,8 +396,8 @@ export function AttackMapPanel({
         ]}
       >
         <p className="text-sm text-muted-foreground">
-          Click a team or attack arc to inspect it. Search keeps labels readable
-          without forcing the map to show every name at once.
+          Click a team or attack path to inspect it. Search focuses labels while
+          the rest of the globe stays readable.
         </p>
       </InspectorCard>
     );
@@ -411,15 +407,15 @@ export function AttackMapPanel({
     return (
       <div
         className={cn(
-          'grid gap-4',
+          'grid gap-3',
           expandedView
-            ? 'min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,22vh)]'
-            : 'grid-rows-[minmax(0,1fr)_auto]',
+            ? 'h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,20vh)] xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-none'
+            : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-none',
         )}
       >
         <CyberAttackMap
           attacks={visibleRows}
-          className=""
+          className={expandedView ? 'aspect-auto h-full min-h-[34rem]' : 'min-h-[24rem]'}
           focusedTeams={focusedTeams}
           highlightedAttackIDs={activeHighlightIDs}
           placementScopeTeams={allTeams}
@@ -454,7 +450,7 @@ export function AttackMapPanel({
     <div
       data-testid="attack-map-panel"
       className={cn(
-        'space-y-4 rounded-md border border-border/70 bg-background p-4',
+        'space-y-3 rounded-sm border border-border/70 bg-card p-3',
         className,
       )}
     >
@@ -464,9 +460,9 @@ export function AttackMapPanel({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{visibleRows.length} visible attacks</Badge>
-          <Badge variant="secondary">{visibleTeamCount} visible teams</Badge>
-          <Badge variant="secondary">{visibleServiceCount} visible services</Badge>
+          <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+          <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+          <Badge variant="secondary">{visibleServiceCount} services</Badge>
           {attackRows.length > 0 ? (
             <>
               <Button
@@ -476,7 +472,7 @@ export function AttackMapPanel({
                 onClick={replayCurrentTick}
               >
                 <Zap className="h-4 w-4" />
-                Replay Tick #{selectedTickValue}
+                Replay tick #{selectedTickValue}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
@@ -488,14 +484,14 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/20 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="space-y-2">
               <label
                 htmlFor={`${title}-team-search`}
                 className="text-sm font-medium text-foreground"
               >
-                Focus Team
+                Focus team
               </label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -509,7 +505,7 @@ export function AttackMapPanel({
               </div>
             </div>
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Map Mode</p>
+              <p className="text-sm font-medium text-foreground">Map mode</p>
               <div className="flex flex-wrap gap-2">
                 {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
                   <Button
@@ -524,7 +520,7 @@ export function AttackMapPanel({
               </div>
             </div>
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Tick Playback</p>
+              <p className="text-sm font-medium text-foreground">Tick playback</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
@@ -559,7 +555,7 @@ export function AttackMapPanel({
                 </Button>
                 <select
                   aria-label="Playback speed"
-                  className="flex h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  className="flex h-9 rounded-sm border border-input bg-card px-3 text-sm"
                   value={String(playbackSpeed)}
                   onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
                 >
@@ -602,9 +598,9 @@ export function AttackMapPanel({
           </DialogHeader>
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{visibleRows.length} visible attacks</Badge>
-              <Badge variant="secondary">{visibleTeamCount} visible teams</Badge>
-              <Badge variant="secondary">{visibleServiceCount} visible services</Badge>
+              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+              <Badge variant="secondary">{visibleServiceCount} services</Badge>
               <Button
                 size="sm"
                 variant="outline"
@@ -612,7 +608,7 @@ export function AttackMapPanel({
                 onClick={replayCurrentTick}
               >
                 <Zap className="h-4 w-4" />
-                Replay Tick #{selectedTickValue}
+                Replay tick #{selectedTickValue}
               </Button>
               <Button
                 size="sm"
@@ -643,9 +639,9 @@ function InspectorCard({
   title: string;
 }): ReactElement {
   return (
-    <div className="space-y-4 rounded-md border border-border/70 bg-muted/20 p-4">
+    <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3">
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="text-xs font-medium text-muted-foreground">
           {eyebrow}
         </p>
         <p className="text-base font-semibold text-foreground">{title}</p>

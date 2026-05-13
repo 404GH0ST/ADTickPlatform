@@ -330,17 +330,17 @@ export function AttacksPanel({
             />
           </>
         )}
-        {isMapFocused ? <AttackSliceSummaryGrid rows={attackRows} /> : null}
         <AttackMapPanel
           attackRows={attackRows}
           description={
             isMapFocused
-              ? "Accepted submissions rendered as attacker-to-victim links for the current participant slice."
+              ? "Accepted submissions rendered as directional team flow for the current participant slice."
               : undefined
           }
           highlightedAttackIDs={highlightedAttackIDs}
           title={isMapFocused ? "Participant attack map" : undefined}
         />
+        {isMapFocused ? <AttackSliceSummaryGrid rows={attackRows} /> : null}
 
         {attackRows.length === 0 ? (
           <EmptyStateText message="No accepted attack events are available for this slice." />
