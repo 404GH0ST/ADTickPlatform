@@ -24,19 +24,19 @@ test("organizer attacks page can focus the current tick and step through tick pl
 
   await page.getByRole("button", { name: "Current Tick" }).click();
 
-  await expect(page.getByText("4 visible attacks")).toBeVisible();
+  await expect(page.getByText("4 attacks")).toBeVisible();
   await expect(page.getByText("Tick #12", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Replay Tick #12" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Highlight tick #12" })).toBeVisible();
 
   await page.getByRole("button", { name: "Previous Tick" }).click();
 
-  await expect(page.getByText("2 visible attacks")).toBeVisible();
+  await expect(page.getByText("2 attacks")).toBeVisible();
   await expect(page.getByText("Tick #11", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Replay Tick #11" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Highlight tick #11" })).toBeVisible();
 
   await page.getByRole("button", { name: "Next Tick" }).click();
 
-  await expect(page.getByText("4 visible attacks")).toBeVisible();
+  await expect(page.getByText("4 attacks")).toBeVisible();
   await expect(page.getByText("Tick #12", { exact: true })).toBeVisible();
 });
 
