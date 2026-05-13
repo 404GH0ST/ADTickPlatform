@@ -348,6 +348,8 @@ export function useOrganizerDashboard({
   const attackPageRef = useRef<AdminAttackFeedPage>(attackPage);
   const checkerRunsLiveRef = useRef(true);
   const schedulerEventsLiveRef = useRef(true);
+  const pendingActionRef = useRef<string | null>(null);
+  const gameStatusRealtimeSuppressedUntilRef = useRef(0);
 
   const summary = useMemo(
     () => ({
@@ -430,6 +432,15 @@ export function useOrganizerDashboard({
   }, [schedulerEventsLiveMode]);
 
   useEffect(() => {
+    pendingActionRef.current = pendingAction;
+  }, [pendingAction]);
+
+  function suppressGameStatusRealtime(durationMs = 1_500): void {
+    gameStatusRealtimeSuppressedUntilRef.current =
+      window.performance.now() + durationMs;
+  }
+
+  useEffect(() => {
     const gameStatusSource = new EventSource(
       "/api/admin/realtime/game/status/stream",
     );
@@ -447,6 +458,14 @@ export function useOrganizerDashboard({
     );
 
     gameStatusSource.onmessage = (event) => {
+      const action = pendingActionRef.current;
+      if (
+        (action !== null && action.startsWith("game:")) ||
+        window.performance.now() < gameStatusRealtimeSuppressedUntilRef.current
+      ) {
+        return;
+      }
+
       try {
         setGameState(JSON.parse(event.data) as AdminGameStatus);
       } catch {
@@ -1437,6 +1456,7 @@ export function useOrganizerDashboard({
   }
 
   async function startGameMatch(): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:match:start");
     setActionError(null);
     setActionNote(null);
@@ -1480,11 +1500,13 @@ export function useOrganizerDashboard({
           : "game start failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
 
   async function stopGameMatch(): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:match:stop");
     setActionError(null);
     setActionNote(null);
@@ -1514,11 +1536,13 @@ export function useOrganizerDashboard({
         error instanceof Error ? error.message : "game match stop failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
 
   async function startGameScheduler(): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:scheduler:start");
     setActionError(null);
     setActionNote(null);
@@ -1544,11 +1568,13 @@ export function useOrganizerDashboard({
           : "game-core scheduler start failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
 
   async function stopGameScheduler(): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:scheduler:stop");
     setActionError(null);
     setActionNote(null);
@@ -1574,6 +1600,7 @@ export function useOrganizerDashboard({
           : "game-core scheduler stop failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
@@ -1582,6 +1609,7 @@ export function useOrganizerDashboard({
     scheduledStartAt?: string;
     scheduledEndAt?: string;
   }): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:match:schedule");
     setActionError(null);
     setActionNote(null);
@@ -1611,11 +1639,13 @@ export function useOrganizerDashboard({
           : "game match schedule update failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
 
   async function updateGameScheduler(intervalSeconds: number): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:scheduler:update");
     setActionError(null);
     setActionNote(null);
@@ -1642,6 +1672,7 @@ export function useOrganizerDashboard({
           : "game-core scheduler update failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
@@ -1866,6 +1897,7 @@ export function useOrganizerDashboard({
   }
 
   async function advanceGameTick(): Promise<void> {
+    suppressGameStatusRealtime();
     setPendingAction("game:advance");
     setActionError(null);
     setActionNote(null);
@@ -1905,6 +1937,7 @@ export function useOrganizerDashboard({
           : "game-core tick advance failed",
       );
     } finally {
+      suppressGameStatusRealtime(1_000);
       setPendingAction(null);
     }
   }
