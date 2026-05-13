@@ -1,11 +1,14 @@
 'use client';
 
-import type { ReactElement } from 'react';
-import { useEffect, useId, useMemo, useState } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactElement,
+} from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import globeJson from '@/data/globe.json';
 import { cn } from '@/lib/utils';
-
-import { WORLD_MAP_PATH } from './world_path';
 
 export type CyberAttackEvent = {
   id: string;
@@ -13,36 +16,99 @@ export type CyberAttackEvent = {
   victim: string;
   service: string;
   tick: number;
+  attackerLocation?: GeoPoint;
+  victimLocation?: GeoPoint;
 };
 
-type TeamNode = {
-  id: string;
-  name: string;
+type GlobeRotation = {
+  lat: number;
+  lon: number;
+};
+
+type GeoPoint = {
+  lat: number;
+  lon: number;
+};
+
+type ProjectedPoint = GeoPoint & {
+  visible: boolean;
   x: number;
   y: number;
-  labelLineX: number;
-  labelLineY: number;
+  z: number;
+};
+
+type Landmark = GeoPoint & {
+  code: string;
+  name: string;
+};
+
+type GlobeFeatureCollection = {
+  features: Array<{
+    geometry: {
+      coordinates: unknown;
+      type: 'MultiPolygon' | 'Polygon';
+    };
+    properties?: {
+      name?: string;
+    };
+    type: 'Feature';
+  }>;
+  type: 'FeatureCollection';
+};
+
+type CountryRing = {
+  id: string;
+  name: string;
+  points: GeoPoint[];
+};
+
+type TeamNode = ProjectedPoint & {
+  id: string;
+  name: string;
+  landmark: Landmark;
+  labelX: number;
+  labelY: number;
   labelAnchor: 'start' | 'middle' | 'end';
-  labelDx: number;
-  labelDy: number;
   highlighted: boolean;
   selected: boolean;
   incoming: number;
   outgoing: number;
 };
 
-type AttackArc = {
+type ArcPoint = ProjectedPoint & {
   id: string;
+};
+
+type AttackArc = {
+  attackIds: string[];
+  id: string;
+  domId: string;
   attacker: string;
   victim: string;
   service: string;
   tick: number;
+  count: number;
   color: string;
-  gradientId: string;
+  endX: number;
+  endY: number;
+  featured: boolean;
   highlighted: boolean;
+  fresh: boolean;
   selected: boolean;
+  recency: number;
   active: boolean;
   path: string;
+  delay: string;
+  partial: boolean;
+  startX: number;
+  startY: number;
+  visible: boolean;
+  visibility: number;
+};
+
+type AttackRoute = CyberAttackEvent & {
+  attackIds: string[];
+  count: number;
 };
 
 type TeamStats = {
@@ -50,47 +116,53 @@ type TeamStats = {
   outgoing: number;
 };
 
-type LandSlot = {
+type DragState = {
+  pointerId: number;
+  startLat: number;
+  startLon: number;
   x: number;
   y: number;
 };
 
-type LandPlacementResources = {
-  isLand: (x: number, y: number) => boolean;
-  slots: LandSlot[];
-};
+const MAP_WIDTH = 1000;
+const MAP_HEIGHT = 560;
+const CENTER_X = MAP_WIDTH / 2 - 22;
+const CENTER_Y = MAP_HEIGHT / 2 + 2;
+const GLOBE_RADIUS = 256;
+const MAX_ROTATION_LAT = 62;
+const AUTO_ROTATE_IDLE_MS = 10_000;
+const FEATURED_ATTACK_STEP_MS = 6_400;
+const DEFAULT_LABEL_LIMIT = 10;
+const DENSE_KEYBOARD_ITEM_LIMIT = 28;
+const PACKET_ANIMATION_ROUTE_LIMIT = 80;
+const LABEL_HEIGHT = 40;
+const LABEL_PADDING_X = 6;
+const LABEL_SAFE_INSET_X = 24;
+const LABEL_SAFE_INSET_Y = 28;
+const LABEL_VERTICAL_GAP = 14;
 
-type TeamNodeMarkerProps = {
-  node: TeamNode;
-  showLabel: boolean;
-  pulseClassName: string;
-  onHoverChange: (teamId: string | null) => void;
-  onSelectTeam?: (teamId: string | null) => void;
-};
-
-const FALLBACK_LAND_SLOTS: LandSlot[] = [
-  { x: 156, y: 128 }, { x: 236, y: 144 }, { x: 212, y: 104 }, { x: 196, y: 188 },
-  { x: 304, y: 286 }, { x: 314, y: 382 }, { x: 292, y: 304 }, { x: 472, y: 126 },
-  { x: 490, y: 150 }, { x: 536, y: 130 }, { x: 575, y: 124 }, { x: 596, y: 156 },
-  { x: 490, y: 196 }, { x: 472, y: 244 }, { x: 546, y: 266 }, { x: 516, y: 382 },
-  { x: 642, y: 184 }, { x: 684, y: 172 }, { x: 722, y: 194 }, { x: 752, y: 212 },
-  { x: 792, y: 160 }, { x: 790, y: 204 }, { x: 804, y: 228 }, { x: 816, y: 250 },
-  { x: 846, y: 170 }, { x: 850, y: 226 }, { x: 872, y: 184 }, { x: 850, y: 336 },
-  { x: 892, y: 338 }, { x: 944, y: 362 },
+const LANDMARKS: Landmark[] = [
+  { code: 'usa-central', name: 'United States', lat: 39.6, lon: -98.5 },
+  { code: 'uk-midlands', name: 'United Kingdom', lat: 52.6, lon: -1.5 },
+  { code: 'java-central', name: 'Indonesia', lat: -7.4, lon: 110.0 },
+  { code: 'usa-east', name: 'US East', lat: 39.4, lon: -77.8 },
+  { code: 'malaysia-peninsula', name: 'Malaysia', lat: 4.2, lon: 102.0 },
+  { code: 'germany-central', name: 'Germany', lat: 51.0, lon: 10.2 },
+  { code: 'australia-inland', name: 'Australia', lat: -25.3, lon: 134.2 },
+  { code: 'canada-ontario', name: 'Canada', lat: 50.5, lon: -86.0 },
+  { code: 'arabia', name: 'Arabian Peninsula', lat: 23.7, lon: 45.3 },
+  { code: 'brazil-central', name: 'Brazil', lat: -10.8, lon: -52.7 },
+  { code: 'japan-honshu', name: 'Japan', lat: 37.0, lon: 138.5 },
+  { code: 'east-africa', name: 'East Africa', lat: 0.4, lon: 37.8 },
+  { code: 'usa-west', name: 'US West', lat: 39.2, lon: -115.0 },
+  { code: 'india-central', name: 'India', lat: 22.5, lon: 79.0 },
+  { code: 'south-africa', name: 'South Africa', lat: -29.0, lon: 24.0 },
+  { code: 'south-china', name: 'South China', lat: 25.0, lon: 110.0 },
+  { code: 'benelux', name: 'Benelux', lat: 51.5, lon: 5.2 },
+  { code: 'france-central', name: 'France', lat: 46.6, lon: 2.4 },
 ];
 
-const MAP_WIDTH = 1000;
-const MAP_HEIGHT = 500;
-const LAND_SLOT_LIMIT = 320;
-const LAND_SCAN_START_X = 92;
-const LAND_SCAN_END_X = 908;
-const LAND_SCAN_START_Y = 72;
-const LAND_SCAN_END_Y = 422;
-const LAND_SCAN_STEP = 20;
-const DEFAULT_TEAM_POINT: LandSlot = { x: 500, y: 250 };
-
-let cachedLandPlacementResources: LandPlacementResources | null = null;
-const cachedTeamPlacements = new Map<string, Record<string, LandSlot>>();
+const COUNTRY_RINGS = parseCountryRings(globeJson as GlobeFeatureCollection);
 
 export function CyberAttackMap({
   attacks,
@@ -102,6 +174,9 @@ export function CyberAttackMap({
   className,
   onSelectAttack,
   onSelectTeam,
+  onFeaturedAttackChange,
+  presentation = false,
+  teamLocations,
 }: {
   attacks: CyberAttackEvent[];
   highlightedAttackIDs?: string[];
@@ -112,70 +187,87 @@ export function CyberAttackMap({
   className?: string;
   onSelectAttack?: (attackId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
+  onFeaturedAttackChange?: (attackId: string | null) => void;
+  presentation?: boolean;
+  teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
-  const [clientReady, setClientReady] = useState(false);
+  const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
+  const mapRootRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const featuredAttackIndexRef = useRef(0);
+  const featuredAttackIntervalRef = useRef<number | null>(null);
+  const featuredAttackIdRef = useRef<string | null>(featuredAttackId);
+  const previousAttackIdsRef = useRef<Set<string> | null>(null);
+  const freshAttackTimeoutRef = useRef<number | null>(null);
+  const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
+  const idleTimeoutRef = useRef<number | null>(null);
+  const lastActivityRef = useRef(0);
+  const rotationRef = useRef<GlobeRotation>(rotation);
   const mapId = useId().replace(/:/g, '');
-  const patternId = `${mapId}-dot-pattern`;
-  const maskId = `${mapId}-map-mask`;
-  const beamClassName = `cyber-beam-${mapId}`;
-  const pulseClassName = `cyber-pulse-${mapId}`;
+  const clipId = `${mapId}-globe-clip`;
+  const markerId = `${mapId}-arrow`;
+  const beamClassName = `globe-beam-${mapId}`;
+  const haloClassName = `globe-halo-${mapId}`;
   const focusedTeamSet = useMemo(() => new Set(focusedTeams), [focusedTeams]);
-
-  useEffect(() => {
-    setClientReady(true);
-  }, []);
-
-  const { arcs, nodes, services } = useMemo(() => {
+  const hasFocus =
+    selectedAttackId !== null ||
+    selectedTeamId !== null ||
+    featuredAttackId !== null ||
+    highlightedAttackIDs.length > 0 ||
+    focusedTeams.length > 0;
+  const featuredQueue = useMemo(() => buildFeaturedAttackQueue(attacks), [attacks]);
+  const { arcs, featuredAttack, nodes, services } = useMemo(() => {
     const attackTeamNames = listAttackTeams(attacks);
     const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
     const teamStats = buildTeamStats(attacks, attackTeamNames);
+    const landmarksByTeam = getLandmarkPlacements(placementTeamNames, attacks, teamLocations);
+    const highlightedSet = new Set(highlightedAttackIDs);
+    const serviceNames = listAttackServices(attacks);
+    const serviceColors = buildServiceColors(serviceNames);
+    const tickRange = getAttackTickRange(attacks);
+    const routeBundles = bundleAttackRoutes(attacks);
 
     const nodesByName: Record<string, TeamNode> = {};
-    const pointsByTeam = clientReady
-      ? getCachedTeamPlacements(placementTeamNames)
-      : {};
-
     attackTeamNames.forEach((name) => {
-      const point = pointsByTeam[name] ?? DEFAULT_TEAM_POINT;
-      const labelPlacement = getLabelPlacement(point.x, point.y);
+      const landmark = landmarksByTeam[name] ?? LANDMARKS[0];
+      const point = projectGlobePoint(landmark, rotation);
+      const label = getLabelPlacement(point);
       const stats = teamStats.get(name) ?? { incoming: 0, outgoing: 0 };
+      const selected = name === selectedTeamId;
+      const highlighted = focusedTeamSet.has(name);
 
       nodesByName[name] = {
+        ...point,
         id: name,
         name,
-        x: point.x,
-        y: point.y,
-        labelLineX: labelPlacement.lineX,
-        labelLineY: labelPlacement.lineY,
-        labelAnchor: labelPlacement.anchor,
-        labelDx: labelPlacement.dx,
-        labelDy: labelPlacement.dy,
-        highlighted: false,
-        selected: name === selectedTeamId,
+        landmark,
+        labelX: label.x,
+        labelY: label.y,
+        labelAnchor: label.anchor,
+        highlighted,
+        selected,
         incoming: stats.incoming,
         outgoing: stats.outgoing,
       };
     });
 
-    const highlightedSet = new Set(highlightedAttackIDs);
-    const serviceList = listAttackServices(attacks);
-    const serviceColors: Record<string, string> = {};
-    serviceList.forEach((service, index) => {
-      serviceColors[service] = attackPalette[index % attackPalette.length];
-    });
-    const serviceGradientIds = new Map(
-      serviceList.map((service, index) => [service, `${mapId}-grad-${index}`]),
-    );
-
-    const arcs = attacks.map((attack) => {
+    const arcs = routeBundles.map((attack, index) => {
       const start = nodesByName[attack.attacker];
       const end = nodesByName[attack.victim];
-      const highlighted = highlightedSet.has(attack.id);
-      const selected = selectedAttackId === attack.id;
+      const highlighted = attack.attackIds.some((id) => highlightedSet.has(id));
+      const selected = selectedAttackId !== null && attack.attackIds.includes(selectedAttackId);
+      const featured = featuredAttackId !== null && attack.attackIds.includes(featuredAttackId);
+      const fresh = attack.attackIds.some((id) => freshAttackIds.has(id));
       const active =
         highlighted ||
         selected ||
+        featured ||
+        focusedTeamSet.has(attack.attacker) ||
+        focusedTeamSet.has(attack.victim) ||
         attack.attacker === selectedTeamId ||
         attack.victim === selectedTeamId;
 
@@ -183,167 +275,418 @@ export function CyberAttackMap({
         start.highlighted = true;
         end.highlighted = true;
       }
-
-      const midX = (start.x + end.x) / 2;
-      const midY = (start.y + end.y) / 2 - Math.abs(start.x - end.x) * 0.15 - 40;
+      const arcEndpoints = getArcEndpoints(start, end, rotation);
 
       return {
         id: attack.id,
+        attackIds: attack.attackIds,
+        domId: `${mapId}-arc-${index}`,
         attacker: attack.attacker,
         victim: attack.victim,
         service: attack.service,
         tick: attack.tick,
+        count: attack.count,
         color: serviceColors[attack.service],
-        gradientId:
-          serviceGradientIds.get(attack.service) ?? `${mapId}-grad-fallback`,
+        endX: arcEndpoints.end.x,
+        endY: arcEndpoints.end.y,
         highlighted,
+        fresh,
         selected,
+        featured,
+        recency: getAttackRecency(attack.tick, tickRange),
         active,
-        path: `M ${start.x} ${start.y} Q ${midX} ${midY} ${end.x} ${end.y}`,
+        path: buildAttackPath(arcEndpoints.start, arcEndpoints.end, attack.id),
+        delay: `${(index % 9) * 0.28}s`,
+        partial: start.visible !== end.visible,
+        startX: arcEndpoints.start.x,
+        startY: arcEndpoints.start.y,
+        visible: start.visible || end.visible,
+        visibility: getArcVisibility(start, end),
       } satisfies AttackArc;
     });
 
     return {
       arcs: arcs.sort((left, right) => Number(left.active) - Number(right.active)),
-      nodes: Object.values(nodesByName),
-      services: serviceList.map((service) => ({
+      featuredAttack: attacks.find((attack) => attack.id === featuredAttackId) ?? null,
+      nodes: resolveLabelCollisions(Object.values(nodesByName)).sort((left, right) => left.z - right.z),
+      services: serviceNames.map((service) => ({
         color: serviceColors[service],
-        gradientId: serviceGradientIds.get(service) ?? `${mapId}-grad-fallback`,
         name: service,
       })),
     };
   }, [
     attacks,
-    clientReady,
+    focusedTeamSet,
+    featuredAttackId,
+    freshAttackIds,
     highlightedAttackIDs,
     mapId,
     placementScopeTeams,
+    rotation,
     selectedAttackId,
     selectedTeamId,
+    teamLocations,
   ]);
+  const showDefaultLabels = !hasFocus && nodes.length > 0 && nodes.length <= DEFAULT_LABEL_LIMIT;
+  const denseKeyboardMode = arcs.length + nodes.length > DENSE_KEYBOARD_ITEM_LIMIT;
+  const motionEnabled = attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
+
+  useEffect(() => {
+    rotationRef.current = rotation;
+  }, [rotation]);
+
+  useEffect(() => {
+    featuredAttackIdRef.current = featuredAttackId;
+    onFeaturedAttackChange?.(featuredAttackId);
+  }, [featuredAttackId, onFeaturedAttackChange]);
+
+  useEffect(() => {
+    startAutoRotationFromIdle();
+    return clearAutoRotationTimers;
+  }, [attacks, featuredQueue, placementScopeTeams]);
+
+  useEffect(() => {
+    const nextAttackIds = new Set(attacks.map((attack) => attack.id));
+    const previousAttackIds = previousAttackIdsRef.current;
+    previousAttackIdsRef.current = nextAttackIds;
+    if (previousAttackIds === null) {
+      return undefined;
+    }
+
+    const freshIds = attacks
+      .map((attack) => attack.id)
+      .filter((id) => !previousAttackIds.has(id));
+    if (freshIds.length === 0) {
+      return undefined;
+    }
+
+    setFreshAttackIds(new Set(freshIds));
+    if (freshAttackTimeoutRef.current !== null) {
+      window.clearTimeout(freshAttackTimeoutRef.current);
+    }
+    freshAttackTimeoutRef.current = window.setTimeout(() => {
+      setFreshAttackIds(new Set());
+      freshAttackTimeoutRef.current = null;
+    }, 4_200);
+
+    return undefined;
+  }, [attacks]);
+
+  useEffect(() => {
+    const root = mapRootRef.current;
+    if (!root) {
+      return undefined;
+    }
+
+    function handleFeatureAttack(event: Event): void {
+      const detail = (event as CustomEvent<{
+        animate?: boolean;
+        attackId?: string;
+        rotation?: GlobeRotation;
+      }>).detail;
+      if (!detail?.attackId) {
+        return;
+      }
+      const attack = attacks.find((item) => item.id === detail.attackId);
+      if (!attack) {
+        return;
+      }
+      clearAutoRotationTimers(false);
+      if (detail.rotation) {
+        const nextRotation = {
+          lat: clamp(detail.rotation.lat, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+          lon: normalizeLongitude(detail.rotation.lon),
+        };
+        rotationRef.current = nextRotation;
+        setRotation(nextRotation);
+      }
+      featureAttack(attack, detail.rotation ? false : detail.animate !== false);
+    }
+
+    root.addEventListener('ad-platform:feature-attack', handleFeatureAttack);
+    return () => {
+      root.removeEventListener('ad-platform:feature-attack', handleFeatureAttack);
+    };
+  }, [attacks, placementScopeTeams]);
+
+  function clearAutoRotationTimers(clearFeatured = true): void {
+    if (idleTimeoutRef.current !== null) {
+      window.clearTimeout(idleTimeoutRef.current);
+      idleTimeoutRef.current = null;
+    }
+    if (featuredAttackIntervalRef.current !== null) {
+      window.clearInterval(featuredAttackIntervalRef.current);
+      featuredAttackIntervalRef.current = null;
+    }
+    if (freshAttackTimeoutRef.current !== null) {
+      window.clearTimeout(freshAttackTimeoutRef.current);
+      freshAttackTimeoutRef.current = null;
+    }
+    if (clearFeatured && featuredAttackIdRef.current !== null) {
+      featuredAttackIdRef.current = null;
+      setFeaturedAttackId(null);
+    }
+    cancelRotationAnimation();
+  }
+
+  function cancelRotationAnimation(): void {
+    if (animationFrameRef.current !== null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  }
+
+  function markUserActivity(): void {
+    const now = window.performance.now();
+    if (featuredAttackIdRef.current === null && now - lastActivityRef.current < 250) {
+      return;
+    }
+    lastActivityRef.current = now;
+    clearAutoRotationTimers();
+    startAutoRotationFromIdle();
+  }
+
+  function featureNextAttack(): void {
+    if (attacks.length === 0) {
+      return;
+    }
+    const queue = featuredQueue.length > 0 ? featuredQueue : attacks;
+    const attack = queue[featuredAttackIndexRef.current % queue.length];
+    featuredAttackIndexRef.current += 1;
+    featureAttack(attack, true);
+  }
+
+  function featureAttack(attack: CyberAttackEvent, animate: boolean): void {
+    setFeaturedAttackId(attack.id);
+
+    const attackTeamNames = listAttackTeams(attacks);
+    const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
+    const landmarksByTeam = getLandmarkPlacements(placementTeamNames, attacks, teamLocations);
+    const attacker = landmarksByTeam[attack.attacker];
+    const victim = landmarksByTeam[attack.victim];
+    const target = getFeaturedAttackRotation(attacker, victim);
+    if (target && animate) {
+      animateRotationTo(target);
+    }
+  }
+
+  function animateRotationTo(target: GlobeRotation): void {
+    cancelRotationAnimation();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      rotationRef.current = target;
+      setRotation(target);
+      return;
+    }
+    const start = rotationRef.current;
+    const startTime = window.performance.now();
+    const duration = 2800;
+    const deltaLon = normalizeLongitude(target.lon - start.lon);
+    const deltaLat = target.lat - start.lat;
+
+    function tick(timestamp: number): void {
+      const progress = clamp((timestamp - startTime) / duration, 0, 1);
+      const eased = 1 - Math.pow(1 - progress, 4);
+      const nextRotation = {
+        lat: start.lat + deltaLat * eased,
+        lon: normalizeLongitude(start.lon + deltaLon * eased),
+      };
+      rotationRef.current = nextRotation;
+      setRotation(nextRotation);
+      if (progress < 1) {
+        animationFrameRef.current = window.requestAnimationFrame(tick);
+      } else {
+        animationFrameRef.current = null;
+      }
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function startAutoRotationFromIdle(): void {
+    clearAutoRotationTimers(false);
+    if (attacks.length === 0) {
+      return;
+    }
+    idleTimeoutRef.current = window.setTimeout(() => {
+      if (dragRef.current !== null) {
+        startAutoRotationFromIdle();
+        return;
+      }
+      featureNextAttack();
+      featuredAttackIntervalRef.current = window.setInterval(
+        featureNextAttack,
+        FEATURED_ATTACK_STEP_MS,
+      );
+    }, AUTO_ROTATE_IDLE_MS);
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0 || isInteractivePointerTarget(event.target)) {
+      return;
+    }
+    markUserActivity();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startLat: rotation.lat,
+      startLon: rotation.lon,
+      x: event.clientX,
+      y: event.clientY,
+    };
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    markUserActivity();
+    const nextLon = normalizeLongitude(drag.startLon - (event.clientX - drag.x) * 0.42);
+    const nextLat = clamp(drag.startLat + (event.clientY - drag.y) * 0.34, -MAX_ROTATION_LAT, MAX_ROTATION_LAT);
+    const nextRotation = { lat: nextLat, lon: nextLon };
+    rotationRef.current = nextRotation;
+    setRotation(nextRotation);
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
+    markUserActivity();
+    if (dragRef.current?.pointerId === event.pointerId) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      dragRef.current = null;
+      setDragging(false);
+    }
+  }
+
+  function handlePointerLostCapture(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      setDragging(false);
+    }
+  }
 
   return (
     <div
+      ref={mapRootRef}
+      data-testid="cyber-attack-map"
+      data-featured-attack-id={featuredAttackId ?? undefined}
+      data-keyboard-mode={denseKeyboardMode ? 'jump' : 'direct'}
+      data-motion-enabled={motionEnabled ? 'true' : 'false'}
+      data-rotation-lat={rotation.lat.toFixed(2)}
+      data-rotation-lon={rotation.lon.toFixed(2)}
+      data-route-count={arcs.length}
+      data-team-count={nodes.length}
+      aria-describedby={`${mapId}-instructions`}
+      aria-label="Interactive attack globe. Drag to rotate the globe, tab to teams and routes, then press Enter or Space to inspect."
+      role="region"
       className={cn(
-        'relative aspect-[2/1] w-full overflow-hidden rounded-sm border',
+        'relative aspect-[2/1] w-full touch-none overflow-hidden rounded-sm border',
         className,
       )}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handlePointerLostCapture}
+      onMouseMove={markUserActivity}
       style={{
-        backgroundColor: 'var(--attack-map-background)',
+        background:
+          presentation
+            ? 'radial-gradient(circle at 50% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 18%, transparent) 0%, transparent 38%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 20%, transparent) 0%, transparent 64%), var(--attack-map-background)'
+            : 'radial-gradient(circle at 48% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 14%, transparent) 0%, transparent 34%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 18%, transparent) 0%, transparent 62%), var(--attack-map-background)',
         borderColor: 'var(--attack-map-border)',
+        cursor: dragging ? 'grabbing' : 'grab',
       }}
     >
+      <p id={`${mapId}-instructions`} className="sr-only">
+        Attack map routes and team nodes are keyboard focusable. Press Enter or
+        Space on a focused team or route to inspect it.
+      </p>
       <svg
-        viewBox="0 0 1000 500"
-        preserveAspectRatio="xMidYMid meet"
-        className="pointer-events-none absolute inset-0 h-full w-full"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <pattern id={patternId} width="12" height="12" patternUnits="userSpaceOnUse">
-            <circle cx="2" cy="2" r="1" fill="var(--attack-map-grid)" />
-          </pattern>
-          <mask id={maskId}>
-            <path d={WORLD_MAP_PATH} fill="white" />
-          </mask>
-        </defs>
-        <rect width="1000" height="500" fill={`url(#${patternId})`} opacity="0.28" />
-        <rect
-          width="1000"
-          height="500"
-          fill="var(--attack-map-land)"
-          mask={`url(#${maskId})`}
-          opacity="0.42"
-        />
-        <path
-          d={WORLD_MAP_PATH}
-          fill="none"
-          stroke="var(--attack-map-outline)"
-          strokeWidth="1"
-          opacity="0.7"
-        />
-      </svg>
-
-      <svg
-        viewBox="0 0 1000 500"
+        viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
         className="absolute inset-0 h-full w-full"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          {services.map((service) => (
-            <linearGradient
-              key={service.gradientId}
-              id={service.gradientId}
-              x1="0%"
-              y1="0%"
-              x2="100%"
-              y2="0%"
-            >
-              <stop offset="0%" stopColor={service.color} stopOpacity="0" />
-              <stop offset="50%" stopColor={service.color} stopOpacity="1" />
-              <stop offset="100%" stopColor={service.color} stopOpacity="0" />
-            </linearGradient>
-          ))}
+          <clipPath id={clipId}>
+            <circle cx={CENTER_X} cy={CENTER_Y} r={GLOBE_RADIUS} />
+          </clipPath>
+          <radialGradient id={`${mapId}-sphere`} cx="34%" cy="24%" r="76%">
+            <stop offset="0%" stopColor="var(--attack-map-land)" stopOpacity="0.28" />
+            <stop offset="58%" stopColor="var(--attack-map-background)" stopOpacity="0.1" />
+            <stop offset="100%" stopColor="var(--foreground)" stopOpacity="0.2" />
+          </radialGradient>
+          <marker
+            id={markerId}
+            markerHeight="8"
+            markerWidth="8"
+            orient="auto"
+            refX="7"
+            refY="4"
+          >
+            <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--attack-map-node-highlight)" opacity="0.8" />
+          </marker>
         </defs>
 
-        {arcs.map((arc) => {
-          const beamVisible = arc.highlighted || arc.selected;
+        <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
+
+        <g clipPath={`url(#${clipId})`}>
+          {arcs.map((arc) => (
+            <AttackArcPath
+              key={arc.id}
+              arc={arc}
+              beamClassName={beamClassName}
+              dimmed={hasFocus && !arc.active}
+              haloClassName={haloClassName}
+              markerId={markerId}
+              motionEnabled={motionEnabled}
+              onSelectAttack={onSelectAttack}
+              tabReachable={!denseKeyboardMode}
+            />
+          ))}
+        </g>
+
+        {nodes.map((node) => {
+          const featured = isFeaturedTeam(node, featuredAttack);
+          const showLabel =
+            showDefaultLabels ||
+            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
+            featured;
           return (
-            <g key={arc.id}>
-              <path
-                d={arc.path}
-                fill="none"
-                stroke={arc.color}
-                strokeOpacity={arc.active ? '0.42' : '0.12'}
-                strokeWidth={arc.active ? '2.2' : '1.1'}
-              />
-              {beamVisible ? (
-                <>
-                  <path
-                    d={arc.path}
-                    fill="none"
-                    stroke={arc.color}
-                    strokeWidth="2.5"
-                    strokeOpacity="0.22"
-                  />
-                  <path
-                    d={arc.path}
-                    fill="none"
-                    stroke={`url(#${arc.gradientId})`}
-                    strokeWidth="4.5"
-                    strokeDasharray="40, 960"
-                    className={beamClassName}
-                    style={{ filter: `drop-shadow(0 0 2px ${arc.color})` }}
-                  />
-                </>
-              ) : null}
-              <path
-                d={arc.path}
-                fill="none"
-                stroke="transparent"
-                strokeWidth="12"
-                pointerEvents="stroke"
-                className="cursor-pointer"
-                onClick={() => onSelectAttack?.(arc.selected ? null : arc.id)}
-              />
-            </g>
+            <TeamNodeLabel
+              key={`${node.id}-label`}
+              node={node}
+              showLabel={showLabel}
+            />
           );
         })}
 
-        {nodes.map((node) => (
-          <TeamNodeMarker
-            key={node.id}
-            node={node}
-            showLabel={shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet)}
-            pulseClassName={pulseClassName}
-            onHoverChange={setHoveredTeamId}
-            onSelectTeam={onSelectTeam}
-          />
-        ))}
+        {nodes.map((node) => {
+          const featured = isFeaturedTeam(node, featuredAttack);
+          const showLabel =
+            showDefaultLabels ||
+            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
+            featured;
+          return (
+            <TeamNodeDot
+              key={node.id}
+              node={node}
+              haloClassName={haloClassName}
+              showLabel={showLabel}
+              onHoverChange={setHoveredTeamId}
+              onSelectTeam={onSelectTeam}
+              tabReachable={!denseKeyboardMode}
+            />
+          );
+        })}
+
       </svg>
 
-      <div className="pointer-events-none absolute bottom-4 left-4 flex flex-wrap gap-2">
+      <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
         {services.map((service) => (
           <div
             key={service.name}
@@ -355,7 +698,7 @@ export function CyberAttackMap({
           >
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: service.color }} />
             <span
-              className="text-[10px] font-bold uppercase tracking-widest"
+              className="text-[10px] font-semibold"
               style={{ color: 'var(--attack-map-legend-foreground)' }}
             >
               {service.name}
@@ -364,36 +707,144 @@ export function CyberAttackMap({
         ))}
       </div>
 
-      <div
-        className="pointer-events-none absolute inset-0 bg-[length:100%_4px]"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(0, 0, 0, 0) 50%, var(--attack-map-scanline) 50%)',
-        }}
-      />
+      {presentation ? null : (
+        <div className="absolute right-3 top-3 flex flex-wrap justify-end gap-1.5">
+          {[
+            { label: 'Americas', value: { lat: -6, lon: -82 } },
+            { label: 'EMEA', value: { lat: -6, lon: 34 } },
+            { label: 'APAC', value: { lat: -6, lon: 118 } },
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="min-h-9 rounded-sm border px-3 py-1.5 text-[11px] font-semibold sm:min-h-0 sm:px-2 sm:py-1 sm:text-[10px]"
+              onClick={(event) => {
+                event.stopPropagation();
+                markUserActivity();
+                animateRotationTo(preset.value);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                backgroundColor: 'var(--attack-map-legend-background)',
+                borderColor: 'var(--attack-map-legend-border)',
+                color: 'var(--attack-map-node-label)',
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {presentation || !denseKeyboardMode ? null : (
+        <div
+          className="absolute left-3 top-3 grid max-w-[min(26rem,calc(100%-1.5rem))] gap-1.5 rounded-sm border p-2 sm:grid-cols-2"
+          style={{
+            backgroundColor: 'var(--attack-map-legend-background)',
+            borderColor: 'var(--attack-map-legend-border)',
+            color: 'var(--attack-map-legend-foreground)',
+          }}
+        >
+          <label className="grid gap-1">
+            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to team</span>
+            <select
+              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
+              value={selectedTeamId ?? ''}
+              onChange={(event) => {
+                event.stopPropagation();
+                const value = event.target.value;
+                onSelectTeam?.(value === '' ? null : value);
+                if (value !== '') {
+                  onSelectAttack?.(null);
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <option value="">Select team</option>
+              {nodes
+                .slice()
+                .sort((left, right) => left.name.localeCompare(right.name))
+                .map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {node.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to route</span>
+            <select
+              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
+              value={selectedAttackId ?? ''}
+              onChange={(event) => {
+                event.stopPropagation();
+                const value = event.target.value;
+                onSelectAttack?.(value === '' ? null : value);
+                if (value !== '') {
+                  onSelectTeam?.(null);
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <option value="">Select route</option>
+              {arcs.map((arc) => (
+                <option key={arc.id} value={arc.attackIds[0]}>
+                  {arc.attacker} to {arc.victim}, {arc.service}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       <style
         dangerouslySetInnerHTML={{
           __html: `
         @keyframes ${beamClassName}-keyframes {
-          0% { stroke-dashoffset: 1000; }
+          0% { stroke-dashoffset: 760; }
           100% { stroke-dashoffset: 0; }
         }
-        @keyframes ${pulseClassName}-keyframes {
-          0% { transform: scale(0.96); opacity: 0.2; }
-          70% { transform: scale(1.8); opacity: 0; }
-          100% { transform: scale(1.8); opacity: 0; }
+        @keyframes ${haloClassName}-keyframes {
+          0% { opacity: 0.32; transform: scale(0.96); }
+          70% { opacity: 0; transform: scale(1.55); }
+          100% { opacity: 0; transform: scale(1.55); }
+        }
+        @keyframes ${haloClassName}-fresh {
+          0% { opacity: 0; stroke-width: 7; }
+          16% { opacity: 0.9; stroke-width: 5; }
+          100% { opacity: 0; stroke-width: 1; }
         }
         .${beamClassName} {
-          animation: ${beamClassName}-keyframes 2s linear infinite;
+          animation: ${beamClassName}-keyframes 4.8s linear infinite;
         }
-        .${pulseClassName} {
+        .${haloClassName} {
+          transform-box: fill-box;
           transform-origin: center;
-          animation: ${pulseClassName}-keyframes 1.4s ease-out infinite;
+          animation: ${haloClassName}-keyframes 1.7s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+        }
+        .${haloClassName}-fresh {
+          animation: ${haloClassName}-fresh 1.8s cubic-bezier(0.22, 1, 0.36, 1) 2;
+        }
+        [data-attack-arc-hit]:focus-visible,
+        [data-attack-team-hit]:focus-visible {
+          outline: none;
+        }
+        [data-attack-arc-hit]:focus-visible {
+          stroke: var(--attack-map-node-highlight);
+          stroke-opacity: 0.62;
+          stroke-width: 6.5;
+        }
+        [data-attack-team-hit]:focus-visible circle:first-of-type {
+          fill-opacity: 0.34;
+        }
+        [data-attack-team-hit]:focus-visible circle:nth-of-type(2) {
+          stroke-opacity: 0.95;
+          stroke-width: 2.6;
         }
         @media (prefers-reduced-motion: reduce) {
           .${beamClassName},
-          .${pulseClassName} {
+          .${haloClassName},
+          .${haloClassName}-fresh {
             animation: none !important;
           }
         }
@@ -404,83 +855,521 @@ export function CyberAttackMap({
   );
 }
 
-function TeamNodeMarker({
-  node,
-  showLabel,
-  pulseClassName,
-  onHoverChange,
-  onSelectTeam,
-}: TeamNodeMarkerProps): ReactElement {
-  const emphasized = node.selected || node.highlighted;
-
+function GlobeSurface({
+  clipId,
+  mapId,
+  rotation,
+}: {
+  clipId: string;
+  mapId: string;
+  rotation: GlobeRotation;
+}): ReactElement {
   return (
-    <g
-      transform={`translate(${node.x}, ${node.y})`}
-      className="cursor-pointer"
-      onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
-      onMouseEnter={() => onHoverChange(node.id)}
-      onMouseLeave={() => onHoverChange(null)}
-    >
+    <g pointerEvents="none">
       <circle
-        r={getNodeHaloRadius(node)}
+        cx={CENTER_X}
+        cy={CENTER_Y}
+        r={GLOBE_RADIUS + 14}
         fill="var(--attack-map-node-highlight-halo)"
-        fillOpacity={getNodeHaloOpacity(node, showLabel)}
-        className={emphasized ? pulseClassName : ''}
+        fillOpacity="var(--attack-map-outer-glow-opacity)"
       />
       <circle
-        r={getNodeCoreRadius(node, showLabel)}
-        fill={showLabel ? 'var(--attack-map-node-highlight)' : 'var(--attack-map-node)'}
-        style={getNodeCoreStyle(showLabel)}
+        cx={CENTER_X}
+        cy={CENTER_Y}
+        r={GLOBE_RADIUS}
+        fill={`url(#${mapId}-sphere)`}
+        stroke="var(--attack-map-border)"
+        strokeOpacity="0.92"
+        strokeWidth="1.4"
       />
-      {showLabel ? <TeamNodeLabelLine node={node} emphasized={emphasized} /> : null}
-      {showLabel ? <TeamNodeLabel node={node} emphasized={emphasized} /> : null}
+      <g clipPath={`url(#${clipId})`}>
+        <ProjectedGraticule rotation={rotation} />
+        {COUNTRY_RINGS.map((country) => {
+          const fillPath = buildProjectedCountryFillPath(country.points, rotation);
+          const outlinePath = buildProjectedLinePath(country.points, rotation);
+          if (fillPath === '' && outlinePath === '') {
+            return null;
+          }
+          return (
+            <g key={country.id}>
+              {fillPath !== '' ? (
+                <path
+                  d={fillPath}
+                  fill="var(--attack-map-land)"
+                  fillOpacity="0.18"
+                  stroke="none"
+                />
+              ) : null}
+              <path
+                d={outlinePath}
+                fill="none"
+                stroke="var(--attack-map-outline)"
+                strokeOpacity="0.46"
+                strokeWidth="0.82"
+              />
+            </g>
+          );
+        })}
+        {LANDMARKS.map((landmark) => {
+          const point = projectGlobePoint(landmark, rotation);
+          if (!point.visible) {
+            return null;
+          }
+          return (
+            <circle
+              key={landmark.code}
+              cx={point.x}
+              cy={point.y}
+              r="1.6"
+              fill="var(--attack-map-node-highlight)"
+              opacity="0.34"
+            />
+          );
+        })}
+      </g>
+      <circle
+        cx={CENTER_X}
+        cy={CENTER_Y}
+        r={GLOBE_RADIUS}
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity="var(--attack-map-rim-opacity)"
+        strokeWidth="var(--attack-map-rim-width)"
+      />
     </g>
   );
 }
 
-function TeamNodeLabelLine({
-  node,
-  emphasized,
+function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactElement {
+  return (
+    <g>
+      {[-60, -30, 0, 30, 60].map((lat) => (
+        <path
+          key={`lat-${lat}`}
+          d={buildProjectedLinePath(
+            Array.from({ length: 73 }, (_, index) => ({
+              lat,
+              lon: -180 + index * 5,
+            })),
+            rotation,
+          )}
+          fill="none"
+          stroke="var(--attack-map-grid)"
+          strokeOpacity={lat === 0 ? '0.42' : '0.22'}
+        />
+      ))}
+      {[-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180].map((lon) => (
+        <path
+          key={`lon-${lon}`}
+          d={buildProjectedLinePath(
+            Array.from({ length: 37 }, (_, index) => ({
+              lat: -90 + index * 5,
+              lon,
+            })),
+            rotation,
+          )}
+          fill="none"
+          stroke="var(--attack-map-grid)"
+          strokeOpacity="0.18"
+        />
+      ))}
+    </g>
+  );
+}
+
+function AttackArcPath({
+  arc,
+  beamClassName,
+  dimmed,
+  haloClassName,
+  markerId,
+  motionEnabled,
+  onSelectAttack,
+  tabReachable,
 }: {
-  node: TeamNode;
-  emphasized: boolean;
+  arc: AttackArc;
+  beamClassName: string;
+  dimmed: boolean;
+  haloClassName: string;
+  markerId: string;
+  motionEnabled: boolean;
+  onSelectAttack?: (attackId: string | null) => void;
+  tabReachable: boolean;
+}): ReactElement | null {
+  if (!arc.visible) {
+    return null;
+  }
+  const emphasized = arc.selected || arc.highlighted || arc.active;
+  const serviceStyle = getServiceRouteStyle(arc.service);
+  const depthOpacity = clamp(0.36 + arc.visibility * 0.64, 0.24, 1);
+  const bundleWeight = clamp(Math.log2(arc.count + 1) * 0.22, 0, 0.72);
+  const trafficWeight = clamp(0.72 + arc.recency * 0.42 + bundleWeight, 0.72, 1.52);
+  const opacity = dimmed
+    ? 0.035
+    : arc.fresh
+      ? 0.96
+    : arc.partial
+      ? arc.featured
+        ? 0.92
+        : 0.12 * depthOpacity * trafficWeight
+      : arc.featured
+        ? 0.98
+        : emphasized
+          ? 0.78 * depthOpacity * trafficWeight
+          : 0.2 * depthOpacity * trafficWeight;
+  const strokeWidth = arc.partial
+    ? arc.featured
+      ? '4.4'
+      : String(1 + arc.recency * 0.85 + bundleWeight)
+    : arc.featured
+      ? '5.2'
+      : arc.selected
+        ? '3.6'
+        : emphasized
+          ? String(2 + arc.recency * 0.95 + bundleWeight)
+          : String(1 + arc.recency * 0.65 + bundleWeight);
+  const packetEnabled =
+    motionEnabled &&
+    !dimmed &&
+    !arc.partial &&
+    arc.visibility > 0.16 &&
+    (arc.featured || arc.fresh || arc.selected || arc.highlighted || arc.recency > 0.86);
+
+  return (
+    <g>
+      {arc.featured && !dimmed ? (
+        <path
+          d={arc.path}
+          fill="none"
+          stroke={arc.color}
+          strokeLinecap="round"
+          strokeOpacity={arc.partial ? '0.42' : '0.32'}
+          strokeWidth={arc.partial ? '12' : '15'}
+        />
+      ) : null}
+      <path
+        id={arc.domId}
+        data-attack-arc="true"
+        data-attack-count={String(arc.count)}
+        data-attack-id={arc.id}
+        data-featured={arc.featured ? 'true' : 'false'}
+        data-fresh={arc.fresh ? 'true' : 'false'}
+        data-partial={arc.partial ? 'true' : 'false'}
+        d={arc.path}
+        fill="none"
+        markerEnd={emphasized && !arc.partial ? `url(#${markerId})` : undefined}
+        stroke={arc.color}
+        strokeLinecap="round"
+        strokeDasharray={arc.partial && !arc.featured ? serviceStyle.partialDash : undefined}
+        strokeOpacity={opacity}
+        strokeWidth={strokeWidth}
+      />
+      {arc.fresh && !dimmed ? (
+        <path
+          d={arc.path}
+          fill="none"
+          stroke="var(--attack-map-node-highlight)"
+          strokeLinecap="round"
+          strokeOpacity="0.78"
+          strokeWidth="7"
+          className={`${haloClassName}-fresh`}
+        />
+      ) : null}
+      {packetEnabled ? (
+        <>
+          <path
+            d={arc.path}
+            fill="none"
+            stroke={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color}
+            strokeDasharray={arc.featured ? '54 706' : emphasized ? serviceStyle.activeDash : serviceStyle.idleDash}
+            strokeLinecap="round"
+            strokeOpacity={arc.featured ? '1' : emphasized ? '0.95' : '0.48'}
+            strokeWidth={arc.featured ? '5.1' : emphasized ? serviceStyle.activeWidth : serviceStyle.idleWidth}
+            className={beamClassName}
+          />
+          <circle r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
+            <animateMotion dur={arc.featured ? serviceStyle.featuredDuration : emphasized ? serviceStyle.activeDuration : `${serviceStyle.idleDuration - arc.recency * 0.55}s`} begin={arc.delay} repeatCount="indefinite">
+              <mpath href={`#${arc.domId}`} />
+            </animateMotion>
+          </circle>
+        </>
+      ) : null}
+      {arc.featured && !dimmed ? (
+        <FeaturedTransmissionEndpoints arc={arc} haloClassName={haloClassName} />
+      ) : null}
+      {arc.count > 1 && !dimmed ? <RouteBundleBadge arc={arc} /> : null}
+      <path
+        d={arc.path}
+        aria-label={`${arc.selected ? 'Clear' : 'Inspect'} attack route from ${arc.attacker} to ${arc.victim} on ${arc.service}, ${arc.count} transmission${arc.count === 1 ? '' : 's'}, tick ${arc.tick}`}
+        fill="none"
+        role="button"
+        stroke="transparent"
+        strokeWidth="14"
+        pointerEvents="stroke"
+        tabIndex={tabReachable ? 0 : -1}
+        className="cursor-pointer"
+        data-attack-arc-hit="true"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => onSelectAttack?.(arc.selected ? null : arc.attackIds[0])}
+        onKeyDown={(event) => {
+          activateSvgButton(event, () => onSelectAttack?.(arc.selected ? null : arc.attackIds[0]));
+        }}
+      />
+    </g>
+  );
+}
+
+function FeaturedTransmissionEndpoints({
+  arc,
+  haloClassName,
+}: {
+  arc: AttackArc;
+  haloClassName: string;
 }): ReactElement {
   return (
-    <line
-      x1="0"
-      y1="-1"
-      x2={node.labelLineX}
-      y2={node.labelLineY}
-      stroke="var(--attack-map-node-label)"
-      strokeOpacity={emphasized ? '0.95' : '0.58'}
-      strokeWidth={node.selected ? '1.35' : '0.9'}
-    />
+    <g pointerEvents="none">
+      <circle
+        cx={arc.startX}
+        cy={arc.startY}
+        r="12"
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity="0.58"
+        strokeWidth="2"
+        className={haloClassName}
+      />
+      <circle
+        cx={arc.startX}
+        cy={arc.startY}
+        r="4.4"
+        fill="var(--attack-map-node-highlight)"
+        opacity="0.98"
+      />
+      <circle
+        cx={arc.endX}
+        cy={arc.endY}
+        r="15"
+        fill="var(--attack-map-node-highlight-halo)"
+        fillOpacity="0.32"
+      />
+      <circle
+        cx={arc.endX}
+        cy={arc.endY}
+        r="8.5"
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity="0.9"
+        strokeWidth="2.4"
+      />
+      <path
+        d={`M ${arc.endX - 12} ${arc.endY} L ${arc.endX + 12} ${arc.endY} M ${arc.endX} ${arc.endY - 12} L ${arc.endX} ${arc.endY + 12}`}
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeLinecap="round"
+        strokeOpacity="0.72"
+        strokeWidth="1.5"
+      />
+    </g>
+  );
+}
+
+function RouteBundleBadge({ arc }: { arc: AttackArc }): ReactElement {
+  const x = (arc.startX + arc.endX) / 2;
+  const y = (arc.startY + arc.endY) / 2;
+
+  return (
+    <g pointerEvents="none">
+      <rect
+        x={x - 12}
+        y={y - 10}
+        width="24"
+        height="18"
+        rx="3"
+        fill="var(--attack-map-legend-background)"
+        stroke="var(--attack-map-legend-border)"
+        strokeOpacity="0.82"
+      />
+      <text
+        x={x}
+        y={y + 3}
+        textAnchor="middle"
+        fill="var(--attack-map-node-label)"
+        fontSize="9.5"
+        fontWeight="700"
+        className="select-none font-mono"
+      >
+        x{arc.count}
+      </text>
+    </g>
   );
 }
 
 function TeamNodeLabel({
   node,
-  emphasized,
+  showLabel,
 }: {
   node: TeamNode;
-  emphasized: boolean;
-}): ReactElement {
+  showLabel: boolean;
+}): ReactElement | null {
+  if (!node.visible || !showLabel) {
+    return null;
+  }
+
   return (
-    <text
-      x={node.labelDx}
-      y={emphasized ? node.labelDy - 2 : node.labelDy}
-      textAnchor={node.labelAnchor}
-      fill={emphasized ? 'var(--foreground)' : 'var(--attack-map-node-label)'}
-      stroke="var(--attack-map-node-label-halo)"
-      strokeWidth={emphasized ? '3' : '2.25'}
-      paintOrder="stroke"
-      strokeLinejoin="round"
-      fontSize={getNodeLabelFontSize(node)}
-      fontWeight={emphasized ? '600' : '500'}
-      className="pointer-events-none select-none drop-shadow-lg font-sans"
+    <g pointerEvents="none">
+      <line
+        x1={node.x}
+        x2={node.labelX}
+        y1={node.y}
+        y2={node.labelY}
+        stroke="var(--attack-map-node-label)"
+        strokeOpacity={node.selected ? '0.9' : '0.52'}
+      />
+      <TeamLabelPlate node={node} />
+      <text
+        x={node.labelX}
+        y={node.labelY - 7}
+        textAnchor={node.labelAnchor}
+        fill={node.selected ? 'var(--foreground)' : 'var(--attack-map-node-label)'}
+        stroke="var(--attack-map-node-label-halo)"
+        strokeLinejoin="round"
+        strokeWidth="2.4"
+        paintOrder="stroke"
+        fontSize={node.selected ? '12.5' : '11'}
+        fontWeight={node.selected ? '700' : '650'}
+        className="select-none font-sans"
+      >
+        {node.name}
+      </text>
+      <text
+        x={node.labelX}
+        y={node.labelY + 7}
+        textAnchor={node.labelAnchor}
+        fill="var(--attack-map-node-label)"
+        fontSize="9.5"
+        fontWeight="500"
+        className="select-none font-sans"
+      >
+        {node.landmark.name} / {node.outgoing} out
+      </text>
+    </g>
+  );
+}
+
+function TeamNodeDot({
+  node,
+  haloClassName,
+  showLabel,
+  onHoverChange,
+  onSelectTeam,
+  tabReachable,
+}: {
+  node: TeamNode;
+  haloClassName: string;
+  showLabel: boolean;
+  onHoverChange: (teamId: string | null) => void;
+  onSelectTeam?: (teamId: string | null) => void;
+  tabReachable: boolean;
+}): ReactElement | null {
+  if (!node.visible) {
+    return null;
+  }
+  const emphasized = node.selected || node.highlighted || showLabel;
+  const totalActivity = node.incoming + node.outgoing;
+  const coreRadius = clamp(4.5 + Math.sqrt(totalActivity) * 1.05, 5, 13);
+  const ringRadius = coreRadius + 6;
+
+  return (
+    <g
+      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.landmark.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
+      className="cursor-pointer"
+      data-attack-team-hit="true"
+      role="button"
+      tabIndex={tabReachable ? 0 : -1}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
+      onFocus={() => onHoverChange(node.id)}
+      onBlur={() => onHoverChange(null)}
+      onKeyDown={(event) => {
+        activateSvgButton(event, () => onSelectTeam?.(node.selected ? null : node.id));
+      }}
+      onMouseEnter={() => onHoverChange(node.id)}
+      onMouseLeave={() => onHoverChange(null)}
     >
-      {node.name}
-    </text>
+      <circle
+        cx={node.x}
+        cy={node.y}
+        r={ringRadius}
+        fill="var(--attack-map-node-highlight-halo)"
+        fillOpacity={emphasized ? '0.3' : '0.08'}
+        className={emphasized ? haloClassName : undefined}
+      />
+      <circle
+        cx={node.x}
+        cy={node.y}
+        r={ringRadius}
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity={emphasized ? '0.5' : '0.16'}
+      />
+      <circle
+        cx={node.x}
+        cy={node.y}
+        r={coreRadius}
+        fill={emphasized ? 'var(--attack-map-node-highlight)' : 'var(--attack-map-node)'}
+        stroke="var(--attack-map-background)"
+        strokeWidth="2"
+      />
+    </g>
+  );
+}
+
+function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
+  const width = getTeamLabelWidth(node);
+  const box = getLabelBox(node);
+
+  return (
+    <rect
+      x={box.left}
+      y={node.labelY - 23}
+      width={width}
+      height="40"
+      rx="3"
+      fill="var(--attack-map-legend-background)"
+      stroke="var(--attack-map-legend-border)"
+      strokeOpacity={node.selected ? '0.95' : '0.72'}
+    />
+  );
+}
+
+function getTeamLabelWidth(node: TeamNode): number {
+  const titleWidth = node.name.length * 6.5;
+  const metaWidth = `${node.landmark.name} / ${node.outgoing} out`.length * 5.2;
+  return clamp(Math.max(titleWidth, metaWidth) + 22, 82, 178);
+}
+
+function getRawLabelWidth(value: string): number {
+  return clamp(value.length * 6.2 + 22, 82, 178);
+}
+
+function activateSvgButton(
+  event: ReactKeyboardEvent<SVGElement>,
+  action: () => void,
+): void {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  action();
+}
+
+function isInteractivePointerTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      'a,button,input,select,textarea,[data-attack-arc-hit],[data-attack-team-hit]',
+    ) !== null
   );
 }
 
@@ -497,91 +1386,437 @@ function shouldShowTeamLabel(
   );
 }
 
-function getNodeHaloRadius(node: TeamNode): number {
-  if (node.selected) {
-    return 12;
-  }
-  return node.highlighted ? 10 : 4;
+function isFeaturedTeam(
+  node: TeamNode,
+  featuredAttack: CyberAttackEvent | null,
+): boolean {
+  return (
+    featuredAttack !== null &&
+    (node.name === featuredAttack.attacker || node.name === featuredAttack.victim)
+  );
 }
 
-function getNodeHaloOpacity(node: TeamNode, showLabel: boolean): number {
-  if (showLabel) {
-    return 0.2;
+function buildAttackPath(start: ArcPoint, end: ArcPoint, attackId: string): string {
+  if (start.id === end.id) {
+    const radius = 24 + (hashString(attackId) % 18);
+    return `M ${start.x} ${start.y} C ${start.x - radius} ${start.y - radius * 2}, ${start.x + radius} ${start.y - radius * 2}, ${start.x} ${start.y}`;
   }
-  return node.highlighted ? 0.12 : 0.04;
+
+  const midX = (start.x + end.x) / 2;
+  const midY = (start.y + end.y) / 2;
+  const centerVector = normalize(midX - CENTER_X, midY - CENTER_Y);
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const lift = clamp(distance * 0.34, 46, 148) + (hashString(attackId) % 30);
+  const controlX = midX + centerVector.x * lift;
+  const controlY = midY + centerVector.y * lift - 18;
+
+  return `M ${start.x} ${start.y} Q ${controlX} ${controlY} ${end.x} ${end.y}`;
 }
 
-function getNodeCoreRadius(node: TeamNode, showLabel: boolean): number {
-  if (showLabel) {
-    return 3.8;
+function getArcEndpoints(
+  start: TeamNode,
+  end: TeamNode,
+  rotation: GlobeRotation,
+): { end: ArcPoint; start: ArcPoint } {
+  if (start.visible === end.visible) {
+    return { end, start };
   }
-  return node.highlighted || node.selected ? 4 : 2.5;
-}
-
-function getNodeCoreStyle(showLabel: boolean): { filter: string } | undefined {
-  if (!showLabel) {
-    return undefined;
+  if (start.visible) {
+    return {
+      end: findHorizonPoint(start, end, rotation),
+      start,
+    };
   }
-  return { filter: 'drop-shadow(0 0 8px var(--attack-map-node-highlight))' };
-}
-
-function getNodeLabelFontSize(node: TeamNode): string {
-  if (node.selected) {
-    return '12.5';
-  }
-  return node.highlighted ? '12' : '10';
-}
-
-const attackPalette = [
-  '#2dd4bf',
-  '#3b82f6',
-  '#f59e0b',
-  '#ef4444',
-  '#a855f7',
-  '#10b981',
-  '#f97316',
-  '#ec4899',
-];
-
-function hashTeamName(name: string): number {
-  let hash = 5381;
-  for (let index = 0; index < name.length; index += 1) {
-    hash = ((hash << 5) + hash + name.charCodeAt(index)) >>> 0;
-  }
-  return hash;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getLabelPlacement(
-  x: number,
-  y: number,
-): {
-  anchor: 'start' | 'middle' | 'end';
-  dx: number;
-  dy: number;
-  lineX: number;
-  lineY: number;
-} {
-  if (x < 120) {
-    return { anchor: 'start', dx: 10, dy: -10, lineX: 6, lineY: -6 };
-  }
-  if (x > 880) {
-    return { anchor: 'end', dx: -10, dy: -10, lineX: -6, lineY: -6 };
-  }
-  if (y > 360) {
-    return { anchor: 'middle', dx: 0, dy: -16, lineX: 0, lineY: -8 };
-  }
-  return { anchor: 'middle', dx: 0, dy: -14, lineX: 0, lineY: -8 };
-}
-
-function createFallbackPlacementResources(): LandPlacementResources {
   return {
-    slots: FALLBACK_LAND_SLOTS,
-    isLand: () => true,
+    end,
+    start: findHorizonPoint(end, start, rotation),
   };
+}
+
+function findHorizonPoint(
+  visiblePoint: GeoPoint,
+  hiddenPoint: GeoPoint,
+  rotation: GlobeRotation,
+): ArcPoint {
+  let low = 0;
+  let high = 1;
+  let projected = projectGlobePoint(visiblePoint, rotation);
+
+  for (let index = 0; index < 24; index += 1) {
+    const middle = (low + high) / 2;
+    const candidate = interpolateGeoPoint(visiblePoint, hiddenPoint, middle);
+    const candidateProjection = projectGlobePoint(candidate, rotation);
+
+    if (candidateProjection.z > 0.015) {
+      low = middle;
+      projected = candidateProjection;
+    } else {
+      high = middle;
+    }
+  }
+
+  return {
+    ...projected,
+    id: `${hiddenPoint.lat}:${hiddenPoint.lon}:horizon`,
+    visible: true,
+  };
+}
+
+function interpolateGeoPoint(start: GeoPoint, end: GeoPoint, progress: number): GeoPoint {
+  return {
+    lat: start.lat + (end.lat - start.lat) * progress,
+    lon: normalizeLongitude(start.lon + normalizeLongitude(end.lon - start.lon) * progress),
+  };
+}
+
+function getArcVisibility(start: TeamNode, end: TeamNode): number {
+  if (!start.visible && !end.visible) {
+    return 0;
+  }
+  if (start.visible !== end.visible) {
+    return clamp((Math.max(start.z, end.z) + 0.04) / 1.04, 0, 0.5);
+  }
+  return clamp((Math.min(start.z, end.z) + 0.04) / 1.04, 0, 1);
+}
+
+function buildProjectedCountryFillPath(points: GeoPoint[], rotation: GlobeRotation): string {
+  const projected = points.map((point) => projectGlobePoint(point, rotation));
+  if (projected.length < 3 || !projected.every((point) => point.visible)) {
+    return '';
+  }
+  return `${projected
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .join(' ')} Z`;
+}
+
+function buildProjectedLinePath(points: GeoPoint[], rotation: GlobeRotation): string {
+  let path = '';
+  let drawing = false;
+  points.forEach((point) => {
+    const projected = projectGlobePoint(point, rotation);
+    if (!projected.visible) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? ' L' : ' M'} ${projected.x} ${projected.y}`;
+    drawing = true;
+  });
+  return path;
+}
+
+function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
+  return collection.features.flatMap((feature, featureIndex) => {
+    const name = feature.properties?.name ?? `country-${featureIndex}`;
+    const polygons = getFeaturePolygons(feature.geometry);
+    return polygons.flatMap((polygon, polygonIndex) => {
+      const outerRing = polygon[0];
+      if (!outerRing || outerRing.length < 3) {
+        return [];
+      }
+      return [
+        {
+          id: `${featureIndex}-${polygonIndex}`,
+          name,
+          points: outerRing.map(([lon, lat]) => ({ lat, lon })),
+        },
+      ];
+    });
+  });
+}
+
+function getFeaturePolygons(
+  geometry: GlobeFeatureCollection['features'][number]['geometry'],
+): Array<Array<Array<[number, number]>>> {
+  if (geometry.type === 'Polygon') {
+    return parsePolygonCoordinates(geometry.coordinates);
+  }
+  return parseMultiPolygonCoordinates(geometry.coordinates);
+}
+
+function parsePolygonCoordinates(
+  coordinates: unknown,
+): Array<Array<Array<[number, number]>>> {
+  if (!Array.isArray(coordinates)) {
+    return [];
+  }
+  return [
+    coordinates
+      .map((ring) => parseLinearRing(ring))
+      .filter((ring) => ring.length >= 3),
+  ].filter((polygon) => polygon.length > 0);
+}
+
+function parseMultiPolygonCoordinates(
+  coordinates: unknown,
+): Array<Array<Array<[number, number]>>> {
+  if (!Array.isArray(coordinates)) {
+    return [];
+  }
+  return coordinates.flatMap((polygon) => parsePolygonCoordinates(polygon));
+}
+
+function parseLinearRing(ring: unknown): Array<[number, number]> {
+  if (!Array.isArray(ring)) {
+    return [];
+  }
+  return ring.flatMap((coordinate) => {
+    if (
+      Array.isArray(coordinate) &&
+      typeof coordinate[0] === 'number' &&
+      typeof coordinate[1] === 'number'
+    ) {
+      return [[coordinate[0], coordinate[1]] satisfies [number, number]];
+    }
+    return [];
+  });
+}
+
+function getLandmarkPlacements(
+  teamNames: string[],
+  attacks: CyberAttackEvent[] = [],
+  teamLocations: Record<string, GeoPoint> = {},
+): Record<string, Landmark> {
+  const orderedTeams = [...teamNames].sort();
+  const placements: Record<string, Landmark> = {};
+  const attackLocations = getAttackProvidedLocations(attacks);
+
+  orderedTeams.forEach((team, index) => {
+    const provided = teamLocations[team] ?? attackLocations[team];
+    placements[team] = provided
+      ? {
+          code: `provided-${hashString(team)}`,
+          name: 'Configured location',
+          lat: provided.lat,
+          lon: provided.lon,
+        }
+      : LANDMARKS[index % LANDMARKS.length];
+  });
+
+  return placements;
+}
+
+function getAttackProvidedLocations(attacks: CyberAttackEvent[]): Record<string, GeoPoint> {
+  const locations: Record<string, GeoPoint> = {};
+  attacks.forEach((attack) => {
+    if (attack.attackerLocation) {
+      locations[attack.attacker] = attack.attackerLocation;
+    }
+    if (attack.victimLocation) {
+      locations[attack.victim] = attack.victimLocation;
+    }
+  });
+  return locations;
+}
+
+function getFeaturedAttackRotation(
+  attacker?: Landmark,
+  victim?: Landmark,
+): GlobeRotation | null {
+  if (!attacker && !victim) {
+    return null;
+  }
+  if (!attacker || !victim) {
+    const target = attacker ?? victim;
+    return target
+      ? {
+          lat: clamp(target.lat * 0.72, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+          lon: target.lon,
+        }
+      : null;
+  }
+
+  const midpoint = {
+    lat: clamp((attacker.lat + victim.lat) / 2, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    lon: getMidLongitude(attacker.lon, victim.lon),
+  };
+  const candidates = [
+    midpoint,
+    { lat: clamp(midpoint.lat * 0.82, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: midpoint.lon },
+    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon - 18) },
+    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon + 18) },
+    { lat: clamp(attacker.lat * 0.55 + victim.lat * 0.45, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: attacker.lon },
+    { lat: clamp(attacker.lat * 0.45 + victim.lat * 0.55, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: victim.lon },
+  ];
+
+  return candidates.reduce((best, candidate) => (
+    scoreFeaturedRotation(candidate, attacker, victim) > scoreFeaturedRotation(best, attacker, victim)
+      ? candidate
+      : best
+  ));
+}
+
+function getMidLongitude(left: number, right: number): number {
+  return normalizeLongitude(left + normalizeLongitude(right - left) / 2);
+}
+
+function scoreFeaturedRotation(
+  rotation: GlobeRotation,
+  attacker: Landmark,
+  victim: Landmark,
+): number {
+  const start = projectGlobePoint(attacker, rotation);
+  const end = projectGlobePoint(victim, rotation);
+  const weakestEndpoint = Math.min(start.z, end.z);
+  const combinedDepth = start.z + end.z;
+  const rimPenalty = getRimPenalty(start) + getRimPenalty(end);
+  const labelRoomBonus = getLabelRoomScore(start) + getLabelRoomScore(end);
+
+  return weakestEndpoint * 4 + combinedDepth * 1.4 + labelRoomBonus - rimPenalty;
+}
+
+function getRimPenalty(point: ProjectedPoint): number {
+  const distanceFromCenter = Math.hypot(point.x - CENTER_X, point.y - CENTER_Y);
+  return Math.max(0, (distanceFromCenter - GLOBE_RADIUS * 0.78) / 22);
+}
+
+function getLabelRoomScore(point: ProjectedPoint): number {
+  const horizontalRoom = Math.min(point.x - LABEL_SAFE_INSET_X, MAP_WIDTH - LABEL_SAFE_INSET_X - point.x);
+  const verticalRoom = Math.min(point.y - LABEL_SAFE_INSET_Y, MAP_HEIGHT - LABEL_SAFE_INSET_Y - point.y);
+  return clamp(Math.min(horizontalRoom / 140, verticalRoom / 90), -1, 1);
+}
+
+function projectGlobePoint(point: GeoPoint, rotation: GlobeRotation): ProjectedPoint {
+  const lat = toRadians(point.lat);
+  const lon = toRadians(normalizeLongitude(point.lon - rotation.lon));
+  const tilt = toRadians(rotation.lat);
+  const cosLat = Math.cos(lat);
+  const x = GLOBE_RADIUS * cosLat * Math.sin(lon);
+  const rawY = GLOBE_RADIUS * (Math.sin(lat) * Math.cos(tilt) - cosLat * Math.cos(lon) * Math.sin(tilt));
+  const z = Math.sin(lat) * Math.sin(tilt) + cosLat * Math.cos(lon) * Math.cos(tilt);
+
+  return {
+    ...point,
+    visible: z > -0.04,
+    x: CENTER_X + x,
+    y: CENTER_Y - rawY,
+    z,
+  };
+}
+
+function getLabelPlacement(point: ProjectedPoint): {
+  anchor: 'start' | 'middle' | 'end';
+  x: number;
+  y: number;
+} {
+  const vector = normalize(point.x - CENTER_X, point.y - CENTER_Y);
+  const anchor = vector.x < -0.22 ? 'end' : vector.x > 0.22 ? 'start' : 'middle';
+  const width = getRawLabelWidth('');
+  const preferredX = point.x + vector.x * 44;
+  const x = clampLabelAnchorX(preferredX, width, anchor);
+  const y = clamp(point.y + vector.y * 34, LABEL_SAFE_INSET_Y + LABEL_HEIGHT / 2, MAP_HEIGHT - LABEL_SAFE_INSET_Y - LABEL_HEIGHT / 2);
+  return { anchor, x, y };
+}
+
+function resolveLabelCollisions(nodes: TeamNode[]): TeamNode[] {
+  const adjustedNodes = nodes.map((node) => ({ ...node }));
+  const placedNodes: TeamNode[] = [];
+  const visibleNodes = adjustedNodes
+    .filter((node) => node.visible)
+    .sort((left, right) => left.labelY - right.labelY || left.labelX - right.labelX);
+
+  visibleNodes.forEach((node) => {
+    let nextY = node.labelY;
+    placedNodes.forEach((placedNode) => {
+      if (
+        labelsOverlap(
+          { ...node, labelY: nextY },
+          placedNode,
+        )
+      ) {
+        nextY = placedNode.labelY + LABEL_HEIGHT + LABEL_VERTICAL_GAP;
+      }
+    });
+    node.labelY = clamp(nextY, LABEL_SAFE_INSET_Y + LABEL_HEIGHT / 2, MAP_HEIGHT - LABEL_SAFE_INSET_Y - LABEL_HEIGHT / 2);
+    node.labelX = clampLabelAnchorX(node.labelX, getTeamLabelWidth(node), node.labelAnchor);
+    placedNodes.push(node);
+  });
+
+  const overflow = Math.max(
+    0,
+    ...placedNodes.map((node) => node.labelY + LABEL_HEIGHT / 2 - (MAP_HEIGHT - LABEL_SAFE_INSET_Y)),
+  );
+  if (overflow > 0) {
+    placedNodes.forEach((node) => {
+      node.labelY = clamp(node.labelY - overflow, LABEL_SAFE_INSET_Y + LABEL_HEIGHT / 2, MAP_HEIGHT - LABEL_SAFE_INSET_Y - LABEL_HEIGHT / 2);
+    });
+  }
+
+  return adjustedNodes;
+}
+
+function labelsOverlap(left: TeamNode, right: TeamNode): boolean {
+  const leftBox = getLabelBox(left);
+  const rightBox = getLabelBox(right);
+  return !(
+    leftBox.right < rightBox.left ||
+    leftBox.left > rightBox.right ||
+    leftBox.bottom < rightBox.top ||
+    leftBox.top > rightBox.bottom
+  );
+}
+
+function getLabelBox(node: TeamNode): {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+} {
+  const width = getTeamLabelWidth(node);
+  const left =
+    node.labelAnchor === 'end'
+      ? node.labelX + LABEL_PADDING_X - width
+      : node.labelAnchor === 'middle'
+        ? node.labelX - width / 2
+        : node.labelX - LABEL_PADDING_X;
+
+  return {
+    bottom: node.labelY + LABEL_HEIGHT / 2,
+    left,
+    right: left + width,
+    top: node.labelY - LABEL_HEIGHT / 2,
+  };
+}
+
+function clampLabelAnchorX(
+  preferredX: number,
+  width: number,
+  anchor: 'start' | 'middle' | 'end',
+): number {
+  if (anchor === 'end') {
+    return clamp(
+      preferredX,
+      LABEL_SAFE_INSET_X + width - LABEL_PADDING_X,
+      MAP_WIDTH - LABEL_SAFE_INSET_X - LABEL_PADDING_X,
+    );
+  }
+  if (anchor === 'middle') {
+    return clamp(
+      preferredX,
+      LABEL_SAFE_INSET_X + width / 2,
+      MAP_WIDTH - LABEL_SAFE_INSET_X - width / 2,
+    );
+  }
+  return clamp(
+    preferredX,
+    LABEL_SAFE_INSET_X + LABEL_PADDING_X,
+    MAP_WIDTH - LABEL_SAFE_INSET_X - width + LABEL_PADDING_X,
+  );
+}
+
+function normalize(x: number, y: number): { x: number; y: number } {
+  const length = Math.sqrt(x * x + y * y);
+  if (length === 0) {
+    return { x: 0, y: -1 };
+  }
+  return { x: x / length, y: y / length };
+}
+
+function normalizeLongitude(value: number): number {
+  return ((((value + 180) % 360) + 360) % 360) - 180;
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
 }
 
 function listAttackServices(attacks: CyberAttackEvent[]): string[] {
@@ -597,6 +1832,145 @@ function listAttackTeams(attacks: CyberAttackEvent[]): string[] {
   ).sort();
 }
 
+function getAttackTickRange(attacks: CyberAttackEvent[]): {
+  max: number;
+  min: number;
+} {
+  if (attacks.length === 0) {
+    return { max: 0, min: 0 };
+  }
+  return attacks.reduce(
+    (range, attack) => ({
+      max: Math.max(range.max, attack.tick),
+      min: Math.min(range.min, attack.tick),
+    }),
+    { max: attacks[0]?.tick ?? 0, min: attacks[0]?.tick ?? 0 },
+  );
+}
+
+function getAttackRecency(
+  tick: number,
+  range: { max: number; min: number },
+): number {
+  if (range.max <= range.min) {
+    return 1;
+  }
+  return clamp((tick - range.min) / (range.max - range.min), 0, 1);
+}
+
+function bundleAttackRoutes(attacks: CyberAttackEvent[]): AttackRoute[] {
+  const routes = new Map<string, AttackRoute>();
+  attacks.forEach((attack) => {
+    const key = `${attack.attacker}\u0000${attack.victim}\u0000${attack.service}`;
+    const existing = routes.get(key);
+    if (!existing) {
+      routes.set(key, {
+        ...attack,
+        attackIds: [attack.id],
+        count: 1,
+      });
+      return;
+    }
+
+    existing.attackIds.push(attack.id);
+    existing.count += 1;
+    if (attack.tick >= existing.tick) {
+      existing.id = attack.id;
+      existing.tick = attack.tick;
+    }
+  });
+
+  return Array.from(routes.values()).sort((left, right) => (
+    left.tick - right.tick ||
+    left.attacker.localeCompare(right.attacker) ||
+    left.victim.localeCompare(right.victim) ||
+    left.service.localeCompare(right.service)
+  ));
+}
+
+function buildFeaturedAttackQueue(attacks: CyberAttackEvent[]): CyberAttackEvent[] {
+  const tickRange = getAttackTickRange(attacks);
+  const serviceCounts = new Map<string, number>();
+  const teamCounts = new Map<string, number>();
+  attacks.forEach((attack) => {
+    serviceCounts.set(attack.service, (serviceCounts.get(attack.service) ?? 0) + 1);
+    teamCounts.set(attack.attacker, (teamCounts.get(attack.attacker) ?? 0) + 1);
+    teamCounts.set(attack.victim, (teamCounts.get(attack.victim) ?? 0) + 1);
+  });
+
+  return [...attacks].sort((left, right) => (
+    scoreFeaturedAttack(right, tickRange, serviceCounts, teamCounts) -
+      scoreFeaturedAttack(left, tickRange, serviceCounts, teamCounts) ||
+    right.tick - left.tick ||
+    left.id.localeCompare(right.id)
+  ));
+}
+
+function scoreFeaturedAttack(
+  attack: CyberAttackEvent,
+  tickRange: { max: number; min: number },
+  serviceCounts: Map<string, number>,
+  teamCounts: Map<string, number>,
+): number {
+  const recency = getAttackRecency(attack.tick, tickRange);
+  const serviceRarity = 1 / Math.max(1, serviceCounts.get(attack.service) ?? 1);
+  const teamActivity =
+    (teamCounts.get(attack.attacker) ?? 0) + (teamCounts.get(attack.victim) ?? 0);
+  const crossRegion = getAttackRegion(attack.attacker) === getAttackRegion(attack.victim) ? 0 : 1;
+  return recency * 7 + crossRegion * 2.4 + serviceRarity * 1.6 + Math.log2(teamActivity + 1);
+}
+
+function getAttackRegion(teamName: string): number {
+  return hashString(teamName) % 4;
+}
+
+function getServiceRouteStyle(service: string): {
+  activeDash: string;
+  activeDuration: string;
+  activeWidth: string;
+  featuredDuration: string;
+  idleDash: string;
+  idleDuration: number;
+  idleWidth: string;
+  partialDash: string;
+} {
+  const normalized = service.toLowerCase();
+  if (normalized.includes('redis')) {
+    return {
+      activeDash: '16 22 5 34',
+      activeDuration: '2.75s',
+      activeWidth: '3.1',
+      featuredDuration: '1.65s',
+      idleDash: '10 32',
+      idleDuration: 5.2,
+      idleWidth: '2',
+      partialDash: '2 8',
+    };
+  }
+  if (normalized.includes('postgres') || normalized.includes('db')) {
+    return {
+      activeDash: '42 34',
+      activeDuration: '3.7s',
+      activeWidth: '3.8',
+      featuredDuration: '2.6s',
+      idleDash: '28 48',
+      idleDuration: 6.6,
+      idleWidth: '2.5',
+      partialDash: '6 9',
+    };
+  }
+  return {
+    activeDash: '28 34',
+    activeDuration: '3.15s',
+    activeWidth: '3.3',
+    featuredDuration: '2.05s',
+    idleDash: '18 46',
+    idleDuration: 5.8,
+    idleWidth: '2.2',
+    partialDash: '2 9',
+  };
+}
+
 function listPlacementTeams(
   attackTeamNames: string[],
   placementScopeTeams?: string[],
@@ -605,9 +1979,7 @@ function listPlacementTeams(
     return attackTeamNames;
   }
 
-  return Array.from(
-    new Set([...placementScopeTeams, ...attackTeamNames]),
-  ).sort();
+  return Array.from(new Set([...placementScopeTeams, ...attackTeamNames])).sort();
 }
 
 function buildTeamStats(
@@ -633,270 +2005,33 @@ function buildTeamStats(
   return stats;
 }
 
-function getLandPlacementResources(): LandPlacementResources {
-  if (cachedLandPlacementResources) {
-    return cachedLandPlacementResources;
-  }
-
-  if (typeof document === 'undefined' || typeof Path2D === 'undefined') {
-    cachedLandPlacementResources = createFallbackPlacementResources();
-    return cachedLandPlacementResources;
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = MAP_WIDTH;
-  canvas.height = MAP_HEIGHT;
-  const context = canvas.getContext('2d');
-  if (!context) {
-    cachedLandPlacementResources = createFallbackPlacementResources();
-    return cachedLandPlacementResources;
-  }
-
-  const landPath = new Path2D(WORLD_MAP_PATH);
-  const isRawLand = (x: number, y: number) =>
-    context.isPointInPath(landPath, x, y);
-  const isDeepLand = (x: number, y: number) => {
-    const checks = [
-      [0, 0],
-      [8, 0],
-      [-8, 0],
-      [0, 8],
-      [0, -8],
-      [6, 6],
-      [-6, 6],
-      [6, -6],
-      [-6, -6],
-    ];
-
-    return checks.every(([dx, dy]) => {
-      const px = clamp(x + dx, 1, MAP_WIDTH - 1);
-      const py = clamp(y + dy, 1, MAP_HEIGHT - 1);
-      return isRawLand(px, py);
-    });
-  };
-
-  const generatedSlots: LandSlot[] = [];
-  for (let y = LAND_SCAN_START_Y; y <= LAND_SCAN_END_Y; y += LAND_SCAN_STEP) {
-    const rowIndex = Math.floor((y - LAND_SCAN_START_Y) / LAND_SCAN_STEP);
-    const rowOffset = rowIndex % 2 === 0 ? 0 : LAND_SCAN_STEP / 2;
-    for (
-      let x = LAND_SCAN_START_X + rowOffset;
-      x <= LAND_SCAN_END_X;
-      x += LAND_SCAN_STEP
-    ) {
-      if (isDeepLand(x, y)) {
-        generatedSlots.push({ x, y });
-      }
-    }
-  }
-
-  const slots =
-    generatedSlots.length >= FALLBACK_LAND_SLOTS.length
-      ? interleaveLandSlots(generatedSlots).slice(0, LAND_SLOT_LIMIT)
-      : FALLBACK_LAND_SLOTS;
-
-  cachedLandPlacementResources = {
-    slots,
-    isLand: isDeepLand,
-  };
-  return cachedLandPlacementResources;
-}
-
-function getCachedTeamPlacements(teamNames: string[]): Record<string, LandSlot> {
-  const cacheKey = teamNames.join('\u001f');
-  const cachedPlacements = cachedTeamPlacements.get(cacheKey);
-  if (cachedPlacements) {
-    return cachedPlacements;
-  }
-
-  const placement = getLandPlacementResources();
-  const pointsByTeam: Record<string, LandSlot> = {};
-  const usedSlots = new Set<number>();
-  const overflowCounts = new Map<number, number>();
-  const sortedPlacementTeams = sortTeamsForPlacement(teamNames);
-
-  sortedPlacementTeams.forEach((name) => {
-    const hash = hashTeamName(name);
-    const slotIndex = pickSlotIndex(hash, placement.slots.length, usedSlots);
-    const baseSlot = placement.slots[slotIndex];
-    let repeatIndex = 0;
-    if (!usedSlots.has(slotIndex)) {
-      usedSlots.add(slotIndex);
-    } else {
-      repeatIndex = (overflowCounts.get(slotIndex) ?? 0) + 1;
-      overflowCounts.set(slotIndex, repeatIndex);
-    }
-
-    pointsByTeam[name] = ensureLandPoint(
-      getSlotPoint(baseSlot, repeatIndex, hash, placement.isLand),
-      placement.slots,
-      placement.isLand,
-    );
+function buildServiceColors(services: string[]): Record<string, string> {
+  const colors: Record<string, string> = {};
+  services.forEach((service, index) => {
+    colors[service] = attackPalette[index % attackPalette.length];
   });
-
-  cachedTeamPlacements.set(cacheKey, pointsByTeam);
-  return pointsByTeam;
+  return colors;
 }
 
-function sortTeamsForPlacement(teamNames: string[]): string[] {
-  return [...teamNames].sort((left, right) => {
-    const leftHash = hashTeamName(left);
-    const rightHash = hashTeamName(right);
-    return leftHash - rightHash || left.localeCompare(right);
-  });
+function hashString(value: string): number {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
 }
 
-function interleaveLandSlots(slots: LandSlot[]): LandSlot[] {
-  const cellWidth = (LAND_SCAN_END_X - LAND_SCAN_START_X) / 8;
-  const cellHeight = (LAND_SCAN_END_Y - LAND_SCAN_START_Y) / 4;
-  const buckets = new Map<string, LandSlot[]>();
-
-  for (const slot of slots) {
-    const xIndex = clamp(
-      Math.floor((slot.x - LAND_SCAN_START_X) / cellWidth),
-      0,
-      7,
-    );
-    const yIndex = clamp(
-      Math.floor((slot.y - LAND_SCAN_START_Y) / cellHeight),
-      0,
-      3,
-    );
-    const key = `${xIndex}:${yIndex}`;
-    const values = buckets.get(key) ?? [];
-    values.push(slot);
-    buckets.set(key, values);
-  }
-
-  const keyOrder = Array.from(buckets.keys()).sort((left, right) => {
-    const [lx, ly] = left.split(':').map((value) => Number(value));
-    const [rx, ry] = right.split(':').map((value) => Number(value));
-    const leftDistance = Math.abs(lx - 3.5) + Math.abs(ly - 1.5);
-    const rightDistance = Math.abs(rx - 3.5) + Math.abs(ry - 1.5);
-    return leftDistance - rightDistance || ly - ry || lx - rx;
-  });
-
-  keyOrder.forEach((key) => {
-    const values = buckets.get(key);
-    if (!values) {
-      return;
-    }
-    values.sort((left, right) => left.y - right.y || left.x - right.x);
-  });
-
-  const result: LandSlot[] = [];
-  let remaining = true;
-  while (remaining) {
-    remaining = false;
-    for (const key of keyOrder) {
-      const values = buckets.get(key);
-      if (!values || values.length === 0) {
-        continue;
-      }
-      remaining = true;
-      result.push(values.shift() as LandSlot);
-    }
-  }
-
-  return result;
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
-function pickSlotIndex(
-  hash: number,
-  slotCount: number,
-  usedSlots: Set<number>,
-): number {
-  if (slotCount <= 0) {
-    return 0;
-  }
-
-  const start = hash % slotCount;
-  const stride = pickStride(slotCount, hash);
-
-  for (let attempt = 0; attempt < slotCount; attempt += 1) {
-    const index = (start + attempt * stride) % slotCount;
-    if (!usedSlots.has(index)) {
-      return index;
-    }
-  }
-
-  return start;
-}
-
-function pickStride(slotCount: number, hash: number): number {
-  const candidates = [97, 89, 83, 79, 73, 71, 67, 61, 59, 53, 47];
-  for (const candidate of candidates) {
-    if (candidate >= slotCount) {
-      continue;
-    }
-    if (gcd(candidate, slotCount) === 1) {
-      return candidate;
-    }
-  }
-  const fallback = (hash % Math.max(2, slotCount - 1)) + 1;
-  return gcd(fallback, slotCount) === 1 ? fallback : 1;
-}
-
-function gcd(left: number, right: number): number {
-  let a = Math.abs(left);
-  let b = Math.abs(right);
-  while (b !== 0) {
-    const next = a % b;
-    a = b;
-    b = next;
-  }
-  return a;
-}
-
-function getSlotPoint(
-  slot: LandSlot,
-  repeatIndex: number,
-  hash: number,
-  isLand: (x: number, y: number) => boolean,
-): LandSlot {
-  if (repeatIndex === 0) {
-    return { x: slot.x, y: slot.y };
-  }
-
-  const goldenAngle = 2.399963229728653;
-  for (let attempt = 0; attempt < 28; attempt += 1) {
-    const radius = 3 + repeatIndex * 1.7 + attempt * 0.35;
-    const angle = hash * 0.011 + repeatIndex * goldenAngle + attempt * 0.32;
-    const candidate = {
-      x: clamp(slot.x + Math.cos(angle) * radius, 34, 966),
-      y: clamp(slot.y + Math.sin(angle) * radius, 34, 456),
-    };
-    if (isLand(candidate.x, candidate.y)) {
-      return candidate;
-    }
-  }
-
-  return { x: slot.x, y: slot.y };
-}
-
-function ensureLandPoint(
-  point: LandSlot,
-  slots: LandSlot[],
-  isLand: (x: number, y: number) => boolean,
-): LandSlot {
-  if (isLand(point.x, point.y)) {
-    return point;
-  }
-  if (slots.length === 0) {
-    return point;
-  }
-
-  let nearest = slots[0];
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const slot of slots) {
-    const dx = slot.x - point.x;
-    const dy = slot.y - point.y;
-    const distance = dx * dx + dy * dy;
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      nearest = slot;
-    }
-  }
-
-  return { x: nearest.x, y: nearest.y };
-}
+const attackPalette = [
+  'oklch(0.76 0.13 52)',
+  'oklch(0.72 0.1 145)',
+  'oklch(0.74 0.09 225)',
+  'oklch(0.72 0.12 28)',
+  'oklch(0.78 0.1 92)',
+  'oklch(0.7 0.1 178)',
+  'oklch(0.74 0.1 305)',
+  'oklch(0.75 0.1 15)',
+];

@@ -1,12 +1,13 @@
 'use client';
 
 import type { ReactElement, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
   Expand,
   Minimize2,
+  Monitor,
   Pause,
   Play,
   Search,
@@ -31,7 +32,15 @@ import { CyberAttackMap } from './cyber-attack-map';
 export type AttackMapEvent = {
   id: string;
   attacker: string;
+  attackerLocation?: {
+    lat: number;
+    lon: number;
+  };
   victim: string;
+  victimLocation?: {
+    lat: number;
+    lon: number;
+  };
   service: string;
   tick: number;
   verdict: string;
@@ -49,7 +58,7 @@ const PLAYBACK_SPEEDS = [
 export function AttackMapPanel({
   attackRows,
   className,
-  description = 'Live visualization of successful exploits across the game network.',
+  description = 'Directional attack flow across teams, services, and match ticks.',
   highlightedAttackIDs = [],
   title = 'Attack map',
 }: {
@@ -59,6 +68,7 @@ export function AttackMapPanel({
   highlightedAttackIDs?: string[];
   title?: string;
 }): ReactElement {
+  const [audienceMode, setAudienceMode] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [teamQuery, setTeamQuery] = useState('');
   const [replayAttackIDs, setReplayAttackIDs] = useState<string[]>([]);
@@ -68,6 +78,7 @@ export function AttackMapPanel({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1500);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [selectedAttackId, setSelectedAttackId] = useState<string | null>(null);
+  const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
 
@@ -201,11 +212,28 @@ export function AttackMapPanel({
       ),
     [highlightedAttackIDs, replayAttackIDs, selectedAttackId],
   );
+  const teamLocations = useMemo(() => {
+    const locations: Record<string, { lat: number; lon: number }> = {};
+    attackRows.forEach((row) => {
+      if (row.attackerLocation) {
+        locations[row.attacker] = row.attackerLocation;
+      }
+      if (row.victimLocation) {
+        locations[row.victim] = row.victimLocation;
+      }
+    });
+    return locations;
+  }, [attackRows]);
 
   const selectedAttack = useMemo(
     () => attackRows.find((row) => row.id === selectedAttackId) ?? null,
     [attackRows, selectedAttackId],
   );
+  const featuredAttack = useMemo(
+    () => attackRows.find((row) => row.id === featuredAttackId) ?? null,
+    [attackRows, featuredAttackId],
+  );
+  const inspectedAttack = selectedAttack ?? featuredAttack;
   const selectedTeamSummary = useMemo(() => {
     if (!selectedTeamId) {
       return null;
@@ -257,6 +285,16 @@ export function AttackMapPanel({
   }, [attackRows, selectedAttackId]);
 
   useEffect(() => {
+    if (featuredAttackId && !attackRows.some((row) => row.id === featuredAttackId)) {
+      setFeaturedAttackId(null);
+    }
+  }, [attackRows, featuredAttackId]);
+
+  const handleFeaturedAttackChange = useCallback((attackId: string | null) => {
+    setFeaturedAttackId(attackId);
+  }, []);
+
+  useEffect(() => {
     if (selectedTeamId && !allTeams.includes(selectedTeamId)) {
       setSelectedTeamId(null);
     }
@@ -305,24 +343,32 @@ export function AttackMapPanel({
   }
 
   function renderInspector(): ReactElement {
-    if (selectedAttack) {
+    if (inspectedAttack) {
+      const inspectingAutoFeature = selectedAttack === null;
       return (
         <InspectorCard
-          eyebrow="Attack"
-          title={`${selectedAttack.attacker} -> ${selectedAttack.victim}`}
+          eyebrow={inspectingAutoFeature ? 'Featured transmission' : 'Attack'}
+          title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
           lines={[
-            { label: 'Tick', value: `#${selectedAttack.tick}` },
-            { label: 'Service', value: selectedAttack.service },
-            { label: 'Verdict', value: selectedAttack.verdict },
+            { label: 'Tick', value: `#${inspectedAttack.tick}` },
+            { label: 'Service', value: inspectedAttack.service },
+            { label: 'Verdict', value: inspectedAttack.verdict },
           ]}
         >
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSelectedAttackId(null)}
-          >
-            Clear attack focus
-          </Button>
+          {inspectingAutoFeature ? (
+            <p className="text-sm text-muted-foreground">
+              Idle showcase is following this route. Move the pointer or click a
+              path to take manual control.
+            </p>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedAttackId(null)}
+            >
+              Clear attack focus
+            </Button>
+          )}
         </InspectorCard>
       );
     }
@@ -347,9 +393,7 @@ export function AttackMapPanel({
         >
           {selectedTeamSummary.services.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Services
-              </p>
+              <p className="text-xs font-medium text-muted-foreground">Services</p>
               <div className="flex flex-wrap gap-2">
                 {selectedTeamSummary.services.map((service) => (
                   <Badge key={service} variant="secondary">
@@ -361,9 +405,7 @@ export function AttackMapPanel({
           ) : null}
           {selectedTeamSummary.opponents.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                Frequent opponents
-              </p>
+              <p className="text-xs font-medium text-muted-foreground">Frequent opponents</p>
               <div className="space-y-1 text-sm text-muted-foreground">
                 {selectedTeamSummary.opponents.map(([opponent, count]) => (
                   <div
@@ -400,8 +442,8 @@ export function AttackMapPanel({
         ]}
       >
         <p className="text-sm text-muted-foreground">
-          Click a team or attack arc to inspect it. Search keeps labels readable
-          without forcing the map to show every name at once.
+          Click a team or attack path to inspect it. Search focuses labels while
+          the rest of the globe stays readable.
         </p>
       </InspectorCard>
     );
@@ -411,20 +453,22 @@ export function AttackMapPanel({
     return (
       <div
         className={cn(
-          'grid gap-4',
+          'grid gap-3',
           expandedView
-            ? 'min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,22vh)]'
-            : 'grid-rows-[minmax(0,1fr)_auto]',
+            ? 'h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,18vh)] xl:grid-cols-[minmax(0,1fr)_18rem] xl:grid-rows-none'
+            : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
         <CyberAttackMap
           attacks={visibleRows}
-          className=""
+          className={expandedView ? 'aspect-auto h-full min-h-[36rem]' : 'min-h-[27rem]'}
           focusedTeams={focusedTeams}
           highlightedAttackIDs={activeHighlightIDs}
           placementScopeTeams={allTeams}
           selectedAttackId={selectedAttackId}
           selectedTeamId={selectedTeamId}
+          teamLocations={teamLocations}
+          onFeaturedAttackChange={handleFeaturedAttackChange}
           onSelectAttack={(attackId) => {
             setSelectedAttackId(attackId);
             if (attackId) {
@@ -454,7 +498,7 @@ export function AttackMapPanel({
     <div
       data-testid="attack-map-panel"
       className={cn(
-        'space-y-4 rounded-md border border-border/70 bg-background p-4',
+        'space-y-3 rounded-sm border border-border/70 bg-card p-3',
         className,
       )}
     >
@@ -464,23 +508,18 @@ export function AttackMapPanel({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{visibleRows.length} visible attacks</Badge>
-          <Badge variant="secondary">{visibleTeamCount} visible teams</Badge>
-          <Badge variant="secondary">{visibleServiceCount} visible services</Badge>
+          <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+          <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+          <Badge variant="secondary">{visibleServiceCount} services</Badge>
           {attackRows.length > 0 ? (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={currentTickAttackIDs.length === 0}
-                onClick={replayCurrentTick}
-              >
-                <Zap className="h-4 w-4" />
-                Replay Tick #{selectedTickValue}
-              </Button>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
                 Maximize
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAudienceMode(true)}>
+                <Monitor className="h-4 w-4" />
+                Present
               </Button>
             </>
           ) : null}
@@ -488,99 +527,121 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <div className="space-y-2">
-              <label
-                htmlFor={`${title}-team-search`}
-                className="text-sm font-medium text-foreground"
-              >
-                Focus Team
-              </label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id={`${title}-team-search`}
-                  value={teamQuery}
-                  onChange={(event) => setTeamQuery(event.target.value)}
-                  placeholder="Search team name to reveal labels"
-                  className="pl-9"
-                />
+        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/20 p-3">
+          <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <div className="space-y-2">
+                <label
+                  htmlFor={`${title}-team-search`}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Focus team
+                </label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id={`${title}-team-search`}
+                    value={teamQuery}
+                    onChange={(event) => setTeamQuery(event.target.value)}
+                    placeholder="Search team name to reveal labels"
+                    className="pl-9"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Map Mode</p>
-              <div className="flex flex-wrap gap-2">
-                {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
-                  <Button
-                    key={mode}
-                    size="sm"
-                    variant={viewMode === mode ? 'default' : 'outline'}
-                    onClick={() => setViewMode(mode)}
-                  >
-                    {describeViewMode(mode)}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Tick Playback</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length === 0}
-                  onClick={() => moveTick('prev')}
-                  aria-label="Previous Tick"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length < 2}
-                  onClick={() => setPlaybackRunning((current) => !current)}
-                >
-                  {playbackRunning ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  {playbackRunning ? 'Pause' : 'Play'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length === 0}
-                  onClick={() => moveTick('next')}
-                  aria-label="Next Tick"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <select
-                  aria-label="Playback speed"
-                  className="flex h-9 rounded-md border border-input bg-background px-3 text-sm"
-                  value={String(playbackSpeed)}
-                  onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
-                >
-                  {PLAYBACK_SPEEDS.map((speed) => (
-                    <option key={speed.value} value={speed.value}>
-                      {speed.label}
-                    </option>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">View</p>
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
+                    <Button
+                      key={mode}
+                      size="touch"
+                      variant={viewMode === mode ? 'default' : 'outline'}
+                      onClick={() => setViewMode(mode)}
+                    >
+                      {describeViewMode(mode)}
+                    </Button>
                   ))}
-                </select>
+                </div>
               </div>
+            </div>
+            <div className="space-y-1 lg:text-right">
+              <p className="text-sm font-medium text-foreground">
+                {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
+              </p>
+              <p className="max-w-[34rem] text-sm text-muted-foreground lg:max-w-[20rem]">
+                {normalizedTeamQuery === ''
+                  ? `${describeViewMode(viewMode)} view across ${formatTickWindow(visibleTicks)}.`
+                  : `Showing labels for ${searchedTeams.length} matching team(s).`}
+              </p>
             </div>
           </div>
-          <div className="space-y-2 xl:text-right">
-            <p className="text-sm font-medium text-foreground">
-              {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {normalizedTeamQuery === ''
-                ? `${describeViewMode(viewMode)} view across ${formatTickWindow(visibleTicks)}.`
-                : `Showing labels for ${searchedTeams.length} matching team(s).`}
-            </p>
+          <div className="flex flex-col gap-3 border-t border-border/60 pt-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1">
+              <label
+                htmlFor={`${title}-playback-speed`}
+                className="text-xs font-medium uppercase text-muted-foreground"
+              >
+                Playback
+              </label>
+              <p className="text-sm text-muted-foreground">
+                Review ticks or highlight the current burst.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length === 0}
+                onClick={() => moveTick('prev')}
+                aria-label="Previous Tick"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length < 2}
+                onClick={() => setPlaybackRunning((current) => !current)}
+              >
+                {playbackRunning ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {playbackRunning ? 'Pause' : 'Play'}
+              </Button>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length === 0}
+                onClick={() => moveTick('next')}
+                aria-label="Next Tick"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <select
+                id={`${title}-playback-speed`}
+                aria-label="Playback speed"
+                className="flex h-11 rounded-sm border border-input bg-card px-3 text-sm"
+                value={String(playbackSpeed)}
+                onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
+              >
+                {PLAYBACK_SPEEDS.map((speed) => (
+                  <option key={speed.value} value={speed.value}>
+                    {speed.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={currentTickAttackIDs.length === 0}
+                onClick={replayCurrentTick}
+              >
+                <Zap className="h-4 w-4" />
+                Highlight tick #{selectedTickValue}
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -602,9 +663,9 @@ export function AttackMapPanel({
           </DialogHeader>
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{visibleRows.length} visible attacks</Badge>
-              <Badge variant="secondary">{visibleTeamCount} visible teams</Badge>
-              <Badge variant="secondary">{visibleServiceCount} visible services</Badge>
+              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+              <Badge variant="secondary">{visibleServiceCount} services</Badge>
               <Button
                 size="sm"
                 variant="outline"
@@ -612,7 +673,7 @@ export function AttackMapPanel({
                 onClick={replayCurrentTick}
               >
                 <Zap className="h-4 w-4" />
-                Replay Tick #{selectedTickValue}
+                Highlight tick #{selectedTickValue}
               </Button>
               <Button
                 size="sm"
@@ -627,34 +688,153 @@ export function AttackMapPanel({
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={audienceMode} onOpenChange={setAudienceMode}>
+        <DialogContent
+          data-testid="attack-map-audience-dialog"
+          className="!left-0 !top-0 !h-[100dvh] !w-[100dvw] !max-w-none !translate-x-0 !translate-y-0 overflow-hidden rounded-none border-border/70 bg-card p-0"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">Attack map presentation mode</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full-screen attack map for audience displays.
+          </DialogDescription>
+          <div className="relative h-full min-h-0">
+            <CyberAttackMap
+              attacks={visibleRows}
+              className="h-full min-h-0 rounded-none border-0"
+              focusedTeams={[]}
+              highlightedAttackIDs={activeHighlightIDs}
+              placementScopeTeams={allTeams}
+              presentation
+              selectedAttackId={selectedAttackId}
+              selectedTeamId={selectedTeamId}
+              teamLocations={teamLocations}
+              onFeaturedAttackChange={handleFeaturedAttackChange}
+              onSelectAttack={(attackId) => {
+                setSelectedAttackId(attackId);
+                if (attackId) {
+                  setSelectedTeamId(null);
+                }
+              }}
+              onSelectTeam={(teamId) => {
+                setSelectedTeamId(teamId);
+                if (teamId) {
+                  setSelectedAttackId(null);
+                }
+              }}
+            />
+            <div className="pointer-events-none absolute left-5 top-5 flex flex-wrap gap-2">
+              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+              <Badge variant="secondary">{visibleServiceCount} services</Badge>
+              <Badge variant="secondary">{formatTickWindow(visibleTicks)}</Badge>
+            </div>
+            <div className="pointer-events-none absolute bottom-16 left-5 right-5 z-20 max-h-[calc(100dvh-7rem)] overflow-y-auto sm:bottom-5 sm:right-40">
+              {inspectedAttack ? (
+                <PresentationTransmissionRail
+                  data-testid="attack-map-presentation-inspector"
+                  eyebrow={selectedAttack ? 'Attack' : 'Featured transmission'}
+                  title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
+                  lines={[
+                    { label: 'Tick', value: `#${inspectedAttack.tick}` },
+                    { label: 'Service', value: inspectedAttack.service },
+                    { label: 'Verdict', value: inspectedAttack.verdict },
+                  ]}
+                />
+              ) : null}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="absolute bottom-5 right-5"
+              onClick={() => setAudienceMode(false)}
+            >
+              <Minimize2 className="h-4 w-4" />
+              Back to page
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PresentationTransmissionRail({
+  className,
+  eyebrow,
+  lines,
+  title,
+  ...props
+}: {
+  className?: string;
+  eyebrow: string;
+  lines: Array<{ label: string; value: string }>;
+  title: string;
+} & React.HTMLAttributes<HTMLDivElement>): ReactElement {
+  return (
+    <div
+      className={cn(
+        "w-full max-w-[58rem] border-y border-border/70 bg-card/88 px-5 py-3 shadow-[0_1px_0_var(--border)]",
+        className,
+      )}
+      {...props}
+    >
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="min-w-0 space-y-1">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground">
+            {eyebrow}
+          </p>
+          <p className="min-w-0 break-words text-2xl font-semibold leading-7 text-foreground">
+            {title}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-5 text-sm">
+          {lines.map((line) => (
+            <div key={line.label} className="min-w-20">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">
+                {line.label}
+              </p>
+              <p className="mt-1 break-words font-mono text-base text-foreground">
+                {line.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
 function InspectorCard({
   children,
+  className,
   eyebrow,
   lines,
   title,
+  ...props
 }: {
   children?: ReactNode;
+  className?: string;
   eyebrow: string;
   lines: Array<{ label: string; value: string }>;
   title: string;
-}): ReactElement {
+} & React.HTMLAttributes<HTMLDivElement>): ReactElement {
   return (
-    <div className="space-y-4 rounded-md border border-border/70 bg-muted/20 p-4">
+    <div
+      className={cn("min-w-0 space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3", className)}
+      {...props}
+    >
       <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="text-xs font-medium text-muted-foreground">
           {eyebrow}
         </p>
-        <p className="text-base font-semibold text-foreground">{title}</p>
+        <p className="min-w-0 break-words text-base font-semibold text-foreground">{title}</p>
       </div>
       <div className="space-y-2 text-sm">
         {lines.map((line) => (
-          <div key={line.label} className="flex items-start justify-between gap-3">
+          <div key={line.label} className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-3">
             <span className="text-muted-foreground">{line.label}</span>
-            <span className="text-right font-mono text-foreground">{line.value}</span>
+            <span className="min-w-0 break-words text-right font-mono text-foreground">{line.value}</span>
           </div>
         ))}
       </div>

@@ -163,7 +163,7 @@ export default async function AdminAuditPage({ searchParams }: PageProps) {
                   id="limit"
                   name="limit"
                   defaultValue={String(limit)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex h-10 w-full rounded-sm border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="25">25 per page</option>
                   <option value="50">50 per page</option>
