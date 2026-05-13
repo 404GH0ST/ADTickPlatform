@@ -131,7 +131,7 @@ export function ScoreboardPanel({
       <CardHeader>
         <CardTitle>Scoreboard</CardTitle>
         <CardDescription>
-          Dense team rankings with per-service scoring cells and overall totals.
+          Team ranking with per-service attack, defense, SLA, and total scores.
         </CardDescription>
       </CardHeader>
       <CardContent>

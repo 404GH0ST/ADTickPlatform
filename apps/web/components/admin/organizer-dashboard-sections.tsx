@@ -1588,8 +1588,7 @@ export function ScoreboardTab({
         <CardHeader>
           <CardTitle>Scoreboard View</CardTitle>
           <CardDescription>
-            Filter the authoritative ranking by team name without leaving the
-            organizer page.
+            Filter and sort authoritative rankings without leaving this page.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px_auto] md:items-end">
@@ -1641,7 +1640,7 @@ export function ScoreboardTab({
           </Field>
           <InfoPanel className="h-fit">
             <p className="text-sm text-muted-foreground">
-              Showing {sortedRows.length} of {scoreRows.length} team row(s).
+              Showing {sortedRows.length} of {scoreRows.length} teams.
             </p>
           </InfoPanel>
         </CardContent>
@@ -3833,8 +3832,7 @@ function GameScoreboardCard({
           <div>
             <CardTitle>Authoritative Scoreboard</CardTitle>
             <CardDescription>
-              Dense service-by-service rankings derived from persisted
-              game-core scoring state.
+              Service-by-service rankings from persisted game-core scoring state.
             </CardDescription>
           </div>
           <Button

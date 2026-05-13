@@ -21,7 +21,10 @@ export function ScoreboardRank({
   const isStatic = !isNaN(deltaValue) && deltaValue === 0;
 
   return (
-    <div className="flex items-center gap-2">
+    <div
+      className="flex items-center gap-2"
+      aria-label={`Rank ${rank}, ${describeDelta(delta)}${isCurrentTeam ? ", current team" : ""}`}
+    >
       <div className="flex w-6 items-center justify-center">
         {isCurrentTeam ? (
           <Star className="text-highlight h-4 w-4 fill-current" />
@@ -45,7 +48,7 @@ export function ScoreboardRank({
         )}
         {isStatic && <span className="text-muted-foreground/30">—</span>}
         {isNew && (
-          <span className="text-info text-[10px] uppercase tracking-tighter">
+          <span className="text-info text-[10px] font-semibold uppercase">
             New
           </span>
         )}
@@ -56,4 +59,18 @@ export function ScoreboardRank({
       </div>
     </div>
   );
+}
+
+function describeDelta(delta: string): string {
+  const deltaValue = parseInt(delta, 10);
+  if (delta === "new") {
+    return "new entry";
+  }
+  if (Number.isNaN(deltaValue) || deltaValue === 0) {
+    return "unchanged";
+  }
+  if (deltaValue > 0) {
+    return `up ${deltaValue}`;
+  }
+  return `down ${Math.abs(deltaValue)}`;
 }
