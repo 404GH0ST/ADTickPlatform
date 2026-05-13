@@ -150,6 +150,40 @@ const attackItems = [
   },
 ];
 
+const denseAttackMapItems = [
+  ["map-seed-01", "Universitas 01", "Universitas 03", "map-http", 21],
+  ["map-seed-02", "Universitas 02", "Universitas 06", "map-http", 21],
+  ["map-seed-03", "Universitas 06", "Universitas 07", "map-redis", 21],
+  ["map-seed-04", "Universitas 05", "Universitas 11", "map-redis", 22],
+  ["map-seed-05", "Universitas 10", "Universitas 01", "map-postgres", 22],
+  ["map-seed-06", "Universitas 13", "Universitas 08", "map-postgres", 22],
+  ["map-seed-07", "Universitas 14", "Universitas 16", "map-http", 23],
+  ["map-seed-08", "Universitas 12", "Universitas 15", "map-redis", 23],
+  ["map-seed-09", "Universitas 18", "Universitas 17", "map-http", 23],
+  ["map-seed-10", "Universitas 04", "Universitas 10", "map-postgres", 24],
+  ["map-seed-11", "Universitas 09", "Universitas 05", "map-http", 24],
+  ["map-seed-12", "Universitas 07", "Universitas 03", "map-redis", 24],
+  ["map-seed-13", "Universitas 11", "Universitas 02", "map-postgres", 25],
+  ["map-seed-14", "Universitas 01", "Universitas 14", "map-http", 25],
+  ["map-seed-15", "Universitas 15", "Universitas 10", "map-redis", 25],
+  ["map-seed-16", "Universitas 16", "Universitas 05", "map-postgres", 26],
+  ["map-seed-17", "Universitas 08", "Universitas 13", "map-http", 26],
+  ["map-seed-18", "Universitas 03", "Universitas 12", "map-redis", 26],
+  ["map-seed-19", "Universitas 06", "Universitas 18", "map-postgres", 27],
+  ["map-seed-20", "Universitas 17", "Universitas 02", "map-http", 27],
+  ["map-seed-21", "Universitas 05", "Universitas 07", "map-redis", 27],
+  ["map-seed-22", "Universitas 10", "Universitas 15", "map-postgres", 28],
+  ["map-seed-23", "Universitas 14", "Universitas 09", "map-http", 28],
+  ["map-seed-24", "Universitas 14", "Universitas 16", "map-http", 28],
+].map(([id, attacker, victim, service, tick]) => ({
+  id,
+  attacker,
+  victim,
+  service,
+  tick,
+  verdict: "first valid submission accepted",
+}));
+
 const teams = [
   {
     id: 101,
@@ -874,6 +908,15 @@ function createStateForScenario(scenario = "default") {
 
   if (scenario === "realtime-updates") {
     nextState.streamScenario = "realtime-updates";
+  }
+
+  if (scenario === "attack-map-dense") {
+    nextState.attackItems = denseAttackMapItems.map((item) => ({ ...item }));
+    nextState.gameStatus.current_tick = {
+      ...nextState.gameStatus.current_tick,
+      id: 28,
+    };
+    nextState.gameStatus.total_ticks = 28;
   }
 
   if (scenario === "empty-attacks") {

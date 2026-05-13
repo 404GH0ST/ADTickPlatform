@@ -12,6 +12,8 @@ export type CyberAttackEvent = {
   victim: string;
   service: string;
   tick: number;
+  attackerLocation?: GeoPoint;
+  victimLocation?: GeoPoint;
 };
 
 type GlobeRotation = {
@@ -69,21 +71,40 @@ type TeamNode = ProjectedPoint & {
   outgoing: number;
 };
 
+type ArcPoint = ProjectedPoint & {
+  id: string;
+};
+
 type AttackArc = {
+  attackIds: string[];
   id: string;
   domId: string;
   attacker: string;
   victim: string;
   service: string;
   tick: number;
+  count: number;
   color: string;
+  endX: number;
+  endY: number;
+  featured: boolean;
   highlighted: boolean;
+  fresh: boolean;
   selected: boolean;
+  recency: number;
   active: boolean;
   path: string;
   delay: string;
   partial: boolean;
+  startX: number;
+  startY: number;
   visible: boolean;
+  visibility: number;
+};
+
+type AttackRoute = CyberAttackEvent & {
+  attackIds: string[];
+  count: number;
 };
 
 type TeamStats = {
@@ -106,7 +127,8 @@ const CENTER_Y = MAP_HEIGHT / 2 + 2;
 const GLOBE_RADIUS = 256;
 const MAX_ROTATION_LAT = 62;
 const AUTO_ROTATE_IDLE_MS = 10_000;
-const AUTO_ROTATE_STEP_MS = 4_200;
+const FEATURED_ATTACK_STEP_MS = 6_400;
+const DEFAULT_LABEL_LIMIT = 10;
 const LABEL_HEIGHT = 40;
 const LABEL_PADDING_X = 6;
 const LABEL_SAFE_INSET_X = 24;
@@ -146,6 +168,9 @@ export function CyberAttackMap({
   className,
   onSelectAttack,
   onSelectTeam,
+  onFeaturedAttackChange,
+  presentation = false,
+  teamLocations,
 }: {
   attacks: CyberAttackEvent[];
   highlightedAttackIDs?: string[];
@@ -156,14 +181,24 @@ export function CyberAttackMap({
   className?: string;
   onSelectAttack?: (attackId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
+  onFeaturedAttackChange?: (attackId: string | null) => void;
+  presentation?: boolean;
+  teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
+  const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
+  const mapRootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const autoIntervalRef = useRef<number | null>(null);
-  const autoTargetIndexRef = useRef(0);
   const animationFrameRef = useRef<number | null>(null);
+  const featuredAttackIndexRef = useRef(0);
+  const featuredAttackIntervalRef = useRef<number | null>(null);
+  const featuredAttackIdRef = useRef<string | null>(featuredAttackId);
+  const previousAttackIdsRef = useRef<Set<string> | null>(null);
+  const freshAttackTimeoutRef = useRef<number | null>(null);
+  const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
   const idleTimeoutRef = useRef<number | null>(null);
+  const lastActivityRef = useRef(0);
   const rotationRef = useRef<GlobeRotation>(rotation);
   const mapId = useId().replace(/:/g, '');
   const clipId = `${mapId}-globe-clip`;
@@ -174,26 +209,20 @@ export function CyberAttackMap({
   const hasFocus =
     selectedAttackId !== null ||
     selectedTeamId !== null ||
+    featuredAttackId !== null ||
     highlightedAttackIDs.length > 0 ||
     focusedTeams.length > 0;
-  const autoTargets = useMemo(() => {
-    const attackTeamNames = listAttackTeams(attacks);
-    const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
-    const landmarksByTeam = getLandmarkPlacements(placementTeamNames);
-    return attackTeamNames.flatMap((teamName) => {
-      const landmark = landmarksByTeam[teamName];
-      return landmark ? [landmark] : [];
-    });
-  }, [attacks, placementScopeTeams]);
-
-  const { arcs, nodes, services } = useMemo(() => {
+  const featuredQueue = useMemo(() => buildFeaturedAttackQueue(attacks), [attacks]);
+  const { arcs, featuredAttack, nodes, services } = useMemo(() => {
     const attackTeamNames = listAttackTeams(attacks);
     const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
     const teamStats = buildTeamStats(attacks, attackTeamNames);
-    const landmarksByTeam = getLandmarkPlacements(placementTeamNames);
+    const landmarksByTeam = getLandmarkPlacements(placementTeamNames, attacks, teamLocations);
     const highlightedSet = new Set(highlightedAttackIDs);
     const serviceNames = listAttackServices(attacks);
     const serviceColors = buildServiceColors(serviceNames);
+    const tickRange = getAttackTickRange(attacks);
+    const routeBundles = bundleAttackRoutes(attacks);
 
     const nodesByName: Record<string, TeamNode> = {};
     attackTeamNames.forEach((name) => {
@@ -219,14 +248,17 @@ export function CyberAttackMap({
       };
     });
 
-    const arcs = attacks.map((attack, index) => {
+    const arcs = routeBundles.map((attack, index) => {
       const start = nodesByName[attack.attacker];
       const end = nodesByName[attack.victim];
-      const highlighted = highlightedSet.has(attack.id);
-      const selected = selectedAttackId === attack.id;
+      const highlighted = attack.attackIds.some((id) => highlightedSet.has(id));
+      const selected = selectedAttackId !== null && attack.attackIds.includes(selectedAttackId);
+      const featured = featuredAttackId !== null && attack.attackIds.includes(featuredAttackId);
+      const fresh = attack.attackIds.some((id) => freshAttackIds.has(id));
       const active =
         highlighted ||
         selected ||
+        featured ||
         focusedTeamSet.has(attack.attacker) ||
         focusedTeamSet.has(attack.victim) ||
         attack.attacker === selectedTeamId ||
@@ -236,27 +268,39 @@ export function CyberAttackMap({
         start.highlighted = true;
         end.highlighted = true;
       }
+      const arcEndpoints = getArcEndpoints(start, end, rotation);
 
       return {
         id: attack.id,
+        attackIds: attack.attackIds,
         domId: `${mapId}-arc-${index}`,
         attacker: attack.attacker,
         victim: attack.victim,
         service: attack.service,
         tick: attack.tick,
+        count: attack.count,
         color: serviceColors[attack.service],
+        endX: arcEndpoints.end.x,
+        endY: arcEndpoints.end.y,
         highlighted,
+        fresh,
         selected,
+        featured,
+        recency: getAttackRecency(attack.tick, tickRange),
         active,
-        path: buildAttackPath(start, end, attack.id),
-        delay: `${(index % 9) * 0.32}s`,
+        path: buildAttackPath(arcEndpoints.start, arcEndpoints.end, attack.id),
+        delay: `${(index % 9) * 0.28}s`,
         partial: start.visible !== end.visible,
+        startX: arcEndpoints.start.x,
+        startY: arcEndpoints.start.y,
         visible: start.visible || end.visible,
+        visibility: getArcVisibility(start, end),
       } satisfies AttackArc;
     });
 
     return {
       arcs: arcs.sort((left, right) => Number(left.active) - Number(right.active)),
+      featuredAttack: attacks.find((attack) => attack.id === featuredAttackId) ?? null,
       nodes: resolveLabelCollisions(Object.values(nodesByName)).sort((left, right) => left.z - right.z),
       services: serviceNames.map((service) => ({
         color: serviceColors[service],
@@ -266,14 +310,17 @@ export function CyberAttackMap({
   }, [
     attacks,
     focusedTeamSet,
+    featuredAttackId,
+    freshAttackIds,
     highlightedAttackIDs,
     mapId,
     placementScopeTeams,
     rotation,
     selectedAttackId,
     selectedTeamId,
+    teamLocations,
   ]);
-  const showAllLabels = nodes.length > 0 && nodes.length <= 18;
+  const showDefaultLabels = !hasFocus && nodes.length > 0 && nodes.length <= DEFAULT_LABEL_LIMIT;
   const motionEnabled = attacks.length <= 160;
 
   useEffect(() => {
@@ -281,18 +328,95 @@ export function CyberAttackMap({
   }, [rotation]);
 
   useEffect(() => {
+    featuredAttackIdRef.current = featuredAttackId;
+    onFeaturedAttackChange?.(featuredAttackId);
+  }, [featuredAttackId, onFeaturedAttackChange]);
+
+  useEffect(() => {
     startAutoRotationFromIdle();
     return clearAutoRotationTimers;
-  }, [autoTargets]);
+  }, [attacks, featuredQueue, placementScopeTeams]);
 
-  function clearAutoRotationTimers(): void {
+  useEffect(() => {
+    const nextAttackIds = new Set(attacks.map((attack) => attack.id));
+    const previousAttackIds = previousAttackIdsRef.current;
+    previousAttackIdsRef.current = nextAttackIds;
+    if (previousAttackIds === null) {
+      return undefined;
+    }
+
+    const freshIds = attacks
+      .map((attack) => attack.id)
+      .filter((id) => !previousAttackIds.has(id));
+    if (freshIds.length === 0) {
+      return undefined;
+    }
+
+    setFreshAttackIds(new Set(freshIds));
+    if (freshAttackTimeoutRef.current !== null) {
+      window.clearTimeout(freshAttackTimeoutRef.current);
+    }
+    freshAttackTimeoutRef.current = window.setTimeout(() => {
+      setFreshAttackIds(new Set());
+      freshAttackTimeoutRef.current = null;
+    }, 4_200);
+
+    return undefined;
+  }, [attacks]);
+
+  useEffect(() => {
+    const root = mapRootRef.current;
+    if (!root) {
+      return undefined;
+    }
+
+    function handleFeatureAttack(event: Event): void {
+      const detail = (event as CustomEvent<{
+        animate?: boolean;
+        attackId?: string;
+        rotation?: GlobeRotation;
+      }>).detail;
+      if (!detail?.attackId) {
+        return;
+      }
+      const attack = attacks.find((item) => item.id === detail.attackId);
+      if (!attack) {
+        return;
+      }
+      clearAutoRotationTimers(false);
+      if (detail.rotation) {
+        const nextRotation = {
+          lat: clamp(detail.rotation.lat, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+          lon: normalizeLongitude(detail.rotation.lon),
+        };
+        rotationRef.current = nextRotation;
+        setRotation(nextRotation);
+      }
+      featureAttack(attack, detail.rotation ? false : detail.animate !== false);
+    }
+
+    root.addEventListener('ad-platform:feature-attack', handleFeatureAttack);
+    return () => {
+      root.removeEventListener('ad-platform:feature-attack', handleFeatureAttack);
+    };
+  }, [attacks, placementScopeTeams]);
+
+  function clearAutoRotationTimers(clearFeatured = true): void {
     if (idleTimeoutRef.current !== null) {
       window.clearTimeout(idleTimeoutRef.current);
       idleTimeoutRef.current = null;
     }
-    if (autoIntervalRef.current !== null) {
-      window.clearInterval(autoIntervalRef.current);
-      autoIntervalRef.current = null;
+    if (featuredAttackIntervalRef.current !== null) {
+      window.clearInterval(featuredAttackIntervalRef.current);
+      featuredAttackIntervalRef.current = null;
+    }
+    if (freshAttackTimeoutRef.current !== null) {
+      window.clearTimeout(freshAttackTimeoutRef.current);
+      freshAttackTimeoutRef.current = null;
+    }
+    if (clearFeatured && featuredAttackIdRef.current !== null) {
+      featuredAttackIdRef.current = null;
+      setFeaturedAttackId(null);
     }
     cancelRotationAnimation();
   }
@@ -305,33 +429,55 @@ export function CyberAttackMap({
   }
 
   function markUserActivity(): void {
+    const now = window.performance.now();
+    if (featuredAttackIdRef.current === null && now - lastActivityRef.current < 250) {
+      return;
+    }
+    lastActivityRef.current = now;
     clearAutoRotationTimers();
     startAutoRotationFromIdle();
   }
 
-  function rotateToNextAutoTarget(): void {
-    if (autoTargets.length === 0) {
+  function featureNextAttack(): void {
+    if (attacks.length === 0) {
       return;
     }
-    const target = autoTargets[autoTargetIndexRef.current % autoTargets.length];
-    autoTargetIndexRef.current += 1;
-    animateRotationTo({
-      lat: clamp(target.lat, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
-      lon: target.lon,
-    });
+    const queue = featuredQueue.length > 0 ? featuredQueue : attacks;
+    const attack = queue[featuredAttackIndexRef.current % queue.length];
+    featuredAttackIndexRef.current += 1;
+    featureAttack(attack, true);
+  }
+
+  function featureAttack(attack: CyberAttackEvent, animate: boolean): void {
+    setFeaturedAttackId(attack.id);
+
+    const attackTeamNames = listAttackTeams(attacks);
+    const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
+    const landmarksByTeam = getLandmarkPlacements(placementTeamNames, attacks, teamLocations);
+    const attacker = landmarksByTeam[attack.attacker];
+    const victim = landmarksByTeam[attack.victim];
+    const target = getFeaturedAttackRotation(attacker, victim);
+    if (target && animate) {
+      animateRotationTo(target);
+    }
   }
 
   function animateRotationTo(target: GlobeRotation): void {
     cancelRotationAnimation();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      rotationRef.current = target;
+      setRotation(target);
+      return;
+    }
     const start = rotationRef.current;
     const startTime = window.performance.now();
-    const duration = 1800;
+    const duration = 2800;
     const deltaLon = normalizeLongitude(target.lon - start.lon);
     const deltaLat = target.lat - start.lat;
 
     function tick(timestamp: number): void {
       const progress = clamp((timestamp - startTime) / duration, 0, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
+      const eased = 1 - Math.pow(1 - progress, 4);
       const nextRotation = {
         lat: start.lat + deltaLat * eased,
         lon: normalizeLongitude(start.lon + deltaLon * eased),
@@ -349,8 +495,8 @@ export function CyberAttackMap({
   }
 
   function startAutoRotationFromIdle(): void {
-    clearAutoRotationTimers();
-    if (autoTargets.length === 0) {
+    clearAutoRotationTimers(false);
+    if (attacks.length === 0) {
       return;
     }
     idleTimeoutRef.current = window.setTimeout(() => {
@@ -358,10 +504,10 @@ export function CyberAttackMap({
         startAutoRotationFromIdle();
         return;
       }
-      rotateToNextAutoTarget();
-      autoIntervalRef.current = window.setInterval(
-        rotateToNextAutoTarget,
-        AUTO_ROTATE_STEP_MS,
+      featureNextAttack();
+      featuredAttackIntervalRef.current = window.setInterval(
+        featureNextAttack,
+        FEATURED_ATTACK_STEP_MS,
       );
     }, AUTO_ROTATE_IDLE_MS);
   }
@@ -379,11 +525,11 @@ export function CyberAttackMap({
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
-    markUserActivity();
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
+    markUserActivity();
     const nextLon = normalizeLongitude(drag.startLon - (event.clientX - drag.x) * 0.42);
     const nextLat = clamp(drag.startLat + (event.clientY - drag.y) * 0.34, -MAX_ROTATION_LAT, MAX_ROTATION_LAT);
     const nextRotation = { lat: nextLat, lon: nextLon };
@@ -400,6 +546,11 @@ export function CyberAttackMap({
 
   return (
     <div
+      ref={mapRootRef}
+      data-testid="cyber-attack-map"
+      data-featured-attack-id={featuredAttackId ?? undefined}
+      data-rotation-lat={rotation.lat.toFixed(2)}
+      data-rotation-lon={rotation.lon.toFixed(2)}
       className={cn(
         'relative aspect-[2/1] w-full touch-none overflow-hidden rounded-sm border',
         className,
@@ -411,7 +562,9 @@ export function CyberAttackMap({
       onMouseMove={markUserActivity}
       style={{
         background:
-          'radial-gradient(circle at 48% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 14%, transparent) 0%, transparent 34%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 18%, transparent) 0%, transparent 62%), var(--attack-map-background)',
+          presentation
+            ? 'radial-gradient(circle at 50% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 18%, transparent) 0%, transparent 38%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 20%, transparent) 0%, transparent 64%), var(--attack-map-background)'
+            : 'radial-gradient(circle at 48% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 14%, transparent) 0%, transparent 34%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 18%, transparent) 0%, transparent 62%), var(--attack-map-background)',
         borderColor: 'var(--attack-map-border)',
         cursor: dragRef.current ? 'grabbing' : 'grab',
       }}
@@ -452,6 +605,7 @@ export function CyberAttackMap({
               arc={arc}
               beamClassName={beamClassName}
               dimmed={hasFocus && !arc.active}
+              haloClassName={haloClassName}
               markerId={markerId}
               motionEnabled={motionEnabled}
               onSelectAttack={onSelectAttack}
@@ -460,7 +614,11 @@ export function CyberAttackMap({
         </g>
 
         {nodes.map((node) => {
-          const showLabel = showAllLabels || shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet);
+          const featured = isFeaturedTeam(node, featuredAttack);
+          const showLabel =
+            showDefaultLabels ||
+            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
+            featured;
           return (
             <TeamNodeLabel
               key={`${node.id}-label`}
@@ -470,16 +628,23 @@ export function CyberAttackMap({
           );
         })}
 
-        {nodes.map((node) => (
-          <TeamNodeDot
-            key={node.id}
-            node={node}
-            haloClassName={haloClassName}
-            showLabel={showAllLabels || shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet)}
-            onHoverChange={setHoveredTeamId}
-            onSelectTeam={onSelectTeam}
-          />
-        ))}
+        {nodes.map((node) => {
+          const featured = isFeaturedTeam(node, featuredAttack);
+          const showLabel =
+            showDefaultLabels ||
+            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
+            featured;
+          return (
+            <TeamNodeDot
+              key={node.id}
+              node={node}
+              haloClassName={haloClassName}
+              showLabel={showLabel}
+              onHoverChange={setHoveredTeamId}
+              onSelectTeam={onSelectTeam}
+            />
+          );
+        })}
 
       </svg>
 
@@ -504,32 +669,34 @@ export function CyberAttackMap({
         ))}
       </div>
 
-      <div className="absolute right-3 top-3 flex flex-wrap justify-end gap-1.5">
-        {[
-          { label: 'Americas', value: { lat: -6, lon: -82 } },
-          { label: 'EMEA', value: { lat: -6, lon: 34 } },
-          { label: 'APAC', value: { lat: -6, lon: 118 } },
-        ].map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            className="rounded-sm border px-2 py-1 text-[10px] font-semibold"
-            onClick={(event) => {
-              event.stopPropagation();
-              markUserActivity();
-              animateRotationTo(preset.value);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              backgroundColor: 'var(--attack-map-legend-background)',
-              borderColor: 'var(--attack-map-legend-border)',
-              color: 'var(--attack-map-node-label)',
-            }}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </div>
+      {presentation ? null : (
+        <div className="absolute right-3 top-3 flex flex-wrap justify-end gap-1.5">
+          {[
+            { label: 'Americas', value: { lat: -6, lon: -82 } },
+            { label: 'EMEA', value: { lat: -6, lon: 34 } },
+            { label: 'APAC', value: { lat: -6, lon: 118 } },
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="rounded-sm border px-2 py-1 text-[10px] font-semibold"
+              onClick={(event) => {
+                event.stopPropagation();
+                markUserActivity();
+                animateRotationTo(preset.value);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                backgroundColor: 'var(--attack-map-legend-background)',
+                borderColor: 'var(--attack-map-legend-border)',
+                color: 'var(--attack-map-node-label)',
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <style
         dangerouslySetInnerHTML={{
@@ -543,17 +710,26 @@ export function CyberAttackMap({
           70% { opacity: 0; transform: scale(1.55); }
           100% { opacity: 0; transform: scale(1.55); }
         }
+        @keyframes ${haloClassName}-fresh {
+          0% { opacity: 0; stroke-width: 7; }
+          16% { opacity: 0.9; stroke-width: 5; }
+          100% { opacity: 0; stroke-width: 1; }
+        }
         .${beamClassName} {
-          animation: ${beamClassName}-keyframes 2s linear infinite;
+          animation: ${beamClassName}-keyframes 4.8s linear infinite;
         }
         .${haloClassName} {
           transform-box: fill-box;
           transform-origin: center;
           animation: ${haloClassName}-keyframes 1.7s cubic-bezier(0.22, 1, 0.36, 1) infinite;
         }
+        .${haloClassName}-fresh {
+          animation: ${haloClassName}-fresh 1.8s cubic-bezier(0.22, 1, 0.36, 1) 2;
+        }
         @media (prefers-reduced-motion: reduce) {
           .${beamClassName},
-          .${haloClassName} {
+          .${haloClassName},
+          .${haloClassName}-fresh {
             animation: none !important;
           }
         }
@@ -690,6 +866,7 @@ function AttackArcPath({
   arc,
   beamClassName,
   dimmed,
+  haloClassName,
   markerId,
   motionEnabled,
   onSelectAttack,
@@ -697,6 +874,7 @@ function AttackArcPath({
   arc: AttackArc;
   beamClassName: string;
   dimmed: boolean;
+  haloClassName: string;
   markerId: string;
   motionEnabled: boolean;
   onSelectAttack?: (attackId: string | null) => void;
@@ -705,42 +883,104 @@ function AttackArcPath({
     return null;
   }
   const emphasized = arc.selected || arc.highlighted || arc.active;
-  const opacity = dimmed ? '0.06' : arc.partial ? '0.24' : emphasized ? '0.86' : '0.42';
-  const strokeWidth = arc.selected ? '3.6' : emphasized ? '2.35' : '1.45';
-  const packetEnabled = motionEnabled && !dimmed && !arc.partial;
+  const serviceStyle = getServiceRouteStyle(arc.service);
+  const depthOpacity = clamp(0.36 + arc.visibility * 0.64, 0.24, 1);
+  const bundleWeight = clamp(Math.log2(arc.count + 1) * 0.22, 0, 0.72);
+  const trafficWeight = clamp(0.72 + arc.recency * 0.42 + bundleWeight, 0.72, 1.52);
+  const opacity = dimmed
+    ? 0.035
+    : arc.fresh
+      ? 0.96
+    : arc.partial
+      ? arc.featured
+        ? 0.92
+        : 0.12 * depthOpacity * trafficWeight
+      : arc.featured
+        ? 0.98
+        : emphasized
+          ? 0.78 * depthOpacity * trafficWeight
+          : 0.2 * depthOpacity * trafficWeight;
+  const strokeWidth = arc.partial
+    ? arc.featured
+      ? '4.4'
+      : String(1 + arc.recency * 0.85 + bundleWeight)
+    : arc.featured
+      ? '5.2'
+      : arc.selected
+        ? '3.6'
+        : emphasized
+          ? String(2 + arc.recency * 0.95 + bundleWeight)
+          : String(1 + arc.recency * 0.65 + bundleWeight);
+  const packetEnabled =
+    motionEnabled &&
+    !dimmed &&
+    !arc.partial &&
+    arc.visibility > 0.16 &&
+    (arc.featured || arc.fresh || arc.selected || arc.highlighted || arc.recency > 0.86);
 
   return (
     <g>
+      {arc.featured && !dimmed ? (
+        <path
+          d={arc.path}
+          fill="none"
+          stroke={arc.color}
+          strokeLinecap="round"
+          strokeOpacity={arc.partial ? '0.42' : '0.32'}
+          strokeWidth={arc.partial ? '12' : '15'}
+        />
+      ) : null}
       <path
         id={arc.domId}
+        data-attack-arc="true"
+        data-attack-count={String(arc.count)}
+        data-attack-id={arc.id}
+        data-featured={arc.featured ? 'true' : 'false'}
+        data-fresh={arc.fresh ? 'true' : 'false'}
+        data-partial={arc.partial ? 'true' : 'false'}
         d={arc.path}
         fill="none"
         markerEnd={emphasized && !arc.partial ? `url(#${markerId})` : undefined}
         stroke={arc.color}
         strokeLinecap="round"
-        strokeDasharray={arc.partial ? '7 9' : undefined}
+        strokeDasharray={arc.partial && !arc.featured ? serviceStyle.partialDash : undefined}
         strokeOpacity={opacity}
         strokeWidth={strokeWidth}
       />
+      {arc.fresh && !dimmed ? (
+        <path
+          d={arc.path}
+          fill="none"
+          stroke="var(--attack-map-node-highlight)"
+          strokeLinecap="round"
+          strokeOpacity="0.78"
+          strokeWidth="7"
+          className={`${haloClassName}-fresh`}
+        />
+      ) : null}
       {packetEnabled ? (
         <>
           <path
             d={arc.path}
             fill="none"
-            stroke={arc.color}
-            strokeDasharray={emphasized ? '38 722' : '20 740'}
+            stroke={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color}
+            strokeDasharray={arc.featured ? '54 706' : emphasized ? serviceStyle.activeDash : serviceStyle.idleDash}
             strokeLinecap="round"
-            strokeOpacity={emphasized ? '0.95' : '0.48'}
-            strokeWidth={emphasized ? '3.4' : '2.2'}
+            strokeOpacity={arc.featured ? '1' : emphasized ? '0.95' : '0.48'}
+            strokeWidth={arc.featured ? '5.1' : emphasized ? serviceStyle.activeWidth : serviceStyle.idleWidth}
             className={beamClassName}
           />
-          <circle r={emphasized ? '4.5' : '3.1'} fill={arc.color} opacity={emphasized ? '0.95' : '0.72'}>
-            <animateMotion dur={emphasized ? '2.4s' : '3.6s'} begin={arc.delay} repeatCount="indefinite">
+          <circle r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
+            <animateMotion dur={arc.featured ? serviceStyle.featuredDuration : emphasized ? serviceStyle.activeDuration : `${serviceStyle.idleDuration - arc.recency * 0.55}s`} begin={arc.delay} repeatCount="indefinite">
               <mpath href={`#${arc.domId}`} />
             </animateMotion>
           </circle>
         </>
       ) : null}
+      {arc.featured && !dimmed ? (
+        <FeaturedTransmissionEndpoints arc={arc} haloClassName={haloClassName} />
+      ) : null}
+      {arc.count > 1 && !dimmed ? <RouteBundleBadge arc={arc} /> : null}
       <path
         d={arc.path}
         fill="none"
@@ -748,8 +988,93 @@ function AttackArcPath({
         strokeWidth="14"
         pointerEvents="stroke"
         className="cursor-pointer"
-        onClick={() => onSelectAttack?.(arc.selected ? null : arc.id)}
+        onClick={() => onSelectAttack?.(arc.selected ? null : arc.attackIds[0])}
       />
+    </g>
+  );
+}
+
+function FeaturedTransmissionEndpoints({
+  arc,
+  haloClassName,
+}: {
+  arc: AttackArc;
+  haloClassName: string;
+}): ReactElement {
+  return (
+    <g pointerEvents="none">
+      <circle
+        cx={arc.startX}
+        cy={arc.startY}
+        r="12"
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity="0.58"
+        strokeWidth="2"
+        className={haloClassName}
+      />
+      <circle
+        cx={arc.startX}
+        cy={arc.startY}
+        r="4.4"
+        fill="var(--attack-map-node-highlight)"
+        opacity="0.98"
+      />
+      <circle
+        cx={arc.endX}
+        cy={arc.endY}
+        r="15"
+        fill="var(--attack-map-node-highlight-halo)"
+        fillOpacity="0.32"
+      />
+      <circle
+        cx={arc.endX}
+        cy={arc.endY}
+        r="8.5"
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeOpacity="0.9"
+        strokeWidth="2.4"
+      />
+      <path
+        d={`M ${arc.endX - 12} ${arc.endY} L ${arc.endX + 12} ${arc.endY} M ${arc.endX} ${arc.endY - 12} L ${arc.endX} ${arc.endY + 12}`}
+        fill="none"
+        stroke="var(--attack-map-node-highlight)"
+        strokeLinecap="round"
+        strokeOpacity="0.72"
+        strokeWidth="1.5"
+      />
+    </g>
+  );
+}
+
+function RouteBundleBadge({ arc }: { arc: AttackArc }): ReactElement {
+  const x = (arc.startX + arc.endX) / 2;
+  const y = (arc.startY + arc.endY) / 2;
+
+  return (
+    <g pointerEvents="none">
+      <rect
+        x={x - 12}
+        y={y - 10}
+        width="24"
+        height="18"
+        rx="3"
+        fill="var(--attack-map-legend-background)"
+        stroke="var(--attack-map-legend-border)"
+        strokeOpacity="0.82"
+      />
+      <text
+        x={x}
+        y={y + 3}
+        textAnchor="middle"
+        fill="var(--attack-map-node-label)"
+        fontSize="9.5"
+        fontWeight="700"
+        className="select-none font-mono"
+      >
+        x{arc.count}
+      </text>
     </g>
   );
 }
@@ -881,13 +1206,13 @@ function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
 }
 
 function getTeamLabelWidth(node: TeamNode): number {
-  return getRawLabelWidth(
-    node.name.length > node.landmark.name.length ? node.name : node.landmark.name,
-  );
+  const titleWidth = node.name.length * 6.5;
+  const metaWidth = `${node.landmark.name} / ${node.outgoing} out`.length * 5.2;
+  return clamp(Math.max(titleWidth, metaWidth) + 22, 82, 178);
 }
 
 function getRawLabelWidth(value: string): number {
-  return clamp(value.length * 7.2 + 38, 104, 220);
+  return clamp(value.length * 6.2 + 22, 82, 178);
 }
 
 function shouldShowTeamLabel(
@@ -903,7 +1228,17 @@ function shouldShowTeamLabel(
   );
 }
 
-function buildAttackPath(start: TeamNode, end: TeamNode, attackId: string): string {
+function isFeaturedTeam(
+  node: TeamNode,
+  featuredAttack: CyberAttackEvent | null,
+): boolean {
+  return (
+    featuredAttack !== null &&
+    (node.name === featuredAttack.attacker || node.name === featuredAttack.victim)
+  );
+}
+
+function buildAttackPath(start: ArcPoint, end: ArcPoint, attackId: string): string {
   if (start.id === end.id) {
     const radius = 24 + (hashString(attackId) % 18);
     return `M ${start.x} ${start.y} C ${start.x - radius} ${start.y - radius * 2}, ${start.x + radius} ${start.y - radius * 2}, ${start.x} ${start.y}`;
@@ -918,6 +1253,72 @@ function buildAttackPath(start: TeamNode, end: TeamNode, attackId: string): stri
   const controlY = midY + centerVector.y * lift - 18;
 
   return `M ${start.x} ${start.y} Q ${controlX} ${controlY} ${end.x} ${end.y}`;
+}
+
+function getArcEndpoints(
+  start: TeamNode,
+  end: TeamNode,
+  rotation: GlobeRotation,
+): { end: ArcPoint; start: ArcPoint } {
+  if (start.visible === end.visible) {
+    return { end, start };
+  }
+  if (start.visible) {
+    return {
+      end: findHorizonPoint(start, end, rotation),
+      start,
+    };
+  }
+  return {
+    end,
+    start: findHorizonPoint(end, start, rotation),
+  };
+}
+
+function findHorizonPoint(
+  visiblePoint: GeoPoint,
+  hiddenPoint: GeoPoint,
+  rotation: GlobeRotation,
+): ArcPoint {
+  let low = 0;
+  let high = 1;
+  let projected = projectGlobePoint(visiblePoint, rotation);
+
+  for (let index = 0; index < 24; index += 1) {
+    const middle = (low + high) / 2;
+    const candidate = interpolateGeoPoint(visiblePoint, hiddenPoint, middle);
+    const candidateProjection = projectGlobePoint(candidate, rotation);
+
+    if (candidateProjection.z > 0.015) {
+      low = middle;
+      projected = candidateProjection;
+    } else {
+      high = middle;
+    }
+  }
+
+  return {
+    ...projected,
+    id: `${hiddenPoint.lat}:${hiddenPoint.lon}:horizon`,
+    visible: true,
+  };
+}
+
+function interpolateGeoPoint(start: GeoPoint, end: GeoPoint, progress: number): GeoPoint {
+  return {
+    lat: start.lat + (end.lat - start.lat) * progress,
+    lon: normalizeLongitude(start.lon + normalizeLongitude(end.lon - start.lon) * progress),
+  };
+}
+
+function getArcVisibility(start: TeamNode, end: TeamNode): number {
+  if (!start.visible && !end.visible) {
+    return 0;
+  }
+  if (start.visible !== end.visible) {
+    return clamp((Math.max(start.z, end.z) + 0.04) / 1.04, 0, 0.5);
+  }
+  return clamp((Math.min(start.z, end.z) + 0.04) / 1.04, 0, 1);
 }
 
 function buildProjectedCountryFillPath(points: GeoPoint[], rotation: GlobeRotation): string {
@@ -1012,15 +1413,108 @@ function parseLinearRing(ring: unknown): Array<[number, number]> {
   });
 }
 
-function getLandmarkPlacements(teamNames: string[]): Record<string, Landmark> {
+function getLandmarkPlacements(
+  teamNames: string[],
+  attacks: CyberAttackEvent[] = [],
+  teamLocations: Record<string, GeoPoint> = {},
+): Record<string, Landmark> {
   const orderedTeams = [...teamNames].sort();
   const placements: Record<string, Landmark> = {};
+  const attackLocations = getAttackProvidedLocations(attacks);
 
   orderedTeams.forEach((team, index) => {
-    placements[team] = LANDMARKS[index % LANDMARKS.length];
+    const provided = teamLocations[team] ?? attackLocations[team];
+    placements[team] = provided
+      ? {
+          code: `provided-${hashString(team)}`,
+          name: 'Configured location',
+          lat: provided.lat,
+          lon: provided.lon,
+        }
+      : LANDMARKS[index % LANDMARKS.length];
   });
 
   return placements;
+}
+
+function getAttackProvidedLocations(attacks: CyberAttackEvent[]): Record<string, GeoPoint> {
+  const locations: Record<string, GeoPoint> = {};
+  attacks.forEach((attack) => {
+    if (attack.attackerLocation) {
+      locations[attack.attacker] = attack.attackerLocation;
+    }
+    if (attack.victimLocation) {
+      locations[attack.victim] = attack.victimLocation;
+    }
+  });
+  return locations;
+}
+
+function getFeaturedAttackRotation(
+  attacker?: Landmark,
+  victim?: Landmark,
+): GlobeRotation | null {
+  if (!attacker && !victim) {
+    return null;
+  }
+  if (!attacker || !victim) {
+    const target = attacker ?? victim;
+    return target
+      ? {
+          lat: clamp(target.lat * 0.72, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+          lon: target.lon,
+        }
+      : null;
+  }
+
+  const midpoint = {
+    lat: clamp((attacker.lat + victim.lat) / 2, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    lon: getMidLongitude(attacker.lon, victim.lon),
+  };
+  const candidates = [
+    midpoint,
+    { lat: clamp(midpoint.lat * 0.82, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: midpoint.lon },
+    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon - 18) },
+    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon + 18) },
+    { lat: clamp(attacker.lat * 0.55 + victim.lat * 0.45, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: attacker.lon },
+    { lat: clamp(attacker.lat * 0.45 + victim.lat * 0.55, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: victim.lon },
+  ];
+
+  return candidates.reduce((best, candidate) => (
+    scoreFeaturedRotation(candidate, attacker, victim) > scoreFeaturedRotation(best, attacker, victim)
+      ? candidate
+      : best
+  ));
+}
+
+function getMidLongitude(left: number, right: number): number {
+  return normalizeLongitude(left + normalizeLongitude(right - left) / 2);
+}
+
+function scoreFeaturedRotation(
+  rotation: GlobeRotation,
+  attacker: Landmark,
+  victim: Landmark,
+): number {
+  const start = projectGlobePoint(attacker, rotation);
+  const end = projectGlobePoint(victim, rotation);
+  const weakestEndpoint = Math.min(start.z, end.z);
+  const combinedDepth = start.z + end.z;
+  const rimPenalty = getRimPenalty(start) + getRimPenalty(end);
+  const labelRoomBonus = getLabelRoomScore(start) + getLabelRoomScore(end);
+
+  return weakestEndpoint * 4 + combinedDepth * 1.4 + labelRoomBonus - rimPenalty;
+}
+
+function getRimPenalty(point: ProjectedPoint): number {
+  const distanceFromCenter = Math.hypot(point.x - CENTER_X, point.y - CENTER_Y);
+  return Math.max(0, (distanceFromCenter - GLOBE_RADIUS * 0.78) / 22);
+}
+
+function getLabelRoomScore(point: ProjectedPoint): number {
+  const horizontalRoom = Math.min(point.x - LABEL_SAFE_INSET_X, MAP_WIDTH - LABEL_SAFE_INSET_X - point.x);
+  const verticalRoom = Math.min(point.y - LABEL_SAFE_INSET_Y, MAP_HEIGHT - LABEL_SAFE_INSET_Y - point.y);
+  return clamp(Math.min(horizontalRoom / 140, verticalRoom / 90), -1, 1);
 }
 
 function projectGlobePoint(point: GeoPoint, rotation: GlobeRotation): ProjectedPoint {
@@ -1178,6 +1672,145 @@ function listAttackTeams(attacks: CyberAttackEvent[]): string[] {
       ...attacks.map((attack) => attack.victim),
     ]),
   ).sort();
+}
+
+function getAttackTickRange(attacks: CyberAttackEvent[]): {
+  max: number;
+  min: number;
+} {
+  if (attacks.length === 0) {
+    return { max: 0, min: 0 };
+  }
+  return attacks.reduce(
+    (range, attack) => ({
+      max: Math.max(range.max, attack.tick),
+      min: Math.min(range.min, attack.tick),
+    }),
+    { max: attacks[0]?.tick ?? 0, min: attacks[0]?.tick ?? 0 },
+  );
+}
+
+function getAttackRecency(
+  tick: number,
+  range: { max: number; min: number },
+): number {
+  if (range.max <= range.min) {
+    return 1;
+  }
+  return clamp((tick - range.min) / (range.max - range.min), 0, 1);
+}
+
+function bundleAttackRoutes(attacks: CyberAttackEvent[]): AttackRoute[] {
+  const routes = new Map<string, AttackRoute>();
+  attacks.forEach((attack) => {
+    const key = `${attack.attacker}\u0000${attack.victim}\u0000${attack.service}`;
+    const existing = routes.get(key);
+    if (!existing) {
+      routes.set(key, {
+        ...attack,
+        attackIds: [attack.id],
+        count: 1,
+      });
+      return;
+    }
+
+    existing.attackIds.push(attack.id);
+    existing.count += 1;
+    if (attack.tick >= existing.tick) {
+      existing.id = attack.id;
+      existing.tick = attack.tick;
+    }
+  });
+
+  return Array.from(routes.values()).sort((left, right) => (
+    left.tick - right.tick ||
+    left.attacker.localeCompare(right.attacker) ||
+    left.victim.localeCompare(right.victim) ||
+    left.service.localeCompare(right.service)
+  ));
+}
+
+function buildFeaturedAttackQueue(attacks: CyberAttackEvent[]): CyberAttackEvent[] {
+  const tickRange = getAttackTickRange(attacks);
+  const serviceCounts = new Map<string, number>();
+  const teamCounts = new Map<string, number>();
+  attacks.forEach((attack) => {
+    serviceCounts.set(attack.service, (serviceCounts.get(attack.service) ?? 0) + 1);
+    teamCounts.set(attack.attacker, (teamCounts.get(attack.attacker) ?? 0) + 1);
+    teamCounts.set(attack.victim, (teamCounts.get(attack.victim) ?? 0) + 1);
+  });
+
+  return [...attacks].sort((left, right) => (
+    scoreFeaturedAttack(right, tickRange, serviceCounts, teamCounts) -
+      scoreFeaturedAttack(left, tickRange, serviceCounts, teamCounts) ||
+    right.tick - left.tick ||
+    left.id.localeCompare(right.id)
+  ));
+}
+
+function scoreFeaturedAttack(
+  attack: CyberAttackEvent,
+  tickRange: { max: number; min: number },
+  serviceCounts: Map<string, number>,
+  teamCounts: Map<string, number>,
+): number {
+  const recency = getAttackRecency(attack.tick, tickRange);
+  const serviceRarity = 1 / Math.max(1, serviceCounts.get(attack.service) ?? 1);
+  const teamActivity =
+    (teamCounts.get(attack.attacker) ?? 0) + (teamCounts.get(attack.victim) ?? 0);
+  const crossRegion = getAttackRegion(attack.attacker) === getAttackRegion(attack.victim) ? 0 : 1;
+  return recency * 7 + crossRegion * 2.4 + serviceRarity * 1.6 + Math.log2(teamActivity + 1);
+}
+
+function getAttackRegion(teamName: string): number {
+  return hashString(teamName) % 4;
+}
+
+function getServiceRouteStyle(service: string): {
+  activeDash: string;
+  activeDuration: string;
+  activeWidth: string;
+  featuredDuration: string;
+  idleDash: string;
+  idleDuration: number;
+  idleWidth: string;
+  partialDash: string;
+} {
+  const normalized = service.toLowerCase();
+  if (normalized.includes('redis')) {
+    return {
+      activeDash: '16 22 5 34',
+      activeDuration: '2.75s',
+      activeWidth: '3.1',
+      featuredDuration: '1.65s',
+      idleDash: '10 32',
+      idleDuration: 5.2,
+      idleWidth: '2',
+      partialDash: '2 8',
+    };
+  }
+  if (normalized.includes('postgres') || normalized.includes('db')) {
+    return {
+      activeDash: '42 34',
+      activeDuration: '3.7s',
+      activeWidth: '3.8',
+      featuredDuration: '2.6s',
+      idleDash: '28 48',
+      idleDuration: 6.6,
+      idleWidth: '2.5',
+      partialDash: '6 9',
+    };
+  }
+  return {
+    activeDash: '28 34',
+    activeDuration: '3.15s',
+    activeWidth: '3.3',
+    featuredDuration: '2.05s',
+    idleDash: '18 46',
+    idleDuration: 5.8,
+    idleWidth: '2.2',
+    partialDash: '2 9',
+  };
 }
 
 function listPlacementTeams(

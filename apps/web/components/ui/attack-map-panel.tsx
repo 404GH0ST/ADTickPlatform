@@ -1,12 +1,13 @@
 'use client';
 
 import type { ReactElement, ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
   Expand,
   Minimize2,
+  Monitor,
   Pause,
   Play,
   Search,
@@ -31,7 +32,15 @@ import { CyberAttackMap } from './cyber-attack-map';
 export type AttackMapEvent = {
   id: string;
   attacker: string;
+  attackerLocation?: {
+    lat: number;
+    lon: number;
+  };
   victim: string;
+  victimLocation?: {
+    lat: number;
+    lon: number;
+  };
   service: string;
   tick: number;
   verdict: string;
@@ -59,6 +68,7 @@ export function AttackMapPanel({
   highlightedAttackIDs?: string[];
   title?: string;
 }): ReactElement {
+  const [audienceMode, setAudienceMode] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [teamQuery, setTeamQuery] = useState('');
   const [replayAttackIDs, setReplayAttackIDs] = useState<string[]>([]);
@@ -68,6 +78,7 @@ export function AttackMapPanel({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1500);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [selectedAttackId, setSelectedAttackId] = useState<string | null>(null);
+  const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
 
@@ -201,11 +212,28 @@ export function AttackMapPanel({
       ),
     [highlightedAttackIDs, replayAttackIDs, selectedAttackId],
   );
+  const teamLocations = useMemo(() => {
+    const locations: Record<string, { lat: number; lon: number }> = {};
+    attackRows.forEach((row) => {
+      if (row.attackerLocation) {
+        locations[row.attacker] = row.attackerLocation;
+      }
+      if (row.victimLocation) {
+        locations[row.victim] = row.victimLocation;
+      }
+    });
+    return locations;
+  }, [attackRows]);
 
   const selectedAttack = useMemo(
     () => attackRows.find((row) => row.id === selectedAttackId) ?? null,
     [attackRows, selectedAttackId],
   );
+  const featuredAttack = useMemo(
+    () => attackRows.find((row) => row.id === featuredAttackId) ?? null,
+    [attackRows, featuredAttackId],
+  );
+  const inspectedAttack = selectedAttack ?? featuredAttack;
   const selectedTeamSummary = useMemo(() => {
     if (!selectedTeamId) {
       return null;
@@ -257,6 +285,16 @@ export function AttackMapPanel({
   }, [attackRows, selectedAttackId]);
 
   useEffect(() => {
+    if (featuredAttackId && !attackRows.some((row) => row.id === featuredAttackId)) {
+      setFeaturedAttackId(null);
+    }
+  }, [attackRows, featuredAttackId]);
+
+  const handleFeaturedAttackChange = useCallback((attackId: string | null) => {
+    setFeaturedAttackId(attackId);
+  }, []);
+
+  useEffect(() => {
     if (selectedTeamId && !allTeams.includes(selectedTeamId)) {
       setSelectedTeamId(null);
     }
@@ -305,24 +343,32 @@ export function AttackMapPanel({
   }
 
   function renderInspector(): ReactElement {
-    if (selectedAttack) {
+    if (inspectedAttack) {
+      const inspectingAutoFeature = selectedAttack === null;
       return (
         <InspectorCard
-          eyebrow="Attack"
-          title={`${selectedAttack.attacker} -> ${selectedAttack.victim}`}
+          eyebrow={inspectingAutoFeature ? 'Featured transmission' : 'Attack'}
+          title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
           lines={[
-            { label: 'Tick', value: `#${selectedAttack.tick}` },
-            { label: 'Service', value: selectedAttack.service },
-            { label: 'Verdict', value: selectedAttack.verdict },
+            { label: 'Tick', value: `#${inspectedAttack.tick}` },
+            { label: 'Service', value: inspectedAttack.service },
+            { label: 'Verdict', value: inspectedAttack.verdict },
           ]}
         >
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSelectedAttackId(null)}
-          >
-            Clear attack focus
-          </Button>
+          {inspectingAutoFeature ? (
+            <p className="text-sm text-muted-foreground">
+              Idle showcase is following this route. Move the pointer or click a
+              path to take manual control.
+            </p>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectedAttackId(null)}
+            >
+              Clear attack focus
+            </Button>
+          )}
         </InspectorCard>
       );
     }
@@ -409,18 +455,20 @@ export function AttackMapPanel({
         className={cn(
           'grid gap-3',
           expandedView
-            ? 'h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,20vh)] xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-none'
-            : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-none',
+            ? 'h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,18vh)] xl:grid-cols-[minmax(0,1fr)_18rem] xl:grid-rows-none'
+            : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
         <CyberAttackMap
           attacks={visibleRows}
-          className={expandedView ? 'aspect-auto h-full min-h-[34rem]' : 'min-h-[24rem]'}
+          className={expandedView ? 'aspect-auto h-full min-h-[36rem]' : 'min-h-[27rem]'}
           focusedTeams={focusedTeams}
           highlightedAttackIDs={activeHighlightIDs}
           placementScopeTeams={allTeams}
           selectedAttackId={selectedAttackId}
           selectedTeamId={selectedTeamId}
+          teamLocations={teamLocations}
+          onFeaturedAttackChange={handleFeaturedAttackChange}
           onSelectAttack={(attackId) => {
             setSelectedAttackId(attackId);
             if (attackId) {
@@ -477,6 +525,10 @@ export function AttackMapPanel({
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
                 Maximize
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAudienceMode(true)}>
+                <Monitor className="h-4 w-4" />
+                Present
               </Button>
             </>
           ) : null}
@@ -623,34 +675,107 @@ export function AttackMapPanel({
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={audienceMode} onOpenChange={setAudienceMode}>
+        <DialogContent
+          data-testid="attack-map-audience-dialog"
+          className="!left-0 !top-0 !h-[100dvh] !w-[100dvw] !max-w-none !translate-x-0 !translate-y-0 overflow-hidden rounded-none border-border/70 bg-card p-0"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">Attack map presentation mode</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full-screen attack map for audience displays.
+          </DialogDescription>
+          <div className="relative h-full min-h-0">
+            <CyberAttackMap
+              attacks={visibleRows}
+              className="h-full min-h-0 rounded-none border-0"
+              focusedTeams={[]}
+              highlightedAttackIDs={activeHighlightIDs}
+              placementScopeTeams={allTeams}
+              presentation
+              selectedAttackId={selectedAttackId}
+              selectedTeamId={selectedTeamId}
+              teamLocations={teamLocations}
+              onFeaturedAttackChange={handleFeaturedAttackChange}
+              onSelectAttack={(attackId) => {
+                setSelectedAttackId(attackId);
+                if (attackId) {
+                  setSelectedTeamId(null);
+                }
+              }}
+              onSelectTeam={(teamId) => {
+                setSelectedTeamId(teamId);
+                if (teamId) {
+                  setSelectedAttackId(null);
+                }
+              }}
+            />
+            <div className="pointer-events-none absolute left-5 top-5 flex flex-wrap gap-2">
+              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
+              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
+              <Badge variant="secondary">{visibleServiceCount} services</Badge>
+              <Badge variant="secondary">{formatTickWindow(visibleTicks)}</Badge>
+            </div>
+            <div className="pointer-events-none fixed right-4 top-4 z-20 max-h-[calc(100dvh-6rem)] w-[min(20rem,calc(100dvw-2rem))] overflow-y-auto">
+              {inspectedAttack ? (
+                <InspectorCard
+                  data-testid="attack-map-presentation-inspector"
+                  eyebrow={selectedAttack ? 'Attack' : 'Featured transmission'}
+                  title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
+                  lines={[
+                    { label: 'Tick', value: `#${inspectedAttack.tick}` },
+                    { label: 'Service', value: inspectedAttack.service },
+                    { label: 'Verdict', value: inspectedAttack.verdict },
+                  ]}
+                />
+              ) : null}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="absolute bottom-5 right-5"
+              onClick={() => setAudienceMode(false)}
+            >
+              <Minimize2 className="h-4 w-4" />
+              Back to page
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function InspectorCard({
   children,
+  className,
   eyebrow,
   lines,
   title,
+  ...props
 }: {
   children?: ReactNode;
+  className?: string;
   eyebrow: string;
   lines: Array<{ label: string; value: string }>;
   title: string;
-}): ReactElement {
+} & React.HTMLAttributes<HTMLDivElement>): ReactElement {
   return (
-    <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3">
+    <div
+      className={cn("min-w-0 space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3", className)}
+      {...props}
+    >
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground">
           {eyebrow}
         </p>
-        <p className="text-base font-semibold text-foreground">{title}</p>
+        <p className="min-w-0 break-words text-base font-semibold text-foreground">{title}</p>
       </div>
       <div className="space-y-2 text-sm">
         {lines.map((line) => (
-          <div key={line.label} className="flex items-start justify-between gap-3">
+          <div key={line.label} className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-3">
             <span className="text-muted-foreground">{line.label}</span>
-            <span className="text-right font-mono text-foreground">{line.value}</span>
+            <span className="min-w-0 break-words text-right font-mono text-foreground">{line.value}</span>
           </div>
         ))}
       </div>
