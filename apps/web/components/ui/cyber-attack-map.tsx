@@ -1,6 +1,10 @@
 'use client';
 
-import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactElement,
+} from 'react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import globeJson from '@/data/globe.json';
@@ -129,6 +133,8 @@ const MAX_ROTATION_LAT = 62;
 const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
 const DEFAULT_LABEL_LIMIT = 10;
+const DENSE_KEYBOARD_ITEM_LIMIT = 28;
+const PACKET_ANIMATION_ROUTE_LIMIT = 80;
 const LABEL_HEIGHT = 40;
 const LABEL_PADDING_X = 6;
 const LABEL_SAFE_INSET_X = 24;
@@ -321,7 +327,8 @@ export function CyberAttackMap({
     teamLocations,
   ]);
   const showDefaultLabels = !hasFocus && nodes.length > 0 && nodes.length <= DEFAULT_LABEL_LIMIT;
-  const motionEnabled = attacks.length <= 160;
+  const denseKeyboardMode = arcs.length + nodes.length > DENSE_KEYBOARD_ITEM_LIMIT;
+  const motionEnabled = attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
 
   useEffect(() => {
     rotationRef.current = rotation;
@@ -549,8 +556,15 @@ export function CyberAttackMap({
       ref={mapRootRef}
       data-testid="cyber-attack-map"
       data-featured-attack-id={featuredAttackId ?? undefined}
+      data-keyboard-mode={denseKeyboardMode ? 'jump' : 'direct'}
+      data-motion-enabled={motionEnabled ? 'true' : 'false'}
       data-rotation-lat={rotation.lat.toFixed(2)}
       data-rotation-lon={rotation.lon.toFixed(2)}
+      data-route-count={arcs.length}
+      data-team-count={nodes.length}
+      aria-describedby={`${mapId}-instructions`}
+      aria-label="Interactive attack globe. Drag to rotate the globe, tab to teams and routes, then press Enter or Space to inspect."
+      role="region"
       className={cn(
         'relative aspect-[2/1] w-full touch-none overflow-hidden rounded-sm border',
         className,
@@ -569,6 +583,10 @@ export function CyberAttackMap({
         cursor: dragRef.current ? 'grabbing' : 'grab',
       }}
     >
+      <p id={`${mapId}-instructions`} className="sr-only">
+        Attack map routes and team nodes are keyboard focusable. Press Enter or
+        Space on a focused team or route to inspect it.
+      </p>
       <svg
         viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
@@ -609,6 +627,7 @@ export function CyberAttackMap({
               markerId={markerId}
               motionEnabled={motionEnabled}
               onSelectAttack={onSelectAttack}
+              tabReachable={!denseKeyboardMode}
             />
           ))}
         </g>
@@ -642,6 +661,7 @@ export function CyberAttackMap({
               showLabel={showLabel}
               onHoverChange={setHoveredTeamId}
               onSelectTeam={onSelectTeam}
+              tabReachable={!denseKeyboardMode}
             />
           );
         })}
@@ -679,7 +699,7 @@ export function CyberAttackMap({
             <button
               key={preset.label}
               type="button"
-              className="rounded-sm border px-2 py-1 text-[10px] font-semibold"
+              className="min-h-9 rounded-sm border px-3 py-1.5 text-[11px] font-semibold sm:min-h-0 sm:px-2 sm:py-1 sm:text-[10px]"
               onClick={(event) => {
                 event.stopPropagation();
                 markUserActivity();
@@ -695,6 +715,67 @@ export function CyberAttackMap({
               {preset.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {presentation || !denseKeyboardMode ? null : (
+        <div
+          className="absolute left-3 top-3 grid max-w-[min(26rem,calc(100%-1.5rem))] gap-1.5 rounded-sm border p-2 sm:grid-cols-2"
+          style={{
+            backgroundColor: 'var(--attack-map-legend-background)',
+            borderColor: 'var(--attack-map-legend-border)',
+            color: 'var(--attack-map-legend-foreground)',
+          }}
+        >
+          <label className="grid gap-1">
+            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to team</span>
+            <select
+              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
+              value={selectedTeamId ?? ''}
+              onChange={(event) => {
+                event.stopPropagation();
+                const value = event.target.value;
+                onSelectTeam?.(value === '' ? null : value);
+                if (value !== '') {
+                  onSelectAttack?.(null);
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <option value="">Select team</option>
+              {nodes
+                .slice()
+                .sort((left, right) => left.name.localeCompare(right.name))
+                .map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {node.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to route</span>
+            <select
+              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
+              value={selectedAttackId ?? ''}
+              onChange={(event) => {
+                event.stopPropagation();
+                const value = event.target.value;
+                onSelectAttack?.(value === '' ? null : value);
+                if (value !== '') {
+                  onSelectTeam?.(null);
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <option value="">Select route</option>
+              {arcs.map((arc) => (
+                <option key={arc.id} value={arc.attackIds[0]}>
+                  {arc.attacker} to {arc.victim}, {arc.service}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       )}
 
@@ -726,6 +807,22 @@ export function CyberAttackMap({
         .${haloClassName}-fresh {
           animation: ${haloClassName}-fresh 1.8s cubic-bezier(0.22, 1, 0.36, 1) 2;
         }
+        [data-attack-arc-hit]:focus-visible,
+        [data-attack-team-hit]:focus-visible {
+          outline: none;
+        }
+        [data-attack-arc-hit]:focus-visible {
+          stroke: var(--attack-map-node-highlight);
+          stroke-opacity: 0.62;
+          stroke-width: 6.5;
+        }
+        [data-attack-team-hit]:focus-visible circle:first-of-type {
+          fill-opacity: 0.34;
+        }
+        [data-attack-team-hit]:focus-visible circle:nth-of-type(2) {
+          stroke-opacity: 0.95;
+          stroke-width: 2.6;
+        }
         @media (prefers-reduced-motion: reduce) {
           .${beamClassName},
           .${haloClassName},
@@ -754,9 +851,9 @@ function GlobeSurface({
       <circle
         cx={CENTER_X}
         cy={CENTER_Y}
-        r={GLOBE_RADIUS + 20}
+        r={GLOBE_RADIUS + 14}
         fill="var(--attack-map-node-highlight-halo)"
-        fillOpacity="0.12"
+        fillOpacity="var(--attack-map-outer-glow-opacity)"
       />
       <circle
         cx={CENTER_X}
@@ -818,8 +915,8 @@ function GlobeSurface({
         r={GLOBE_RADIUS}
         fill="none"
         stroke="var(--attack-map-node-highlight)"
-        strokeOpacity="0.24"
-        strokeWidth="2"
+        strokeOpacity="var(--attack-map-rim-opacity)"
+        strokeWidth="var(--attack-map-rim-width)"
       />
     </g>
   );
@@ -870,6 +967,7 @@ function AttackArcPath({
   markerId,
   motionEnabled,
   onSelectAttack,
+  tabReachable,
 }: {
   arc: AttackArc;
   beamClassName: string;
@@ -878,6 +976,7 @@ function AttackArcPath({
   markerId: string;
   motionEnabled: boolean;
   onSelectAttack?: (attackId: string | null) => void;
+  tabReachable: boolean;
 }): ReactElement | null {
   if (!arc.visible) {
     return null;
@@ -983,12 +1082,19 @@ function AttackArcPath({
       {arc.count > 1 && !dimmed ? <RouteBundleBadge arc={arc} /> : null}
       <path
         d={arc.path}
+        aria-label={`${arc.selected ? 'Clear' : 'Inspect'} attack route from ${arc.attacker} to ${arc.victim} on ${arc.service}, ${arc.count} transmission${arc.count === 1 ? '' : 's'}, tick ${arc.tick}`}
         fill="none"
+        role="button"
         stroke="transparent"
         strokeWidth="14"
         pointerEvents="stroke"
+        tabIndex={tabReachable ? 0 : -1}
         className="cursor-pointer"
+        data-attack-arc-hit="true"
         onClick={() => onSelectAttack?.(arc.selected ? null : arc.attackIds[0])}
+        onKeyDown={(event) => {
+          activateSvgButton(event, () => onSelectAttack?.(arc.selected ? null : arc.attackIds[0]));
+        }}
       />
     </g>
   );
@@ -1137,12 +1243,14 @@ function TeamNodeDot({
   showLabel,
   onHoverChange,
   onSelectTeam,
+  tabReachable,
 }: {
   node: TeamNode;
   haloClassName: string;
   showLabel: boolean;
   onHoverChange: (teamId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
+  tabReachable: boolean;
 }): ReactElement | null {
   if (!node.visible) {
     return null;
@@ -1154,8 +1262,17 @@ function TeamNodeDot({
 
   return (
     <g
+      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.landmark.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
       className="cursor-pointer"
+      data-attack-team-hit="true"
+      role="button"
+      tabIndex={tabReachable ? 0 : -1}
       onClick={() => onSelectTeam?.(node.selected ? null : node.id)}
+      onFocus={() => onHoverChange(node.id)}
+      onBlur={() => onHoverChange(null)}
+      onKeyDown={(event) => {
+        activateSvgButton(event, () => onSelectTeam?.(node.selected ? null : node.id));
+      }}
       onMouseEnter={() => onHoverChange(node.id)}
       onMouseLeave={() => onHoverChange(null)}
     >
@@ -1213,6 +1330,18 @@ function getTeamLabelWidth(node: TeamNode): number {
 
 function getRawLabelWidth(value: string): number {
   return clamp(value.length * 6.2 + 22, 82, 178);
+}
+
+function activateSvgButton(
+  event: ReactKeyboardEvent<SVGElement>,
+  action: () => void,
+): void {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  action();
 }
 
 function shouldShowTeamLabel(

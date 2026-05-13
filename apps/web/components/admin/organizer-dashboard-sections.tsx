@@ -1514,7 +1514,7 @@ export function GameTab({
             onUpdateScheduler={onUpdateScheduler}
           />
           <details
-            className="rounded-md border border-border/70 bg-muted/10 p-3"
+            className="rounded-sm border border-border/70 bg-muted/10 p-3"
             data-testid="checker-investigation-disclosure"
             open={checkerAttentionActive}
           >
@@ -1855,7 +1855,7 @@ function MatchScheduleCard({
             valueClassName="font-mono"
           />
         </InfoPanel>
-        <div className="grid gap-3 rounded-md border border-border/70 bg-background p-3">
+        <div className="grid gap-3 rounded-sm border border-border/70 bg-background p-3">
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="grid gap-3">
               <Field
@@ -2160,7 +2160,7 @@ function RuntimeHealthCard({
           />
         ) : null}
         {snapshot.warnings.length === 0 ? (
-          <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 rounded-sm border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between">
             <RuntimeActionButton
               actionID="runtime:health"
               label="Refresh Runtime"
@@ -2177,7 +2177,7 @@ function RuntimeHealthCard({
             </div>
           </div>
         ) : null}
-        <details className="rounded-md border border-border/70 bg-muted/10 p-3 text-sm">
+        <details className="rounded-sm border border-border/70 bg-muted/10 p-3 text-sm">
           <summary className="cursor-pointer font-medium text-foreground">
             Inspect trust inputs
           </summary>
@@ -2263,7 +2263,7 @@ function RuntimeRemediationPanel({
   return (
     <div
       className={cn(
-        "rounded-md border p-3",
+        "rounded-sm border p-3",
         severity === "critical" ? "tone-danger" : "tone-warning",
       )}
     >
@@ -2561,7 +2561,7 @@ function OperationsAlertsCard({
   return (
     <section
       data-testid="operations-alerts-card"
-      className="rounded-md border border-border/50 bg-muted/5 p-4"
+      className="rounded-sm border border-border/50 bg-muted/5 p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -2599,7 +2599,7 @@ function OperationsAlertsCard({
               return (
                 <div
                   key={alert.id}
-                  className="rounded-md border border-border/70 bg-background p-3"
+                  className="rounded-sm border border-border/70 bg-background p-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -2658,7 +2658,7 @@ function OperationsMetricsCard({
   return (
     <section
       data-testid="operations-metrics-card"
-      className="rounded-md border border-border/50 bg-muted/5 p-4"
+      className="rounded-sm border border-border/50 bg-muted/5 p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -2701,7 +2701,7 @@ function OperationsMetricsCard({
                 }
                 variant={unhealthyCount === 0 ? "success" : "warning"}
               />
-              <div className="rounded-md border border-border/70 bg-background p-3">
+              <div className="rounded-sm border border-border/70 bg-background p-3">
                 <div className="flex flex-wrap gap-2">
                   {serviceHealth.map((entry) => (
                     <Badge
@@ -2755,7 +2755,7 @@ function OperationsMetricsCard({
                   valueClassName="font-mono"
                 />
               </InfoPanel>
-              <div className="rounded-md border border-border/70 bg-background p-3">
+              <div className="rounded-sm border border-border/70 bg-background p-3">
                 <p className="text-sm font-medium text-foreground">
                   Service watchlist
                 </p>
@@ -2771,7 +2771,7 @@ function OperationsMetricsCard({
                 </div>
               </div>
             </div>
-            <details className="rounded-md border border-border/70 bg-background p-3">
+            <details className="rounded-sm border border-border/70 bg-background p-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">
                 Inspect per-service metrics
               </summary>
@@ -2967,7 +2967,7 @@ function MetricsServicePanel({
   lines: { label: string; value: string }[];
 }): ReactElement {
   return (
-    <div className="rounded-md border border-border/70 bg-muted/20 p-4">
+    <div className="rounded-sm border border-border/70 bg-muted/20 p-4">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {health ? (
@@ -3200,7 +3200,7 @@ function SchedulerCard({
             onStopScheduler={onStopScheduler}
           />
           <details
-            className="rounded-md border border-border/70 bg-muted/10 p-3"
+            className="rounded-sm border border-border/70 bg-muted/10 p-3"
             data-testid="scheduler-audit-disclosure"
             open={auditExpanded}
           >
@@ -3320,7 +3320,7 @@ function SchedulerIntervalControl({
     <div className="flex items-center justify-between gap-3">
       <span className="text-sm text-muted-foreground">Interval</span>
       <div className="flex items-center gap-2">
-        <div className="flex h-8 items-center rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
+        <div className="flex h-8 items-center rounded-sm border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
           <input
             type="number"
             min="1"
@@ -3367,7 +3367,7 @@ function SchedulerActionRow({
   onStopScheduler: () => void;
 }): ReactElement {
   return (
-    <CardActionRow className="rounded-md border border-border/70 bg-muted/10 p-3 pt-3">
+    <CardActionRow className="rounded-sm border border-border/70 bg-muted/10 p-3 pt-3">
       <Button
         disabled={pendingAction !== null || schedulerState === "running"}
         variant="outline"
@@ -3470,7 +3470,7 @@ function SchedulerAuditFilters({
   return (
     <div
       data-testid="scheduler-audit-filters"
-      className="mb-4 flex flex-wrap gap-3 rounded-md border border-border/70 bg-muted/20 p-3"
+      className="mb-4 flex flex-wrap gap-3 rounded-sm border border-border/70 bg-muted/20 p-3"
     >
       <Field
         label="Page Size"
@@ -3604,7 +3604,7 @@ function SchedulerEventRow({
   event: AdminSchedulerEventPage["items"][number];
 }): ReactElement {
   return (
-    <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+    <div className="rounded-sm border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{event.event_type}</Badge>
@@ -3632,7 +3632,7 @@ function CurrentTickCard({
 }): ReactElement {
   return (
     <section
-      className="rounded-md border border-border/70 bg-muted/10 p-4"
+      className="rounded-sm border border-border/70 bg-muted/10 p-4"
       data-testid="current-tick-card"
       id="current-tick-card"
     >
@@ -3697,7 +3697,7 @@ function ScoreboardSnapshotCard({
   const lastPlace = scoreRows[scoreRows.length - 1];
 
   return (
-    <section className="rounded-md border border-border/70 bg-muted/10 p-4">
+    <section className="rounded-sm border border-border/70 bg-muted/10 p-4">
       <div className="mb-4">
         <h3 className="text-sm font-semibold text-foreground">Scoreboard</h3>
         <p className="text-sm text-muted-foreground">
@@ -3959,7 +3959,7 @@ function CheckerRunsCard({
           </Button>
         </div>
         <details
-          className="rounded-md border border-border/70 bg-muted/10 p-3"
+          className="rounded-sm border border-border/70 bg-muted/10 p-3"
           data-testid="checker-runs-disclosure"
           open={detailExpanded}
         >
@@ -3970,7 +3970,7 @@ function CheckerRunsCard({
             Phase-level history, filters, and paging for checker investigation.
           </p>
           <div className="mt-3 space-y-4">
-            <div className="space-y-3 rounded-md border border-border/70 bg-muted/20 p-3">
+            <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Page Size" htmlFor="checker-limit">
                   <select
@@ -4210,7 +4210,7 @@ function WireGuardDialog({
                 valueClassName="font-mono"
               />
             </InfoPanel>
-            <pre className="max-h-[22rem] overflow-auto rounded-md border border-border/70 bg-card p-4 text-xs leading-6 text-foreground">
+            <pre className="max-h-[22rem] overflow-auto rounded-sm border border-border/70 bg-card p-4 text-xs leading-6 text-foreground">
               {peer.config}
             </pre>
           </div>

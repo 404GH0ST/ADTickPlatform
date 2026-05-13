@@ -513,15 +513,6 @@ export function AttackMapPanel({
           <Badge variant="secondary">{visibleServiceCount} services</Badge>
           {attackRows.length > 0 ? (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={currentTickAttackIDs.length === 0}
-                onClick={replayCurrentTick}
-              >
-                <Zap className="h-4 w-4" />
-                Replay tick #{selectedTickValue}
-              </Button>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
                 Maximize
@@ -536,99 +527,121 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/20 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <div className="space-y-2">
-              <label
-                htmlFor={`${title}-team-search`}
-                className="text-sm font-medium text-foreground"
-              >
-                Focus team
-              </label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id={`${title}-team-search`}
-                  value={teamQuery}
-                  onChange={(event) => setTeamQuery(event.target.value)}
-                  placeholder="Search team name to reveal labels"
-                  className="pl-9"
-                />
+        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/20 p-3">
+          <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <div className="space-y-2">
+                <label
+                  htmlFor={`${title}-team-search`}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Focus team
+                </label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id={`${title}-team-search`}
+                    value={teamQuery}
+                    onChange={(event) => setTeamQuery(event.target.value)}
+                    placeholder="Search team name to reveal labels"
+                    className="pl-9"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Map mode</p>
-              <div className="flex flex-wrap gap-2">
-                {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
-                  <Button
-                    key={mode}
-                    size="sm"
-                    variant={viewMode === mode ? 'default' : 'outline'}
-                    onClick={() => setViewMode(mode)}
-                  >
-                    {describeViewMode(mode)}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">Tick playback</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length === 0}
-                  onClick={() => moveTick('prev')}
-                  aria-label="Previous Tick"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length < 2}
-                  onClick={() => setPlaybackRunning((current) => !current)}
-                >
-                  {playbackRunning ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  {playbackRunning ? 'Pause' : 'Play'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tickValues.length === 0}
-                  onClick={() => moveTick('next')}
-                  aria-label="Next Tick"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <select
-                  aria-label="Playback speed"
-                  className="flex h-9 rounded-sm border border-input bg-card px-3 text-sm"
-                  value={String(playbackSpeed)}
-                  onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
-                >
-                  {PLAYBACK_SPEEDS.map((speed) => (
-                    <option key={speed.value} value={speed.value}>
-                      {speed.label}
-                    </option>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">View</p>
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
+                    <Button
+                      key={mode}
+                      size="touch"
+                      variant={viewMode === mode ? 'default' : 'outline'}
+                      onClick={() => setViewMode(mode)}
+                    >
+                      {describeViewMode(mode)}
+                    </Button>
                   ))}
-                </select>
+                </div>
               </div>
+            </div>
+            <div className="space-y-1 lg:text-right">
+              <p className="text-sm font-medium text-foreground">
+                {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
+              </p>
+              <p className="max-w-[34rem] text-sm text-muted-foreground lg:max-w-[20rem]">
+                {normalizedTeamQuery === ''
+                  ? `${describeViewMode(viewMode)} view across ${formatTickWindow(visibleTicks)}.`
+                  : `Showing labels for ${searchedTeams.length} matching team(s).`}
+              </p>
             </div>
           </div>
-          <div className="space-y-2 xl:text-right">
-            <p className="text-sm font-medium text-foreground">
-              {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {normalizedTeamQuery === ''
-                ? `${describeViewMode(viewMode)} view across ${formatTickWindow(visibleTicks)}.`
-                : `Showing labels for ${searchedTeams.length} matching team(s).`}
-            </p>
+          <div className="flex flex-col gap-3 border-t border-border/60 pt-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1">
+              <label
+                htmlFor={`${title}-playback-speed`}
+                className="text-xs font-medium uppercase text-muted-foreground"
+              >
+                Playback
+              </label>
+              <p className="text-sm text-muted-foreground">
+                Review ticks or highlight the current burst.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length === 0}
+                onClick={() => moveTick('prev')}
+                aria-label="Previous Tick"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length < 2}
+                onClick={() => setPlaybackRunning((current) => !current)}
+              >
+                {playbackRunning ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {playbackRunning ? 'Pause' : 'Play'}
+              </Button>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={tickValues.length === 0}
+                onClick={() => moveTick('next')}
+                aria-label="Next Tick"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <select
+                id={`${title}-playback-speed`}
+                aria-label="Playback speed"
+                className="flex h-11 rounded-sm border border-input bg-card px-3 text-sm"
+                value={String(playbackSpeed)}
+                onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
+              >
+                {PLAYBACK_SPEEDS.map((speed) => (
+                  <option key={speed.value} value={speed.value}>
+                    {speed.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="touch"
+                variant="outline"
+                disabled={currentTickAttackIDs.length === 0}
+                onClick={replayCurrentTick}
+              >
+                <Zap className="h-4 w-4" />
+                Highlight tick #{selectedTickValue}
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -660,7 +673,7 @@ export function AttackMapPanel({
                 onClick={replayCurrentTick}
               >
                 <Zap className="h-4 w-4" />
-                Replay tick #{selectedTickValue}
+                Highlight tick #{selectedTickValue}
               </Button>
               <Button
                 size="sm"
@@ -716,9 +729,9 @@ export function AttackMapPanel({
               <Badge variant="secondary">{visibleServiceCount} services</Badge>
               <Badge variant="secondary">{formatTickWindow(visibleTicks)}</Badge>
             </div>
-            <div className="pointer-events-none fixed right-4 top-4 z-20 max-h-[calc(100dvh-6rem)] w-[min(20rem,calc(100dvw-2rem))] overflow-y-auto">
+            <div className="pointer-events-none absolute bottom-16 left-5 right-5 z-20 max-h-[calc(100dvh-7rem)] overflow-y-auto sm:bottom-5 sm:right-40">
               {inspectedAttack ? (
-                <InspectorCard
+                <PresentationTransmissionRail
                   data-testid="attack-map-presentation-inspector"
                   eyebrow={selectedAttack ? 'Attack' : 'Featured transmission'}
                   title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
@@ -742,6 +755,52 @@ export function AttackMapPanel({
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function PresentationTransmissionRail({
+  className,
+  eyebrow,
+  lines,
+  title,
+  ...props
+}: {
+  className?: string;
+  eyebrow: string;
+  lines: Array<{ label: string; value: string }>;
+  title: string;
+} & React.HTMLAttributes<HTMLDivElement>): ReactElement {
+  return (
+    <div
+      className={cn(
+        "w-full max-w-[58rem] border-y border-border/70 bg-card/88 px-5 py-3 shadow-[0_1px_0_var(--border)]",
+        className,
+      )}
+      {...props}
+    >
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="min-w-0 space-y-1">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground">
+            {eyebrow}
+          </p>
+          <p className="min-w-0 break-words text-2xl font-semibold leading-7 text-foreground">
+            {title}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-5 text-sm">
+          {lines.map((line) => (
+            <div key={line.label} className="min-w-20">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">
+                {line.label}
+              </p>
+              <p className="mt-1 break-words font-mono text-base text-foreground">
+                {line.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

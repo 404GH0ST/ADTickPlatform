@@ -85,6 +85,22 @@ test("seeded dense attack globe keeps partial featured routes solid", async ({
   await expect(featuredPartialArc).not.toHaveAttribute("stroke-dasharray", /.+/);
 });
 
+test("seeded dense attack globe supports keyboard route inspection", async ({
+  page,
+}) => {
+  await page.goto("/attacks");
+
+  const panel = page.getByTestId("attack-map-panel");
+  const globe = page.getByTestId("cyber-attack-map");
+  const routeButton = globe.locator('[role="button"][aria-label^="Inspect attack route"]').first();
+
+  await expect(routeButton).toBeVisible();
+  await routeButton.focus();
+  await page.keyboard.press("Enter");
+
+  await expect(panel.getByText("Clear attack focus")).toBeVisible();
+});
+
 test("seeded dense attack globe has audience mode for presentation screens", async ({
   page,
 }) => {
