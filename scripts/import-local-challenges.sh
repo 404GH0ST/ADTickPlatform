@@ -109,7 +109,7 @@ for manifest_ref in "${manifests[@]}"; do
   display_name="$(jq -r '.display_name' "${manifest_path}")"
   service_image="$(jq -r '.service_image' "${manifest_path}")"
   checker_image="$(jq -r '.checker_image' "${manifest_path}")"
-  source_bundle_path="${slug}"
+  source_bundle_path="$(jq -r '(.source_bundle_path // .slug)' "${manifest_path}")"
   weight="$(jq -r '(.weight // 1)' "${manifest_path}")"
   service_port="$(jq -r '(.service_port // 0)' "${manifest_path}")"
   service_subnet_octet="$(jq -r '(.service_subnet_octet // 0)' "${manifest_path}")"
