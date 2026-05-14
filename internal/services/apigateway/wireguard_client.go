@@ -42,12 +42,12 @@ type httpWireGuardClient struct {
 }
 
 func NewHTTPWireGuardClient(baseURL, token string) wireGuardClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopWireGuardClient{}
 	}
 	return &httpWireGuardClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 15 * time.Second,
@@ -69,7 +69,7 @@ func (c *httpWireGuardClient) Teardown(ctx context.Context) error {
 }
 
 func (c *httpWireGuardClient) request(ctx context.Context, method, path string) (WireGuardGatewayStatus, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return WireGuardGatewayStatus{}, err
 	}
@@ -80,7 +80,7 @@ func (c *httpWireGuardClient) request(ctx context.Context, method, path string) 
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal wireguard service origin.
 	if err != nil {
 		return WireGuardGatewayStatus{}, err
 	}

@@ -29,8 +29,12 @@ type httpPublicSnapshotClient struct {
 }
 
 func newHTTPPublicSnapshotClient(baseURL, adminToken string) publicSnapshotClient {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
+		normalizedBaseURL = "http://127.0.0.1"
+	}
 	return &httpPublicSnapshotClient{
-		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		baseURL:    normalizedBaseURL,
 		adminToken: strings.TrimSpace(adminToken),
 		client: &http.Client{
 			Timeout: 15 * time.Second,
@@ -73,7 +77,7 @@ func fetchSnapshot[T any](ctx context.Context, client *http.Client, url string) 
 func fetchSnapshotWithToken[T any](ctx context.Context, client *http.Client, url, token string) (T, error) {
 	var zero T
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) // #nosec G704 -- snapshot URL is built from a validated base origin and fixed paths.
 	if err != nil {
 		return zero, err
 	}
@@ -81,7 +85,7 @@ func fetchSnapshotWithToken[T any](ctx context.Context, client *http.Client, url
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704 -- request targets a validated platform snapshot origin.
 	if err != nil {
 		return zero, err
 	}

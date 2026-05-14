@@ -39,12 +39,12 @@ type httpCheckerClient struct {
 }
 
 func newCheckerClient(baseURL, token string) checkerClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopCheckerClient{}
 	}
 	return &httpCheckerClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 45 * time.Second,
@@ -58,7 +58,7 @@ func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.Chec
 		return apigateway.CheckerExecutionResult{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/execute", strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/execute", strings.NewReader(string(reqBody))) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return apigateway.CheckerExecutionResult{}, err
 	}
@@ -67,7 +67,7 @@ func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.Chec
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal checker service origin.
 	if err != nil {
 		return apigateway.CheckerExecutionResult{}, err
 	}

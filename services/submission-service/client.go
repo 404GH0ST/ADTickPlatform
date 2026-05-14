@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -34,12 +35,12 @@ type httpGameCoreSubmissionClient struct {
 }
 
 func newGameCoreSubmissionClient(baseURL, token string) submissionGameCoreClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopGameCoreSubmissionClient{}
 	}
 	return &httpGameCoreSubmissionClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -96,7 +97,7 @@ func requestGameCoreSubmissionJSON[T any](ctx context.Context, c *httpGameCoreSu
 		requestBody = strings.NewReader(string(encodedBody))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return zero, err
 	}
@@ -107,7 +108,7 @@ func requestGameCoreSubmissionJSON[T any](ctx context.Context, c *httpGameCoreSu
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal service origin.
 	if err != nil {
 		return zero, err
 	}

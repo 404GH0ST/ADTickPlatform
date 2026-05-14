@@ -69,3 +69,28 @@ func TestDecodeJSONRejectsTrailingJSONValue(t *testing.T) {
 		t.Fatalf("expected trailing json error, got %v", err)
 	}
 }
+
+func TestNormalizeInternalBaseURL(t *testing.T) {
+	testCases := []struct {
+		name string
+		raw  string
+		want string
+		ok   bool
+	}{
+		{name: "http origin", raw: " http://game-core:8080/ ", want: "http://game-core:8080", ok: true},
+		{name: "https path", raw: "https://api.internal/v1", want: "https://api.internal/v1", ok: true},
+		{name: "missing scheme", raw: "game-core:8080", ok: false},
+		{name: "unsupported scheme", raw: "file:///etc/passwd", ok: false},
+		{name: "userinfo", raw: "http://user:pass@game-core:8080", ok: false},
+		{name: "query", raw: "http://game-core:8080?next=http://metadata", ok: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := NormalizeInternalBaseURL(tc.raw)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("NormalizeInternalBaseURL(%q) = %q, %v; want %q, %v", tc.raw, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}

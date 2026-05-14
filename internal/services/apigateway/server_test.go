@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1854,6 +1855,23 @@ func TestParticipantCannotDownloadDraftChallengeSourceBundle(t *testing.T) {
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected draft source download 404, got %d", response.Code)
+	}
+}
+
+func TestChallengeSourceRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write outside source: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", root)
+
+	_, _, err := resolveChallengeSourcePath(filepath.Join("escape", "secret.txt"))
+	if !errors.Is(err, errChallengeSourceUnavailable) {
+		t.Fatalf("expected symlink escape to be unavailable, got %v", err)
 	}
 }
 

@@ -130,15 +130,15 @@ func NewHTTPGameCoreClient(baseURL, token string) gameCoreClient {
 }
 
 func NewHTTPGameCoreClientWithTimeout(baseURL, token string, timeout time.Duration) gameCoreClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopGameCoreClient{}
 	}
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	return &httpGameCoreClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: timeout,
@@ -301,7 +301,7 @@ func requestGameCoreJSON[T any](ctx context.Context, c *httpGameCoreClient, meth
 		requestBody = strings.NewReader(string(encodedBody))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return zero, err
 	}
@@ -312,7 +312,7 @@ func requestGameCoreJSON[T any](ctx context.Context, c *httpGameCoreClient, meth
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal game-core service origin.
 	if err != nil {
 		return zero, err
 	}

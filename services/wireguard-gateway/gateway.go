@@ -285,16 +285,16 @@ func (a *fileWireGuardApplier) Apply(_ context.Context, snapshot wireGuardGatewa
 
 func (a *fileWireGuardApplier) Teardown(_ context.Context) error {
 	if strings.TrimSpace(a.paths.configPath) != "" {
-		_ = os.Remove(a.paths.configPath)
+		_ = os.Remove(a.paths.configPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	if strings.TrimSpace(a.paths.rulesPath) != "" {
-		_ = os.Remove(a.paths.rulesPath)
+		_ = os.Remove(a.paths.rulesPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	if strings.TrimSpace(a.paths.peersPath) != "" {
-		_ = os.Remove(a.paths.peersPath)
+		_ = os.Remove(a.paths.peersPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	if strings.TrimSpace(a.paths.statusPath) != "" {
-		_ = os.Remove(a.paths.statusPath)
+		_ = os.Remove(a.paths.statusPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	return nil
 }
@@ -380,7 +380,7 @@ func (a *hostWireGuardApplier) Teardown(ctx context.Context) error {
 }
 
 func (execCommandRunner) Run(ctx context.Context, binary string, args ...string) error {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204,G702 -- binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %s failed: %w: %s", binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
@@ -428,7 +428,7 @@ func writeStatusArtifact(path string, status apigateway.WireGuardGatewayStatus) 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, payload, 0o600)
+	return os.WriteFile(path, payload, 0o600) // #nosec G703 -- caller resolves configured artifact path.
 }
 
 func ensureParentDir(path string) error {
@@ -436,7 +436,7 @@ func ensureParentDir(path string) error {
 	if trimmed == "" {
 		return nil
 	}
-	return os.MkdirAll(filepath.Dir(trimmed), 0o755)
+	return os.MkdirAll(filepath.Dir(trimmed), 0o750)
 }
 
 func buildWireGuardGatewaySnapshot(peers []apigateway.WireGuardGatewayPeer, now time.Time) wireGuardGatewaySnapshot {

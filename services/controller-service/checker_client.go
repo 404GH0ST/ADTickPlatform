@@ -25,8 +25,8 @@ type httpCheckerValidationClient struct {
 }
 
 func newCheckerValidationClient() checkerValidationClient {
-	baseURL := strings.TrimRight(strings.TrimSpace(config.String("CHECKER_RUNNER_INTERNAL_URL", "")), "/")
-	if baseURL == "" {
+	baseURL, ok := httpapi.NormalizeInternalBaseURL(config.String("CHECKER_RUNNER_INTERNAL_URL", ""))
+	if !ok {
 		return nil
 	}
 	return &httpCheckerValidationClient{
@@ -43,7 +43,7 @@ func (c *httpCheckerValidationClient) Validate(ctx context.Context, request apig
 	if err != nil {
 		return apigateway.CheckerValidationResult{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/validate", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/validate", strings.NewReader(string(body))) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return apigateway.CheckerValidationResult{}, err
 	}
@@ -52,7 +52,7 @@ func (c *httpCheckerValidationClient) Validate(ctx context.Context, request apig
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal checker service origin.
 	if err != nil {
 		return apigateway.CheckerValidationResult{}, err
 	}

@@ -1112,6 +1112,7 @@ func (s *postgresGameStore) loadCheckerRunSummaries(ctx context.Context, runs []
 		clauses = append(clauses, fmt.Sprintf("(tick_id = $%d AND team_id = $%d AND challenge_id = $%d)", base, base+1, base+2))
 	}
 
+	// #nosec G202 -- clauses are generated from fixed column predicates and positional placeholders only.
 	query := `
 		SELECT tick_id, team_id, challenge_id, service_state, state_phase, state_message
 		FROM checker_service_states
@@ -1167,6 +1168,7 @@ func (s *postgresGameStore) loadCheckerRunSummariesFromRuns(ctx context.Context,
 		clauses = append(clauses, fmt.Sprintf("(tick_id = $%d AND team_id = $%d AND challenge_id = $%d)", base, base+1, base+2))
 	}
 
+	// #nosec G202 -- clauses are generated from fixed column predicates and positional placeholders only.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
 		FROM checker_runs
@@ -1855,12 +1857,13 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 
 	whereClause := strings.Join(conditions, " AND ")
 	var totalCount int
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM attack_events WHERE %s", whereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM attack_events WHERE %s", whereClause) // #nosec G201 -- whereClause is assembled from fixed predicates and placeholders only.
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return apigateway.AttackFeedPage{}, err
 	}
 
 	queryArgs := append(append([]any{}, args...), limit, offset)
+	// #nosec G201 -- whereClause is assembled from fixed predicates and placeholders only.
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT id, attacker, victim, service, tick, verdict, created_at
 		FROM attack_events
