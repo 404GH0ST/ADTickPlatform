@@ -508,9 +508,15 @@ export function AttackMapPanel({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{visibleRows.length} attacks</Badge>
-          <Badge variant="secondary">{visibleTeamCount} teams</Badge>
-          <Badge variant="secondary">{visibleServiceCount} services</Badge>
+          <Badge data-testid="attack-map-visible-attacks" variant="secondary">
+            {visibleRows.length} attacks
+          </Badge>
+          <Badge data-testid="attack-map-visible-teams" variant="secondary">
+            {visibleTeamCount} teams
+          </Badge>
+          <Badge data-testid="attack-map-visible-services" variant="secondary">
+            {visibleServiceCount} services
+          </Badge>
           {attackRows.length > 0 ? (
             <>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
@@ -565,7 +571,10 @@ export function AttackMapPanel({
               </div>
             </div>
             <div className="space-y-1 lg:text-right">
-              <p className="text-sm font-medium text-foreground">
+              <p
+                className="text-sm font-medium text-foreground"
+                data-testid="attack-map-selected-tick"
+              >
                 {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
               </p>
               <p className="max-w-[34rem] text-sm text-muted-foreground lg:max-w-[20rem]">
@@ -633,6 +642,7 @@ export function AttackMapPanel({
                 ))}
               </select>
               <Button
+                data-testid="attack-map-highlight-current-tick"
                 size="touch"
                 variant="outline"
                 disabled={currentTickAttackIDs.length === 0}
@@ -663,10 +673,17 @@ export function AttackMapPanel({
           </DialogHeader>
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
-              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
-              <Badge variant="secondary">{visibleServiceCount} services</Badge>
+              <Badge data-testid="attack-map-visible-attacks" variant="secondary">
+                {visibleRows.length} attacks
+              </Badge>
+              <Badge data-testid="attack-map-visible-teams" variant="secondary">
+                {visibleTeamCount} teams
+              </Badge>
+              <Badge data-testid="attack-map-visible-services" variant="secondary">
+                {visibleServiceCount} services
+              </Badge>
               <Button
+                data-testid="attack-map-highlight-current-tick"
                 size="sm"
                 variant="outline"
                 disabled={currentTickAttackIDs.length === 0}
@@ -724,9 +741,15 @@ export function AttackMapPanel({
               }}
             />
             <div className="pointer-events-none absolute left-5 top-5 flex flex-wrap gap-2">
-              <Badge variant="secondary">{visibleRows.length} attacks</Badge>
-              <Badge variant="secondary">{visibleTeamCount} teams</Badge>
-              <Badge variant="secondary">{visibleServiceCount} services</Badge>
+              <Badge data-testid="attack-map-visible-attacks" variant="secondary">
+                {visibleRows.length} attacks
+              </Badge>
+              <Badge data-testid="attack-map-visible-teams" variant="secondary">
+                {visibleTeamCount} teams
+              </Badge>
+              <Badge data-testid="attack-map-visible-services" variant="secondary">
+                {visibleServiceCount} services
+              </Badge>
               <Badge variant="secondary">{formatTickWindow(visibleTicks)}</Badge>
             </div>
             <div className="pointer-events-none absolute bottom-16 left-5 right-5 z-20 max-h-[calc(100dvh-7rem)] overflow-y-auto sm:bottom-5 sm:right-40">
