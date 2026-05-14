@@ -199,6 +199,58 @@ func decodeProblem(t *testing.T, body []byte) httpapi.ProblemDetails {
 	return payload
 }
 
+func TestGameCoreInternalRoutesRequireAdminAuth(t *testing.T) {
+	mux := newTestGameCoreMux(testCheckerClient{})
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/internal/v1/game/status", ""},
+		{http.MethodGet, "/internal/v1/game/match", ""},
+		{http.MethodPost, "/internal/v1/game/match/start", `{}`},
+		{http.MethodPost, "/internal/v1/game/match/stop", `{}`},
+		{http.MethodPut, "/internal/v1/game/match/schedule", `{}`},
+		{http.MethodPost, "/internal/v1/game/ticks/advance", `{}`},
+		{http.MethodGet, "/internal/v1/game/checker-runs", ""},
+		{http.MethodGet, "/internal/v1/game/scoreboard", ""},
+		{http.MethodGet, "/internal/v1/game/attacks", ""},
+		{http.MethodPost, "/internal/v1/game/scoring/recompute", `{}`},
+		{http.MethodGet, "/internal/v1/game/scoring/audit", ""},
+		{http.MethodGet, "/internal/v1/game/scheduler", ""},
+		{http.MethodGet, "/internal/v1/game/scheduler/events", ""},
+		{http.MethodPost, "/internal/v1/game/scheduler/start", `{}`},
+		{http.MethodPost, "/internal/v1/game/scheduler/stop", `{}`},
+		{http.MethodPut, "/internal/v1/game/scheduler/interval", `{}`},
+		{http.MethodPost, "/internal/v1/flags/submit", `{"team_id":101,"flags":["FLAGv1.demo"]}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func startTestMatch(t *testing.T, mux *http.ServeMux) {
 	t.Helper()
 

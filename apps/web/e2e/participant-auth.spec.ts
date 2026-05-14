@@ -15,6 +15,71 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`);
 });
 
+type ApiCase = {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  data?: unknown;
+};
+
+const adminApiCases: ApiCase[] = [
+  { method: "GET", path: "/api/admin/access/status" },
+  { method: "POST", path: "/api/admin/access/reconcile" },
+  { method: "POST", path: "/api/admin/access/teardown" },
+  { method: "POST", path: "/api/admin/challenges" },
+  { method: "PUT", path: "/api/admin/challenges/1" },
+  { method: "DELETE", path: "/api/admin/challenges/1" },
+  { method: "POST", path: "/api/admin/challenges/1/deploy" },
+  { method: "POST", path: "/api/admin/challenges/1/validate" },
+  { method: "GET", path: "/api/admin/deployments" },
+  { method: "DELETE", path: "/api/admin/deployments/77" },
+  { method: "POST", path: "/api/admin/deployments/reconcile" },
+  { method: "GET", path: "/api/admin/game/attacks" },
+  { method: "GET", path: "/api/admin/game/checker-runs" },
+  { method: "GET", path: "/api/admin/game/match" },
+  { method: "PUT", path: "/api/admin/game/match/schedule" },
+  { method: "POST", path: "/api/admin/game/match/start" },
+  { method: "POST", path: "/api/admin/game/match/stop" },
+  { method: "GET", path: "/api/admin/game/scheduler/events" },
+  { method: "PUT", path: "/api/admin/game/scheduler/interval" },
+  { method: "GET", path: "/api/admin/game/scheduler" },
+  { method: "POST", path: "/api/admin/game/scheduler/start" },
+  { method: "POST", path: "/api/admin/game/scheduler/stop" },
+  { method: "GET", path: "/api/admin/game/scoreboard" },
+  { method: "GET", path: "/api/admin/game/scoring/audit" },
+  { method: "POST", path: "/api/admin/game/scoring/recompute" },
+  { method: "GET", path: "/api/admin/game/status" },
+  { method: "POST", path: "/api/admin/game/ticks/advance" },
+  { method: "GET", path: "/api/admin/operations/metrics" },
+  { method: "GET", path: "/api/admin/operations/status" },
+  { method: "POST", path: "/api/admin/players" },
+  { method: "PUT", path: "/api/admin/players/1001" },
+  { method: "DELETE", path: "/api/admin/players/1001" },
+  { method: "GET", path: "/api/admin/players/1001/wireguard" },
+  { method: "POST", path: "/api/admin/players/1001/wireguard/revoke" },
+  { method: "POST", path: "/api/admin/players/1001/wireguard/rotate" },
+  { method: "GET", path: "/api/admin/realtime/game/attacks/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/checker-runs/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/scheduler/events/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/scoreboard/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/status/stream" },
+  { method: "GET", path: "/api/admin/runtime-health/report" },
+  { method: "POST", path: "/api/admin/teams" },
+  { method: "PUT", path: "/api/admin/teams/101" },
+  { method: "DELETE", path: "/api/admin/teams/101" },
+  { method: "POST", path: "/api/admin/wireguard/reconcile" },
+  { method: "GET", path: "/api/admin/wireguard/status" },
+  { method: "POST", path: "/api/admin/wireguard/teardown" },
+];
+
+const participantOwnedApiCases: ApiCase[] = [
+  { method: "GET", path: "/api/platform/team/services" },
+  { method: "GET", path: "/api/platform/challenges/1/source" },
+  { method: "POST", path: "/api/platform/services/1/ssh-session" },
+  { method: "POST", path: "/api/platform/services/1/reset/factory" },
+  { method: "POST", path: "/api/platform/services/1/reset/restart" },
+  { method: "POST", path: "/api/platform/services/1/unlock", data: { proof: "bad" } },
+];
+
 async function loginAsParticipant(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill("alpha.captain@college.local");
@@ -89,22 +154,10 @@ test("unauthenticated callers cannot use admin api proxies", async ({
   });
 });
 
-test("unauthenticated callers cannot use representative admin api methods", async ({
+test("unauthenticated callers cannot use admin api methods", async ({
   page,
 }) => {
-  const cases = [
-    { method: "GET", path: "/api/admin/game/status" },
-    { method: "GET", path: "/api/admin/realtime/game/status/stream" },
-    { method: "POST", path: "/api/admin/game/ticks/advance" },
-    {
-      method: "PUT",
-      path: "/api/admin/game/scheduler/interval",
-      data: { interval_seconds: 90 },
-    },
-    { method: "DELETE", path: "/api/admin/teams/101" },
-  ];
-
-  for (const item of cases) {
+  for (const item of adminApiCases) {
     const response = await page.request.fetch(item.path, {
       method: item.method,
       data: item.data,
@@ -133,25 +186,13 @@ test("participant session cannot use admin api proxies", async ({
   });
 });
 
-test("participant session cannot use representative admin api methods", async ({
+test("participant session cannot use admin api methods", async ({
   page,
   context,
 }) => {
   await setParticipantSession(context);
 
-  const cases = [
-    { method: "GET", path: "/api/admin/game/status" },
-    { method: "GET", path: "/api/admin/realtime/game/status/stream" },
-    { method: "POST", path: "/api/admin/game/ticks/advance" },
-    {
-      method: "PUT",
-      path: "/api/admin/game/scheduler/interval",
-      data: { interval_seconds: 90 },
-    },
-    { method: "DELETE", path: "/api/admin/teams/101" },
-  ];
-
-  for (const item of cases) {
+  for (const item of adminApiCases) {
     const response = await page.request.fetch(item.path, {
       method: item.method,
       data: item.data,
@@ -168,16 +209,7 @@ test("participant session cannot use representative admin api methods", async ({
 test("unauthenticated callers cannot use participant-owned api proxies", async ({
   page,
 }) => {
-  const cases = [
-    { method: "GET", path: "/api/platform/team/services" },
-    { method: "GET", path: "/api/platform/challenges/1/source" },
-    { method: "POST", path: "/api/platform/services/1/ssh-session" },
-    { method: "POST", path: "/api/platform/services/1/reset/factory" },
-    { method: "POST", path: "/api/platform/services/1/reset/restart" },
-    { method: "POST", path: "/api/platform/services/1/unlock", data: { proof: "bad" } },
-  ];
-
-  for (const item of cases) {
+  for (const item of participantOwnedApiCases) {
     const response = await page.request.fetch(item.path, {
       method: item.method,
       data: item.data,

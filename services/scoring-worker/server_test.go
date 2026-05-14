@@ -40,6 +40,46 @@ func (c testScoringGameCoreClient) AuditScoring(_ context.Context) (apigateway.S
 	return apigateway.ScoringAuditAlias{Status: "ok", StoredRows: 1, ReplayedRows: 1}, nil
 }
 
+func TestScoringWorkerRoutesRequireAdminAuth(t *testing.T) {
+	server := newScoringWorkerServer("dev-admin-token", testScoringGameCoreClient{})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "scoring-worker", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/internal/v1/scoring/status"},
+		{http.MethodGet, "/internal/v1/scoring/scoreboard"},
+		{http.MethodPost, "/internal/v1/scoring/recompute"},
+		{http.MethodGet, "/internal/v1/scoring/audit"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestScoringWorkerRecompute(t *testing.T) {
 	server := newScoringWorkerServer("dev-admin-token", testScoringGameCoreClient{})
 	server.now = func() time.Time { return time.Date(2026, 3, 11, 2, 0, 0, 0, time.UTC) }
