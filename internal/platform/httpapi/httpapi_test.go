@@ -52,3 +52,20 @@ func TestMetricsEndpointIncludesHTTPAndCustomMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeJSONRejectsTrailingJSONValue(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/demo",
+		strings.NewReader(`{"name":"alpha"}{"name":"beta"}`),
+	)
+
+	var payload struct {
+		Name string `json:"name"`
+	}
+	err := DecodeJSON(request, &payload)
+
+	if err == nil || !strings.Contains(err.Error(), "unexpected trailing json") {
+		t.Fatalf("expected trailing json error, got %v", err)
+	}
+}

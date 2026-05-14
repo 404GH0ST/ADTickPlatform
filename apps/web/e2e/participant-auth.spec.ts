@@ -218,6 +218,40 @@ test("unauthenticated callers cannot use participant-owned api proxies", async (
   }
 });
 
+test("browser mutation api proxies reject explicit cross-site requests", async ({
+  page,
+  context,
+}) => {
+  await loginAsOrganizer(context);
+
+  const cases = [
+    { method: "POST", path: "/api/admin/game/ticks/advance" },
+    { method: "POST", path: "/api/platform/services/1/reset/restart" },
+    {
+      method: "POST",
+      path: "/api/platform/session/login",
+      data: { email: "alpha.captain@college.local", password: "alpha-password" },
+    },
+    { method: "POST", path: "/api/platform/session/logout" },
+  ];
+
+  for (const item of cases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+      headers: {
+        Origin: "https://attacker.example",
+      },
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "cross-site mutation requests are not allowed.",
+    });
+  }
+});
+
 test("organizer session can use admin api proxies", async ({
   page,
   context,
