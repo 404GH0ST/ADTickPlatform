@@ -176,8 +176,8 @@ Run the main host validation flow end to end:
 ```bash
 sudo make go-live-check
 ```
-This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, checks the realtime SSE routes, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
-The artifact directory also records the git revision, a `prod.env` SHA256 fingerprint, an `operator-summary.json` snapshot, and an `operator-report.html` status page for the validated run.
+This runs the short match rehearsal, reuses the created participant account for the restart recovery drill, checks the realtime SSE routes, verifies the scoring replay audit, and then captures the final baseline snapshot into a timestamped `.runtime/go-live-check-*` directory.
+The artifact directory also records the git revision, a `prod.env` SHA256 fingerprint, `scoring-audit.json`, an `operator-summary.json` snapshot, and an `operator-report.html` status page for the validated run.
 
 ### Release-Candidate Validation
 Run the full release-candidate host workflow:

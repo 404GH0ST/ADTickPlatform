@@ -15,6 +15,7 @@ attack_map_load_output_dir="${artifact_dir}/attack-map-load"
 prod_env="${PROD_ENV:-deploy/compose/prod.env}"
 include_attack_map_load="${GO_LIVE_CHECK_INCLUDE_ATTACK_MAP_LOAD:-true}"
 operations_status_file="${artifact_dir}/operations-status.json"
+scoring_audit_file="${artifact_dir}/scoring-audit.json"
 game_core_metrics_file="${artifact_dir}/game-core-metrics.prom"
 submission_metrics_file="${artifact_dir}/submission-service-metrics.prom"
 controller_metrics_file="${artifact_dir}/controller-service-metrics.prom"
@@ -56,6 +57,14 @@ if ! jq -e '.healthy == true and ((.alerts | length) == 0)' "${operations_status
   exit 1
 fi
 
+curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+  "${edge_base_url}/api/v2/admin/game/scoring/audit" > "${scoring_audit_file}"
+if ! jq -e '.status == "ok" and .mismatch_count == 0' "${scoring_audit_file}" >/dev/null; then
+  echo "go-live check finished with scoring replay mismatches" >&2
+  cat "${scoring_audit_file}" >&2
+  exit 1
+fi
+
 {
   echo "commit=$(git rev-parse HEAD)"
   echo "short_commit=$(git rev-parse --short HEAD)"
@@ -91,6 +100,7 @@ Artifacts in this directory:
 ${attack_map_artifacts}
 - realtime-health.json
 - operations-status.json
+- scoring-audit.json
 - git-revision.txt
 - prod-env.sha256
 - game-core-metrics.prom
@@ -113,6 +123,7 @@ jq -nc \
   --arg artifact_dir "${artifact_dir}" \
   --arg short_match_env "short-match.env" \
   --arg operations_status "operations-status.json" \
+  --arg scoring_audit "scoring-audit.json" \
   --arg operator_summary "operator-summary.json" \
   --arg operator_report "operator-report.html" \
   --arg git_revision "git-revision.txt" \
@@ -150,6 +161,7 @@ jq -nc \
       short_match_env: $short_match_env,
       realtime_health: "realtime-health.json",
       operations_status: $operations_status,
+      scoring_audit: $scoring_audit,
       operator_summary: $operator_summary,
       operator_report: $operator_report,
       git_revision: $git_revision,

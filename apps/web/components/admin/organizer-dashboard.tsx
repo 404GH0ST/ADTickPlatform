@@ -84,6 +84,7 @@ export function OrganizerDashboard({
         schedulerEventFilters: state.schedulerEventFilters,
         schedulerEventPage: state.schedulerEventPageState,
         schedulerEventsLiveMode: state.schedulerEventsLiveMode,
+        scoringAudit: state.scoringAudit,
         scoreRows: state.scoreRows,
         selectedWireGuardPeer: state.selectedWireGuardPeer,
         teamRows: state.teamRows,
@@ -131,6 +132,9 @@ export function OrganizerDashboard({
         },
         onPageSchedulerEvents: (direction) => {
           void state.pageSchedulerEvents(direction);
+        },
+        onAuditGameScoring: () => {
+          void state.auditGameScoring();
         },
         onRecomputeGameScoring: () => {
           void state.recomputeGameScoring();
@@ -266,6 +270,7 @@ function renderOrganizerPanel({
   schedulerEventFilters,
   schedulerEventPage,
   schedulerEventsLiveMode,
+  scoringAudit,
   scoreRows,
   selectedWireGuardPeer,
   teamRows,
@@ -290,6 +295,7 @@ function renderOrganizerPanel({
   onPageAttacks,
   onPageCheckerRuns,
   onPageSchedulerEvents,
+  onAuditGameScoring,
   onRecomputeGameScoring,
   onReconcileAccess,
   onReconcileDeployments,
@@ -350,6 +356,7 @@ function renderOrganizerPanel({
   schedulerEventFilters: OrganizerDashboardState["schedulerEventFilters"];
   schedulerEventPage: OrganizerDashboardState["schedulerEventPageState"];
   schedulerEventsLiveMode: boolean;
+  scoringAudit: OrganizerDashboardState["scoringAudit"];
   scoreRows: OrganizerDashboardOptions["scoreboard"];
   selectedWireGuardPeer: OrganizerDashboardState["selectedWireGuardPeer"];
   teamRows: OrganizerDashboardOptions["teams"];
@@ -381,6 +388,7 @@ function renderOrganizerPanel({
   onPageAttacks: (direction: "prev" | "next") => void;
   onPageCheckerRuns: (direction: "prev" | "next") => void;
   onPageSchedulerEvents: (direction: "prev" | "next") => void;
+  onAuditGameScoring: () => void;
   onRecomputeGameScoring: () => void;
   onReconcileAccess: () => void;
   onReconcileDeployments: () => void;
@@ -501,7 +509,9 @@ function renderOrganizerPanel({
     return (
       <ScoreboardTab
         pendingAction={pendingAction}
+        scoringAudit={scoringAudit}
         scoreRows={scoreRows}
+        onAudit={onAuditGameScoring}
         onRefresh={onRefreshGameScoreboard}
       />
     );

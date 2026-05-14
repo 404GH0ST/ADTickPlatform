@@ -100,6 +100,7 @@ type gameStore interface {
 	AcceptFlagSubmission(ctx context.Context, submission acceptedFlagSubmission) (bool, error)
 	ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
 	RecomputeScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
+	AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error)
 	ListAttackFeed(ctx context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error)
 	MatchStatus(ctx context.Context) (apigateway.GameMatchStatus, error)
 	StartMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
@@ -433,6 +434,23 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 
 	s.scoreboard = append([]apigateway.ScoreRowAlias(nil), rows...)
 	return append([]apigateway.ScoreRowAlias(nil), rows...), nil
+}
+
+func (s *memoryGameStore) AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error) {
+	s.mu.Lock()
+	stored := append([]apigateway.ScoreRowAlias(nil), s.scoreboard...)
+	s.mu.Unlock()
+
+	replayed, err := s.RecomputeScoreboard(ctx)
+	if err != nil {
+		return apigateway.ScoringAuditAlias{}, err
+	}
+
+	s.mu.Lock()
+	s.scoreboard = append([]apigateway.ScoreRowAlias(nil), stored...)
+	s.mu.Unlock()
+
+	return buildScoringAuditReport(stored, replayed), nil
 }
 
 func (s *memoryGameStore) ListAttackFeed(_ context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error) {
@@ -1507,6 +1525,22 @@ func (s *postgresGameStore) ListScoreboard(ctx context.Context) ([]apigateway.Sc
 }
 
 func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
+	return s.buildScoreboard(ctx, true)
+}
+
+func (s *postgresGameStore) AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error) {
+	stored, err := s.listStoredScoreboard(ctx)
+	if err != nil {
+		return apigateway.ScoringAuditAlias{}, err
+	}
+	replayed, err := s.buildScoreboard(ctx, false)
+	if err != nil {
+		return apigateway.ScoringAuditAlias{}, err
+	}
+	return buildScoringAuditReport(stored, replayed), nil
+}
+
+func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) ([]apigateway.ScoreRowAlias, error) {
 	type teamRecord struct {
 		ID   int
 		Name string
@@ -1714,12 +1748,6 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 	})
 
 	result := make([]apigateway.ScoreRowAlias, 0, len(scoreboard))
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	for index, snapshot := range scoreboard {
 		row := apigateway.ScoreRowAlias{
 			Rank:     index + 1,
@@ -1731,6 +1759,19 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 			Delta:    rankDelta(previousRanks[snapshot.TeamID], index+1),
 			Services: append([]apigateway.ServiceScoreBreakdownAlias(nil), snapshot.Services...),
 		}
+		result = append(result, row)
+	}
+	if !persist {
+		return result, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	for index, row := range result {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO scoreboard_entries (team_id, rank, team_name, attack_points, defense_points, sla_points, total_points, delta)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1742,10 +1783,9 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 				sla_points = EXCLUDED.sla_points,
 				total_points = EXCLUDED.total_points,
 				delta = EXCLUDED.delta
-		`, snapshot.TeamID, row.Rank, row.Team, row.Attack, row.Defense, row.SLA, row.Total, row.Delta); err != nil {
+		`, scoreboard[index].TeamID, row.Rank, row.Team, row.Attack, row.Defense, row.SLA, row.Total, row.Delta); err != nil {
 			return nil, err
 		}
-		result = append(result, row)
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id NOT IN (SELECT id FROM teams)`); err != nil {
@@ -1755,6 +1795,28 @@ func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigatew
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *postgresGameStore) listStoredScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rank, team_name, attack_points, defense_points, sla_points, total_points, delta
+		FROM scoreboard_entries
+		ORDER BY rank ASC, team_name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]apigateway.ScoreRowAlias, 0)
+	for rows.Next() {
+		var row apigateway.ScoreRowAlias
+		if err := rows.Scan(&row.Rank, &row.Team, &row.Attack, &row.Defense, &row.SLA, &row.Total, &row.Delta); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error) {
@@ -2120,6 +2182,72 @@ func faustSLAFactor(teamCount int) float64 {
 		return 0
 	}
 	return math.Sqrt(float64(teamCount))
+}
+
+func buildScoringAuditReport(stored, replayed []apigateway.ScoreRowAlias) apigateway.ScoringAuditAlias {
+	const scoreTolerance = 0.000001
+
+	report := apigateway.ScoringAuditAlias{
+		Status:       "ok",
+		StoredRows:   len(stored),
+		ReplayedRows: len(replayed),
+		Mismatches:   make([]apigateway.ScoringAuditMismatchAlias, 0),
+	}
+
+	storedByTeam := make(map[string]apigateway.ScoreRowAlias, len(stored))
+	for _, row := range stored {
+		storedByTeam[row.Team] = row
+	}
+	replayedByTeam := make(map[string]apigateway.ScoreRowAlias, len(replayed))
+	for _, row := range replayed {
+		replayedByTeam[row.Team] = row
+	}
+
+	for _, row := range replayed {
+		storedRow, ok := storedByTeam[row.Team]
+		if !ok {
+			report.Mismatches = append(report.Mismatches, apigateway.ScoringAuditMismatchAlias{
+				Team:   row.Team,
+				Field:  "row",
+				Detail: "replayed row is missing from stored scoreboard",
+			})
+			continue
+		}
+		appendScoreMismatch := func(field string, storedValue, replayedValue float64) {
+			delta := replayedValue - storedValue
+			if math.Abs(delta) <= scoreTolerance {
+				return
+			}
+			report.Mismatches = append(report.Mismatches, apigateway.ScoringAuditMismatchAlias{
+				Team:     row.Team,
+				Field:    field,
+				Stored:   storedValue,
+				Replayed: replayedValue,
+				Delta:    delta,
+			})
+		}
+		appendScoreMismatch("rank", float64(storedRow.Rank), float64(row.Rank))
+		appendScoreMismatch("attack", storedRow.Attack, row.Attack)
+		appendScoreMismatch("defense", storedRow.Defense, row.Defense)
+		appendScoreMismatch("sla", storedRow.SLA, row.SLA)
+		appendScoreMismatch("total", storedRow.Total, row.Total)
+	}
+	for _, row := range stored {
+		if _, ok := replayedByTeam[row.Team]; ok {
+			continue
+		}
+		report.Mismatches = append(report.Mismatches, apigateway.ScoringAuditMismatchAlias{
+			Team:   row.Team,
+			Field:  "row",
+			Detail: "stored row is missing from replayed scoreboard",
+		})
+	}
+
+	report.MismatchCount = len(report.Mismatches)
+	if report.MismatchCount > 0 {
+		report.Status = "mismatch"
+	}
+	return report
 }
 
 func rankDelta(previousRank, currentRank int) string {

@@ -32,6 +32,13 @@ func (c testScoringGameCoreClient) RecomputeScoring(_ context.Context) ([]apigat
 	return c.Scoreboard(context.Background())
 }
 
+func (c testScoringGameCoreClient) AuditScoring(_ context.Context) (apigateway.ScoringAuditAlias, error) {
+	if c.err != nil {
+		return apigateway.ScoringAuditAlias{}, c.err
+	}
+	return apigateway.ScoringAuditAlias{Status: "ok", StoredRows: 1, ReplayedRows: 1}, nil
+}
+
 func TestScoringWorkerRecompute(t *testing.T) {
 	server := newScoringWorkerServer("dev-admin-token", testScoringGameCoreClient{})
 	server.now = func() time.Time { return time.Date(2026, 3, 11, 2, 0, 0, 0, time.UTC) }
@@ -62,6 +69,29 @@ func TestScoringWorkerRecompute(t *testing.T) {
 	}
 	if payload.LastScoreRows != 1 || payload.LastRecomputedAt == "" || payload.State != "ready" {
 		t.Fatalf("unexpected scoring status %+v", payload)
+	}
+}
+
+func TestScoringWorkerAudit(t *testing.T) {
+	server := newScoringWorkerServer("dev-admin-token", testScoringGameCoreClient{})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "scoring-worker", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/scoring/audit", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+
+	var payload apigateway.ScoringAuditAlias
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode scoring audit: %v", err)
+	}
+	if payload.Status != "ok" || payload.StoredRows != 1 || payload.ReplayedRows != 1 {
+		t.Fatalf("unexpected scoring audit %+v", payload)
 	}
 }
 

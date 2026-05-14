@@ -51,6 +51,17 @@ const scoreboard = [
   },
 ];
 
+function buildScoringAudit(overrides = {}) {
+  return {
+    status: "ok",
+    stored_rows: scoreboard.length,
+    replayed_rows: scoreboard.length,
+    mismatch_count: 0,
+    mismatches: [],
+    ...overrides,
+  };
+}
+
 const attackItems = [
   {
     id: "atk-01",
@@ -608,6 +619,7 @@ function createInitialState() {
     deployments: deployments.map((deployment) => ({ ...deployment })),
     checkerRuns: checkerRuns.map((run) => ({ ...run })),
     scoreboard: scoreboard.map((row) => ({ ...row })),
+    scoringAudit: buildScoringAudit(),
     wireguardStatus: { ...wireguardStatus },
     accessStatus: { ...accessStatus },
     operationsStatus: { ...operationsStatus },
@@ -2076,6 +2088,7 @@ async function handleAdminGameRoutes(ctx) {
   const handled = writeGetRoute(res, method, url.pathname, {
     "/api/v2/admin/game/status": () => state.gameStatus,
     "/api/v2/admin/game/scoreboard": () => state.scoreboard,
+    "/api/v2/admin/game/scoring/audit": () => state.scoringAudit,
   });
   if (handled) {
     return true;

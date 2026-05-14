@@ -100,6 +100,23 @@ type ServiceScoreBreakdownAlias struct {
 	Total       float64 `json:"total"`
 }
 
+type ScoringAuditAlias struct {
+	Status        string                      `json:"status"`
+	StoredRows    int                         `json:"stored_rows"`
+	ReplayedRows  int                         `json:"replayed_rows"`
+	MismatchCount int                         `json:"mismatch_count"`
+	Mismatches    []ScoringAuditMismatchAlias `json:"mismatches"`
+}
+
+type ScoringAuditMismatchAlias struct {
+	Team     string  `json:"team"`
+	Field    string  `json:"field"`
+	Stored   float64 `json:"stored"`
+	Replayed float64 `json:"replayed"`
+	Delta    float64 `json:"delta"`
+	Detail   string  `json:"detail,omitempty"`
+}
+
 type AttackEventAlias struct {
 	ID        string    `json:"id"`
 	Attacker  string    `json:"attacker"`

@@ -34,6 +34,7 @@ type gameCoreClient interface {
 	Scoreboard(ctx context.Context) ([]scoreRow, error)
 	AttackFeed(ctx context.Context, query AttackFeedQuery) (AttackFeedPage, error)
 	RecomputeScoring(ctx context.Context) ([]scoreRow, error)
+	AuditScoring(ctx context.Context) (ScoringAuditAlias, error)
 }
 
 type noopGameCoreClient struct{}
@@ -100,6 +101,10 @@ func (noopGameCoreClient) AttackFeed(context.Context, AttackFeedQuery) (AttackFe
 
 func (noopGameCoreClient) RecomputeScoring(context.Context) ([]scoreRow, error) {
 	return nil, errGameCoreDisabled
+}
+
+func (noopGameCoreClient) AuditScoring(context.Context) (ScoringAuditAlias, error) {
+	return ScoringAuditAlias{}, errGameCoreDisabled
 }
 
 type httpGameCoreClient struct {
@@ -278,6 +283,10 @@ func (c *httpGameCoreClient) AttackFeed(ctx context.Context, query AttackFeedQue
 
 func (c *httpGameCoreClient) RecomputeScoring(ctx context.Context) ([]scoreRow, error) {
 	return requestGameCoreJSON[[]scoreRow](ctx, c, http.MethodPost, "/internal/v1/game/scoring/recompute")
+}
+
+func (c *httpGameCoreClient) AuditScoring(ctx context.Context) (ScoringAuditAlias, error) {
+	return requestGameCoreJSON[ScoringAuditAlias](ctx, c, http.MethodGet, "/internal/v1/game/scoring/audit")
 }
 
 func requestGameCoreJSON[T any](ctx context.Context, c *httpGameCoreClient, method, path string, body ...any) (T, error) {

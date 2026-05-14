@@ -56,6 +56,7 @@ Artifacts in this directory:
 - go-live-check/README.txt
 - go-live-check/short-match.env
 - go-live-check/operations-status.json
+- go-live-check/scoring-audit.json
 - go-live-check/attack-map-load/README.txt
 - go-live-check/attack-map-load/attack-map-load.env
 - go-live-check/attack-map-load/attack-map-load-report.json
@@ -102,6 +103,7 @@ jq -nc \
         operator_summary: "go-live-check/operator-summary.json",
         short_match_env: "go-live-check/short-match.env",
         operations_status: "go-live-check/operations-status.json",
+        scoring_audit: "go-live-check/scoring-audit.json",
         attack_map_load: {
           readme: "go-live-check/attack-map-load/README.txt",
           env: "go-live-check/attack-map-load/attack-map-load.env",

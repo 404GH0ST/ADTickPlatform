@@ -18,6 +18,7 @@ var errScoringWorkerDisabled = errors.New("scoring worker is not configured")
 type scoringClient interface {
 	Scoreboard(ctx context.Context) ([]scoreRow, error)
 	RecomputeScoring(ctx context.Context) ([]scoreRow, error)
+	AuditScoring(ctx context.Context) (ScoringAuditAlias, error)
 }
 
 type noopScoringClient struct{}
@@ -28,6 +29,10 @@ func (noopScoringClient) Scoreboard(context.Context) ([]scoreRow, error) {
 
 func (noopScoringClient) RecomputeScoring(context.Context) ([]scoreRow, error) {
 	return nil, errScoringWorkerDisabled
+}
+
+func (noopScoringClient) AuditScoring(context.Context) (ScoringAuditAlias, error) {
+	return ScoringAuditAlias{}, errScoringWorkerDisabled
 }
 
 type httpScoringClient struct {
@@ -56,6 +61,10 @@ func (c *httpScoringClient) Scoreboard(ctx context.Context) ([]scoreRow, error) 
 
 func (c *httpScoringClient) RecomputeScoring(ctx context.Context) ([]scoreRow, error) {
 	return requestScoringJSON[[]scoreRow](ctx, c, http.MethodPost, "/internal/v1/scoring/recompute")
+}
+
+func (c *httpScoringClient) AuditScoring(ctx context.Context) (ScoringAuditAlias, error) {
+	return requestScoringJSON[ScoringAuditAlias](ctx, c, http.MethodGet, "/internal/v1/scoring/audit")
 }
 
 func requestScoringJSON[T any](ctx context.Context, c *httpScoringClient, method, path string, body ...any) (T, error) {

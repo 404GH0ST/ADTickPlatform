@@ -236,6 +236,23 @@ Behavior:
   - scheduler start and stop
   - scoring recompute
 
+### GET `/api/v2/admin/game/scoring/audit`
+
+Dry-run replay of persisted submissions and checker service state against the stored scoreboard snapshot.
+
+Response shape:
+
+- `status` as `ok` or `mismatch`
+- `stored_rows` and `replayed_rows`
+- `mismatch_count`
+- `mismatches[]` with `team`, `field`, `stored`, `replayed`, `delta`, and optional `detail`
+
+Behavior:
+
+- does not update the stored scoreboard
+- compares rank, attack, defense, SLA, and total points
+- reports missing stored or replayed rows as row mismatches
+
 ### GET `/api/v2/admin/game/status`
 
 Read the current match lifecycle state plus the latest persisted game tick and aggregate checker-run counts from `game-core`.
@@ -464,6 +481,7 @@ The repository now also exposes `game-core` endpoints:
 - `GET /internal/v1/game/scoreboard`
 - `GET /internal/v1/game/attacks`
 - `POST /internal/v1/game/scoring/recompute`
+- `GET /internal/v1/game/scoring/audit`
 - `POST /internal/v1/flags/submit`
 
 Current behavior:

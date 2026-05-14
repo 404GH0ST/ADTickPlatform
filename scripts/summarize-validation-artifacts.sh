@@ -113,8 +113,15 @@ if [[ ! -f "${go_live_summary_file}" ]]; then
 fi
 
 go_live_operations_file="${go_live_dir}/$(jq -r '.artifacts.operations_status' "${go_live_summary_file}")"
+scoring_audit_rel="$(jq -r '.artifacts.scoring_audit // empty' "${go_live_summary_file}")"
+scoring_audit_file=""
 attack_map_report_rel="$(jq -r '.artifacts.attack_map_load.report // empty' "${go_live_summary_file}")"
 attack_map_report_file=""
+if [[ -n "${scoring_audit_rel}" ]]; then
+  scoring_audit_file="${go_live_dir}/${scoring_audit_rel}"
+elif [[ -f "${go_live_dir}/scoring-audit.json" ]]; then
+  scoring_audit_file="${go_live_dir}/scoring-audit.json"
+fi
 if [[ -n "${attack_map_report_rel}" ]]; then
   attack_map_report_file="${go_live_dir}/${attack_map_report_rel}"
 fi
@@ -131,6 +138,17 @@ validated_short_commit="$(sed -n 's/^short_commit=//p' "${git_revision_file}" 2>
 
 operations_healthy="$(jq -r '.healthy // false' "${go_live_operations_file}")"
 operations_alerts_count="$(jq -r '.alerts | length' "${go_live_operations_file}")"
+
+scoring_audit_status=""
+scoring_audit_stored_rows=""
+scoring_audit_replayed_rows=""
+scoring_audit_mismatch_count=""
+if [[ -n "${scoring_audit_file}" && -f "${scoring_audit_file}" ]]; then
+  scoring_audit_status="$(jq -r '.status // empty' "${scoring_audit_file}")"
+  scoring_audit_stored_rows="$(jq -r '.stored_rows // empty' "${scoring_audit_file}")"
+  scoring_audit_replayed_rows="$(jq -r '.replayed_rows // empty' "${scoring_audit_file}")"
+  scoring_audit_mismatch_count="$(jq -r '.mismatch_count // empty' "${scoring_audit_file}")"
+fi
 
 attack_map_validation_status=""
 attack_map_submissions_per_second=""
@@ -193,6 +211,10 @@ summary_json="$(
     --arg validated_short_commit "${validated_short_commit}" \
     --arg operations_healthy "${operations_healthy}" \
     --argjson operations_alerts_count "$(json_number_or_null "${operations_alerts_count}")" \
+    --arg scoring_audit_status "${scoring_audit_status}" \
+    --argjson scoring_audit_stored_rows "$(json_number_or_null "${scoring_audit_stored_rows}")" \
+    --argjson scoring_audit_replayed_rows "$(json_number_or_null "${scoring_audit_replayed_rows}")" \
+    --argjson scoring_audit_mismatch_count "$(json_number_or_null "${scoring_audit_mismatch_count}")" \
     --arg attack_map_validation_status "${attack_map_validation_status}" \
     --arg game_core_match_state "${game_core_match_state}" \
     --argjson game_core_total_ticks "$(json_number_or_null "${game_core_total_ticks}")" \
@@ -230,6 +252,18 @@ summary_json="$(
             severity: "critical",
             summary: "Attack-map load validation did not pass.",
             detail: ("Status was " + $attack_map_validation_status + ".")
+          }] else [] end)
+        + (if $scoring_audit_status != "" and $scoring_audit_status != "ok" then [{
+            id: "scoring-audit-status",
+            severity: "critical",
+            summary: "Scoring replay audit did not pass.",
+            detail: ("Status was " + $scoring_audit_status + ".")
+          }] else [] end)
+        + (if $scoring_audit_mismatch_count != null and $scoring_audit_mismatch_count > 0 then [{
+            id: "scoring-audit-mismatches",
+            severity: "critical",
+            summary: "Scoring replay audit found scoreboard mismatches.",
+            detail: ("Mismatches: " + ($scoring_audit_mismatch_count | tostring) + ".")
           }] else [] end)
         + (if $game_core_checker_runs_failed != null and $game_core_checker_runs_failed > 0 then [{
             id: "checker-failures",
@@ -287,6 +321,12 @@ summary_json="$(
         healthy: ($operations_healthy == "true"),
         alerts_count: $operations_alerts_count,
         alerts: ($operations_status[0].alerts // [])
+      },
+      scoring_audit: {
+        status: (if $scoring_audit_status == "" then null else $scoring_audit_status end),
+        stored_rows: $scoring_audit_stored_rows,
+        replayed_rows: $scoring_audit_replayed_rows,
+        mismatch_count: $scoring_audit_mismatch_count
       },
       attack_map_load: {
         validation_status: (if $attack_map_validation_status == "" then null else $attack_map_validation_status end),

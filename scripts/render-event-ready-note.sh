@@ -141,6 +141,7 @@ Expected evidence from the nested go-live run:
 - \`${go_live_dir}/summary.json\`
 - \`${go_live_dir}/short-match.env\`
 - \`${go_live_dir}/operations-status.json\`
+- \`${go_live_dir}/scoring-audit.json\`
 - \`${go_live_dir}/git-revision.txt\`
 - \`${go_live_dir}/prod-env.sha256\`
 - \`${go_live_dir}/final-iptables-filter.txt\`

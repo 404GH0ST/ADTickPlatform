@@ -28,6 +28,7 @@ import type {
   AdminServiceMetricSnapshot,
   AdminPlayer,
   AdminSchedulerEventPage,
+  AdminScoringAudit,
   AdminTeam,
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
@@ -161,7 +162,9 @@ type DeploymentsTabProps = {
 
 type ScoreboardTabProps = {
   pendingAction: string | null;
+  scoringAudit: AdminScoringAudit | null;
   scoreRows: AdminGameScoreRow[];
+  onAudit: () => void;
   onRefresh: () => void;
 };
 
@@ -1547,7 +1550,9 @@ export function GameTab({
 
 export function ScoreboardTab({
   pendingAction,
+  scoringAudit,
   scoreRows,
+  onAudit,
   onRefresh,
 }: ScoreboardTabProps): ReactElement {
   const [teamFilter, setTeamFilter] = useState("");
@@ -1645,6 +1650,11 @@ export function ScoreboardTab({
           </InfoPanel>
         </CardContent>
       </Card>
+      <ScoringAuditCard
+        pendingAction={pendingAction}
+        scoringAudit={scoringAudit}
+        onAudit={onAudit}
+      />
       <GameScoreboardCard
         pendingAction={pendingAction}
         scoreRows={sortedRows}
@@ -3814,6 +3824,128 @@ export function GameAttacksCard({
       </CardContent>
     </Card>
   );
+}
+
+function ScoringAuditCard({
+  pendingAction,
+  scoringAudit,
+  onAudit,
+}: {
+  pendingAction: string | null;
+  scoringAudit: AdminScoringAudit | null;
+  onAudit: () => void;
+}): ReactElement {
+  const mismatches = scoringAudit?.mismatches.slice(0, 4) ?? [];
+
+  return (
+    <Card data-testid="scoring-audit-card">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>Scoring Replay Audit</CardTitle>
+            <CardDescription>
+              Dry-run replay of submissions and checker state against the stored scoreboard.
+            </CardDescription>
+          </div>
+          <Button
+            disabled={pendingAction !== null}
+            size="sm"
+            variant="outline"
+            onClick={onAudit}
+          >
+            {pendingAction === "game:scoring-audit" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Audit
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div className="grid gap-2 md:grid-cols-4">
+          <InfoPanel>
+            <p className="text-xs uppercase text-muted-foreground">Status</p>
+            <div className="mt-2">
+              <Badge
+                className={
+                  !scoringAudit
+                    ? "tone-neutral"
+                    : scoringAudit.status === "mismatch"
+                      ? "tone-danger"
+                      : "tone-success"
+                }
+              >
+                {scoringAudit ? scoringAudit.status : "not run"}
+              </Badge>
+            </div>
+          </InfoPanel>
+          <InfoPanel>
+            <p className="text-xs uppercase text-muted-foreground">Stored</p>
+            <p className="mt-2 font-mono text-lg">
+              {scoringAudit?.stored_rows ?? "-"}
+            </p>
+          </InfoPanel>
+          <InfoPanel>
+            <p className="text-xs uppercase text-muted-foreground">Replayed</p>
+            <p className="mt-2 font-mono text-lg">
+              {scoringAudit?.replayed_rows ?? "-"}
+            </p>
+          </InfoPanel>
+          <InfoPanel>
+            <p className="text-xs uppercase text-muted-foreground">Mismatches</p>
+            <p className="mt-2 font-mono text-lg">
+              {scoringAudit?.mismatch_count ?? "-"}
+            </p>
+          </InfoPanel>
+        </div>
+        {mismatches.length > 0 ? (
+          <div className="overflow-hidden rounded-sm border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">Team</th>
+                  <th className="px-3 py-2 text-left">Field</th>
+                  <th className="px-3 py-2 text-right">Stored</th>
+                  <th className="px-3 py-2 text-right">Replayed</th>
+                  <th className="px-3 py-2 text-right">Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mismatches.map((mismatch) => (
+                  <tr
+                    key={`${mismatch.team}-${mismatch.field}-${mismatch.delta}`}
+                    className="border-t border-border"
+                  >
+                    <td className="px-3 py-2 font-medium">{mismatch.team}</td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {mismatch.detail ?? mismatch.field}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {formatScoreValue(mismatch.stored)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {formatScoreValue(mismatch.replayed)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {formatScoreValue(mismatch.delta)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatScoreValue(value: number): string {
+  if (Number.isInteger(value)) {
+    return value.toString();
+  }
+  return value.toFixed(3);
 }
 
 function GameScoreboardCard({

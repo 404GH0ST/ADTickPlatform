@@ -13,6 +13,7 @@ import type {
   AdminDeployment,
   AdminDeploymentJob,
   AdminGameScoreRow,
+  AdminScoringAudit,
   AdminGameMatchStatus,
   AdminOperationsStatus,
   AdminServiceMetricSnapshot,
@@ -713,4 +714,8 @@ export async function recomputeAdminGameScoring() {
       method: "POST",
     },
   );
+}
+
+export async function auditAdminGameScoring() {
+  return adminFetch<AdminScoringAudit>("/api/v2/admin/game/scoring/audit");
 }

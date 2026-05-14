@@ -123,6 +123,7 @@ func (s *gameCoreServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/game/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /internal/v1/game/attacks", s.handleAttackFeed)
 	mux.HandleFunc("POST /internal/v1/game/scoring/recompute", s.handleRecomputeScoring)
+	mux.HandleFunc("GET /internal/v1/game/scoring/audit", s.handleAuditScoring)
 	mux.HandleFunc("GET /internal/v1/game/scheduler", s.handleSchedulerStatus)
 	mux.HandleFunc("GET /internal/v1/game/scheduler/events", s.handleSchedulerEvents)
 	mux.HandleFunc("POST /internal/v1/game/scheduler/start", s.handleStartScheduler)
@@ -329,6 +330,18 @@ func (s *gameCoreServer) handleRecomputeScoring(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeData(w, http.StatusOK, rows)
+}
+
+func (s *gameCoreServer) handleAuditScoring(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	report, err := s.store.AuditScoreboard(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Scoring audit failed", err.Error())
+		return
+	}
+	writeData(w, http.StatusOK, report)
 }
 
 func (s *gameCoreServer) handleSchedulerStatus(w http.ResponseWriter, r *http.Request) {
