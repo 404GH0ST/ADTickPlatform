@@ -758,6 +758,19 @@ func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
 	if !approxScore(rows["Team Delta"].Defense, -math.Pow(2, 0.75)) {
 		t.Fatalf("expected victim defense to use Faust penalty, got %+v", rows["Team Delta"])
 	}
+
+	auditRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/scoring/audit", nil)
+	auditRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	auditResponse := httptest.NewRecorder()
+	mux.ServeHTTP(auditResponse, auditRequest)
+	if auditResponse.Code != http.StatusOK {
+		t.Fatalf("expected score audit 200, got %d", auditResponse.Code)
+	}
+
+	audit := decodeResponse[apigateway.ScoringAuditAlias](t, auditResponse.Body.Bytes())
+	if audit.Status != "ok" || audit.MismatchCount != 0 || audit.StoredRows != len(scoreboard) || audit.ReplayedRows != len(scoreboard) {
+		t.Fatalf("unexpected scoring audit %+v", audit)
+	}
 }
 
 func scoreRowsByTeam(rows []apigateway.ScoreRowAlias) map[string]apigateway.ScoreRowAlias {

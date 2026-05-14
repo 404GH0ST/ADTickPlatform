@@ -6,6 +6,7 @@ import type { AttackFeedPage, ScoreRow, ServiceRow } from '@/lib/dashboard-types
 import type { SSHSessionData } from '@/components/dashboard/control-center-sections';
 import type { TeamServiceState } from '@/lib/platform-api';
 import { useAttackHighlights } from '@/components/hooks/use-attack-highlights';
+import { useAttackSfx } from '@/components/hooks/use-attack-sfx';
 import {
   computePageOffset,
   handleRealtimeAttackMessage,
@@ -105,6 +106,7 @@ export function useControlCenter({
   const [attackFilters, setAttackFilters] = useState<AttackFilters>(initialAttackFilters);
   const attackPageRef = useRef<AttackFeedPage>(attackPage);
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
+  const playAttackSfx = useAttackSfx();
   const attackRealtimeEnabled = initialAttackFilters.offset === '0';
   const attackLiveMode = useMemo(
     () => attackRealtimeEnabled && isDefaultAttackFilters(attackFilters, initialAttackFilters),
@@ -151,14 +153,17 @@ export function useControlCenter({
       currentPage: () => attackPageRef.current,
       limitStr: attackFilters.limit,
       setPage: setAttackPageState,
-      scheduleHighlights: scheduleAttackHighlights,
+      scheduleHighlights: (ids) => {
+        scheduleAttackHighlights(ids);
+        playAttackSfx(ids);
+      },
     });
 
     return () => {
       scoreboardSource.close();
       attacksSource.close();
     };
-  }, [attackFilters.limit, attackLiveMode, realtimeBaseUrl]);
+  }, [attackFilters.limit, attackLiveMode, playAttackSfx, realtimeBaseUrl, scheduleAttackHighlights]);
 
   function buildAttackQuery(filters: AttackFilters): string {
     const params = new URLSearchParams();

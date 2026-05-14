@@ -521,4 +521,15 @@ test("organizer match controls handle manual match operations and recompute logi
     page,
     /Recomputed 3 scoreboard row\(s\) from authoritative tick and submission state\./,
   );
+
+  await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
+  const scoringAuditCard = page.getByTestId("scoring-audit-card");
+  await expect(scoringAuditCard).toBeVisible();
+  await scoringAuditCard.getByRole("button", { name: "Audit" }).click();
+  await expectActionNote(
+    page,
+    /Score audit passed: 3 replayed row\(s\) match the stored scoreboard\./,
+  );
+  await expect(scoringAuditCard.getByText("ok")).toBeVisible();
+  await expect(scoringAuditCard.getByText("0")).toBeVisible();
 });

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 
 export function useAttackHighlights(timeoutMs = 4000) {
   const [highlightedAttackIDs, setHighlightedAttackIDs] = useState<string[]>([]);
@@ -12,7 +12,7 @@ export function useAttackHighlights(timeoutMs = 4000) {
     };
   }, []);
 
-  function scheduleAttackHighlights(ids: string[]): void {
+  const scheduleAttackHighlights = useCallback((ids: string[]): void => {
     if (attackHighlightTimeoutRef.current !== null) {
       window.clearTimeout(attackHighlightTimeoutRef.current);
     }
@@ -22,15 +22,15 @@ export function useAttackHighlights(timeoutMs = 4000) {
       setHighlightedAttackIDs([]);
       attackHighlightTimeoutRef.current = null;
     }, timeoutMs);
-  }
+  }, [timeoutMs]);
 
-  function clearAttackHighlights(): void {
+  const clearAttackHighlights = useCallback((): void => {
     if (attackHighlightTimeoutRef.current !== null) {
       window.clearTimeout(attackHighlightTimeoutRef.current);
       attackHighlightTimeoutRef.current = null;
     }
     setHighlightedAttackIDs([]);
-  }
+  }, []);
 
   return {
     highlightedAttackIDs,

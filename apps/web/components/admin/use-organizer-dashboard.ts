@@ -22,6 +22,7 @@ import type {
   AdminReconcileResult,
   AdminSchedulerEventPage,
   AdminSchedulerEventQuery,
+  AdminScoringAudit,
   AdminTeam,
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
@@ -29,6 +30,7 @@ import type {
 import { buildQueryString, parseApiError, processApiResponse } from "@/lib/api-utils";
 
 import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
+import { useAttackSfx } from "@/components/hooks/use-attack-sfx";
 
 import {
   computePageOffset,
@@ -199,6 +201,8 @@ export type OrganizerDashboardState = {
   pendingAction: string | null;
   playerDraft: PlayerDraft;
   playerRows: AdminPlayer[];
+  scoringAudit: AdminScoringAudit | null;
+  auditGameScoring: (silent?: boolean) => Promise<void>;
   recomputeGameScoring: (silent?: boolean) => Promise<void>;
   reconcileAccess: () => Promise<void>;
   reconcileDeployments: () => Promise<void>;
@@ -295,6 +299,9 @@ export function useOrganizerDashboard({
     useState<AdminAttackFeedPage>(attackPage);
 
   const [scoreRows, setScoreRows] = useState(scoreboard);
+  const [scoringAudit, setScoringAudit] = useState<AdminScoringAudit | null>(
+    null,
+  );
   const [challengeValidationRows, setChallengeValidationRows] = useState<
     Record<number, AdminChallengeValidationResult>
   >({});
@@ -321,6 +328,7 @@ export function useOrganizerDashboard({
     contactEmail: "",
   });
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
+  const playAttackSfx = useAttackSfx();
   const [playerDraft, setPlayerDraft] = useState<PlayerDraft>({
     teamId: 0,
     displayName: "",
@@ -486,7 +494,10 @@ export function useOrganizerDashboard({
       currentPage: () => attackPageRef.current,
       limitStr: attackFilters.limit,
       setPage: setAttackPageState,
-      scheduleHighlights: scheduleAttackHighlights,
+      scheduleHighlights: (ids) => {
+        scheduleAttackHighlights(ids);
+        playAttackSfx(ids);
+      },
     });
 
     checkerRunsSource.onmessage = (event) => {
@@ -1896,6 +1907,41 @@ export function useOrganizerDashboard({
     }
   }
 
+  async function auditGameScoring(silent = false): Promise<void> {
+    if (!silent) {
+      setPendingAction("game:scoring-audit");
+      setActionError(null);
+      setActionNote(null);
+    }
+
+    try {
+      const response = await fetch("/api/admin/game/scoring/audit");
+      const payload = await processApiResponse<AdminScoringAudit>(
+        response,
+        "/api/admin/game/scoring/audit",
+      );
+
+      setScoringAudit(payload);
+      if (!silent) {
+        setActionNote(
+          payload.status === "ok"
+            ? `Score audit passed: ${payload.replayed_rows} replayed row(s) match the stored scoreboard.`
+            : `Score audit found ${payload.mismatch_count} mismatch(es).`,
+        );
+      }
+    } catch (error) {
+      if (!silent) {
+        setActionError(
+          error instanceof Error ? error.message : "score audit failed",
+        );
+      }
+    } finally {
+      if (!silent) {
+        setPendingAction(null);
+      }
+    }
+  }
+
   async function advanceGameTick(): Promise<void> {
     suppressGameStatusRealtime();
     setPendingAction("game:advance");
@@ -2219,6 +2265,7 @@ export function useOrganizerDashboard({
     createTeam: async () => {
       await createTeam();
     },
+    auditGameScoring,
     copyRuntimeHealthSummary,
     deleteTarget,
     downloadRuntimeHealthReport,
@@ -2240,6 +2287,7 @@ export function useOrganizerDashboard({
     pendingAction,
     playerDraft,
     playerRows,
+    scoringAudit,
     recomputeGameScoring,
     reconcileAccess,
     reconcileDeployments,

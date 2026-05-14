@@ -110,6 +110,9 @@ curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/checker-runs.json" \
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scoreboard.json" \
   "${API_URL}/api/v2/admin/game/scoreboard" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scoring-audit.json" \
+  "${API_URL}/api/v2/admin/game/scoring/audit" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/attacks.json" \
   "${API_URL}/api/v2/attacks?limit=50"
 

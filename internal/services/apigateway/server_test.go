@@ -627,6 +627,13 @@ func (c testGameCoreClient) RecomputeScoring(_ context.Context) ([]scoreRow, err
 	return c.Scoreboard(context.Background())
 }
 
+func (c testGameCoreClient) AuditScoring(_ context.Context) (ScoringAuditAlias, error) {
+	if c.err != nil {
+		return ScoringAuditAlias{}, c.err
+	}
+	return ScoringAuditAlias{Status: "ok", StoredRows: 2, ReplayedRows: 2}, nil
+}
+
 func (c testSubmissionClient) SubmitFlags(_ context.Context, _ int, flags []string) ([]submissionVerdict, error) {
 	if c.err != nil {
 		return nil, c.err
@@ -683,6 +690,13 @@ func (c testScoringClient) Scoreboard(_ context.Context) ([]scoreRow, error) {
 
 func (c testScoringClient) RecomputeScoring(_ context.Context) ([]scoreRow, error) {
 	return c.Scoreboard(context.Background())
+}
+
+func (c testScoringClient) AuditScoring(_ context.Context) (ScoringAuditAlias, error) {
+	if c.err != nil {
+		return ScoringAuditAlias{}, c.err
+	}
+	return ScoringAuditAlias{Status: "ok", StoredRows: 1, ReplayedRows: 1}, nil
 }
 
 func newTestMux() *http.ServeMux {
@@ -3149,6 +3163,19 @@ func TestAdminGameCoreRoutesProxyInternalState(t *testing.T) {
 	recomputePayload := decodeCompat[[]ScoreRowAlias](t, recomputeResponse.Body.Bytes())
 	if len(recomputePayload) == 0 || recomputePayload[0].Team == "" {
 		t.Fatalf("unexpected recompute payload %+v", recomputePayload)
+	}
+
+	auditRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/game/scoring/audit", nil)
+	auditRequest.Header.Set("Authorization", adminAuth)
+	auditResponse := httptest.NewRecorder()
+	mux.ServeHTTP(auditResponse, auditRequest)
+	if auditResponse.Code != http.StatusOK {
+		t.Fatalf("expected score audit 200, got %d", auditResponse.Code)
+	}
+
+	auditPayload := decodeCompat[ScoringAuditAlias](t, auditResponse.Body.Bytes())
+	if auditPayload.Status != "ok" || auditPayload.StoredRows == 0 || auditPayload.ReplayedRows == 0 {
+		t.Fatalf("unexpected scoring audit payload %+v", auditPayload)
 	}
 }
 

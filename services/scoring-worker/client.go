@@ -26,6 +26,10 @@ func (noopGameCoreScoringClient) RecomputeScoring(context.Context) ([]apigateway
 	return nil, errGameCoreScoringDisabled
 }
 
+func (noopGameCoreScoringClient) AuditScoring(context.Context) (apigateway.ScoringAuditAlias, error) {
+	return apigateway.ScoringAuditAlias{}, errGameCoreScoringDisabled
+}
+
 type httpGameCoreScoringClient struct {
 	baseURL string
 	token   string
@@ -52,6 +56,10 @@ func (c *httpGameCoreScoringClient) Scoreboard(ctx context.Context) ([]apigatewa
 
 func (c *httpGameCoreScoringClient) RecomputeScoring(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
 	return requestGameCoreScoringJSON[[]apigateway.ScoreRowAlias](ctx, c, http.MethodPost, "/internal/v1/game/scoring/recompute")
+}
+
+func (c *httpGameCoreScoringClient) AuditScoring(ctx context.Context) (apigateway.ScoringAuditAlias, error) {
+	return requestGameCoreScoringJSON[apigateway.ScoringAuditAlias](ctx, c, http.MethodGet, "/internal/v1/game/scoring/audit")
 }
 
 func requestGameCoreScoringJSON[T any](ctx context.Context, c *httpGameCoreScoringClient, method, path string, body ...any) (T, error) {

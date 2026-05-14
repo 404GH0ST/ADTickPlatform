@@ -113,6 +113,7 @@ validation_date="${validation_date%.md}"
 
 go_live_summary_rel="$(jq -r '.artifacts.go_live_check.summary' "${summary_file}")"
 go_live_operations_rel="$(jq -r '.artifacts.go_live_check.operations_status' "${summary_file}")"
+go_live_scoring_audit_rel="$(jq -r '.artifacts.go_live_check.scoring_audit // empty' "${summary_file}")"
 attack_map_report_rel="$(jq -r '.artifacts.go_live_check.attack_map_load.report // empty' "${summary_file}")"
 go_live_game_core_metrics_rel="$(jq -r '.artifacts.go_live_check.game_core_metrics // empty' "${summary_file}")"
 go_live_submission_metrics_rel="$(jq -r '.artifacts.go_live_check.submission_service_metrics // empty' "${summary_file}")"
@@ -122,6 +123,7 @@ go_live_wireguard_metrics_rel="$(jq -r '.artifacts.go_live_check.wireguard_gatew
 
 go_live_summary_file="${ARTIFACT_DIR}/${go_live_summary_rel}"
 go_live_operations_file="${ARTIFACT_DIR}/${go_live_operations_rel}"
+go_live_scoring_audit_file=""
 attack_map_report_file=""
 go_live_dir="$(dirname "${go_live_summary_file}")"
 go_live_game_core_metrics_file=""
@@ -132,6 +134,9 @@ go_live_wireguard_metrics_file=""
 
 if [[ -n "${attack_map_report_rel}" ]]; then
   attack_map_report_file="${ARTIFACT_DIR}/${attack_map_report_rel}"
+fi
+if [[ -n "${go_live_scoring_audit_rel}" ]]; then
+  go_live_scoring_audit_file="${ARTIFACT_DIR}/${go_live_scoring_audit_rel}"
 fi
 if [[ -n "${go_live_game_core_metrics_rel}" ]]; then
   go_live_game_core_metrics_file="${ARTIFACT_DIR}/${go_live_game_core_metrics_rel}"
@@ -179,6 +184,15 @@ if [[ ! -f "${go_live_operations_file}" ]]; then
   exit 1
 fi
 
+if [[ -z "${go_live_scoring_audit_file}" ]]; then
+  go_live_scoring_audit_file="${go_live_dir}/scoring-audit.json"
+fi
+
+if [[ ! -f "${go_live_scoring_audit_file}" ]]; then
+  echo "missing go-live scoring audit: ${go_live_scoring_audit_file}" >&2
+  exit 1
+fi
+
 if [[ "$(jq -r '.validation' "${go_live_summary_file}")" != "go-live-check" ]]; then
   echo "unexpected go-live validation type in ${go_live_summary_file}" >&2
   exit 1
@@ -193,6 +207,18 @@ fi
 if [[ "$(jq -r '.alerts | length' "${go_live_operations_file}")" != "0" ]]; then
   echo "go-live operations status contains active alerts: ${go_live_operations_file}" >&2
   jq . "${go_live_operations_file}" >&2
+  exit 1
+fi
+
+if [[ "$(jq -r '.status' "${go_live_scoring_audit_file}")" != "ok" ]]; then
+  echo "go-live scoring audit did not pass: ${go_live_scoring_audit_file}" >&2
+  jq . "${go_live_scoring_audit_file}" >&2
+  exit 1
+fi
+
+if [[ "$(jq -r '.mismatch_count' "${go_live_scoring_audit_file}")" != "0" ]]; then
+  echo "go-live scoring audit contains mismatches: ${go_live_scoring_audit_file}" >&2
+  jq . "${go_live_scoring_audit_file}" >&2
   exit 1
 fi
 
@@ -305,6 +331,7 @@ printf '  %s\n' \
   "${event_ready_artifact_file}" \
   "${operator_report_file}" \
   "${go_live_operations_file}" \
+  "${go_live_scoring_audit_file}" \
   "${go_live_game_core_metrics_file}" \
   "${go_live_submission_metrics_file}" \
   "${go_live_controller_metrics_file}" \

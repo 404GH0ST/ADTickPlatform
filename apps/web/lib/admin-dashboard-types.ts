@@ -264,6 +264,23 @@ export type AdminGameScoreRow = {
   services?: AdminGameScoreServiceRow[];
 };
 
+export type AdminScoringAuditMismatch = {
+  team: string;
+  field: string;
+  stored: number;
+  replayed: number;
+  delta: number;
+  detail?: string;
+};
+
+export type AdminScoringAudit = {
+  status: "ok" | "mismatch";
+  stored_rows: number;
+  replayed_rows: number;
+  mismatch_count: number;
+  mismatches: AdminScoringAuditMismatch[];
+};
+
 export type AdminAttackEvent = {
   id: string;
   attacker: string;

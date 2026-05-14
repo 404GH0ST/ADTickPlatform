@@ -31,6 +31,7 @@ type scoringWorkerServer struct {
 type scoringGameCoreClient interface {
 	Scoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
 	RecomputeScoring(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
+	AuditScoring(ctx context.Context) (apigateway.ScoringAuditAlias, error)
 }
 
 func newScoringWorkerServer(adminToken string, gameCore scoringGameCoreClient) *scoringWorkerServer {
@@ -51,6 +52,7 @@ func (s *scoringWorkerServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/scoring/status", s.handleStatus)
 	mux.HandleFunc("GET /internal/v1/scoring/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("POST /internal/v1/scoring/recompute", s.handleRecompute)
+	mux.HandleFunc("GET /internal/v1/scoring/audit", s.handleAudit)
 }
 
 func (s *scoringWorkerServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +87,19 @@ func (s *scoringWorkerServer) handleRecompute(w http.ResponseWriter, r *http.Req
 	}
 	s.recordSuccess(len(rows))
 	httpapi.WriteJSON(w, http.StatusOK, rows)
+}
+
+func (s *scoringWorkerServer) handleAudit(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	report, err := s.gameCore.AuditScoring(r.Context())
+	if err != nil {
+		s.recordFailure(err)
+		writeScoringWorkerFailure(w, err, "game-core scoring audit failed.")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, report)
 }
 
 func (s *scoringWorkerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {

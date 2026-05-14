@@ -811,6 +811,27 @@ func (s *Server) handleAdminRecomputeScoring(w http.ResponseWriter, r *http.Requ
 	writeData(w, http.StatusOK, rows)
 }
 
+func (s *Server) handleAdminAuditScoring(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	if s.scoring != nil {
+		if report, err := s.scoring.AuditScoring(r.Context()); err == nil {
+			writeData(w, http.StatusOK, report)
+			return
+		} else if !errors.Is(err, errScoringWorkerDisabled) {
+			writeProblem(w, http.StatusBadGateway, "Scoring audit unavailable", "scoring-worker score audit failed.")
+			return
+		}
+	}
+	report, err := s.gameCore.AuditScoring(r.Context())
+	if err != nil {
+		writeGameCoreFailure(w, err, "game-core score audit failed.")
+		return
+	}
+	writeData(w, http.StatusOK, report)
+}
+
 func parseAdminCheckerRunQuery(r *http.Request) GameCheckerRunQuery {
 	return GameCheckerRunQuery{
 		Limit:       parseAdminPositiveQueryInt(r, "limit", 25, 200),

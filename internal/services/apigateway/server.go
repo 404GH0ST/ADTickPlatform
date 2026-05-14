@@ -151,6 +151,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v2/admin/game/scheduler/interval", s.handleAdminUpdateGameScheduler)
 	mux.HandleFunc("GET /api/v2/admin/game/scoreboard", s.handleAdminGameScoreboard)
 	mux.HandleFunc("POST /api/v2/admin/game/scoring/recompute", s.handleAdminRecomputeScoring)
+	mux.HandleFunc("GET /api/v2/admin/game/scoring/audit", s.handleAdminAuditScoring)
 }
 
 func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
@@ -229,12 +230,12 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{
-		"player_id":     player.PlayerID,
-		"team_id":       player.TeamID,
-		"team_name":     player.TeamName,
-		"display_name":  player.DisplayName,
-		"email":         player.Email,
-		"role":          player.Role,
+		"player_id":    player.PlayerID,
+		"team_id":      player.TeamID,
+		"team_name":    player.TeamName,
+		"display_name": player.DisplayName,
+		"email":        player.Email,
+		"role":         player.Role,
 	})
 }
 

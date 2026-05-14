@@ -118,6 +118,7 @@ jq -rn \
   + "<section class=\"grid\">"
   + "<div class=\"card\"><div class=\"metric-label\">Runtime Alerts</div><div class=\"metric\">" + ($o.runtime_alerts.alerts_count | fmt_num | @html) + "</div><p>Organizer runtime alert surface at the end of validation.</p></div>"
   + "<div class=\"card\"><div class=\"metric-label\">Derived Alerts</div><div class=\"metric\">" + (($o.derived_alerts | length) | tostring | @html) + "</div><p>Summary-derived conditions from checker, submission, realtime, controller, and WireGuard metrics.</p></div>"
+  + "<div class=\"card\"><div class=\"metric-label\">Scoring Audit</div><div class=\"metric\">" + (($o.scoring_audit.status // "n/a") | @html) + "</div><p>Replay check comparing stored scoreboard rows with authoritative scoring inputs. Mismatches: " + ($o.scoring_audit.mismatch_count | fmt_num | @html) + ".</p></div>"
   + "<div class=\"card\"><div class=\"metric-label\">Attack Throughput</div><div class=\"metric\">" + ($o.attack_map_load.submissions_per_second | fmt_num | @html) + "/s</div><p>Measured during the active attack submission window.</p></div>"
   + "<div class=\"card\"><div class=\"metric-label\">Submission p95</div><div class=\"metric\">" + ($o.attack_map_load.submission_p95_ms | fmt_num | @html) + " ms</div><p>Submission-service path latency from the load gate.</p></div>"
   + "</section>\n"
