@@ -140,6 +140,8 @@ const LABEL_PADDING_X = 6;
 const LABEL_SAFE_INSET_X = 24;
 const LABEL_SAFE_INSET_Y = 28;
 const LABEL_VERTICAL_GAP = 14;
+const FEATURED_ROUTE_SAFE_RADIUS = GLOBE_RADIUS * 0.68;
+const FEATURED_ROUTE_HARD_RIM_RADIUS = GLOBE_RADIUS * 0.84;
 
 const LANDMARKS: Landmark[] = [
   { code: 'usa-central', name: 'United States', lat: 39.6, lon: -98.5 },
@@ -400,7 +402,7 @@ export function CyberAttackMap({
         rotationRef.current = nextRotation;
         setRotation(nextRotation);
       }
-      featureAttack(attack, detail.rotation ? false : detail.animate !== false);
+      featureAttack(attack, detail.rotation ? false : detail.animate !== false, !detail.rotation);
     }
 
     root.addEventListener('ad-platform:feature-attack', handleFeatureAttack);
@@ -456,8 +458,15 @@ export function CyberAttackMap({
     featureAttack(attack, true);
   }
 
-  function featureAttack(attack: CyberAttackEvent, animate: boolean): void {
+  function featureAttack(
+    attack: CyberAttackEvent,
+    animate: boolean,
+    rotate = true,
+  ): void {
     setFeaturedAttackId(attack.id);
+    if (!rotate) {
+      return;
+    }
 
     const attackTeamNames = listAttackTeams(attacks);
     const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
@@ -467,6 +476,9 @@ export function CyberAttackMap({
     const target = getFeaturedAttackRotation(attacker, victim);
     if (target && animate) {
       animateRotationTo(target);
+    } else if (target) {
+      rotationRef.current = target;
+      setRotation(target);
     }
   }
 
@@ -1637,14 +1649,27 @@ function getFeaturedAttackRotation(
     lat: clamp((attacker.lat + victim.lat) / 2, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
     lon: getMidLongitude(attacker.lon, victim.lon),
   };
-  const candidates = [
-    midpoint,
-    { lat: clamp(midpoint.lat * 0.82, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: midpoint.lon },
-    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon - 18) },
-    { lat: midpoint.lat, lon: normalizeLongitude(midpoint.lon + 18) },
-    { lat: clamp(attacker.lat * 0.55 + victim.lat * 0.45, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: attacker.lon },
-    { lat: clamp(attacker.lat * 0.45 + victim.lat * 0.55, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: victim.lon },
+  const latCandidates = Array.from(new Set([
+    clamp(midpoint.lat, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    clamp(midpoint.lat * 0.72, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    clamp(midpoint.lat - 12, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    clamp(midpoint.lat + 12, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    clamp(attacker.lat * 0.58 + victim.lat * 0.42, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+    clamp(attacker.lat * 0.42 + victim.lat * 0.58, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+  ].map((lat) => Math.round(lat * 10) / 10)));
+  const lonAnchors = [
+    midpoint.lon,
+    getMidLongitude(attacker.lon, midpoint.lon),
+    getMidLongitude(midpoint.lon, victim.lon),
   ];
+  const lonCandidates = Array.from(new Set(
+    lonAnchors.flatMap((lon) => [-42, -28, -16, 0, 16, 28, 42].map((offset) => (
+      Math.round(normalizeLongitude(lon + offset) * 10) / 10
+    ))),
+  ));
+  const candidates = latCandidates.flatMap((lat) => (
+    lonCandidates.map((lon) => ({ lat, lon }))
+  ));
 
   return candidates.reduce((best, candidate) => (
     scoreFeaturedRotation(candidate, attacker, victim) > scoreFeaturedRotation(best, attacker, victim)
@@ -1666,15 +1691,28 @@ function scoreFeaturedRotation(
   const end = projectGlobePoint(victim, rotation);
   const weakestEndpoint = Math.min(start.z, end.z);
   const combinedDepth = start.z + end.z;
-  const rimPenalty = getRimPenalty(start) + getRimPenalty(end);
+  const centerDistancePenalty = getFeaturedEndpointPenalty(start) + getFeaturedEndpointPenalty(end);
+  const horizontalImbalancePenalty = Math.abs((start.x + end.x) / 2 - CENTER_X) / 26;
+  const verticalImbalancePenalty = Math.abs((start.y + end.y) / 2 - CENTER_Y) / 42;
+  const hiddenPenalty = Number(!start.visible) * 32 + Number(!end.visible) * 32;
   const labelRoomBonus = getLabelRoomScore(start) + getLabelRoomScore(end);
 
-  return weakestEndpoint * 4 + combinedDepth * 1.4 + labelRoomBonus - rimPenalty;
+  return (
+    weakestEndpoint * 9 +
+    combinedDepth * 2.4 +
+    labelRoomBonus * 2.2 -
+    centerDistancePenalty -
+    horizontalImbalancePenalty -
+    verticalImbalancePenalty -
+    hiddenPenalty
+  );
 }
 
-function getRimPenalty(point: ProjectedPoint): number {
+function getFeaturedEndpointPenalty(point: ProjectedPoint): number {
   const distanceFromCenter = Math.hypot(point.x - CENTER_X, point.y - CENTER_Y);
-  return Math.max(0, (distanceFromCenter - GLOBE_RADIUS * 0.78) / 22);
+  const softPenalty = Math.max(0, (distanceFromCenter - FEATURED_ROUTE_SAFE_RADIUS) / 10);
+  const hardPenalty = Math.max(0, (distanceFromCenter - FEATURED_ROUTE_HARD_RIM_RADIUS) / 3);
+  return softPenalty + hardPenalty * hardPenalty;
 }
 
 function getLabelRoomScore(point: ProjectedPoint): number {

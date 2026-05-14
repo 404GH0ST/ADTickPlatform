@@ -73,6 +73,58 @@ async function expectVisibleTeamLabelsInsideViewport(
   expect(overflowedLabels).toEqual([]);
 }
 
+async function expectFeaturedRouteInsideGlobe(globe: Locator) {
+  const overflow = await globe.evaluate((element) => {
+    const rootBox = element.getBoundingClientRect();
+    const featuredArc = element.querySelector<SVGPathElement>(
+      '[data-attack-arc="true"][data-featured="true"]',
+    );
+    const labels = Array.from(
+      element.querySelectorAll<SVGGElement>('[data-attack-team-label="true"]'),
+    );
+
+    return {
+      arc: featuredArc
+        ? getBoxOverflow(featuredArc.getBoundingClientRect(), rootBox)
+        : { missing: true },
+      labels: labels
+        .map((label) => ({
+          id: label.getAttribute("data-attack-team-id"),
+          ...getBoxOverflow(label.getBoundingClientRect(), rootBox),
+        }))
+        .filter((box) => box.left > 1 || box.right > 1 || box.top > 1 || box.bottom > 1),
+    };
+
+    function getBoxOverflow(box: DOMRect, bounds: DOMRect) {
+      return {
+        bottom: box.bottom - bounds.bottom,
+        left: bounds.left - box.left,
+        right: box.right - bounds.right,
+        top: bounds.top - box.top,
+      };
+    }
+  });
+
+  expect(overflow.arc).not.toHaveProperty("missing");
+  expect(overflow.arc.left).toBeLessThanOrEqual(1);
+  expect(overflow.arc.right).toBeLessThanOrEqual(1);
+  expect(overflow.arc.top).toBeLessThanOrEqual(1);
+  expect(overflow.arc.bottom).toBeLessThanOrEqual(1);
+  expect(overflow.labels).toEqual([]);
+}
+
+async function featureAttack(globe: Locator, attackId: string) {
+  await globe.evaluate((element, selectedAttackId) => {
+    element.dispatchEvent(
+      new CustomEvent("ad-platform:feature-attack", {
+        detail: { animate: false, attackId: selectedAttackId },
+      }),
+    );
+  }, attackId);
+  await expect(globe).toHaveAttribute("data-featured-attack-id", attackId);
+  await expect(globe.locator('[data-attack-arc="true"][data-featured="true"]')).toHaveCount(1);
+}
+
 test("seeded dense attack globe renders deterministic landmark coverage", async ({
   page,
 }) => {
@@ -128,13 +180,7 @@ test("seeded dense attack globe keeps partial featured routes solid", async ({
   const attackId = await partialArc.getAttribute("data-attack-id");
   expect(attackId).toBeTruthy();
 
-  await globe.evaluate((element, selectedAttackId) => {
-    element.dispatchEvent(
-      new CustomEvent("ad-platform:feature-attack", {
-        detail: { animate: false, attackId: selectedAttackId },
-      }),
-    );
-  }, attackId);
+  await featureAttack(globe, attackId!);
 
   const featuredPartialArc = globe.locator(
     `[data-attack-arc="true"][data-attack-id="${attackId}"][data-featured="true"][data-partial="true"]`,
@@ -142,6 +188,22 @@ test("seeded dense attack globe keeps partial featured routes solid", async ({
   await expect(featuredPartialArc).toHaveCount(1);
   await expect(featuredPartialArc).toBeVisible();
   await expect(featuredPartialArc).not.toHaveAttribute("stroke-dasharray", /.+/);
+});
+
+test("seeded dense attack globe keeps every featured route away from viewport edges", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1365, height: 768 });
+  await page.goto("/attacks");
+
+  const globe = page.getByTestId("cyber-attack-map");
+  await expect(globe).toBeVisible();
+
+  for (let index = 1; index <= 24; index += 1) {
+    const attackId = `map-seed-${String(index).padStart(2, "0")}`;
+    await featureAttack(globe, attackId);
+    await expectFeaturedRouteInsideGlobe(globe);
+  }
 });
 
 test("seeded dense attack globe supports keyboard route inspection", async ({
