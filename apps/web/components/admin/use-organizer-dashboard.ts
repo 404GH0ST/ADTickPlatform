@@ -29,6 +29,7 @@ import type {
 import { buildQueryString, parseApiError, processApiResponse } from "@/lib/api-utils";
 
 import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
+import { useAttackSfx } from "@/components/hooks/use-attack-sfx";
 
 import {
   computePageOffset,
@@ -321,6 +322,7 @@ export function useOrganizerDashboard({
     contactEmail: "",
   });
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
+  const playAttackSfx = useAttackSfx();
   const [playerDraft, setPlayerDraft] = useState<PlayerDraft>({
     teamId: 0,
     displayName: "",
@@ -486,7 +488,10 @@ export function useOrganizerDashboard({
       currentPage: () => attackPageRef.current,
       limitStr: attackFilters.limit,
       setPage: setAttackPageState,
-      scheduleHighlights: scheduleAttackHighlights,
+      scheduleHighlights: (ids) => {
+        scheduleAttackHighlights(ids);
+        playAttackSfx(ids);
+      },
     });
 
     checkerRunsSource.onmessage = (event) => {
