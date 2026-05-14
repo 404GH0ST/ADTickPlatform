@@ -89,6 +89,35 @@ test("unauthenticated callers cannot use admin api proxies", async ({
   });
 });
 
+test("unauthenticated callers cannot use representative admin api methods", async ({
+  page,
+}) => {
+  const cases = [
+    { method: "GET", path: "/api/admin/game/status" },
+    { method: "GET", path: "/api/admin/realtime/game/status/stream" },
+    { method: "POST", path: "/api/admin/game/ticks/advance" },
+    {
+      method: "PUT",
+      path: "/api/admin/game/scheduler/interval",
+      data: { interval_seconds: 90 },
+    },
+    { method: "DELETE", path: "/api/admin/teams/101" },
+  ];
+
+  for (const item of cases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "please authenticate before accessing organizer routes.",
+    });
+  }
+});
+
 test("participant session cannot use admin api proxies", async ({
   page,
   context,
@@ -102,6 +131,59 @@ test("participant session cannot use admin api proxies", async ({
     status: 403,
     detail: "please authenticate as organizer.",
   });
+});
+
+test("participant session cannot use representative admin api methods", async ({
+  page,
+  context,
+}) => {
+  await setParticipantSession(context);
+
+  const cases = [
+    { method: "GET", path: "/api/admin/game/status" },
+    { method: "GET", path: "/api/admin/realtime/game/status/stream" },
+    { method: "POST", path: "/api/admin/game/ticks/advance" },
+    {
+      method: "PUT",
+      path: "/api/admin/game/scheduler/interval",
+      data: { interval_seconds: 90 },
+    },
+    { method: "DELETE", path: "/api/admin/teams/101" },
+  ];
+
+  for (const item of cases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "please authenticate as organizer.",
+    });
+  }
+});
+
+test("unauthenticated callers cannot use participant-owned api proxies", async ({
+  page,
+}) => {
+  const cases = [
+    { method: "GET", path: "/api/platform/team/services" },
+    { method: "GET", path: "/api/platform/challenges/1/source" },
+    { method: "POST", path: "/api/platform/services/1/ssh-session" },
+    { method: "POST", path: "/api/platform/services/1/reset/factory" },
+    { method: "POST", path: "/api/platform/services/1/reset/restart" },
+    { method: "POST", path: "/api/platform/services/1/unlock", data: { proof: "bad" } },
+  ];
+
+  for (const item of cases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+  }
 });
 
 test("organizer session can use admin api proxies", async ({
