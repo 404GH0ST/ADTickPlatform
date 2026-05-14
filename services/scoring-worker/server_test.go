@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,7 @@ func TestScoringWorkerRecompute(t *testing.T) {
 
 func TestScoringWorkerAudit(t *testing.T) {
 	server := newScoringWorkerServer("dev-admin-token", testScoringGameCoreClient{})
+	server.now = func() time.Time { return time.Date(2026, 3, 11, 2, 30, 0, 0, time.UTC) }
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "scoring-worker", Version: "dev", Addr: ":0"})
 	server.RegisterRoutes(mux)
 
@@ -92,6 +94,17 @@ func TestScoringWorkerAudit(t *testing.T) {
 	}
 	if payload.Status != "ok" || payload.StoredRows != 1 || payload.ReplayedRows != 1 {
 		t.Fatalf("unexpected scoring audit %+v", payload)
+	}
+
+	status := server.snapshotStatus()
+	if status.LastAuditAt != "2026-03-11T02:30:00Z" || status.LastAuditStatus != "ok" || status.LastMismatches != 0 {
+		t.Fatalf("unexpected audit status %+v", status)
+	}
+
+	var metrics strings.Builder
+	server.WritePrometheusMetrics(&metrics)
+	if !strings.Contains(metrics.String(), "adplatform_scoring_worker_last_audit_mismatches 0") {
+		t.Fatalf("missing scoring audit metric:\n%s", metrics.String())
 	}
 }
 

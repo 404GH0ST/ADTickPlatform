@@ -314,6 +314,12 @@ test("seeded dense attack globe has audience mode for presentation screens", asy
   const globe = dialog.getByTestId("cyber-attack-map");
   await expect(globe).toBeVisible();
   await expect(dialog.getByText("Focus team")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Pause showcase" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Pause showcase" }).click();
+  await expect(dialog.getByRole("button", { name: "Resume showcase" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Resume showcase" }).click();
+  await expect(dialog.getByRole("button", { name: "Next featured route" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Next featured route" }).click();
 
   await globe.evaluate((element) => {
     element.dispatchEvent(
@@ -326,7 +332,7 @@ test("seeded dense attack globe has audience mode for presentation screens", asy
       }),
     );
   });
-  const inspector = page.getByTestId("attack-map-presentation-inspector");
+  const inspector = dialog.getByTestId("attack-map-presentation-inspector");
   await expect(inspector).toBeVisible();
 
   const viewport = page.viewportSize();

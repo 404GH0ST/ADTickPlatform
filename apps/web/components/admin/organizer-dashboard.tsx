@@ -530,27 +530,28 @@ function renderOrganizerPanel({
   }
 
   return (
-      <GameTab
-        attackPage={attackPage}
-        attacksLiveMode={attacksLiveMode}
-        highlightedAttackIDs={highlightedAttackIDs}
-        checkerRunPage={checkerRunPage}
-        checkerRunsLiveMode={checkerRunsLiveMode}
-        filters={{
-          attack: attackFilters,
-          checkerRun: checkerRunFilters,
-          schedulerEvent: schedulerEventFilters,
-        }}
-        gameState={gameState}
-        accessStatus={accessStatus}
-        deploymentRows={deploymentRows}
-        operationsStatus={operationsStatus}
-        serviceMetrics={serviceMetrics}
-        pendingAction={pendingAction}
-        schedulerEventPage={schedulerEventPage}
-        schedulerEventsLiveMode={schedulerEventsLiveMode}
-        scoreRows={scoreRows}
-        wireGuardGatewayStatus={wireGuardGatewayStatus}
+    <GameTab
+      attackPage={attackPage}
+      attacksLiveMode={attacksLiveMode}
+      highlightedAttackIDs={highlightedAttackIDs}
+      checkerRunPage={checkerRunPage}
+      checkerRunsLiveMode={checkerRunsLiveMode}
+      filters={{
+        attack: attackFilters,
+        checkerRun: checkerRunFilters,
+        schedulerEvent: schedulerEventFilters,
+      }}
+      gameState={gameState}
+      accessStatus={accessStatus}
+      deploymentRows={deploymentRows}
+      operationsStatus={operationsStatus}
+      serviceMetrics={serviceMetrics}
+      pendingAction={pendingAction}
+      schedulerEventPage={schedulerEventPage}
+      schedulerEventsLiveMode={schedulerEventsLiveMode}
+      scoringAudit={scoringAudit}
+      scoreRows={scoreRows}
+      wireGuardGatewayStatus={wireGuardGatewayStatus}
       onAdvanceTick={onAdvanceGameTick}
       onApplyAttackFilters={onApplyAttackFilters}
       onApplyCheckerRunFilters={onApplyCheckerRunFilters}
@@ -561,17 +562,18 @@ function renderOrganizerPanel({
       onPageCheckerRuns={onPageCheckerRuns}
       onPageSchedulerEvents={onPageSchedulerEvents}
       onRecomputeScores={onRecomputeGameScoring}
+      onAuditScores={onAuditGameScoring}
       onRefreshAttacks={onRefreshAttacks}
       onRefreshCheckerRuns={onRefreshCheckerRuns}
-          onRefreshDeploymentRows={onRefreshDeploymentRows}
-          onRefreshGameScoreboard={onRefreshGameScoreboard}
-          onRefreshGameStatus={onRefreshGameStatus}
-          onRefreshOperationsStatus={onRefreshOperationsStatus}
-          onRefreshRuntimeHealth={onRefreshRuntimeHealth}
-          onRefreshServiceMetrics={onRefreshServiceMetrics}
-          onRefreshSchedulerEvents={onRefreshSchedulerEvents}
-          onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
-          onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
+      onRefreshDeploymentRows={onRefreshDeploymentRows}
+      onRefreshGameScoreboard={onRefreshGameScoreboard}
+      onRefreshGameStatus={onRefreshGameStatus}
+      onRefreshOperationsStatus={onRefreshOperationsStatus}
+      onRefreshRuntimeHealth={onRefreshRuntimeHealth}
+      onRefreshServiceMetrics={onRefreshServiceMetrics}
+      onRefreshSchedulerEvents={onRefreshSchedulerEvents}
+      onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
+      onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
       onResetAttackFilters={onResetAttackFilters}
       onResetCheckerRunFilters={onResetCheckerRunFilters}
       onResetSchedulerEventFilters={onResetSchedulerEventFilters}

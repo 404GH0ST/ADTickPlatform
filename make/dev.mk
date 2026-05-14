@@ -1,4 +1,4 @@
-.PHONY: fmt test build ci e2e release-notes audit-checker-contracts import-local-challenges \
+.PHONY: fmt test build ci e2e premerge release-notes audit-checker-contracts import-local-challenges \
 	run-api-gateway run-api-gateway-postgres run-game-core run-submission-service \
 	run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway \
 	run-wireguard-gateway run-backend-stack run-backend-stack-postgres \
@@ -34,6 +34,10 @@ import-local-challenges:
 
 e2e:
 	bun run web:e2e
+
+premerge:
+	$(MAKE) ci
+	cd apps/web && PLAYWRIGHT_BROWSERS_PATH=$$(pwd)/.cache/ms-playwright bun run e2e
 
 release-notes:
 	bun run release-notes

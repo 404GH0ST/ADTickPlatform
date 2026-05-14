@@ -358,6 +358,7 @@ export function useOrganizerDashboard({
   const schedulerEventsLiveRef = useRef(true);
   const pendingActionRef = useRef<string | null>(null);
   const gameStatusRealtimeSuppressedUntilRef = useRef(0);
+  const lastScoringAuditTickRef = useRef<number | null>(null);
 
   const summary = useMemo(
     () => ({
@@ -448,6 +449,18 @@ export function useOrganizerDashboard({
       window.performance.now() + durationMs;
   }
 
+  function maybeAuditCompletedTick(status: AdminGameStatus): void {
+    const tick = status.current_tick;
+    if (!tick || tick.status !== "completed") {
+      return;
+    }
+    if (lastScoringAuditTickRef.current === tick.id) {
+      return;
+    }
+    lastScoringAuditTickRef.current = tick.id;
+    void auditGameScoring(true);
+  }
+
   useEffect(() => {
     const gameStatusSource = new EventSource(
       "/api/admin/realtime/game/status/stream",
@@ -475,7 +488,9 @@ export function useOrganizerDashboard({
       }
 
       try {
-        setGameState(JSON.parse(event.data) as AdminGameStatus);
+        const payload = JSON.parse(event.data) as AdminGameStatus;
+        setGameState(payload);
+        maybeAuditCompletedTick(payload);
       } catch {
         // Keep the last good organizer snapshot if one frame is malformed.
       }
@@ -1437,6 +1452,7 @@ export function useOrganizerDashboard({
       );
 
       setGameState(payload);
+      maybeAuditCompletedTick(payload);
       if (!silent) {
         setActionNote(
           `Game-core reports match ${payload.match?.state ?? "unknown"} with ${payload.total_ticks} persisted tick(s).`,
@@ -1973,6 +1989,7 @@ export function useOrganizerDashboard({
       await refreshSchedulerEvents(true);
       await refreshCheckerRuns(true);
       await recomputeGameScoring(true);
+      await auditGameScoring(true);
       setActionNote(
         `Tick ${payload.id} completed with ${payload.successful_checker_runs} success, ${payload.failed_checker_runs} failed, and ${payload.skipped_checker_runs} skipped checker runs.`,
       );

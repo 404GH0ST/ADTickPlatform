@@ -212,6 +212,7 @@ type GameTabProps = {
   pendingAction: string | null;
   schedulerEventPage: AdminSchedulerEventPage;
   schedulerEventsLiveMode: boolean;
+  scoringAudit: AdminScoringAudit | null;
   scoreRows: AdminGameScoreRow[];
   wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
   onAdvanceTick: () => void;
@@ -225,6 +226,7 @@ type GameTabProps = {
   onPageAttacks: (direction: "prev" | "next") => void;
   onPageCheckerRuns: (direction: "prev" | "next") => void;
   onPageSchedulerEvents: (direction: "prev" | "next") => void;
+  onAuditScores: () => void;
   onRecomputeScores: () => void;
   onRefreshAttacks: () => void;
   onRefreshCheckerRuns: () => void;
@@ -1363,6 +1365,7 @@ export function GameTab({
   pendingAction,
   schedulerEventPage,
   schedulerEventsLiveMode,
+  scoringAudit,
   scoreRows,
   wireGuardGatewayStatus,
   onAdvanceTick,
@@ -1376,6 +1379,7 @@ export function GameTab({
 
   onPageCheckerRuns,
   onPageSchedulerEvents,
+  onAuditScores,
   onRecomputeScores,
   onRefreshAttacks,
   onRefreshCheckerRuns,
@@ -1460,7 +1464,9 @@ export function GameTab({
         <GameControlCard
           gameState={gameState}
           pendingAction={pendingAction}
+          scoringAudit={scoringAudit}
           scoreRowCount={scoreRows.length}
+          onAuditScores={onAuditScores}
           onAdvanceTick={onAdvanceTick}
           onRefreshGameStatus={onRefreshGameStatus}
           onRecomputeScores={onRecomputeScores}
@@ -1667,7 +1673,9 @@ export function ScoreboardTab({
 function GameControlCard({
   gameState,
   pendingAction,
+  scoringAudit,
   scoreRowCount,
+  onAuditScores,
   onAdvanceTick,
   onRefreshGameStatus,
   onRecomputeScores,
@@ -1677,7 +1685,9 @@ function GameControlCard({
 }: {
   gameState: AdminGameStatus;
   pendingAction: string | null;
+  scoringAudit: AdminScoringAudit | null;
   scoreRowCount: number;
+  onAuditScores: () => void;
   onAdvanceTick: () => void;
   onRefreshGameStatus: () => void;
   onRecomputeScores: () => void;
@@ -1705,10 +1715,12 @@ function GameControlCard({
       <QuickActionsCard
         currentTick={gameState.current_tick}
         pendingAction={pendingAction}
+        scoringAudit={scoringAudit}
         scoreRowCount={scoreRowCount}
         totalCheckerRuns={gameState.total_checker_runs}
         totalTicks={gameState.total_ticks}
         onAdvanceTick={onAdvanceTick}
+        onAuditScores={onAuditScores}
         onRecomputeScores={onRecomputeScores}
       />
     </div>
@@ -1989,18 +2001,22 @@ function MatchScheduleCard({
 function QuickActionsCard({
   currentTick,
   pendingAction,
+  scoringAudit,
   scoreRowCount,
   totalCheckerRuns,
   totalTicks,
   onAdvanceTick,
+  onAuditScores,
   onRecomputeScores,
 }: {
   currentTick?: AdminGameTickStatus;
   pendingAction: string | null;
+  scoringAudit: AdminScoringAudit | null;
   scoreRowCount: number;
   totalCheckerRuns: number;
   totalTicks: number;
   onAdvanceTick: () => void;
+  onAuditScores: () => void;
   onRecomputeScores: () => void;
 }): ReactElement {
   return (
@@ -2026,6 +2042,11 @@ function QuickActionsCard({
           <InfoLine
             label="Scoreboard rows"
             value={scoreRowCount}
+            valueClassName="font-mono"
+          />
+          <InfoLine
+            label="Scoring audit"
+            value={formatScoringAuditSummary(scoringAudit)}
             valueClassName="font-mono"
           />
           <InfoLine
@@ -2062,10 +2083,33 @@ function QuickActionsCard({
             )}
             Recompute Scores
           </Button>
+          <Button
+            disabled={pendingAction !== null}
+            variant="outline"
+            data-testid="audit-scores"
+            onClick={onAuditScores}
+          >
+            {pendingAction === "game:scoring-audit" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Audit Scores
+          </Button>
         </CardActionRow>
       </CardContent>
     </Card>
   );
+}
+
+function formatScoringAuditSummary(scoringAudit: AdminScoringAudit | null): string {
+  if (!scoringAudit) {
+    return "not run";
+  }
+  if (scoringAudit.status === "ok") {
+    return `ok / ${scoringAudit.replayed_rows} rows`;
+  }
+  return `${scoringAudit.mismatch_count} mismatch`;
 }
 
 type RuntimeHealthSeverity = "healthy" | "warning" | "critical";

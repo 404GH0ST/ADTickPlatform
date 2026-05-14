@@ -203,6 +203,7 @@ export function CyberAttackMap({
   const featuredAttackIndexRef = useRef(0);
   const featuredAttackIntervalRef = useRef<number | null>(null);
   const featuredAttackIdRef = useRef<string | null>(featuredAttackId);
+  const featuredAttackPausedRef = useRef(false);
   const previousAttackIdsRef = useRef<Set<string> | null>(null);
   const freshAttackTimeoutRef = useRef<number | null>(null);
   const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
@@ -411,6 +412,37 @@ export function CyberAttackMap({
     };
   }, [attacks, placementScopeTeams]);
 
+  useEffect(() => {
+    function handlePauseFeaturedAttacks(): void {
+      featuredAttackPausedRef.current = true;
+      clearAutoRotationTimers(false);
+    }
+
+    function handleResumeFeaturedAttacks(): void {
+      featuredAttackPausedRef.current = false;
+      startAutoRotationFromIdle();
+    }
+
+    function handleFeatureNextAttack(): void {
+      featuredAttackPausedRef.current = false;
+      clearAutoRotationTimers(false);
+      featureNextAttack();
+      featuredAttackIntervalRef.current = window.setInterval(
+        featureNextAttack,
+        FEATURED_ATTACK_STEP_MS,
+      );
+    }
+
+    window.addEventListener('ad-platform:pause-featured-attacks', handlePauseFeaturedAttacks);
+    window.addEventListener('ad-platform:resume-featured-attacks', handleResumeFeaturedAttacks);
+    window.addEventListener('ad-platform:feature-next-attack', handleFeatureNextAttack);
+    return () => {
+      window.removeEventListener('ad-platform:pause-featured-attacks', handlePauseFeaturedAttacks);
+      window.removeEventListener('ad-platform:resume-featured-attacks', handleResumeFeaturedAttacks);
+      window.removeEventListener('ad-platform:feature-next-attack', handleFeatureNextAttack);
+    };
+  }, [attacks, featuredQueue, placementScopeTeams]);
+
   function clearAutoRotationTimers(clearFeatured = true): void {
     if (idleTimeoutRef.current !== null) {
       window.clearTimeout(idleTimeoutRef.current);
@@ -444,6 +476,7 @@ export function CyberAttackMap({
       return;
     }
     lastActivityRef.current = now;
+    featuredAttackPausedRef.current = false;
     clearAutoRotationTimers();
     startAutoRotationFromIdle();
   }
@@ -516,7 +549,7 @@ export function CyberAttackMap({
 
   function startAutoRotationFromIdle(): void {
     clearAutoRotationTimers(false);
-    if (attacks.length === 0) {
+    if (attacks.length === 0 || featuredAttackPausedRef.current) {
       return;
     }
     idleTimeoutRef.current = window.setTimeout(() => {
