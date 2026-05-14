@@ -21,6 +21,7 @@ type FeatureAttackOptions = {
 type BaselineArea = "admin" | "participant" | "presentation";
 
 async function stabilize(page: Page, locator: Locator) {
+  await forceDarkTheme(page);
   await locator.scrollIntoViewIfNeeded();
   await page.evaluate(async () => {
     await document.fonts?.ready;
@@ -31,6 +32,13 @@ async function stabilize(page: Page, locator: Locator) {
     });
   });
   await page.waitForTimeout(100);
+}
+
+async function forceDarkTheme(page: Page) {
+  await page.evaluate(() => {
+    window.localStorage.setItem("ad-platform-theme", "dark");
+    document.documentElement.dataset.theme = "dark";
+  });
 }
 
 async function expectVisualBaseline(
@@ -51,6 +59,7 @@ async function loadDenseAttackMap(page: Page, request: APIRequestContext) {
     data: { scenario: "attack-map-dense" },
   });
   await page.goto("/attacks");
+  await forceDarkTheme(page);
 
   const panel = page.getByTestId("attack-map-panel");
   const globe = page.getByTestId("cyber-attack-map");
@@ -109,7 +118,7 @@ test.beforeEach(async ({ page, request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`);
   await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(() => {
-    window.localStorage.removeItem("ad-platform-theme");
+    window.localStorage.setItem("ad-platform-theme", "dark");
   });
 });
 

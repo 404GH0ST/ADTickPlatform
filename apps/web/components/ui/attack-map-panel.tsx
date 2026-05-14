@@ -11,9 +11,12 @@ import {
   Pause,
   Play,
   Search,
+  Volume2,
+  VolumeX,
   Zap,
 } from 'lucide-react';
 
+import { useAttackSfxPreferences } from '@/components/hooks/use-attack-sfx';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -79,6 +82,8 @@ export function AttackMapPanel({
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [selectedAttackId, setSelectedAttackId] = useState<string | null>(null);
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
+  const { preferences: attackSfx, setVolume, toggleEnabled } =
+    useAttackSfxPreferences();
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
 
@@ -519,6 +524,38 @@ export function AttackMapPanel({
           </Badge>
           {attackRows.length > 0 ? (
             <>
+              <div
+                className="flex h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
+                data-testid="attack-sfx-control"
+              >
+                <Button
+                  aria-label={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
+                  aria-pressed={attackSfx.enabled}
+                  className="h-7 px-2 text-xs"
+                  size="sm"
+                  title={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
+                  variant="ghost"
+                  onClick={toggleEnabled}
+                >
+                  {attackSfx.enabled ? (
+                    <Volume2 className="h-4 w-4" />
+                  ) : (
+                    <VolumeX className="h-4 w-4" />
+                  )}
+                  SFX
+                </Button>
+                <input
+                  aria-label="Attack sound volume"
+                  className="hidden h-7 w-20 accent-primary disabled:opacity-40 2xl:block"
+                  disabled={!attackSfx.enabled}
+                  max="1"
+                  min="0"
+                  step="0.05"
+                  type="range"
+                  value={attackSfx.volume}
+                  onChange={(event) => setVolume(Number(event.target.value))}
+                />
+              </div>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
                 Maximize

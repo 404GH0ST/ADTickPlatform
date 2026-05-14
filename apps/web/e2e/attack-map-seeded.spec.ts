@@ -105,7 +105,9 @@ async function expectFeaturedRouteInsideGlobe(globe: Locator) {
     }
   });
 
-  expect(overflow.arc).not.toHaveProperty("missing");
+  if ("missing" in overflow.arc) {
+    throw new Error("featured route is missing");
+  }
   expect(overflow.arc.left).toBeLessThanOrEqual(1);
   expect(overflow.arc.right).toBeLessThanOrEqual(1);
   expect(overflow.arc.top).toBeLessThanOrEqual(1);

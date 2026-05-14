@@ -6,6 +6,7 @@ async function installMockAttackSfx(page: Page) {
     window.localStorage.removeItem("ad-platform-theme");
     type AttackSfxWindow = Window & {
       __attackSfxStarts?: number[];
+      AudioContext?: typeof AudioContext;
       webkitAudioContext?: typeof AudioContext;
     };
     const testWindow = window as AttackSfxWindow;
@@ -85,6 +86,9 @@ test("participant attack map plays SFX for new realtime attacks after user activ
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "default" },
   });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ad-platform-attack-sfx-enabled", "on");
+  });
   await installMockAttackSfx(page);
   await page.goto("/attacks");
   await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
@@ -102,6 +106,36 @@ test("participant attack map plays SFX for new realtime attacks after user activ
       ),
     )
     .toBeGreaterThan(0);
+});
+
+test("participant attack map respects muted attack SFX preference", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "default" },
+  });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ad-platform-attack-sfx-enabled", "off");
+  });
+  await installMockAttackSfx(page);
+  await page.goto("/attacks");
+  await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enable attack sound" })).toBeVisible();
+  await page.mouse.click(24, 24);
+
+  await request.post(`${mockApiBaseUrl}/__reset`, {
+    data: { scenario: "realtime-updates" },
+  });
+
+  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        ((window as Window & { __attackSfxStarts?: number[] }).__attackSfxStarts?.length ?? 0),
+      ),
+    )
+    .toBe(0);
 });
 
 test("organizer game page applies realtime game-status updates to the current tick card", async ({

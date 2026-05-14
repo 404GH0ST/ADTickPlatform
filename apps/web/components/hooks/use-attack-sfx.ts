@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 declare global {
   interface Window {
@@ -12,11 +12,60 @@ type BrowserAudioContext = AudioContext;
 
 const ATTACK_SFX_THROTTLE_MS = 700;
 const ATTACK_SFX_MAX_BLIPS = 3;
+const ATTACK_SFX_ENABLED_KEY = 'ad-platform-attack-sfx-enabled';
+const ATTACK_SFX_VOLUME_KEY = 'ad-platform-attack-sfx-volume';
+const ATTACK_SFX_PREFERENCE_EVENT = 'ad-platform:attack-sfx-preferences';
+const ATTACK_SFX_DEFAULT_VOLUME = 0.75;
+
+export type AttackSfxPreferences = {
+  enabled: boolean;
+  volume: number;
+};
+
+export function useAttackSfxPreferences() {
+  const [preferences, setPreferences] = useState<AttackSfxPreferences>(() =>
+    readAttackSfxPreferences(),
+  );
+
+  useEffect(() => {
+    const mediaQuery =
+      typeof window === 'undefined' || !window.matchMedia
+        ? null
+        : window.matchMedia('(prefers-reduced-motion: reduce)');
+    const syncPreferences = () => setPreferences(readAttackSfxPreferences());
+
+    window.addEventListener('storage', syncPreferences);
+    window.addEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+    mediaQuery?.addEventListener('change', syncPreferences);
+    syncPreferences();
+
+    return () => {
+      window.removeEventListener('storage', syncPreferences);
+      window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+      mediaQuery?.removeEventListener('change', syncPreferences);
+    };
+  }, []);
+
+  const setEnabled = useCallback((enabled: boolean) => {
+    writeAttackSfxPreferences({ enabled });
+  }, []);
+
+  const setVolume = useCallback((volume: number) => {
+    writeAttackSfxPreferences({ volume });
+  }, []);
+
+  const toggleEnabled = useCallback(() => {
+    writeAttackSfxPreferences({ enabled: !readAttackSfxPreferences().enabled });
+  }, []);
+
+  return { preferences, setEnabled, setVolume, toggleEnabled };
+}
 
 export function useAttackSfx() {
   const armedRef = useRef(false);
   const audioContextRef = useRef<BrowserAudioContext | null>(null);
   const lastPlayedAtRef = useRef(0);
+  const preferencesRef = useRef<AttackSfxPreferences>(readAttackSfxPreferences());
 
   const getAudioContext = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -37,6 +86,28 @@ export function useAttackSfx() {
     } catch {
       return null;
     }
+  }, []);
+
+  useEffect(() => {
+    function syncPreferences() {
+      preferencesRef.current = readAttackSfxPreferences();
+    }
+
+    const mediaQuery =
+      typeof window === 'undefined' || !window.matchMedia
+        ? null
+        : window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    window.addEventListener('storage', syncPreferences);
+    window.addEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+    mediaQuery?.addEventListener('change', syncPreferences);
+    syncPreferences();
+
+    return () => {
+      window.removeEventListener('storage', syncPreferences);
+      window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+      mediaQuery?.removeEventListener('change', syncPreferences);
+    };
   }, []);
 
   useEffect(() => {
@@ -73,6 +144,11 @@ export function useAttackSfx() {
       return;
     }
 
+    const preferences = preferencesRef.current;
+    if (!preferences.enabled || preferences.volume <= 0) {
+      return;
+    }
+
     const now = window.performance.now();
     if (now - lastPlayedAtRef.current < ATTACK_SFX_THROTTLE_MS) {
       return;
@@ -87,7 +163,7 @@ export function useAttackSfx() {
     const blipCount = Math.min(attackIds.length, ATTACK_SFX_MAX_BLIPS);
     const startTime = context.currentTime + 0.015;
     for (let index = 0; index < blipCount; index += 1) {
-      playAttackBlip(context, startTime + index * 0.072, index);
+      playAttackBlip(context, startTime + index * 0.072, index, preferences.volume);
     }
   }, [getAudioContext]);
 }
@@ -96,6 +172,7 @@ function playAttackBlip(
   context: BrowserAudioContext,
   startTime: number,
   index: number,
+  volume: number,
 ) {
   try {
     const oscillator = context.createOscillator();
@@ -110,7 +187,7 @@ function playAttackBlip(
     );
 
     gain.gain.setValueAtTime(0.0001, startTime);
-    gain.gain.exponentialRampToValueAtTime(0.06, startTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.06 * volume, startTime + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.11);
 
     oscillator.connect(gain);
@@ -120,4 +197,65 @@ function playAttackBlip(
   } catch {
     // Audio is decorative; never let an SFX failure affect live attack updates.
   }
+}
+
+function readAttackSfxPreferences(): AttackSfxPreferences {
+  if (typeof window === 'undefined') {
+    return { enabled: true, volume: ATTACK_SFX_DEFAULT_VOLUME };
+  }
+
+  const storedEnabled = readStoredValue(ATTACK_SFX_ENABLED_KEY);
+  const storedVolume = readStoredValue(ATTACK_SFX_VOLUME_KEY);
+  const reducedMotion =
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const volume = storedVolume === null ? Number.NaN : Number(storedVolume);
+
+  return {
+    enabled:
+      storedEnabled === null
+        ? !reducedMotion
+        : storedEnabled === 'on' || storedEnabled === 'true',
+    volume: Number.isFinite(volume)
+      ? clampVolume(volume)
+      : ATTACK_SFX_DEFAULT_VOLUME,
+  };
+}
+
+function writeAttackSfxPreferences(
+  preferences: Partial<AttackSfxPreferences>,
+): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (typeof preferences.enabled === 'boolean') {
+      window.localStorage.setItem(
+        ATTACK_SFX_ENABLED_KEY,
+        preferences.enabled ? 'on' : 'off',
+      );
+    }
+    if (typeof preferences.volume === 'number') {
+      window.localStorage.setItem(
+        ATTACK_SFX_VOLUME_KEY,
+        String(clampVolume(preferences.volume)),
+      );
+    }
+  } catch {
+    // Local storage is optional; the in-memory defaults still keep SFX usable.
+  }
+
+  window.dispatchEvent(new Event(ATTACK_SFX_PREFERENCE_EVENT));
+}
+
+function readStoredValue(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function clampVolume(volume: number): number {
+  return Math.min(1, Math.max(0, volume));
 }
