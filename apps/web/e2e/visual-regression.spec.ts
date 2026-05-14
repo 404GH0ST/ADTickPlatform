@@ -18,6 +18,8 @@ type FeatureAttackOptions = {
   };
 };
 
+type BaselineArea = "admin" | "participant" | "presentation";
+
 async function stabilize(page: Page, locator: Locator) {
   await locator.scrollIntoViewIfNeeded();
   await page.evaluate(async () => {
@@ -29,6 +31,17 @@ async function stabilize(page: Page, locator: Locator) {
     });
   });
   await page.waitForTimeout(100);
+}
+
+async function expectVisualBaseline(
+  locator: Locator,
+  snapshotName: string,
+  area: BaselineArea,
+) {
+  await expect(
+    locator,
+    `${area} visual baseline changed: ${snapshotName}. If this is intentional, update the PNG and document the reason in the PR.`,
+  ).toHaveScreenshot(snapshotName);
 }
 
 async function loadDenseAttackMap(page: Page, request: APIRequestContext) {
@@ -100,87 +113,111 @@ test.beforeEach(async ({ page, request }) => {
   });
 });
 
-test("participant service card keeps its visual baseline", async ({ page }) => {
-  await page.goto("/services");
+test.describe("participant visual baselines", () => {
+  test("service card keeps its visual baseline", async ({ page }) => {
+    await page.goto("/services");
 
-  const serviceCard = page.getByTestId("service-card-svc-1");
-  await expect(serviceCard).toBeVisible();
-  await stabilize(page, serviceCard);
-  await expect(serviceCard).toHaveScreenshot("participant-service-card-dark.png");
-});
-
-test("participant attack map panel keeps its visual baseline", async ({
-  page,
-}) => {
-  await page.goto("/attacks");
-
-  const attackMapPanel = page.getByTestId("attack-map-panel");
-  await expect(attackMapPanel).toBeVisible();
-  await stabilize(page, attackMapPanel);
-  await expect(attackMapPanel).toHaveScreenshot(
-    "participant-attack-map-panel-dark.png",
-  );
-});
-
-test("participant dense attack globe keeps its visual baseline", async ({
-  page,
-  request,
-}) => {
-  const { panel } = await loadDenseAttackMap(page, request);
-  await stabilize(page, panel);
-  await expect(panel).toHaveScreenshot(
-    "participant-dense-attack-globe-dark.png",
-  );
-});
-
-test("participant dense attack globe keeps featured route visual baseline", async ({
-  page,
-  request,
-}) => {
-  const { globe, panel } = await loadDenseAttackMap(page, request);
-  await featureAttack(globe, "map-seed-24", {
-    rotation: { lat: -4, lon: 94 },
+    const serviceCard = page.getByTestId("service-card-svc-1");
+    await expect(serviceCard).toBeVisible();
+    await stabilize(page, serviceCard);
+    await expectVisualBaseline(
+      serviceCard,
+      "participant-service-card-dark.png",
+      "participant",
+    );
   });
 
-  await stabilize(page, panel);
-  await expect(panel).toHaveScreenshot(
-    "participant-dense-attack-globe-featured-dark.png",
-  );
+  test("attack map panel keeps its visual baseline", async ({
+    page,
+  }) => {
+    await page.goto("/attacks");
+
+    const attackMapPanel = page.getByTestId("attack-map-panel");
+    await expect(attackMapPanel).toBeVisible();
+    await stabilize(page, attackMapPanel);
+    await expectVisualBaseline(
+      attackMapPanel,
+      "participant-attack-map-panel-dark.png",
+      "participant",
+    );
+  });
 });
 
-test("participant dense attack globe keeps partial featured route visual baseline", async ({
-  page,
-  request,
-}) => {
-  const { globe, panel } = await loadDenseAttackMap(page, request);
-  const attackId = await getLongestVisibleAttackId(globe, true);
-  expect(attackId).toBeTruthy();
-  await featureAttack(globe, attackId!);
+test.describe("presentation attack map visual baselines", () => {
+  test("dense attack globe keeps its visual baseline", async ({
+    page,
+    request,
+  }) => {
+    const { panel } = await loadDenseAttackMap(page, request);
+    await stabilize(page, panel);
+    await expectVisualBaseline(
+      panel,
+      "participant-dense-attack-globe-dark.png",
+      "presentation",
+    );
+  });
 
-  await stabilize(page, panel);
-  await expect(panel).toHaveScreenshot(
-    "participant-dense-attack-globe-partial-featured-dark.png",
-  );
+  test("dense attack globe keeps featured route visual baseline", async ({
+    page,
+    request,
+  }) => {
+    const { globe, panel } = await loadDenseAttackMap(page, request);
+    await featureAttack(globe, "map-seed-24", {
+      rotation: { lat: -4, lon: 94 },
+    });
+
+    await stabilize(page, panel);
+    await expectVisualBaseline(
+      panel,
+      "participant-dense-attack-globe-featured-dark.png",
+      "presentation",
+    );
+  });
+
+  test("dense attack globe keeps partial featured route visual baseline", async ({
+    page,
+    request,
+  }) => {
+    const { globe, panel } = await loadDenseAttackMap(page, request);
+    const attackId = await getLongestVisibleAttackId(globe, true);
+    expect(attackId).toBeTruthy();
+    await featureAttack(globe, attackId!);
+
+    await stabilize(page, panel);
+    await expectVisualBaseline(
+      panel,
+      "participant-dense-attack-globe-partial-featured-dark.png",
+      "presentation",
+    );
+  });
 });
 
-test("organizer scheduler card keeps its visual baseline", async ({ page }) => {
-  await page.goto("/admin/game");
+test.describe("admin visual baselines", () => {
+  test("scheduler card keeps its visual baseline", async ({ page }) => {
+    await page.goto("/admin/game");
 
-  const schedulerCard = page.getByTestId("scheduler-card");
-  await expect(schedulerCard).toBeVisible();
-  await stabilize(page, schedulerCard);
-  await expect(schedulerCard).toHaveScreenshot("organizer-scheduler-card-dark.png");
-});
+    const schedulerCard = page.getByTestId("scheduler-card");
+    await expect(schedulerCard).toBeVisible();
+    await stabilize(page, schedulerCard);
+    await expectVisualBaseline(
+      schedulerCard,
+      "organizer-scheduler-card-dark.png",
+      "admin",
+    );
+  });
 
-test("organizer authoritative scoreboard card keeps its visual baseline", async ({
-  page,
-}) => {
-  await page.goto("/admin/scoreboard");
+  test("authoritative scoreboard card keeps its visual baseline", async ({
+    page,
+  }) => {
+    await page.goto("/admin/scoreboard");
 
-  const scoreboardCard = page.getByTestId("authoritative-scoreboard-card");
-  await expect(scoreboardCard).toBeVisible();
-  await stabilize(page, scoreboardCard);
-  await expect(scoreboardCard).toHaveScreenshot(
-    "organizer-authoritative-scoreboard-card-dark.png",
-  );
+    const scoreboardCard = page.getByTestId("authoritative-scoreboard-card");
+    await expect(scoreboardCard).toBeVisible();
+    await stabilize(page, scoreboardCard);
+    await expectVisualBaseline(
+      scoreboardCard,
+      "organizer-authoritative-scoreboard-card-dark.png",
+      "admin",
+    );
+  });
 });

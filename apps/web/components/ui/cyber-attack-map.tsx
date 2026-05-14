@@ -1055,6 +1055,7 @@ function AttackArcPath({
         data-featured={arc.featured ? 'true' : 'false'}
         data-fresh={arc.fresh ? 'true' : 'false'}
         data-partial={arc.partial ? 'true' : 'false'}
+        data-selected={arc.selected ? 'true' : 'false'}
         d={arc.path}
         fill="none"
         markerEnd={emphasized && !arc.partial ? `url(#${markerId})` : undefined}
@@ -1108,7 +1109,9 @@ function AttackArcPath({
         pointerEvents="stroke"
         tabIndex={tabReachable ? 0 : -1}
         className="cursor-pointer"
+        data-attack-id={arc.id}
         data-attack-arc-hit="true"
+        data-selected={arc.selected ? 'true' : 'false'}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => onSelectAttack?.(arc.selected ? null : arc.attackIds[0])}
         onKeyDown={(event) => {
@@ -1216,7 +1219,11 @@ function TeamNodeLabel({
   }
 
   return (
-    <g pointerEvents="none">
+    <g
+      data-attack-team-id={node.id}
+      data-attack-team-label="true"
+      pointerEvents="none"
+    >
       <line
         x1={node.x}
         x2={node.labelX}
@@ -1283,6 +1290,7 @@ function TeamNodeDot({
     <g
       aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.landmark.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
       className="cursor-pointer"
+      data-attack-team-id={node.id}
       data-attack-team-hit="true"
       role="button"
       tabIndex={tabReachable ? 0 : -1}

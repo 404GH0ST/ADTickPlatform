@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { mockApiBaseUrl } from "./test-utils";
 
@@ -13,6 +13,65 @@ test.beforeEach(async ({ page, request }) => {
     window.localStorage.removeItem("ad-platform-theme");
   });
 });
+
+async function getAttackRouteClickPoint(globe: Locator) {
+  return globe.locator("[data-attack-arc-hit]").evaluateAll((paths: Element[]) => {
+    for (const path of paths) {
+      if (!(path instanceof SVGPathElement)) {
+        continue;
+      }
+      const matrix = path.getScreenCTM();
+      if (!matrix) {
+        continue;
+      }
+      const totalLength = path.getTotalLength();
+      for (const fraction of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+        const point = path.getPointAtLength(totalLength * fraction).matrixTransform(matrix);
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit?.closest("[data-attack-arc-hit]") === path) {
+          return { x: point.x, y: point.y };
+        }
+      }
+    }
+    return null;
+  });
+}
+
+async function expectVisibleTeamLabelsInsideViewport(
+  page: Page,
+  globe: Locator,
+) {
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  if (!viewport) {
+    return;
+  }
+
+  const overflowedLabels = await globe
+    .locator('[data-attack-team-label="true"]')
+    .evaluateAll((labels: Element[], viewportSize: { width: number; height: number }) =>
+      labels
+        .map((label) => {
+          const box = label.getBoundingClientRect();
+          return {
+            id: label.getAttribute("data-attack-team-id"),
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        })
+        .filter((box) =>
+          box.left < 0 ||
+          box.top < 0 ||
+          box.right > viewportSize.width ||
+          box.bottom > viewportSize.height,
+        ),
+      viewport,
+    );
+
+  expect(overflowedLabels).toEqual([]);
+}
 
 test("seeded dense attack globe renders deterministic landmark coverage", async ({
   page,
@@ -108,26 +167,7 @@ test("seeded dense attack globe supports pointer route inspection", async ({
 
   const panel = page.getByTestId("attack-map-panel");
   const globe = page.getByTestId("cyber-attack-map");
-  const clickPoint = await globe.locator("[data-attack-arc-hit]").evaluateAll((paths) => {
-    for (const path of paths) {
-      if (!(path instanceof SVGPathElement)) {
-        continue;
-      }
-      const matrix = path.getScreenCTM();
-      if (!matrix) {
-        continue;
-      }
-      const totalLength = path.getTotalLength();
-      for (const fraction of [0.5, 0.35, 0.65, 0.2, 0.8]) {
-        const point = path.getPointAtLength(totalLength * fraction).matrixTransform(matrix);
-        const hit = document.elementFromPoint(point.x, point.y);
-        if (hit?.closest("[data-attack-arc-hit]") === path) {
-          return { x: point.x, y: point.y };
-        }
-      }
-    }
-    return null;
-  });
+  const clickPoint = await getAttackRouteClickPoint(globe);
 
   expect(clickPoint).not.toBeNull();
   if (!clickPoint) {
@@ -136,6 +176,43 @@ test("seeded dense attack globe supports pointer route inspection", async ({
   await page.mouse.click(clickPoint.x, clickPoint.y);
 
   await expect(panel.getByText("Clear attack focus")).toBeVisible();
+});
+
+test("seeded dense attack globe keeps labels bounded and selected routes visible after drag", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1365, height: 768 });
+  await page.goto("/attacks");
+
+  const panel = page.getByTestId("attack-map-panel");
+  const globe = page.getByTestId("cyber-attack-map");
+  await expect(globe).toBeVisible();
+
+  await globe.locator('[data-attack-team-hit="true"]').first().click();
+  await expect(panel.getByText("Clear team focus")).toBeVisible();
+  await expectVisibleTeamLabelsInsideViewport(page, globe);
+
+  const clickPoint = await getAttackRouteClickPoint(globe);
+  expect(clickPoint).not.toBeNull();
+  if (!clickPoint) {
+    return;
+  }
+  await page.mouse.click(clickPoint.x, clickPoint.y);
+  await expect(panel.getByText("Clear attack focus")).toBeVisible();
+  await expect(globe.locator('[data-attack-arc="true"][data-selected="true"]')).toHaveCount(1);
+
+  const box = await globe.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) {
+    return;
+  }
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.72, box.y + box.height * 0.42, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(globe.locator('[data-attack-arc="true"][data-selected="true"]')).toBeVisible();
+  await expectVisibleTeamLabelsInsideViewport(page, globe);
 });
 
 test("seeded dense attack globe releases pointer capture after drag", async ({

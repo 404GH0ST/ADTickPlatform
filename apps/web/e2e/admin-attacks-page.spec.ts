@@ -22,22 +22,24 @@ test("organizer attacks page can focus the current tick and step through tick pl
 }) => {
   await page.goto("/admin/attacks");
 
+  const panel = page.getByTestId("attack-map-panel");
+
   await page.getByRole("button", { name: "Current Tick" }).click();
 
-  await expect(page.getByText("4 attacks")).toBeVisible();
-  await expect(page.getByText("Tick #12", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Highlight tick #12" })).toBeVisible();
+  await expect(panel.getByTestId("attack-map-visible-attacks")).toHaveText("4 attacks");
+  await expect(panel.getByTestId("attack-map-selected-tick")).toHaveText("Tick #12");
+  await expect(panel.getByTestId("attack-map-highlight-current-tick")).toBeVisible();
 
   await page.getByRole("button", { name: "Previous Tick" }).click();
 
-  await expect(page.getByText("2 attacks")).toBeVisible();
-  await expect(page.getByText("Tick #11", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Highlight tick #11" })).toBeVisible();
+  await expect(panel.getByTestId("attack-map-visible-attacks")).toHaveText("2 attacks");
+  await expect(panel.getByTestId("attack-map-selected-tick")).toHaveText("Tick #11");
+  await expect(panel.getByTestId("attack-map-highlight-current-tick")).toBeVisible();
 
   await page.getByRole("button", { name: "Next Tick" }).click();
 
-  await expect(page.getByText("4 attacks")).toBeVisible();
-  await expect(page.getByText("Tick #12", { exact: true })).toBeVisible();
+  await expect(panel.getByTestId("attack-map-visible-attacks")).toHaveText("4 attacks");
+  await expect(panel.getByTestId("attack-map-selected-tick")).toHaveText("Tick #12");
 });
 
 test("organizer attacks page shows empty-state messaging when no accepted attacks exist", async ({
