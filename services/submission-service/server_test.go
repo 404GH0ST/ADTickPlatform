@@ -97,17 +97,42 @@ func TestSubmissionServiceAttackFeed(t *testing.T) {
 	}
 }
 
-func TestSubmissionServiceRequiresAdminAuth(t *testing.T) {
+func TestSubmissionServiceRoutesRequireAdminAuth(t *testing.T) {
 	server := newSubmissionServiceServer("dev-admin-token", testSubmissionGameCoreClient{})
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "submission-service", Version: "dev", Addr: ":0"})
 	server.RegisterRoutes(mux)
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/internal/v1/submissions/submit", `{"team_id":101,"flags":["FLAGv1.demo"]}`},
+		{http.MethodGet, "/internal/v1/submissions/attacks?service=bank", ""},
+	}
 
-	request := httptest.NewRequest(http.MethodPost, "/internal/v1/submissions/submit", bytes.NewBufferString(`{"team_id":101,"flags":["FLAGv1.demo"]}`))
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, request)
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
 
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", response.Code)
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -259,12 +260,34 @@ func readRedisLine(reader *bufio.Reader) (string, error) {
 }
 
 func clientRateLimitKey(r *http.Request) string {
+	if trustProxyRateLimitHeaders() {
+		return forwardedRateLimitKey(r)
+	}
+	return remoteRateLimitKey(r)
+}
+
+func trustProxyRateLimitHeaders() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("API_GATEWAY_TRUST_PROXY_HEADERS"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func forwardedRateLimitKey(r *http.Request) string {
 	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
 		parts := strings.Split(forwarded, ",")
 		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
+			if client := strings.TrimSpace(parts[0]); client != "" {
+				return client
+			}
 		}
 	}
+	return remoteRateLimitKey(r)
+}
+
+func remoteRateLimitKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
 	if err == nil && host != "" {
 		return host

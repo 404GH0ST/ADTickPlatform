@@ -208,15 +208,42 @@ func TestPublicScoreboardStreamWorksThroughInstrumentedMux(t *testing.T) {
 	}
 }
 
-func TestAdminGameStatusStreamRequiresAuth(t *testing.T) {
+func TestAdminStreamsRequireAdminAuth(t *testing.T) {
 	gateway := newRealtimeGateway(&testSnapshotClient{}, 25*time.Millisecond, "dev-admin-token")
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "realtime-gateway", Version: "dev", Addr: ":0"})
+	gateway.RegisterRoutes(mux)
+	cases := []struct {
+		path string
+	}{
+		{"/admin/v1/game/scoreboard/stream"},
+		{"/admin/v1/game/status/stream"},
+		{"/admin/v1/game/checker-runs/stream"},
+		{"/admin/v1/game/scheduler/events/stream"},
+	}
 
-	request := httptest.NewRequest("GET", "/admin/v1/game/status/stream", nil)
-	response := httptest.NewRecorder()
-	gateway.handleAdminGameStatusStream(response, request)
+	for _, tc := range cases {
+		t.Run(tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			response := httptest.NewRecorder()
 
-	if response.Code != 403 {
-		t.Fatalf("expected 403, got %d", response.Code)
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

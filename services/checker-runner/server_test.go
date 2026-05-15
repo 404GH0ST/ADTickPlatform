@@ -16,6 +16,45 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
+func TestCheckerRunnerRoutesRequireAdminAuth(t *testing.T) {
+	server := newCheckerRunnerServer("dev-admin-token", dryRunCheckerExecutor{})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "checker-runner", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/internal/v1/checkers/validate", `{}`},
+		{http.MethodPost, "/internal/v1/checkers/execute", `{}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	args := buildDockerCheckerValidationArgs(apigateway.CheckerValidationRequest{
 		ChallengeID:  7,

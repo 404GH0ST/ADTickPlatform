@@ -227,7 +227,7 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 }
 
 func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) ([]byte, int, error) {
-	cmd := exec.CommandContext(ctx, e.binary, args...)
+	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return output, 0, nil

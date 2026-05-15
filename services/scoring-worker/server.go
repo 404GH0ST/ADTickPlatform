@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,6 +19,9 @@ type scoringWorkerStatus struct {
 	State            string `json:"state"`
 	LastRecomputedAt string `json:"last_recomputed_at,omitempty"`
 	LastScoreRows    int    `json:"last_score_rows,omitempty"`
+	LastAuditAt      string `json:"last_audit_at,omitempty"`
+	LastAuditStatus  string `json:"last_audit_status,omitempty"`
+	LastMismatches   int    `json:"last_mismatches,omitempty"`
 	LastError        string `json:"last_error,omitempty"`
 }
 
@@ -99,6 +105,7 @@ func (s *scoringWorkerServer) handleAudit(w http.ResponseWriter, r *http.Request
 		writeScoringWorkerFailure(w, err, "game-core scoring audit failed.")
 		return
 	}
+	s.recordAudit(report)
 	httpapi.WriteJSON(w, http.StatusOK, report)
 }
 
@@ -129,6 +136,19 @@ func (s *scoringWorkerServer) recordSuccess(rowCount int) {
 	s.status.LastRecomputedAt = s.now().UTC().Format(time.RFC3339)
 }
 
+func (s *scoringWorkerServer) recordAudit(report apigateway.ScoringAuditAlias) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status.State = "ready"
+	s.status.LastError = ""
+	s.status.LastAuditAt = s.now().UTC().Format(time.RFC3339)
+	s.status.LastAuditStatus = report.Status
+	s.status.LastMismatches = report.MismatchCount
+	if report.MismatchCount > 0 {
+		log.Printf("scoring audit mismatch: mismatches=%d stored_rows=%d replayed_rows=%d", report.MismatchCount, report.StoredRows, report.ReplayedRows)
+	}
+}
+
 func (s *scoringWorkerServer) recordFailure(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,4 +168,31 @@ func writeScoringWorkerFailure(w http.ResponseWriter, err error, fallback string
 		Title:  "Upstream unavailable",
 		Detail: message,
 	})
+}
+
+func (s *scoringWorkerServer) WritePrometheusMetrics(w io.Writer) {
+	status := s.snapshotStatus()
+
+	fmt.Fprintln(w, "# HELP adplatform_scoring_worker_last_score_rows Last recomputed scoreboard row count.")
+	fmt.Fprintln(w, "# TYPE adplatform_scoring_worker_last_score_rows gauge")
+	fmt.Fprintf(w, "adplatform_scoring_worker_last_score_rows %d\n", status.LastScoreRows)
+
+	fmt.Fprintln(w, "# HELP adplatform_scoring_worker_last_audit_mismatches Last scoring replay audit mismatch count.")
+	fmt.Fprintln(w, "# TYPE adplatform_scoring_worker_last_audit_mismatches gauge")
+	fmt.Fprintf(w, "adplatform_scoring_worker_last_audit_mismatches %d\n", status.LastMismatches)
+
+	fmt.Fprintln(w, "# HELP adplatform_scoring_worker_last_audit_ok Whether the last scoring replay audit reported ok.")
+	fmt.Fprintln(w, "# TYPE adplatform_scoring_worker_last_audit_ok gauge")
+	fmt.Fprintf(w, "adplatform_scoring_worker_last_audit_ok %.0f\n", boolMetric(status.LastAuditStatus == "ok"))
+
+	fmt.Fprintln(w, "# HELP adplatform_scoring_worker_degraded Whether scoring-worker currently reports a degraded state.")
+	fmt.Fprintln(w, "# TYPE adplatform_scoring_worker_degraded gauge")
+	fmt.Fprintf(w, "adplatform_scoring_worker_degraded %.0f\n", boolMetric(status.State == "degraded"))
+}
+
+func boolMetric(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
 }

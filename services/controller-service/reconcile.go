@@ -115,8 +115,8 @@ type controllerTrustedReconcileOptions struct {
 }
 
 func newControllerWireGuardReconciler() controllerWireGuardReconciler {
-	baseURL := strings.TrimRight(strings.TrimSpace(config.String("WIREGUARD_GATEWAY_INTERNAL_URL", "")), "/")
-	if baseURL == "" {
+	baseURL, ok := httpapi.NormalizeInternalBaseURL(config.String("WIREGUARD_GATEWAY_INTERNAL_URL", ""))
+	if !ok {
 		return noopControllerWireGuardReconciler{}
 	}
 	return &httpControllerWireGuardReconciler{
@@ -130,7 +130,7 @@ func newControllerWireGuardReconciler() controllerWireGuardReconciler {
 }
 
 func (c *httpControllerWireGuardReconciler) Reconcile(ctx context.Context) (apigateway.WireGuardGatewayStatus, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/wireguard/reconcile", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/wireguard/reconcile", nil) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return apigateway.WireGuardGatewayStatus{}, err
 	}
@@ -139,7 +139,7 @@ func (c *httpControllerWireGuardReconciler) Reconcile(ctx context.Context) (apig
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal wireguard service origin.
 	if err != nil {
 		return apigateway.WireGuardGatewayStatus{}, err
 	}

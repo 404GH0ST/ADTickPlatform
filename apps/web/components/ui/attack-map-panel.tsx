@@ -11,12 +11,16 @@ import {
   Pause,
   Play,
   Search,
+  SkipForward,
   Volume2,
   VolumeX,
   Zap,
 } from 'lucide-react';
 
-import { useAttackSfxPreferences } from '@/components/hooks/use-attack-sfx';
+import {
+  useAttackSfxPreferences,
+  useAttackSfxPreview,
+} from '@/components/hooks/use-attack-sfx';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -72,6 +76,7 @@ export function AttackMapPanel({
   title?: string;
 }): ReactElement {
   const [audienceMode, setAudienceMode] = useState(false);
+  const [audienceShowcasePaused, setAudienceShowcasePaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [teamQuery, setTeamQuery] = useState('');
   const [replayAttackIDs, setReplayAttackIDs] = useState<string[]>([]);
@@ -84,6 +89,7 @@ export function AttackMapPanel({
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const { preferences: attackSfx, setVolume, toggleEnabled } =
     useAttackSfxPreferences();
+  const previewAttackSfx = useAttackSfxPreview();
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
 
@@ -297,6 +303,10 @@ export function AttackMapPanel({
 
   const handleFeaturedAttackChange = useCallback((attackId: string | null) => {
     setFeaturedAttackId(attackId);
+  }, []);
+
+  const dispatchAttackMapEvent = useCallback((eventName: string) => {
+    window.dispatchEvent(new CustomEvent(eventName));
   }, []);
 
   useEffect(() => {
@@ -555,6 +565,17 @@ export function AttackMapPanel({
                   value={attackSfx.volume}
                   onChange={(event) => setVolume(Number(event.target.value))}
                 />
+                <Button
+                  aria-label="Test attack sound"
+                  className="hidden h-7 px-2 text-xs 2xl:inline-flex"
+                  disabled={!attackSfx.enabled}
+                  size="sm"
+                  title="Test attack sound"
+                  variant="ghost"
+                  onClick={previewAttackSfx}
+                >
+                  Test
+                </Button>
               </div>
               <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
                 <Expand className="h-4 w-4" />
@@ -812,6 +833,41 @@ export function AttackMapPanel({
               <Minimize2 className="h-4 w-4" />
               Back to page
             </Button>
+            <div className="absolute bottom-5 right-36 flex flex-wrap gap-2">
+              <Button
+                aria-label={audienceShowcasePaused ? 'Resume showcase' : 'Pause showcase'}
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const nextPaused = !audienceShowcasePaused;
+                  setAudienceShowcasePaused(nextPaused);
+                  dispatchAttackMapEvent(
+                    nextPaused
+                      ? 'ad-platform:pause-featured-attacks'
+                      : 'ad-platform:resume-featured-attacks',
+                  );
+                }}
+              >
+                {audienceShowcasePaused ? (
+                  <Play className="h-4 w-4" />
+                ) : (
+                  <Pause className="h-4 w-4" />
+                )}
+                {audienceShowcasePaused ? 'Resume' : 'Pause'}
+              </Button>
+              <Button
+                aria-label="Next featured route"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAudienceShowcasePaused(false);
+                  dispatchAttackMapEvent('ad-platform:feature-next-attack');
+                }}
+              >
+                <SkipForward className="h-4 w-4" />
+                Next Route
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -834,7 +890,7 @@ function PresentationTransmissionRail({
   return (
     <div
       className={cn(
-        "w-full max-w-[58rem] border-y border-border/70 bg-card/88 px-5 py-3 shadow-[0_1px_0_var(--border)]",
+        "ml-1 w-full max-w-[58rem] border-y border-border/70 bg-card/88 px-5 py-3 shadow-[0_1px_0_var(--border)]",
         className,
       )}
       {...props}

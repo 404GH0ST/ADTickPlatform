@@ -217,6 +217,45 @@ func TestWireGuardServerIPStripsCIDR(t *testing.T) {
 	}
 }
 
+func TestWireGuardGatewayRoutesRequireAdminAuth(t *testing.T) {
+	server := newWireGuardGatewayServer("admin-token", apigateway.NewMemoryStore(101), dryRunWireGuardApplier{})
+	mux := http.NewServeMux()
+	server.RegisterRoutes(mux)
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/internal/v1/wireguard/status"},
+		{http.MethodPost, "/internal/v1/wireguard/reconcile"},
+		{http.MethodPost, "/internal/v1/wireguard/teardown"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestWireGuardGatewayServerReconcileReturnsCounts(t *testing.T) {
 	store := apigateway.NewMemoryStore(101)
 	if _, err := store.RevokeAdminPlayerWireGuardConfig(context.Background(), 2, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC)); err != nil {

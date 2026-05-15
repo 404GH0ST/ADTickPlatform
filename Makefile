@@ -15,7 +15,7 @@ include make/prod.mk
 help:
 	@printf '%s\n' \
 	  'Core:' \
-	  '  make fmt | test | build | ci | e2e' \
+	  '  make fmt | test | build | ci | e2e | premerge' \
 	  '  make run-api-gateway | run-game-core | run-submission-service | run-checker-runner | run-controller-service | run-scoring-worker | run-realtime-gateway | run-wireguard-gateway' \
 	  '' \
 	  'Faust staging:' \

@@ -161,7 +161,7 @@ func (m *submissionServiceMetrics) recordSubmitSuccess(duration time.Duration, f
 	defer m.mu.Unlock()
 
 	m.submitRequestsTotal++
-	m.submitFlagsTotal += uint64(flags)
+	m.submitFlagsTotal += nonNegativeUint64(flags)
 	m.submitDurationSecondsSum += duration.Seconds()
 	m.submitDurationSecondsCount++
 	for _, verdict := range verdicts {
@@ -186,7 +186,7 @@ func (m *submissionServiceMetrics) recordSubmitFailure(duration time.Duration, f
 	defer m.mu.Unlock()
 
 	m.submitRequestsTotal++
-	m.submitFlagsTotal += uint64(flags)
+	m.submitFlagsTotal += nonNegativeUint64(flags)
 	m.submitFailuresTotal++
 	m.submitDurationSecondsSum += duration.Seconds()
 	m.submitDurationSecondsCount++
@@ -197,7 +197,7 @@ func (m *submissionServiceMetrics) recordAttackFeedSuccess(duration time.Duratio
 	defer m.mu.Unlock()
 
 	m.attackFeedRequestsTotal++
-	m.attackFeedItemsTotal += uint64(items)
+	m.attackFeedItemsTotal += nonNegativeUint64(items)
 	m.attackFeedDurationSecondsSum += duration.Seconds()
 	m.attackFeedDurationSecondsCount++
 }
@@ -210,6 +210,13 @@ func (m *submissionServiceMetrics) recordAttackFeedFailure(duration time.Duratio
 	m.attackFeedFailuresTotal++
 	m.attackFeedDurationSecondsSum += duration.Seconds()
 	m.attackFeedDurationSecondsCount++
+}
+
+func nonNegativeUint64(value int) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	return uint64(value)
 }
 
 func (m *submissionServiceMetrics) writePrometheus(w io.Writer) {

@@ -1365,6 +1365,7 @@ func (s *postgresStore) ListAdminAuditLogs(ctx context.Context, query adminAudit
 	}
 
 	selectArgs := append(append([]any(nil), args...), limit, offset)
+	// #nosec G202 -- whereClause is assembled from fixed predicates and placeholders only.
 	selectQuery := `
 		SELECT id, actor_type, actor, action, target_type, target, status, message, metadata::text, created_at
 		FROM audit_logs` + whereClause + fmt.Sprintf(`

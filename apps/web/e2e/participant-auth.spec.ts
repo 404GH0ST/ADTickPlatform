@@ -15,6 +15,71 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`);
 });
 
+type ApiCase = {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  data?: unknown;
+};
+
+const adminApiCases: ApiCase[] = [
+  { method: "GET", path: "/api/admin/access/status" },
+  { method: "POST", path: "/api/admin/access/reconcile" },
+  { method: "POST", path: "/api/admin/access/teardown" },
+  { method: "POST", path: "/api/admin/challenges" },
+  { method: "PUT", path: "/api/admin/challenges/1" },
+  { method: "DELETE", path: "/api/admin/challenges/1" },
+  { method: "POST", path: "/api/admin/challenges/1/deploy" },
+  { method: "POST", path: "/api/admin/challenges/1/validate" },
+  { method: "GET", path: "/api/admin/deployments" },
+  { method: "DELETE", path: "/api/admin/deployments/77" },
+  { method: "POST", path: "/api/admin/deployments/reconcile" },
+  { method: "GET", path: "/api/admin/game/attacks" },
+  { method: "GET", path: "/api/admin/game/checker-runs" },
+  { method: "GET", path: "/api/admin/game/match" },
+  { method: "PUT", path: "/api/admin/game/match/schedule" },
+  { method: "POST", path: "/api/admin/game/match/start" },
+  { method: "POST", path: "/api/admin/game/match/stop" },
+  { method: "GET", path: "/api/admin/game/scheduler/events" },
+  { method: "PUT", path: "/api/admin/game/scheduler/interval" },
+  { method: "GET", path: "/api/admin/game/scheduler" },
+  { method: "POST", path: "/api/admin/game/scheduler/start" },
+  { method: "POST", path: "/api/admin/game/scheduler/stop" },
+  { method: "GET", path: "/api/admin/game/scoreboard" },
+  { method: "GET", path: "/api/admin/game/scoring/audit" },
+  { method: "POST", path: "/api/admin/game/scoring/recompute" },
+  { method: "GET", path: "/api/admin/game/status" },
+  { method: "POST", path: "/api/admin/game/ticks/advance" },
+  { method: "GET", path: "/api/admin/operations/metrics" },
+  { method: "GET", path: "/api/admin/operations/status" },
+  { method: "POST", path: "/api/admin/players" },
+  { method: "PUT", path: "/api/admin/players/1001" },
+  { method: "DELETE", path: "/api/admin/players/1001" },
+  { method: "GET", path: "/api/admin/players/1001/wireguard" },
+  { method: "POST", path: "/api/admin/players/1001/wireguard/revoke" },
+  { method: "POST", path: "/api/admin/players/1001/wireguard/rotate" },
+  { method: "GET", path: "/api/admin/realtime/game/attacks/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/checker-runs/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/scheduler/events/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/scoreboard/stream" },
+  { method: "GET", path: "/api/admin/realtime/game/status/stream" },
+  { method: "GET", path: "/api/admin/runtime-health/report" },
+  { method: "POST", path: "/api/admin/teams" },
+  { method: "PUT", path: "/api/admin/teams/101" },
+  { method: "DELETE", path: "/api/admin/teams/101" },
+  { method: "POST", path: "/api/admin/wireguard/reconcile" },
+  { method: "GET", path: "/api/admin/wireguard/status" },
+  { method: "POST", path: "/api/admin/wireguard/teardown" },
+];
+
+const participantOwnedApiCases: ApiCase[] = [
+  { method: "GET", path: "/api/platform/team/services" },
+  { method: "GET", path: "/api/platform/challenges/1/source" },
+  { method: "POST", path: "/api/platform/services/1/ssh-session" },
+  { method: "POST", path: "/api/platform/services/1/reset/factory" },
+  { method: "POST", path: "/api/platform/services/1/reset/restart" },
+  { method: "POST", path: "/api/platform/services/1/unlock", data: { proof: "bad" } },
+];
+
 async function loginAsParticipant(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill("alpha.captain@college.local");
@@ -89,6 +154,23 @@ test("unauthenticated callers cannot use admin api proxies", async ({
   });
 });
 
+test("unauthenticated callers cannot use admin api methods", async ({
+  page,
+}) => {
+  for (const item of adminApiCases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "please authenticate before accessing organizer routes.",
+    });
+  }
+});
+
 test("participant session cannot use admin api proxies", async ({
   page,
   context,
@@ -102,6 +184,72 @@ test("participant session cannot use admin api proxies", async ({
     status: 403,
     detail: "please authenticate as organizer.",
   });
+});
+
+test("participant session cannot use admin api methods", async ({
+  page,
+  context,
+}) => {
+  await setParticipantSession(context);
+
+  for (const item of adminApiCases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "please authenticate as organizer.",
+    });
+  }
+});
+
+test("unauthenticated callers cannot use participant-owned api proxies", async ({
+  page,
+}) => {
+  for (const item of participantOwnedApiCases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+  }
+});
+
+test("browser mutation api proxies reject explicit cross-site requests", async ({
+  page,
+  context,
+}) => {
+  await loginAsOrganizer(context);
+
+  const cases = [
+    { method: "POST", path: "/api/admin/game/ticks/advance" },
+    { method: "POST", path: "/api/platform/services/1/reset/restart" },
+    {
+      method: "POST",
+      path: "/api/platform/session/login",
+      data: { email: "alpha.captain@college.local", password: "alpha-password" },
+    },
+    { method: "POST", path: "/api/platform/session/logout" },
+  ];
+
+  for (const item of cases) {
+    const response = await page.request.fetch(item.path, {
+      method: item.method,
+      data: item.data,
+      headers: {
+        Origin: "https://attacker.example",
+      },
+    });
+    expect(response.status(), `${item.method} ${item.path}`).toBe(403);
+    await expect(await response.json()).toEqual({
+      title: "Authentication required",
+      status: 403,
+      detail: "cross-site mutation requests are not allowed.",
+    });
+  }
 });
 
 test("organizer session can use admin api proxies", async ({

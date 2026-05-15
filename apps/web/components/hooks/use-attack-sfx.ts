@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
 declare global {
   interface Window {
@@ -21,6 +21,55 @@ export type AttackSfxPreferences = {
   enabled: boolean;
   volume: number;
 };
+
+export function useAttackSfxPreview() {
+  const audioContextRef = useRef<BrowserAudioContext | null>(null);
+  const preferencesRef = useRef<AttackSfxPreferences>(readAttackSfxPreferences());
+
+  useEffect(() => {
+    function syncPreferences() {
+      preferencesRef.current = readAttackSfxPreferences();
+    }
+
+    window.addEventListener('storage', syncPreferences);
+    window.addEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+    syncPreferences();
+
+    return () => {
+      window.removeEventListener('storage', syncPreferences);
+      window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
+      const context = audioContextRef.current;
+      audioContextRef.current = null;
+      if (context && context.state !== 'closed') {
+        void context.close().catch(() => {
+          // The preview context is disposable; ignore page-leave cleanup failures.
+        });
+      }
+    };
+  }, []);
+
+  return useCallback(() => {
+    const preferences = preferencesRef.current;
+    if (!preferences.enabled || preferences.volume <= 0) {
+      return;
+    }
+
+    const context = getOrCreateAudioContext(audioContextRef);
+    if (!context || context.state === 'closed') {
+      return;
+    }
+    if (context.state === 'suspended') {
+      void context.resume().catch(() => {
+        // The click already counts as activation in normal browsers.
+      });
+    }
+
+    const startTime = context.currentTime + 0.015;
+    playAttackBlip(context, startTime, 0, preferences.volume);
+    playAttackBlip(context, startTime + 0.09, 1, preferences.volume * 0.85);
+    playAttackBlip(context, startTime + 0.18, 2, preferences.volume * 0.7);
+  }, []);
+}
 
 export function useAttackSfxPreferences() {
   const [preferences, setPreferences] = useState<AttackSfxPreferences>(() =>
@@ -68,24 +117,7 @@ export function useAttackSfx() {
   const preferencesRef = useRef<AttackSfxPreferences>(readAttackSfxPreferences());
 
   const getAudioContext = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    if (audioContextRef.current) {
-      return audioContextRef.current;
-    }
-
-    const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
-    if (!AudioContextCtor) {
-      return null;
-    }
-
-    try {
-      audioContextRef.current = new AudioContextCtor();
-      return audioContextRef.current;
-    } catch {
-      return null;
-    }
+    return getOrCreateAudioContext(audioContextRef);
   }, []);
 
   useEffect(() => {
@@ -196,6 +228,29 @@ function playAttackBlip(
     oscillator.stop(startTime + 0.12);
   } catch {
     // Audio is decorative; never let an SFX failure affect live attack updates.
+  }
+}
+
+function getOrCreateAudioContext(
+  audioContextRef: MutableRefObject<BrowserAudioContext | null>,
+): BrowserAudioContext | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  if (audioContextRef.current) {
+    return audioContextRef.current;
+  }
+
+  const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  try {
+    audioContextRef.current = new AudioContextCtor();
+    return audioContextRef.current;
+  } catch {
+    return null;
   }
 }
 

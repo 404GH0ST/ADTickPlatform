@@ -3,7 +3,7 @@ package apigateway
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- read-only compatibility for legacy stored tokens.
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -168,6 +168,7 @@ func hashSecret(value string) string {
 }
 
 func legacyMD5Secret(value string) string {
+	// #nosec G401,G501 -- read-only compatibility for legacy stored tokens.
 	sum := md5.Sum([]byte(value))
 	return hex.EncodeToString(sum[:])
 }

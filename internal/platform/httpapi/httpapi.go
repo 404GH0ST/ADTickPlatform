@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+const maxJSONBodyBytes int64 = 1 << 20
 
 type ServiceInfo struct {
 	Name    string `json:"name"`
@@ -79,14 +82,15 @@ func WriteProblem(w http.ResponseWriter, statusCode int, problem ProblemDetails)
 func DecodeJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
 
-	decoder := json.NewDecoder(r.Body)
+	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONBodyBytes+1))
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {
 		return err
 	}
 
-	if decoder.More() {
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return errors.New("unexpected trailing json")
 	}
 

@@ -142,10 +142,10 @@ func (e *fileServiceAccessExecutor) Apply(_ context.Context, policies []apigatew
 
 func (e *fileServiceAccessExecutor) Teardown(_ context.Context) error {
 	if strings.TrimSpace(e.paths.rulesPath) != "" {
-		_ = os.Remove(e.paths.rulesPath)
+		_ = os.Remove(e.paths.rulesPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	if strings.TrimSpace(e.paths.statusPath) != "" {
-		_ = os.Remove(e.paths.statusPath)
+		_ = os.Remove(e.paths.statusPath) // #nosec G703 -- configured artifact path, not request input.
 	}
 	return nil
 }
@@ -256,7 +256,7 @@ func (e *hostServiceAccessExecutor) Teardown(ctx context.Context) error {
 }
 
 func (execControllerCommandRunner) Run(ctx context.Context, binary string, args ...string) error {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204,G702 -- binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %s failed: %w: %s", binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
@@ -514,7 +514,7 @@ func writeControllerAccessStatus(path string, status apigateway.ControllerAccess
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, payload, 0o600)
+	return os.WriteFile(path, payload, 0o600) // #nosec G703 -- caller resolves configured artifact path.
 }
 
 func ensureControllerParentDir(path string) error {
@@ -522,5 +522,5 @@ func ensureControllerParentDir(path string) error {
 	if trimmed == "" {
 		return nil
 	}
-	return os.MkdirAll(filepath.Dir(trimmed), 0o755)
+	return os.MkdirAll(filepath.Dir(trimmed), 0o750)
 }

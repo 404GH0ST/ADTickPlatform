@@ -42,12 +42,12 @@ type httpScoringClient struct {
 }
 
 func NewHTTPScoringClient(baseURL, token string) scoringClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopScoringClient{}
 	}
 	return &httpScoringClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -79,7 +79,7 @@ func requestScoringJSON[T any](ctx context.Context, c *httpScoringClient, method
 		requestBody = strings.NewReader(string(encodedBody))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return zero, err
 	}
@@ -90,7 +90,7 @@ func requestScoringJSON[T any](ctx context.Context, c *httpScoringClient, method
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal scoring service origin.
 	if err != nil {
 		return zero, err
 	}

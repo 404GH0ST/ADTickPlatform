@@ -375,7 +375,7 @@ func (e *dockerCLIExecutor) networkPlan(task apigateway.ControllerRuntimeTask) (
 }
 
 func (e *dockerCLIExecutor) execDocker(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, e.binary, args...)
+	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("%s %s failed: %w: %s", e.binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))

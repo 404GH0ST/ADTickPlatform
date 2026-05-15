@@ -114,27 +114,35 @@ func resolveChallengeSourcePath(sourceBundlePath string) (string, fs.FileInfo, e
 	if err != nil {
 		return "", nil, err
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", nil, err
+	}
 	candidate := filepath.Join(absRoot, cleanRelative)
 	absCandidate, err := filepath.Abs(candidate)
 	if err != nil {
 		return "", nil, err
 	}
-	relToRoot, err := filepath.Rel(absRoot, absCandidate)
+	resolvedCandidate, err := filepath.EvalSymlinks(absCandidate)
+	if err != nil {
+		return "", nil, err
+	}
+	relToRoot, err := filepath.Rel(resolvedRoot, resolvedCandidate)
 	if err != nil {
 		return "", nil, err
 	}
 	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
 		return "", nil, errChallengeSourceUnavailable
 	}
-	info, err := os.Stat(absCandidate)
+	info, err := os.Stat(resolvedCandidate)
 	if err != nil {
 		return "", nil, err
 	}
-	return absCandidate, info, nil
+	return resolvedCandidate, info, nil
 }
 
 func serveChallengeSourceFile(w http.ResponseWriter, r *http.Request, path string, info fs.FileInfo, challengeName string) {
-	file, err := os.Open(path)
+	file, err := openResolvedChallengeSource(path, info)
 	if err != nil {
 		writeProblem(w, http.StatusNotFound, "Source unavailable", "challenge source is unavailable.")
 		return
@@ -203,7 +211,7 @@ func serveChallengeSourceDirectory(w http.ResponseWriter, root string, challenge
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		file, openErr := os.Open(path)
+		file, openErr := openResolvedChallengeSource(path, info)
 		if openErr != nil {
 			return openErr
 		}
@@ -217,6 +225,23 @@ func serveChallengeSourceDirectory(w http.ResponseWriter, root string, challenge
 		http.Error(w, "challenge source archive failed", http.StatusInternalServerError)
 		return
 	}
+}
+
+func openResolvedChallengeSource(path string, expected fs.FileInfo) (*os.File, error) {
+	file, err := os.Open(path) // #nosec G304 -- path is resolved under AD_CHALLENGE_SOURCE_ROOT and checked after open.
+	if err != nil {
+		return nil, err
+	}
+	actual, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if !actual.Mode().IsRegular() || !os.SameFile(expected, actual) {
+		file.Close()
+		return nil, errChallengeSourceUnavailable
+	}
+	return file, nil
 }
 
 func sanitizeArchiveName(name string) string {

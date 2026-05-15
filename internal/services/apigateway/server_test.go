@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1018,6 +1019,87 @@ func TestParticipantTokenCannotAccessAdminRoutes(t *testing.T) {
 	}
 }
 
+func TestAllAdminRoutesRejectUnauthenticatedAndParticipantCallers(t *testing.T) {
+	mux := newTestMux()
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/v2/admin/teams", ""},
+		{http.MethodPost, "/api/v2/admin/teams", `{}`},
+		{http.MethodPut, "/api/v2/admin/teams/101", `{}`},
+		{http.MethodDelete, "/api/v2/admin/teams/101", ""},
+		{http.MethodGet, "/api/v2/admin/players", ""},
+		{http.MethodPost, "/api/v2/admin/players", `{}`},
+		{http.MethodPut, "/api/v2/admin/players/1001", `{}`},
+		{http.MethodDelete, "/api/v2/admin/players/1001", ""},
+		{http.MethodGet, "/api/v2/admin/players/1001/wireguard", ""},
+		{http.MethodPost, "/api/v2/admin/players/1001/wireguard/rotate", `{}`},
+		{http.MethodPost, "/api/v2/admin/players/1001/wireguard/revoke", `{}`},
+		{http.MethodGet, "/api/v2/admin/wireguard/status", ""},
+		{http.MethodPost, "/api/v2/admin/wireguard/reconcile", `{}`},
+		{http.MethodPost, "/api/v2/admin/wireguard/teardown", `{}`},
+		{http.MethodGet, "/api/v2/admin/access/status", ""},
+		{http.MethodPost, "/api/v2/admin/access/reconcile", `{}`},
+		{http.MethodPost, "/api/v2/admin/access/teardown", `{}`},
+		{http.MethodGet, "/api/v2/admin/challenges", ""},
+		{http.MethodPost, "/api/v2/admin/challenges", `{}`},
+		{http.MethodPut, "/api/v2/admin/challenges/1", `{}`},
+		{http.MethodDelete, "/api/v2/admin/challenges/1", ""},
+		{http.MethodPost, "/api/v2/admin/challenges/1/validate", `{}`},
+		{http.MethodPost, "/api/v2/admin/challenges/1/deploy", `{}`},
+		{http.MethodGet, "/api/v2/admin/deployments", ""},
+		{http.MethodDelete, "/api/v2/admin/deployments/77", ""},
+		{http.MethodPost, "/api/v2/admin/deployments/reconcile", `{}`},
+		{http.MethodGet, "/api/v2/admin/audit-logs", ""},
+		{http.MethodGet, "/api/v2/admin/operations/status", ""},
+		{http.MethodGet, "/api/v2/admin/game/status", ""},
+		{http.MethodGet, "/api/v2/admin/game/match", ""},
+		{http.MethodPost, "/api/v2/admin/game/match/start", `{}`},
+		{http.MethodPost, "/api/v2/admin/game/match/stop", `{}`},
+		{http.MethodPut, "/api/v2/admin/game/match/schedule", `{}`},
+		{http.MethodPost, "/api/v2/admin/game/ticks/advance", `{}`},
+		{http.MethodGet, "/api/v2/admin/game/checker-runs", ""},
+		{http.MethodGet, "/api/v2/admin/game/scheduler", ""},
+		{http.MethodGet, "/api/v2/admin/game/scheduler/events", ""},
+		{http.MethodPost, "/api/v2/admin/game/scheduler/start", `{}`},
+		{http.MethodPost, "/api/v2/admin/game/scheduler/stop", `{}`},
+		{http.MethodPut, "/api/v2/admin/game/scheduler/interval", `{}`},
+		{http.MethodGet, "/api/v2/admin/game/scoreboard", ""},
+		{http.MethodPost, "/api/v2/admin/game/scoring/recompute", `{}`},
+		{http.MethodGet, "/api/v2/admin/game/scoring/audit", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" participant", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			setTestTeamAuthHeader(t, request)
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), "please authenticate as organizer") {
+				t.Fatalf("expected organizer auth failure, got %s", response.Body.String())
+			}
+		})
+	}
+}
+
 func TestAdminTokenCannotAccessParticipantRoutes(t *testing.T) {
 	mux := newTestMux()
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
@@ -1031,6 +1113,73 @@ func TestAdminTokenCannotAccessParticipantRoutes(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "please authenticate before access") {
 		t.Fatalf("expected participant auth failure, got %s", response.Body.String())
+	}
+}
+
+func TestTeamRoutesRejectUnauthenticatedAndAdminCallers(t *testing.T) {
+	mux := newTestMux()
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/v2/challenges/1/source", ""},
+		{http.MethodGet, "/api/v2/services", ""},
+		{http.MethodGet, "/api/v2/team/services", ""},
+		{http.MethodPost, "/api/v2/submit", `{"flags":["FLAGv1.demo"]}`},
+		{http.MethodPost, "/api/v2/services/1/unlock", `{"proof":"bad"}`},
+		{http.MethodPost, "/api/v2/services/1/ssh-session", `{}`},
+		{http.MethodPost, "/api/v2/services/1/reset/factory", `{}`},
+		{http.MethodPost, "/api/v2/services/1/reset/restart", `{}`},
+	}
+
+	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
+		PlayerID:    99,
+		TeamID:      101,
+		TeamName:    "Team Alpha",
+		DisplayName: "Organizer",
+		Email:       "organizer@example.com",
+		Role:        "organizer",
+	}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue organizer token: %v", err)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" admin", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			setTestAdminAuthHeader(request)
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" organizer", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 
@@ -1706,6 +1855,23 @@ func TestParticipantCannotDownloadDraftChallengeSourceBundle(t *testing.T) {
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected draft source download 404, got %d", response.Code)
+	}
+}
+
+func TestChallengeSourceRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write outside source: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	t.Setenv("AD_CHALLENGE_SOURCE_ROOT", root)
+
+	_, _, err := resolveChallengeSourcePath(filepath.Join("escape", "secret.txt"))
+	if !errors.Is(err, errChallengeSourceUnavailable) {
+		t.Fatalf("expected symlink escape to be unavailable, got %v", err)
 	}
 }
 

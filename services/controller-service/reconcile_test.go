@@ -19,6 +19,63 @@ func newControllerReconcileTestMux(server *controllerServer) *http.ServeMux {
 	return mux
 }
 
+func TestControllerInternalRoutesRequireAdminAuth(t *testing.T) {
+	server := &controllerServer{
+		adminToken: "dev-admin-token",
+		store:      apigateway.NewMemoryStore(101),
+		executor:   &runtimeExecutorStub{},
+		access:     &serviceAccessExecutorStub{},
+		wireGuard:  &controllerWireGuardReconcilerStub{},
+		metrics:    newControllerServiceMetrics(),
+		now:        time.Now,
+	}
+	mux := newControllerReconcileTestMux(server)
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/internal/v1/deployments", ""},
+		{http.MethodPost, "/internal/v1/deployments/reconcile", `{}`},
+		{http.MethodPost, "/internal/v1/challenges/validate", `{}`},
+		{http.MethodGet, "/internal/v1/access/status", ""},
+		{http.MethodPost, "/internal/v1/access/reconcile", `{}`},
+		{http.MethodPost, "/internal/v1/access/teardown", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/services/1/access/reconcile", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/services/1/ssh-credential", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/services/1/reset/factory", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/services/1/restart", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/services/1/remove", `{}`},
+		{http.MethodPost, "/internal/v1/teams/101/remove", `{}`},
+		{http.MethodPost, "/internal/v1/challenges/1/remove", `{}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path+" unauthenticated", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+
+		t.Run(tc.method+" "+tc.path+" wrong token", func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			request.Header.Set("Authorization", "Bearer wrong-token")
+			response := httptest.NewRecorder()
+
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestControllerReconcileDeploymentsReturnsTrustedSuccess(t *testing.T) {
 	server := &controllerServer{
 		adminToken: "dev-admin-token",

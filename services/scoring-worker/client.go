@@ -37,12 +37,12 @@ type httpGameCoreScoringClient struct {
 }
 
 func newGameCoreScoringClient(baseURL, token string) scoringGameCoreClient {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
+	normalizedBaseURL, ok := httpapi.NormalizeInternalBaseURL(baseURL)
+	if !ok {
 		return noopGameCoreScoringClient{}
 	}
 	return &httpGameCoreScoringClient{
-		baseURL: baseURL,
+		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -74,7 +74,7 @@ func requestGameCoreScoringJSON[T any](ctx context.Context, c *httpGameCoreScori
 		requestBody = strings.NewReader(string(encodedBody))
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return zero, err
 	}
@@ -85,7 +85,7 @@ func requestGameCoreScoringJSON[T any](ctx context.Context, c *httpGameCoreScori
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request targets a validated internal service origin.
 	if err != nil {
 		return zero, err
 	}
