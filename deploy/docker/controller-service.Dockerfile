@@ -2,6 +2,9 @@ ARG GO_VERSION=1.26
 
 FROM golang:${GO_VERSION}-alpine AS builder
 
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -10,7 +13,7 @@ RUN go mod download
 COPY internal ./internal
 COPY services ./services
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/service ./services/controller-service
+RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -o /out/service ./services/controller-service
 
 FROM docker:28-cli AS dockercli
 

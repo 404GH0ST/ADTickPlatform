@@ -38,6 +38,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: checker-runner
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
         EXTRA_APK: docker-cli
     restart: unless-stopped
     environment:
@@ -59,6 +61,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: game-core
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -90,6 +94,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: submission-service
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       game-core:
@@ -107,6 +113,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/controller-service.Dockerfile
+      args:
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -156,6 +165,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: scoring-worker
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       game-core:
@@ -175,6 +186,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: realtime-gateway
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       api-gateway:
@@ -195,6 +208,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: wireguard-gateway
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
         EXTRA_APK: wireguard-tools nftables
     restart: unless-stopped
     depends_on:
@@ -238,6 +253,8 @@ services:
       dockerfile: deploy/docker/go-service.Dockerfile
       args:
         SERVICE_PATH: api-gateway
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
       postgres:

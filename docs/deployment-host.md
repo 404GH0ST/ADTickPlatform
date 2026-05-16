@@ -99,6 +99,17 @@ sudo wg show
    make up-prod-host
    ```
 
+   On a 64-bit ARM Ubuntu server, use the ARM64 wrapper so Compose pulls ARM64
+   images and the Go service images build Linux ARM64 binaries:
+   ```bash
+   make up-prod-host-arm64
+   ```
+
+   To validate the ARM64 Compose configuration without starting containers:
+   ```bash
+   make prod-host-config-arm64
+   ```
+
 ## 6. Bootstrap Administrator
 
 Once the platform is running, create your first organizer account:

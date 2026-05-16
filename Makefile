@@ -1,10 +1,17 @@
 SHELL := /bin/bash
 GOCACHE := $(CURDIR)/.cache/go-build
+GOMODCACHE := $(CURDIR)/.cache/go-mod
 .DEFAULT_GOAL := help
 
 PROD_ENV ?= deploy/compose/prod.env
 PROD_HOST_OVERRIDE ?= deploy/compose/prod.host-enforcement.yml
 COMPOSE_PARALLEL_LIMIT ?= 1
+LINUX_ARM64_TARGETOS ?= linux
+LINUX_ARM64_TARGETARCH ?= arm64
+LINUX_ARM64_PLATFORM ?= linux/arm64
+
+export GOCACHE
+export GOMODCACHE
 
 include make/dev.mk
 include make/smoke.mk
@@ -29,6 +36,7 @@ help:
 	  '' \
 	  'Prod host:' \
 	  '  make preflight-prod-host | prod-config | prod-host-config | up-prod-host | down-prod-host | logs-prod-host' \
+	  '  make prod-host-config-arm64 | up-prod-host-arm64 | build-linux-arm64' \
 	  '  make go-live-check | validate-prod-release-candidate' \
 	  '' \
 	  'Release artifacts:' \

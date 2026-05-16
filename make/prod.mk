@@ -1,7 +1,8 @@
 .PHONY: firewall-cleanup compose-config prod-config prod-host-config preflight-prod-host \
 	wg-host-keygen wg-host-render wg-host-install wg-host-up wg-host-down \
 	wg-host-show wg-host-setup up-prod up-prod-host down-prod down-prod-host \
-	logs-prod logs-prod-host
+	logs-prod logs-prod-host prod-config-arm64 prod-host-config-arm64 \
+	up-prod-arm64 up-prod-host-arm64
 
 firewall-cleanup:
 	@echo "cleaning up all platform firewall rules..."
@@ -20,6 +21,14 @@ prod-config:
 prod-host-config:
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
 	docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) config >/dev/null
+
+prod-config-arm64:
+	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
+	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml config >/dev/null
+
+prod-host-config-arm64:
+	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
+	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) config >/dev/null
 
 preflight-prod-host:
 	./scripts/preflight-prod-host.sh
@@ -52,6 +61,14 @@ up-prod: prod-web-artifacts
 up-prod-host: prod-web-artifacts preflight-prod-host
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
 	COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) up -d --build
+
+up-prod-arm64: prod-web-artifacts
+	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
+	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml up -d --build
+
+up-prod-host-arm64: prod-web-artifacts preflight-prod-host
+	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
+	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) up -d --build
 
 down-prod:
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }

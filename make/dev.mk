@@ -1,4 +1,4 @@
-.PHONY: fmt test build ci e2e premerge release-notes audit-checker-contracts import-local-challenges \
+.PHONY: fmt test build build-linux-arm64 ci e2e premerge release-notes audit-checker-contracts import-local-challenges \
 	run-api-gateway run-api-gateway-postgres run-game-core run-submission-service \
 	run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway \
 	run-wireguard-gateway run-backend-stack run-backend-stack-postgres \
@@ -18,6 +18,17 @@ test:
 build:
 	@mkdir -p $(GOCACHE)
 	GOCACHE=$(GOCACHE) go build ./services/...
+
+build-linux-arm64:
+	@mkdir -p $(GOCACHE) bin/linux-arm64
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/api-gateway ./services/api-gateway
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/game-core ./services/game-core
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/submission-service ./services/submission-service
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/checker-runner ./services/checker-runner
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/controller-service ./services/controller-service
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/scoring-worker ./services/scoring-worker
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/realtime-gateway ./services/realtime-gateway
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=$(LINUX_ARM64_TARGETOS) GOARCH=$(LINUX_ARM64_TARGETARCH) go build -o bin/linux-arm64/wireguard-gateway ./services/wireguard-gateway
 
 ci:
 	@mkdir -p $(GOCACHE)

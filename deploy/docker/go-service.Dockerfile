@@ -3,6 +3,8 @@ ARG GO_VERSION=1.26
 FROM golang:${GO_VERSION}-alpine AS builder
 
 ARG SERVICE_PATH
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 WORKDIR /src
 
@@ -13,7 +15,7 @@ COPY internal ./internal
 COPY services ./services
 
 RUN test -n "${SERVICE_PATH}"
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/service "./services/${SERVICE_PATH}"
+RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -o /out/service "./services/${SERVICE_PATH}"
 
 FROM alpine:3.22
 
