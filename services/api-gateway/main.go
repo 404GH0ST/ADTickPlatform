@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"strings"
 	"time"
 
 	"adplatform/internal/platform/config"
@@ -26,10 +25,10 @@ func main() {
 	}
 	defer store.Close()
 
-	teamJWTSecret := requiredSecret("TEAM_JWT_SECRET")
-	adminAPIToken := requiredSecret("ADMIN_API_TOKEN")
-	unlockProofSecret := requiredSecret("UNLOCK_PROOF_SECRET")
-	sshCredentialSecret := requiredSecret("SSH_CREDENTIAL_SECRET")
+	teamJWTSecret := config.RequiredSecret("TEAM_JWT_SECRET")
+	adminAPIToken := config.RequiredSecret("ADMIN_API_TOKEN")
+	unlockProofSecret := config.RequiredSecret("UNLOCK_PROOF_SECRET")
+	sshCredentialSecret := config.RequiredSecret("SSH_CREDENTIAL_SECRET")
 
 	server := apigateway.NewWithDeps(
 		teamJWTSecret,
@@ -38,28 +37,28 @@ func main() {
 		store,
 		apigateway.NewHTTPControllerClient(
 			config.String("CONTROLLER_INTERNAL_URL", ""),
-			config.String("CONTROLLER_INTERNAL_TOKEN", adminAPIToken),
+			config.Secret("CONTROLLER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 		apigateway.NewHTTPWireGuardClient(
 			config.String("WIREGUARD_GATEWAY_INTERNAL_URL", ""),
-			config.String("WIREGUARD_GATEWAY_INTERNAL_TOKEN", adminAPIToken),
+			config.Secret("WIREGUARD_GATEWAY_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 		apigateway.NewHTTPGameCoreClientWithTimeout(
 			config.String("GAME_CORE_INTERNAL_URL", ""),
-			config.String("GAME_CORE_INTERNAL_TOKEN", adminAPIToken),
+			config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 			config.Duration("GAME_CORE_CLIENT_TIMEOUT", 3*time.Minute),
 		),
 	)
 	server.WithSubmissionClient(
 		apigateway.NewHTTPSubmissionClient(
 			config.String("SUBMISSION_SERVICE_INTERNAL_URL", ""),
-			config.String("SUBMISSION_SERVICE_INTERNAL_TOKEN", adminAPIToken),
+			config.Secret("SUBMISSION_SERVICE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 	)
 	server.WithScoringClient(
 		apigateway.NewHTTPScoringClient(
 			config.String("SCORING_WORKER_INTERNAL_URL", ""),
-			config.String("SCORING_WORKER_INTERNAL_TOKEN", adminAPIToken),
+			config.Secret("SCORING_WORKER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 	)
 	server.WithUnlockProofSecret(unlockProofSecret)
@@ -99,16 +98,4 @@ func buildStore(ctx context.Context) (apigateway.Store, error) {
 		}
 	}
 	return apigateway.NewPostgresStore(db), nil
-}
-
-func requiredSecret(key string) string {
-	value := strings.TrimSpace(config.String(key, ""))
-	if value == "" {
-		log.Fatalf("%s must be set", key)
-	}
-	switch value {
-	case "dev-team-token", "dev-admin-token", "change-this-admin-token", "change-this-team-jwt-secret", "change-this-unlock-proof-secret", "change-this-stable-ssh-credential-secret":
-		log.Fatalf("%s must not use the example or development value", key)
-	}
-	return value
 }

@@ -121,11 +121,8 @@ func newControllerWireGuardReconciler() controllerWireGuardReconciler {
 	}
 	return &httpControllerWireGuardReconciler{
 		baseURL: baseURL,
-		token: strings.TrimSpace(config.String(
-			"WIREGUARD_GATEWAY_INTERNAL_TOKEN",
-			config.String("ADMIN_API_TOKEN", "dev-admin-token"),
-		)),
-		client: &http.Client{Timeout: 15 * time.Second},
+		token:   strings.TrimSpace(config.Secret("WIREGUARD_GATEWAY_INTERNAL_TOKEN", "ADMIN_API_TOKEN")),
+		client:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 

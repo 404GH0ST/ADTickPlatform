@@ -18,8 +18,9 @@ import (
 )
 
 type rateLimitPolicy struct {
-	capacity        int
-	refillPerSecond float64
+	capacity          int
+	refillPerSecond   float64
+	failClosedOnError bool
 }
 
 type rateLimitDecision struct {
@@ -298,6 +299,10 @@ func remoteRateLimitKey(r *http.Request) string {
 func (s *Server) allowRateLimit(ctx context.Context, key string, policy rateLimitPolicy) (rateLimitDecision, bool) {
 	decision, err := s.rateLimiter.Allow(ctx, key, policy)
 	if err != nil {
+		if policy.failClosedOnError {
+			log.Printf("rate limiter failed closed for key %q: %v", key, err)
+			return rateLimitDecision{allowed: false, retryAfter: 5 * time.Second}, false
+		}
 		log.Printf("rate limiter failed open for key %q: %v", key, err)
 		return rateLimitDecision{allowed: true}, true
 	}
@@ -335,17 +340,17 @@ func rateLimitAuthKey(email, clientIP string) string {
 
 var (
 	maxSubmitFlagsPerRequest       = 128
-	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0}
+	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
 	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2}
 	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
 	scoreboardRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
 	attacksReadRateLimitPolicy     = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
 	teamServicesRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
 	challengeSourceRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 1}
-	submitRateLimitPolicy          = rateLimitPolicy{capacity: 30, refillPerSecond: 10}
-	unlockRateLimitPolicy          = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0}
-	sshSessionRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
-	factoryResetRateLimitPolicy    = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0}
-	restartRateLimitPolicy         = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0}
+	submitRateLimitPolicy          = rateLimitPolicy{capacity: 30, refillPerSecond: 10, failClosedOnError: true}
+	unlockRateLimitPolicy          = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0, failClosedOnError: true}
+	sshSessionRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
+	factoryResetRateLimitPolicy    = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}
+	restartRateLimitPolicy         = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
 	defaultRateLimit429Message     = "no bruteforce needed, calm down a little bit."
 )

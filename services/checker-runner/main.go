@@ -10,7 +10,7 @@ import (
 
 func main() {
 	info := httpapi.ServiceInfo{Name: "checker-runner", Version: "dev", Addr: config.String("CHECKER_RUNNER_ADDR", ":8083")}
-	server := newCheckerRunnerServer(config.String("ADMIN_API_TOKEN", "dev-admin-token"), newCheckerExecutor())
+	server := newCheckerRunnerServer(config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"), newCheckerExecutor())
 	mux := httpapi.NewBaseMux(info)
 	server.RegisterRoutes(mux)
 

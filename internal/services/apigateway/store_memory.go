@@ -159,15 +159,16 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 	defer s.mu.Unlock()
 
 	normalizedEmail := strings.TrimSpace(strings.ToLower(email))
-	passwordHash := hashSecret(password)
-	legacyPasswordHash := legacyMD5Secret(password)
 
 	for _, record := range s.players {
 		if !strings.EqualFold(record.Player.Email, normalizedEmail) {
 			continue
 		}
-		if record.PasswordHash != passwordHash && record.PasswordHash != legacyPasswordHash {
+		if !passwordMatches(record.PasswordHash, password) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		if passwordHashNeedsUpgrade(record.PasswordHash) {
+			record.PasswordHash = mustHashPassword(password)
 		}
 		return authenticatedPlayer{
 			PlayerID:    record.Player.ID,
@@ -564,7 +565,7 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 		WireGuardRevokedAt: wireGuardState.RevokedAt,
 		CreatedAt:          now.UTC().Format(time.RFC3339),
 	}
-	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: hashSecret(input.Password), WireGuard: wireGuardState}
+	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), WireGuard: wireGuardState}
 	return player, nil
 }
 
@@ -1392,7 +1393,7 @@ func mustNewAdminPlayerRecord(id, teamID int, teamName, displayName, email, role
 			WireGuardRevokedAt: wireGuardState.RevokedAt,
 			CreatedAt:          createdAt.UTC().Format(time.RFC3339),
 		},
-		PasswordHash: hashSecret(password),
+		PasswordHash: mustHashPassword(password),
 		WireGuard:    wireGuardState,
 	}
 }

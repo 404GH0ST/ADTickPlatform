@@ -125,7 +125,11 @@ function trimBaseUrl(value: string) {
 }
 
 const getAdminToken = cache(async () => {
-  return process.env.ADMIN_API_TOKEN?.trim() || "dev-admin-token";
+  const token = process.env.ADMIN_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error("ADMIN_API_TOKEN must be set for server-side admin API calls");
+  }
+  return token;
 });
 
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {

@@ -35,7 +35,7 @@ func main() {
 	defer store.Close()
 
 	server := &controllerServer{
-		adminToken: config.String("ADMIN_API_TOKEN", "dev-admin-token"),
+		adminToken: config.Secret("CONTROLLER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		store:      store,
 		executor:   newRuntimeExecutor(),
 		access:     newServiceAccessExecutor(),
