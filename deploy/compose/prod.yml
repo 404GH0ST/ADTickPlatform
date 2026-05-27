@@ -116,7 +116,6 @@ services:
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
     networks:
       - control
-      - docker-control
 
   submission-service:
     build:
@@ -196,6 +195,7 @@ services:
       - controller-artifacts:/runtime/controller
     networks:
       - control
+      - docker-control
 
   scoring-worker:
     build:
