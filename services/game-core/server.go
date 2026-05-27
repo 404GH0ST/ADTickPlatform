@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"adplatform/internal/platform/httpapi"
@@ -14,16 +16,32 @@ import (
 )
 
 type gameCoreServer struct {
-	adminToken     string
-	store          gameStore
-	checker        checkerClient
-	flags          flagCodec
-	scheduler      gameScheduler
-	checkerPhases  []string
-	checkerTimeout int
-	matchStartAt   *time.Time
-	matchEndAt     *time.Time
-	now            func() time.Time
+	adminToken         string
+	store              gameStore
+	checker            checkerClient
+	flags              flagCodec
+	scheduler          gameScheduler
+	checkerPhases      []string
+	checkerTimeout     int
+	checkerParallelism int
+	scoringDebounce    time.Duration
+	scoringRetryDelay  time.Duration
+	scoringTimeout     time.Duration
+	scoringMu          sync.Mutex
+	scoringTimer       *time.Timer
+	scoringStatus      scoringRecomputeStatus
+	matchStartAt       *time.Time
+	matchEndAt         *time.Time
+	now                func() time.Time
+}
+
+type scoringRecomputeStatus struct {
+	Pending       bool
+	InFlight      bool
+	LastSuccessAt time.Time
+	LastFailureAt time.Time
+	LastError     string
+	FailureCount  uint64
 }
 
 func newGameCoreServer(adminToken string, store gameStore, checker checkerClient, flags flagCodec, scheduler gameScheduler, checkerPhases []string, checkerTimeout int) *gameCoreServer {
@@ -31,15 +49,47 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		scheduler = noopGameScheduler{}
 	}
 	return &gameCoreServer{
-		adminToken:     strings.TrimSpace(adminToken),
-		store:          store,
-		checker:        checker,
-		flags:          flags,
-		scheduler:      scheduler,
-		checkerPhases:  checkerPhases,
-		checkerTimeout: checkerTimeout,
-		now:            time.Now,
+		adminToken:         strings.TrimSpace(adminToken),
+		store:              store,
+		checker:            checker,
+		flags:              flags,
+		scheduler:          scheduler,
+		checkerPhases:      checkerPhases,
+		checkerTimeout:     checkerTimeout,
+		checkerParallelism: 1,
+		scoringDebounce:    time.Second,
+		scoringRetryDelay:  5 * time.Second,
+		scoringTimeout:     30 * time.Second,
+		now:                time.Now,
 	}
+}
+
+func (s *gameCoreServer) WithCheckerParallelism(value int) *gameCoreServer {
+	if value > 0 {
+		s.checkerParallelism = value
+	}
+	return s
+}
+
+func (s *gameCoreServer) WithScoringDebounce(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.scoringDebounce = value
+	}
+	return s
+}
+
+func (s *gameCoreServer) WithScoringRetryDelay(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.scoringRetryDelay = value
+	}
+	return s
+}
+
+func (s *gameCoreServer) WithScoringTimeout(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.scoringTimeout = value
+	}
+	return s
 }
 
 func (s *gameCoreServer) matchStatus(ctx context.Context) (apigateway.GameMatchStatus, error) {
@@ -559,107 +609,19 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		return apigateway.GameTickStatus{}, err
 	}
 
-	for _, target := range targets {
-		flag := s.flags.Issue(target.TeamID, target.ChallengeID, tick.ID, tick.ID)
-		metadata := ""
-		halted := false
-
-		for _, phase := range s.checkerPhases {
-			runTime := s.now().UTC()
-			run := checkerRunRecord{
-				TickID:        tick.ID,
-				TeamID:        target.TeamID,
-				TeamName:      target.TeamName,
-				ChallengeID:   target.ChallengeID,
-				ChallengeName: target.ChallengeName,
-				Phase:         phase,
-				Target:        target.Target,
-				CheckerImage:  target.CheckerImage,
-				CheckedAt:     runTime,
-				ExitCode:      -1,
-			}
-
-			if halted {
-				run.Status = "skipped"
-				run.Message = "phase skipped after previous checker failure"
-			} else {
-				result, execErr := s.checker.Execute(ctx, apigateway.CheckerExecutionRequest{
-					ChallengeID:    target.ChallengeID,
-					TeamID:         target.TeamID,
-					TeamName:       target.TeamName,
-					ChallengeName:  target.ChallengeName,
-					CheckerImage:   target.CheckerImage,
-					Phase:          phase,
-					Target:         target.Target,
-					TargetHost:     target.TargetHost,
-					TargetIP:       target.TargetIP,
-					TargetPort:     target.TargetPort,
-					TickID:         tick.ID,
-					Flag:           flag,
-					Metadata:       metadata,
-					TimeoutSeconds: s.checkerTimeout,
-				})
-				if execErr != nil {
-					run.Status = "failed"
-					run.Message = execErr.Error()
-				} else {
-					run.Status = normalizedCheckerRunStatus(result.Status)
-					run.ExitCode = result.ExitCode
-					run.Message = strings.TrimSpace(result.Message)
-					run.Output = strings.TrimSpace(result.Output)
-					run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
-					run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
-					if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
-						run.CheckedAt = parsed.UTC()
-					}
-				}
-
-				if run.Status == "success" && run.Output != "" {
-					metadata = run.Output
-				}
-				if run.Status == "failed" {
-					halted = true
-				}
-			}
-
-			if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
-				tick.Status = "failed"
-				tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
-				tick.Message = fmt.Sprintf("checker run persistence failed: %v", err)
-				_, _ = s.store.CompleteTick(ctx, tick)
-				return apigateway.GameTickStatus{}, err
-			}
-
-			if phase == "put" && run.Status == "success" {
-				flag := issuedFlagRecord{
-					Flag:          flag,
-					OwnerTeamID:   target.TeamID,
-					OwnerTeamName: target.TeamName,
-					ChallengeID:   target.ChallengeID,
-					ChallengeName: target.ChallengeName,
-					IssuedTick:    tick.ID,
-					ExpiresTick:   tick.ID,
-					CreatedAt:     run.CheckedAt,
-				}
-				if err := s.store.IssueFlag(ctx, flag); err != nil {
-					tick.Status = "failed"
-					tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
-					tick.Message = fmt.Sprintf("flag issuance persistence failed: %v", err)
-					_, _ = s.store.CompleteTick(ctx, tick)
-					return apigateway.GameTickStatus{}, err
-				}
-			}
-
-			tick.TotalCheckerRuns++
-			switch run.Status {
-			case "success":
-				tick.SuccessfulCheckerRuns++
-			case "skipped":
-				tick.SkippedCheckerRuns++
-			default:
-				tick.FailedCheckerRuns++
-			}
-		}
+	results, err := s.runCheckerTargets(ctx, tick.ID, targets)
+	if err != nil {
+		tick.Status = "failed"
+		tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
+		tick.Message = err.Error()
+		_, _ = s.store.CompleteTick(ctx, tick)
+		return apigateway.GameTickStatus{}, err
+	}
+	for _, result := range results {
+		tick.TotalCheckerRuns += result.total
+		tick.SuccessfulCheckerRuns += result.success
+		tick.SkippedCheckerRuns += result.skipped
+		tick.FailedCheckerRuns += result.failed
 	}
 
 	tick.Status = "completed"
@@ -669,7 +631,173 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		len(targets),
 		len(s.checkerPhases),
 	)
-	return s.store.CompleteTick(ctx, tick)
+	completed, err := s.store.CompleteTick(ctx, tick)
+	if err != nil {
+		return apigateway.GameTickStatus{}, err
+	}
+	if _, err := s.store.RecomputeScoreboard(ctx); err != nil {
+		return apigateway.GameTickStatus{}, err
+	}
+	return completed, nil
+}
+
+type checkerTargetTickResult struct {
+	total   int
+	success int
+	skipped int
+	failed  int
+}
+
+func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targets []checkerTarget) ([]checkerTargetTickResult, error) {
+	parallelism := s.checkerParallelism
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > len(targets) && len(targets) > 0 {
+		parallelism = len(targets)
+	}
+
+	results := make([]checkerTargetTickResult, len(targets))
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	jobs := make(chan int)
+	var firstErr error
+	var errMu sync.Mutex
+
+	for range parallelism {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				if workerCtx.Err() != nil {
+					continue
+				}
+				result, err := s.runCheckerTarget(workerCtx, tickID, targets[index])
+				results[index] = result
+				if err != nil {
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+						cancel()
+					}
+					errMu.Unlock()
+				}
+			}
+		}()
+	}
+
+	for index := range targets {
+		if workerCtx.Err() != nil {
+			break
+		}
+		jobs <- index
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
+}
+
+func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
+	var counts checkerTargetTickResult
+	flagValue := s.flags.Issue(target.TeamID, target.ChallengeID, tickID, tickID)
+	metadata := ""
+	halted := false
+
+	for _, phase := range s.checkerPhases {
+		runTime := s.now().UTC()
+		run := checkerRunRecord{
+			TickID:        tickID,
+			TeamID:        target.TeamID,
+			TeamName:      target.TeamName,
+			ChallengeID:   target.ChallengeID,
+			ChallengeName: target.ChallengeName,
+			Phase:         phase,
+			Target:        target.Target,
+			CheckerImage:  target.CheckerImage,
+			CheckedAt:     runTime,
+			ExitCode:      -1,
+		}
+
+		if halted {
+			run.Status = "skipped"
+			run.Message = "phase skipped after previous checker failure"
+		} else {
+			result, execErr := s.checker.Execute(ctx, apigateway.CheckerExecutionRequest{
+				ChallengeID:    target.ChallengeID,
+				TeamID:         target.TeamID,
+				TeamName:       target.TeamName,
+				ChallengeName:  target.ChallengeName,
+				CheckerImage:   target.CheckerImage,
+				Phase:          phase,
+				Target:         target.Target,
+				TargetHost:     target.TargetHost,
+				TargetIP:       target.TargetIP,
+				TargetPort:     target.TargetPort,
+				TickID:         tickID,
+				Flag:           flagValue,
+				Metadata:       metadata,
+				TimeoutSeconds: s.checkerTimeout,
+			})
+			if execErr != nil {
+				run.Status = "failed"
+				run.Message = execErr.Error()
+			} else {
+				run.Status = normalizedCheckerRunStatus(result.Status)
+				run.ExitCode = result.ExitCode
+				run.Message = strings.TrimSpace(result.Message)
+				run.Output = strings.TrimSpace(result.Output)
+				run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
+				run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
+				if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
+					run.CheckedAt = parsed.UTC()
+				}
+			}
+
+			if run.Status == "success" && run.Output != "" {
+				metadata = run.Output
+			}
+			if run.Status == "failed" {
+				halted = true
+			}
+		}
+
+		if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
+			return counts, fmt.Errorf("checker run persistence failed: %w", err)
+		}
+
+		if phase == "put" && run.Status == "success" {
+			flag := issuedFlagRecord{
+				Flag:          flagValue,
+				OwnerTeamID:   target.TeamID,
+				OwnerTeamName: target.TeamName,
+				ChallengeID:   target.ChallengeID,
+				ChallengeName: target.ChallengeName,
+				IssuedTick:    tickID,
+				ExpiresTick:   tickID,
+				CreatedAt:     run.CheckedAt,
+			}
+			if err := s.store.IssueFlag(ctx, flag); err != nil {
+				return counts, fmt.Errorf("flag issuance persistence failed: %w", err)
+			}
+		}
+
+		counts.total++
+		switch run.Status {
+		case "success":
+			counts.success++
+		case "skipped":
+			counts.skipped++
+		default:
+			counts.failed++
+		}
+	}
+	return counts, nil
 }
 
 func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []string) ([]submissionVerdictAlias, error) {
@@ -701,6 +829,7 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 
 	results := make([]submissionVerdictAlias, 0, len(flags))
 	seen := make(map[string]struct{}, len(flags))
+	acceptedAny := false
 	for _, flagValue := range flags {
 		trimmed := strings.TrimSpace(flagValue)
 		if trimmed == "" {
@@ -743,8 +872,86 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 		}
 
 		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct."})
+		acceptedAny = true
+	}
+	if acceptedAny {
+		s.scheduleScoreboardRecompute()
 	}
 	return results, nil
+}
+
+func (s *gameCoreServer) scheduleScoreboardRecompute() {
+	s.scoringMu.Lock()
+	defer s.scoringMu.Unlock()
+
+	s.scoringStatus.Pending = true
+	if s.scoringStatus.InFlight {
+		return
+	}
+	if s.scoringTimer != nil {
+		s.scoringTimer.Stop()
+	}
+	s.scoringTimer = time.AfterFunc(nonNegativeDuration(s.scoringDebounce), s.runScheduledScoreboardRecompute)
+}
+
+func (s *gameCoreServer) runScheduledScoreboardRecompute() {
+	s.scoringMu.Lock()
+	if s.scoringStatus.InFlight {
+		s.scoringStatus.Pending = true
+		s.scoringMu.Unlock()
+		return
+	}
+	s.scoringStatus.Pending = false
+	s.scoringStatus.InFlight = true
+	s.scoringTimer = nil
+	s.scoringMu.Unlock()
+
+	ctx := context.Background()
+	cancel := func() {}
+	if s.scoringTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, s.scoringTimeout)
+	}
+	defer cancel()
+
+	_, err := s.store.RecomputeScoreboard(ctx)
+
+	s.scoringMu.Lock()
+	defer s.scoringMu.Unlock()
+	s.scoringStatus.InFlight = false
+	if err != nil {
+		s.scoringStatus.Pending = true
+		s.scoringStatus.LastFailureAt = s.now().UTC()
+		s.scoringStatus.LastError = err.Error()
+		s.scoringStatus.FailureCount++
+		log.Printf("scoreboard recompute failed after submission: %v", err)
+		if s.scoringTimer != nil {
+			s.scoringTimer.Stop()
+		}
+		s.scoringTimer = time.AfterFunc(nonNegativeDuration(s.scoringRetryDelay), s.runScheduledScoreboardRecompute)
+		return
+	}
+
+	s.scoringStatus.LastSuccessAt = s.now().UTC()
+	s.scoringStatus.LastError = ""
+	if s.scoringStatus.Pending {
+		if s.scoringTimer != nil {
+			s.scoringTimer.Stop()
+		}
+		s.scoringTimer = time.AfterFunc(nonNegativeDuration(s.scoringDebounce), s.runScheduledScoreboardRecompute)
+	}
+}
+
+func (s *gameCoreServer) snapshotScoringStatus() scoringRecomputeStatus {
+	s.scoringMu.Lock()
+	defer s.scoringMu.Unlock()
+	return s.scoringStatus
+}
+
+func nonNegativeDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func normalizedCheckerRunStatus(status string) string {

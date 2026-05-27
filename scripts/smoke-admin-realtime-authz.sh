@@ -15,7 +15,7 @@ require_bin mktemp
 require_bin grep
 
 EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 SECURITY_TEAM_ID="${SECURITY_TEAM_ID:-101}"
 TEMP_STAMP="$(date +%s)"
 PARTICIPANT_EMAIL="security.realtime.${TEMP_STAMP}@teams.local"

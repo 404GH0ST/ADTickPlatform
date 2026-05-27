@@ -21,7 +21,7 @@ func main() {
 	defer store.Close()
 
 	server := newWireGuardGatewayServer(
-		config.String("WIREGUARD_GATEWAY_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("WIREGUARD_GATEWAY_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		store,
 		newWireGuardApplier(),
 	)

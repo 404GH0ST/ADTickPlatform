@@ -32,7 +32,79 @@ type dockerCheckerExecutor struct {
 	binary        string
 	network       string
 	networkLayout string
+	security      checkerDockerSecurity
 	timeout       time.Duration
+}
+
+type checkerDockerSecurity struct {
+	capDrop     []string
+	capAdd      []string
+	securityOpt []string
+	pidsLimit   string
+	memory      string
+	cpus        string
+}
+
+func (s checkerDockerSecurity) dockerArgs() []string {
+	args := make([]string, 0)
+	for _, capability := range s.capDrop {
+		args = append(args, "--cap-drop", capability)
+	}
+	for _, capability := range s.capAdd {
+		args = append(args, "--cap-add", capability)
+	}
+	for _, option := range s.securityOpt {
+		args = append(args, "--security-opt", option)
+	}
+	if s.pidsLimit != "" {
+		args = append(args, "--pids-limit", s.pidsLimit)
+	}
+	if s.memory != "" {
+		args = append(args, "--memory", s.memory)
+	}
+	if s.cpus != "" {
+		args = append(args, "--cpus", s.cpus)
+	}
+	return args
+}
+
+func checkerCSVConfig(key, fallback string) []string {
+	raw := config.String(key, fallback)
+	trimmedRaw := strings.TrimSpace(raw)
+	if configDisabled(trimmedRaw) {
+		return nil
+	}
+	parts := strings.Split(trimmedRaw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
+func checkerStringConfig(key, fallback string) string {
+	value := strings.TrimSpace(config.String(key, fallback))
+	if configDisabled(value) {
+		return ""
+	}
+	return value
+}
+
+func configDisabled(value string) bool {
+	return value == "" || strings.EqualFold(value, "none") || strings.EqualFold(value, "disabled")
+}
+
+func defaultCheckerSecurity() checkerDockerSecurity {
+	return checkerDockerSecurity{
+		capDrop:     []string{"ALL"},
+		securityOpt: []string{"no-new-privileges:true"},
+		pidsLimit:   "128",
+		memory:      "256m",
+		cpus:        "0.5",
+	}
 }
 
 func newCheckerRunnerServer(adminToken string, executor checkerExecutor) *checkerRunnerServer {
@@ -116,7 +188,15 @@ func newCheckerExecutor() checkerExecutor {
 			binary:        strings.TrimSpace(config.String("CHECKER_RUNNER_DOCKER_BIN", "docker")),
 			network:       network,
 			networkLayout: gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
-			timeout:       config.Duration("CHECKER_RUNNER_TIMEOUT", 15*time.Second),
+			security: checkerDockerSecurity{
+				capDrop:     checkerCSVConfig("CHECKER_RUNNER_CAP_DROP", "ALL"),
+				capAdd:      checkerCSVConfig("CHECKER_RUNNER_CAP_ADD", ""),
+				securityOpt: checkerCSVConfig("CHECKER_RUNNER_SECURITY_OPT", "no-new-privileges:true"),
+				pidsLimit:   checkerStringConfig("CHECKER_RUNNER_PIDS_LIMIT", "128"),
+				memory:      checkerStringConfig("CHECKER_RUNNER_MEMORY", "256m"),
+				cpus:        checkerStringConfig("CHECKER_RUNNER_CPUS", "0.5"),
+			},
+			timeout: config.Duration("CHECKER_RUNNER_TIMEOUT", 15*time.Second),
 		}
 	default:
 		return dryRunCheckerExecutor{}
@@ -170,7 +250,7 @@ func (e *dockerCheckerExecutor) ValidateChecker(ctx context.Context, request api
 		return result, nil
 	}
 
-	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(request)...)
+	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(e.security, request)...)
 	trimmedOutput, serviceStateContractOK := parseCheckerValidationOutput(output)
 	if err != nil {
 		result.Status = "invalid"
@@ -204,7 +284,7 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	if err != nil {
 		return apigateway.CheckerExecutionResult{}, err
 	}
-	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, request)...)
+	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, e.security, request)...)
 	trimmedOutput, serviceState, stateMessage := parseCheckerServiceStateOutput(output)
 	result := apigateway.CheckerExecutionResult{
 		ChallengeID:  request.ChallengeID,
@@ -241,23 +321,28 @@ func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) 
 	return output, exitCode, fmt.Errorf("%s %s failed: %w", e.binary, strings.Join(args, " "), err)
 }
 
-func buildDockerCheckerValidationArgs(request apigateway.CheckerValidationRequest) []string {
-	return []string{
+func buildDockerCheckerValidationArgs(security checkerDockerSecurity, request apigateway.CheckerValidationRequest) []string {
+	args := []string{
 		"run",
 		"--rm",
+	}
+	args = append(args, security.dockerArgs()...)
+	args = append(args,
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,
 		"-lc",
 		checkerEntrypointValidationScript(),
-	}
+	)
+	return args
 }
 
-func buildDockerCheckerExecuteArgs(network string, request apigateway.CheckerExecutionRequest) []string {
+func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurity, request apigateway.CheckerExecutionRequest) []string {
 	args := []string{
 		"run",
 		"--rm",
 	}
+	args = append(args, security.dockerArgs()...)
 	if strings.TrimSpace(network) != "" {
 		args = append(args, "--network", network)
 	}

@@ -13,7 +13,7 @@ require_bin curl
 require_bin jq
 
 EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 SECURITY_TEAM_ID="${SECURITY_TEAM_ID:-101}"
 TEMP_STAMP="$(date +%s)"
 TEMP_EMAIL="security.rate.${TEMP_STAMP}@teams.local"
@@ -22,11 +22,6 @@ INVALID_EMAIL="security.rate.invalid.${TEMP_STAMP}@teams.local"
 TEMP_PLAYER_ID=""
 RATE_LIMIT_DRAFT_CHALLENGE_ID=""
 RATE_LIMIT_DRAFT_CHALLENGE_NAME="security-rate-draft-${TEMP_STAMP}"
-
-if [[ -z "${ADMIN_TOKEN}" ]]; then
-  echo "ADMIN_API_TOKEN must be set in ${PROD_ENV}." >&2
-  exit 1
-fi
 
 wait_for_http "${EDGE_BASE_URL}/healthz" 60 "edge healthz"
 

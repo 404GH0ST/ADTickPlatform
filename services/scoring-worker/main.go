@@ -13,10 +13,10 @@ func main() {
 	info := httpapi.ServiceInfo{Name: "scoring-worker", Version: "dev", Addr: config.String("SCORING_WORKER_ADDR", ":8085")}
 
 	server := newScoringWorkerServer(
-		config.String("SCORING_WORKER_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("SCORING_WORKER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		newGameCoreScoringClient(
 			config.String("GAME_CORE_INTERNAL_URL", ""),
-			config.String("GAME_CORE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+			config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 	)
 	httpapi.RegisterMetricsSource(info.Name, server)

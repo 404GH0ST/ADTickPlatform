@@ -14,13 +14,8 @@ PROD_HOST_OVERRIDE="${PROD_HOST_OVERRIDE:-deploy/compose/prod.host-enforcement.y
 load_env_file "${PROD_ENV}"
 
 EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-ad-platform-prod}"
-
-if [[ -z "${ADMIN_TOKEN}" ]]; then
-  echo "ADMIN_API_TOKEN must be set in ${PROD_ENV} for host recovery smoke." >&2
-  exit 1
-fi
 
 admin_get() {
   local path="$1"

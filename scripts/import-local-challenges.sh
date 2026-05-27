@@ -14,7 +14,7 @@ require_bin jq
 
 API_URL="${AD_PLATFORM_API_URL:-http://localhost:8080}"
 PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 CHALLENGE_REPO_DIR="${CHALLENGE_REPO_DIR:-${ROOT_DIR}/../adplatform-challenges}"
 CHALLENGE_CATALOG_PATH="${CHALLENGE_CATALOG_PATH:-${CHALLENGE_REPO_DIR}/catalog/challenges.json}"
 IMPORT_VALIDATE="${IMPORT_VALIDATE:-false}"

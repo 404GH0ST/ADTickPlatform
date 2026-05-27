@@ -21,7 +21,7 @@ if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
   API_URL="${PUBLIC_URL}"
 fi
 
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
 # User information from environment or positional arguments
 DISPLAY_NAME="${1:-${ADMIN_DISPLAY_NAME:-"System Admin"}}"

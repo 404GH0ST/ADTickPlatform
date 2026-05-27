@@ -13,10 +13,10 @@ func main() {
 	info := httpapi.ServiceInfo{Name: "submission-service", Version: "dev", Addr: config.String("SUBMISSION_SERVICE_ADDR", ":8082")}
 
 	server := newSubmissionServiceServer(
-		config.String("SUBMISSION_SERVICE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("SUBMISSION_SERVICE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		newGameCoreSubmissionClient(
 			config.String("GAME_CORE_INTERNAL_URL", ""),
-			config.String("GAME_CORE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+			config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 	)
 	httpapi.RegisterMetricsSource(info.Name, server)

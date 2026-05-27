@@ -13,7 +13,7 @@ require_bin curl
 require_bin jq
 
 EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 SECURITY_TEAM_ID="${SECURITY_TEAM_ID:-101}"
 TEMP_STAMP="$(date +%s)"
 TEMP_EMAIL="security.probe.${TEMP_STAMP}@teams.local"
@@ -26,11 +26,6 @@ TEMP_PLAYER_ID=""
 TEMP_ORGANIZER_ID=""
 DRAFT_CHALLENGE_ID=""
 QUEUED_CHALLENGE_ID=""
-
-if [[ -z "${ADMIN_TOKEN}" ]]; then
-  echo "ADMIN_API_TOKEN must be set in ${PROD_ENV}." >&2
-  exit 1
-fi
 
 cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then

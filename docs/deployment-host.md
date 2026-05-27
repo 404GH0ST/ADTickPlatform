@@ -50,38 +50,33 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
 
 2. **Configure Environment**:
    ```bash
-   cp deploy/compose/prod.env.example deploy/compose/prod.env
+   make generate-prod-env
    nano deploy/compose/prod.env
    ```
-   **Critical values to set**:
+   `make generate-prod-env` writes `deploy/compose/prod.env` with strong random
+   secrets and refuses to overwrite an existing file unless `FORCE=true` is set.
+   **Critical values to review**:
    - `EDGE_SITE_ADDRESS`: Your public domain or IP (e.g., `http://1.2.3.4`).
-   - `ADMIN_API_TOKEN`: A long, random string.
-   - `TEAM_JWT_SECRET`: A long, random string used to sign participant bearer tokens.
-   - `UNLOCK_PROOF_SECRET`: A separate long, random string for unlock proof verification.
-   - `SSH_CREDENTIAL_SECRET`: A separate long, random string for stable per-team SSH credentials.
-   - `WIREGUARD_SERVER_ENDPOINT`: Your public IP (e.g., `1.2.3.4`).
-   - `WIREGUARD_SERVER_PRIVATE_KEY`: Generate this in the next step.
+   - `WIREGUARD_SERVER_ENDPOINT`: Your public VPN endpoint with port (e.g., `1.2.3.4:51820`).
    - `AD_PLATFORM_EMAIL` / `AD_PLATFORM_PASSWORD`: Set these to a real participant account if you want to use the host smoke scripts. The example alpha credentials only work on seeded/demo data.
    - `AD_PLATFORM_TEAM_ID`: Leave this empty unless you need an explicit consistency check. The smoke scripts derive the team from the authenticated participant account.
 
-3. **Generate Keys**:
+3. **Install WireGuard Host Interface**:
    ```bash
-   make wg-host-keygen
+   sudo make wg-host-setup
    ```
-   Copy the output keys into your `prod.env`.
+   This installs `/etc/wireguard/wg0.conf` from `deploy/compose/prod.env` and
+   brings the interface up. Run `make wg-host-keygen` only when you want to
+   manually rotate or inspect a WireGuard keypair, then copy the new values into
+   `prod.env`.
 
 ## 4. Host Interface Setup
 
 The platform expects a WireGuard interface named `wg0` to exist on the host.
 
 ```bash
-# This installs /etc/wireguard/wg0.conf and brings the interface up
-sudo make wg-host-setup
-```
-
-Verify the interface is active:
-```bash
-sudo wg show
+# Verify the interface is active
+sudo make wg-host-show
 ```
 
 ## 5. Deployment

@@ -18,6 +18,8 @@ Current runtime assumptions:
 - one persistent Docker volume per `team x challenge`
 - same IP is used for both the vulnerable service and SSH access
 - the container is attached to the game Docker network with a static IP
+- default service container limits: `512m` memory, `1.0` CPU, `256` pids
+- default checker container limits: `256m` memory, `0.5` CPU, `128` pids
 
 ### Required Capabilities
 
@@ -234,6 +236,18 @@ For organizers:
 2. choose a unique `service_subnet_octet` per challenge
 3. choose the actual service port the checker should attack
 4. keep the service-address range aligned with the `10.80.x.y` addressing scheme
+5. tune Docker limits and capabilities for unusually heavy services or checkers
+
+Relevant production knobs:
+
+- `GAME_CORE_CHECKER_PARALLELISM`: maximum checker targets processed concurrently per tick.
+- `GAME_CORE_SCORING_DEBOUNCE`: delay used to batch scoreboard recomputes after accepted submissions.
+- `GAME_CORE_SCORING_RETRY_DELAY`: retry delay after a failed asynchronous scoreboard recompute.
+- `CONTROLLER_SERVICE_MEMORY`, `CONTROLLER_SERVICE_CPUS`, `CONTROLLER_SERVICE_PIDS_LIMIT`: service container resource limits.
+- `CONTROLLER_SERVICE_CAP_DROP`, `CONTROLLER_SERVICE_CAP_ADD`, `CONTROLLER_SERVICE_SECURITY_OPT`: service container capability and security profile. The default keeps SSH-compatible capabilities after dropping all others.
+- `CHECKER_RUNNER_MEMORY`, `CHECKER_RUNNER_CPUS`, `CHECKER_RUNNER_PIDS_LIMIT`: checker container resource limits.
+- `CHECKER_RUNNER_CAP_DROP`, `CHECKER_RUNNER_CAP_ADD`, `CHECKER_RUNNER_SECURITY_OPT`: checker container capability and security profile.
+  Set Docker limit, capability, or security options to `none` or `disabled` to omit the Docker option entirely.
 
 For an end-to-end Docker-mode reference run:
 

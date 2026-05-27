@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -306,7 +308,7 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 	}
 	s.accepted[key] = submission
 	s.attackFeed = append([]apigateway.AttackEventAlias{{
-		ID:        fmt.Sprintf("atk-submit-%d", submission.SubmittedAt.UTC().UnixNano()),
+		ID:        acceptedFlagAttackEventID(submission),
 		Attacker:  submission.AttackerName,
 		Victim:    submission.VictimName,
 		Service:   submission.ChallengeName,
@@ -314,17 +316,26 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 		Verdict:   "first valid submission accepted",
 		CreatedAt: submission.SubmittedAt.UTC(),
 	}}, s.attackFeed...)
+	s.recomputeScoreboardLocked()
 	return true, nil
 }
 
 func (s *memoryGameStore) ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
-	return s.RecomputeScoreboard(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]apigateway.ScoreRowAlias(nil), s.scoreboard...), nil
 }
 
 func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.ScoreRowAlias, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	rows := s.recomputeScoreboardLocked()
+	return append([]apigateway.ScoreRowAlias(nil), rows...), nil
+}
+
+func (s *memoryGameStore) recomputeScoreboardLocked() []apigateway.ScoreRowAlias {
 	previousRanks := make(map[string]int, len(s.scoreboard))
 	for _, row := range s.scoreboard {
 		previousRanks[row.Team] = row.Rank
@@ -433,7 +444,7 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 	}
 
 	s.scoreboard = append([]apigateway.ScoreRowAlias(nil), rows...)
-	return append([]apigateway.ScoreRowAlias(nil), rows...), nil
+	return rows
 }
 
 func (s *memoryGameStore) AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error) {
@@ -891,7 +902,7 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO attack_events (id, attacker, victim, service, tick, verdict, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, fmt.Sprintf("atk-submit-%d", submission.SubmittedAt.UTC().UnixNano()), submission.AttackerName, submission.VictimName, submission.ChallengeName, submission.SubmissionTick, "first valid submission accepted", submission.SubmittedAt.UTC()); err != nil {
+	`, acceptedFlagAttackEventID(submission), submission.AttackerName, submission.VictimName, submission.ChallengeName, submission.SubmissionTick, "first valid submission accepted", submission.SubmittedAt.UTC()); err != nil {
 		return false, err
 	}
 
@@ -1523,7 +1534,7 @@ func buildSchedulerEventFilterQuery(query apigateway.GameSchedulerEventQuery) (s
 }
 
 func (s *postgresGameStore) ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
-	return s.RecomputeScoreboard(ctx)
+	return s.listStoredScoreboard(ctx)
 }
 
 func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
@@ -2114,6 +2125,11 @@ func (s *postgresGameStore) sumFloatByTeamAndChallenge(ctx context.Context, quer
 
 func acceptedSubmissionKey(flag string, teamID int) string {
 	return fmt.Sprintf("%s:%d", flag, teamID)
+}
+
+func acceptedFlagAttackEventID(submission acceptedFlagSubmission) string {
+	sum := sha256.Sum256([]byte(acceptedSubmissionKey(submission.Flag, submission.SubmittingTeam)))
+	return fmt.Sprintf("atk-submit-%d-%d-%s", submission.SubmissionTick, submission.SubmittingTeam, hex.EncodeToString(sum[:8]))
 }
 
 func sortAcceptedSubmissions(submissions []acceptedFlagSubmission) {

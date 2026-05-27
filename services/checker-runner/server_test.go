@@ -56,7 +56,7 @@ func TestCheckerRunnerRoutesRequireAdminAuth(t *testing.T) {
 }
 
 func TestBuildDockerCheckerValidationArgs(t *testing.T) {
-	args := buildDockerCheckerValidationArgs(apigateway.CheckerValidationRequest{
+	args := buildDockerCheckerValidationArgs(defaultCheckerSecurity(), apigateway.CheckerValidationRequest{
 		ChallengeID:  7,
 		Name:         "proxy",
 		CheckerImage: "registry.local/proxy-checker:latest",
@@ -78,10 +78,11 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected validation script, got %q", args[len(args)-1])
 	}
+	assertArgPrefix(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
-	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", apigateway.CheckerExecutionRequest{
+	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", defaultCheckerSecurity(), apigateway.CheckerExecutionRequest{
 		ChallengeID:   7,
 		TeamID:        101,
 		TeamName:      "Team Alpha",
@@ -165,7 +166,7 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 		t.Fatalf("read docker log: %v", err)
 	}
 	logOutput := string(logBytes)
-	if !strings.Contains(logOutput, "run --rm --entrypoint /bin/sh registry.local/proxy-checker:latest -lc") {
+	if !strings.Contains(logOutput, "--entrypoint /bin/sh registry.local/proxy-checker:latest -lc") {
 		t.Fatalf("unexpected docker log %q", logOutput)
 	}
 	if !strings.Contains(logOutput, "checker entrypoint does not support validate or --help") {
@@ -345,4 +346,16 @@ func contains(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func assertArgPrefix(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(expected) > len(args) {
+		t.Fatalf("expected prefix %v in args %v", expected, args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("expected args prefix %v, got %v", expected, args[:len(expected)])
+		}
+	}
 }

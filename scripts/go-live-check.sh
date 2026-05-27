@@ -28,6 +28,7 @@ realtime_health_file="${artifact_dir}/realtime-health.json"
 
 load_env_file "${prod_env}"
 edge_base_url="${GO_LIVE_CHECK_BASE_URL:-$(derive_edge_base_url)}"
+admin_token="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
 mkdir -p "${artifact_dir}"
 
@@ -49,7 +50,7 @@ REALTIME_HEALTH_ARTIFACT_FILE="${realtime_health_file}" "${ROOT_DIR}/scripts/smo
 BASELINE_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-prod-host-baseline.sh"
 GO_LIVE_METRICS_OUTPUT_DIR="${artifact_dir}" "${ROOT_DIR}/scripts/capture-go-live-metrics.sh"
 
-curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+curl -fsS -H "Authorization: Bearer ${admin_token}" \
   "${edge_base_url}/api/v2/admin/operations/status" > "${operations_status_file}"
 if ! jq -e '.healthy == true and ((.alerts | length) == 0)' "${operations_status_file}" >/dev/null; then
   echo "go-live check finished with active runtime alerts" >&2
@@ -57,7 +58,7 @@ if ! jq -e '.healthy == true and ((.alerts | length) == 0)' "${operations_status
   exit 1
 fi
 
-curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+curl -fsS -H "Authorization: Bearer ${admin_token}" \
   "${edge_base_url}/api/v2/admin/game/scoring/audit" > "${scoring_audit_file}"
 if ! jq -e '.status == "ok" and .mismatch_count == 0' "${scoring_audit_file}" >/dev/null; then
   echo "go-live check finished with scoring replay mismatches" >&2

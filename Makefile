@@ -35,7 +35,7 @@ help:
 	  '  make smoke-public-surface-audit | smoke-admin-realtime-authz | smoke-realtime-health | smoke-admin-runtime' \
 	  '' \
 	  'Prod host:' \
-	  '  make preflight-prod-host | prod-config | prod-host-config | up-prod-host | down-prod-host | logs-prod-host' \
+	  '  make generate-prod-env | preflight-prod-host | prod-config | prod-host-config | up-prod-host | down-prod-host | logs-prod-host' \
 	  '  make prod-host-config-arm64 | up-prod-host-arm64 | build-linux-arm64' \
 	  '  make go-live-check | validate-prod-release-candidate' \
 	  '' \

@@ -52,6 +52,11 @@ func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuar
 		return wireGuardPeerState{}, err
 	}
 
+	serverPublicKey, err := wireGuardServerPublicKey()
+	if err != nil {
+		return wireGuardPeerState{}, err
+	}
+
 	state := wireGuardPeerState{
 		PlayerID:         playerID,
 		TeamID:           teamID,
@@ -61,7 +66,7 @@ func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuar
 		Address:          wireGuardPeerAddress(teamID, playerID),
 		Status:           "active",
 		ServerEndpoint:   wireGuardServerEndpoint(),
-		ServerPublicKey:  wireGuardServerPublicKey(),
+		ServerPublicKey:  serverPublicKey,
 		ClientPrivateKey: clientPrivateKey,
 		ClientPublicKey:  clientPublicKey,
 		PresharedKey:     presharedKey,
@@ -73,17 +78,24 @@ func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuar
 	return state, nil
 }
 
-func currentWireGuardServerProfile() wireGuardServerProfile {
+func currentWireGuardServerProfile() (wireGuardServerProfile, error) {
+	serverPublicKey, err := wireGuardServerPublicKey()
+	if err != nil {
+		return wireGuardServerProfile{}, err
+	}
 	return wireGuardServerProfile{
 		Endpoint:   wireGuardServerEndpoint(),
-		PublicKey:  wireGuardServerPublicKey(),
+		PublicKey:  serverPublicKey,
 		AllowedIPs: wireGuardAllowedIPs(),
 		DNS:        wireGuardDNS(),
-	}
+	}, nil
 }
 
-func refreshWireGuardPeerState(state wireGuardPeerState) (wireGuardPeerState, bool) {
-	profile := currentWireGuardServerProfile()
+func refreshWireGuardPeerState(state wireGuardPeerState) (wireGuardPeerState, bool, error) {
+	profile, err := currentWireGuardServerProfile()
+	if err != nil {
+		return wireGuardPeerState{}, false, err
+	}
 	updated := state
 	changed := false
 
@@ -109,7 +121,7 @@ func refreshWireGuardPeerState(state wireGuardPeerState) (wireGuardPeerState, bo
 		updated.Config = renderedConfig
 		changed = true
 	}
-	return updated, changed
+	return updated, changed, nil
 }
 
 func renderWireGuardConfig(state wireGuardPeerState) string {
@@ -139,7 +151,7 @@ func wireGuardPeerAddress(teamID, playerID int) string {
 func wireGuardServerEndpoint() string {
 	explicitEndpoint := strings.TrimSpace(config.String("WIREGUARD_SERVER_ENDPOINT", ""))
 	if explicitEndpoint != "" && !isExampleWireGuardEndpoint(explicitEndpoint) {
-		return explicitEndpoint
+		return normalizeWireGuardEndpoint(explicitEndpoint)
 	}
 
 	if derivedEndpoint := deriveWireGuardServerEndpoint(); derivedEndpoint != "" {
@@ -147,9 +159,41 @@ func wireGuardServerEndpoint() string {
 	}
 
 	if explicitEndpoint != "" {
-		return explicitEndpoint
+		return normalizeWireGuardEndpoint(explicitEndpoint)
 	}
 	return net.JoinHostPort("vpn.adplatform.local", wireGuardListenPort())
+}
+
+func normalizeWireGuardEndpoint(endpoint string) string {
+	trimmed := strings.TrimSpace(endpoint)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmed, "://") {
+		parsed, err := url.Parse(trimmed)
+		if err == nil && parsed.Hostname() != "" {
+			port := parsed.Port()
+			if port == "" {
+				port = wireGuardListenPort()
+			}
+			return net.JoinHostPort(parsed.Hostname(), port)
+		}
+		return trimmed
+	}
+
+	if host, port, err := net.SplitHostPort(trimmed); err == nil && strings.TrimSpace(host) != "" && strings.TrimSpace(port) != "" {
+		return net.JoinHostPort(host, port)
+	}
+
+	if strings.Count(trimmed, ":") == 1 {
+		host, port, found := strings.Cut(trimmed, ":")
+		if found && strings.TrimSpace(host) != "" && strings.TrimSpace(port) != "" {
+			return net.JoinHostPort(strings.TrimSpace(host), strings.TrimSpace(port))
+		}
+	}
+
+	return net.JoinHostPort(trimmed, wireGuardListenPort())
 }
 
 func wireGuardAllowedIPs() string {
@@ -164,17 +208,29 @@ func wireGuardListenPort() string {
 	return strings.TrimSpace(config.String("WIREGUARD_SERVER_LISTEN_PORT", "51820"))
 }
 
-func wireGuardServerPublicKey() string {
+func wireGuardServerPublicKey() (string, error) {
 	if publicKey := strings.TrimSpace(config.String("WIREGUARD_SERVER_PUBLIC_KEY", "")); publicKey != "" {
-		return publicKey
+		return publicKey, nil
 	}
 	if privateKey := strings.TrimSpace(config.String("WIREGUARD_SERVER_PRIVATE_KEY", "")); privateKey != "" {
-		if publicKey, err := x25519PublicKeyFromBase64(privateKey); err == nil {
-			return publicKey
+		publicKey, err := x25519PublicKeyFromBase64(privateKey)
+		if err == nil {
+			return publicKey, nil
 		}
+		return "", fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
+	}
+	if !allowDevWireGuardServerKeyFallback() {
+		return "", fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY or WIREGUARD_SERVER_PUBLIC_KEY must be set outside dry-run memory mode")
 	}
 	_, publicKey := wireGuardDevKeypair()
-	return publicKey
+	return publicKey, nil
+}
+
+func allowDevWireGuardServerKeyFallback() bool {
+	apiBackend := strings.ToLower(strings.TrimSpace(config.String("API_GATEWAY_STATE_BACKEND", "memory")))
+	wgBackend := strings.ToLower(strings.TrimSpace(config.String("WIREGUARD_GATEWAY_STATE_BACKEND", apiBackend)))
+	mode := strings.ToLower(strings.TrimSpace(config.String("WIREGUARD_GATEWAY_MODE", "dry-run")))
+	return apiBackend != "postgres" && wgBackend != "postgres" && mode == "dry-run"
 }
 
 func wireGuardDevKeypair() (string, string) {

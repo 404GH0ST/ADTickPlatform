@@ -19,6 +19,16 @@ type stubCheckerValidationClient struct {
 	called bool
 }
 
+func testServiceSecurity() dockerRunSecurity {
+	return dockerRunSecurity{
+		capDrop:   []string{"ALL"},
+		capAdd:    []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
+		pidsLimit: "256",
+		memory:    "512m",
+		cpus:      "1.0",
+	}
+}
+
 func (c *stubCheckerValidationClient) Validate(_ context.Context, _ apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
 	c.called = true
 	return c.result, c.err
@@ -36,7 +46,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		SSHHost:         "10.80.3.11",
 	}
 
-	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", "dev-unlock-secret", task)
+	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", "dev-unlock-secret", testServiceSecurity(), task)
 
 	if len(args) == 0 || args[0] != "run" {
 		t.Fatalf("expected docker run args, got %v", args)
@@ -62,6 +72,20 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	if args[len(args)-1] != task.BaselineImage {
 		t.Fatalf("expected image %s, got %s", task.BaselineImage, args[len(args)-1])
 	}
+	assertArgSequence(t, args, []string{
+		"run", "-d", "--restart", "unless-stopped",
+		"--cap-drop", "ALL",
+		"--cap-add", "CHOWN",
+		"--cap-add", "DAC_OVERRIDE",
+		"--cap-add", "FOWNER",
+		"--cap-add", "SETGID",
+		"--cap-add", "SETUID",
+		"--cap-add", "NET_BIND_SERVICE",
+		"--pids-limit", "256",
+		"--memory", "512m",
+		"--cpus", "1.0",
+		"--name", task.ContainerName,
+	})
 }
 
 func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
@@ -75,7 +99,7 @@ func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
 		SSHHost:         "10.80.2.12",
 	}
 
-	args := buildDockerRunArgs("", "", "dev-unlock-secret", task)
+	args := buildDockerRunArgs("", "", "dev-unlock-secret", testServiceSecurity(), task)
 
 	if slices.Contains(args, "--network") || slices.Contains(args, "--ip") || slices.Contains(args, "--mount") {
 		t.Fatalf("did not expect network, ip, or mount args, got %v", args)
@@ -121,6 +145,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		networkLayout:     "per-service",
 		stateMountPath:    "/opt/ad/state",
 		unlockProofSecret: "dev-unlock-secret",
+		serviceSecurity:   testServiceSecurity(),
 		timeout:           5 * time.Second,
 	}
 	t.Setenv("DOCKER_LOG", logPath)
@@ -143,7 +168,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"run -d --restart unless-stopped --name svc-storage-team-101 --hostname svc-storage-team-101",
+		"run -d --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3),
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",
@@ -234,6 +259,7 @@ func TestBuildDockerBaselineValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing ssh daemon binary inside image") || !strings.Contains(args[len(args)-1], "missing supported password setter inside image") {
 		t.Fatalf("expected challenge validation script, got %q", args[len(args)-1])
 	}
+	assertArgSequence(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func TestBuildDockerCheckerValidationArgs(t *testing.T) {
@@ -258,6 +284,19 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	}
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected checker validation script, got %q", args[len(args)-1])
+	}
+	assertArgSequence(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
+}
+
+func assertArgSequence(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(expected) > len(args) {
+		t.Fatalf("expected sequence %v in args %v", expected, args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("expected args prefix %v, got %v", expected, args[:len(expected)])
+		}
 	}
 }
 
@@ -310,7 +349,7 @@ func TestDockerEnsureServiceVerifiesSSHContractAfterRun(t *testing.T) {
 		"ps -a --filter name=^/svc-banking-team-101$ --format {{.Names}}",
 		"network inspect adplatform_game_svc_001",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.1.0/24 adplatform_game_svc_001",
-		"run -d --restart unless-stopped --name svc-banking-team-101 --hostname svc-banking-team-101",
+		"--name svc-banking-team-101 --hostname svc-banking-team-101",
 		"exec svc-banking-team-101 /bin/sh -lc",
 	}
 	for _, fragment := range expected {
@@ -411,9 +450,9 @@ func TestDockerValidateChallengeRuntimeRunsEphemeralImageProbe(t *testing.T) {
 	}
 	logOutput := string(logBytes)
 	expected := []string{
-		"run --rm --entrypoint /bin/sh registry.local/proxy:baseline -lc",
+		"--entrypoint /bin/sh registry.local/proxy:baseline -lc",
 		"missing ssh daemon binary inside image",
-		"run --rm --entrypoint /bin/sh registry.local/proxy-checker:latest -lc",
+		"--entrypoint /bin/sh registry.local/proxy-checker:latest -lc",
 		"missing standard checker entrypoint inside image",
 	}
 	for _, fragment := range expected {
@@ -481,7 +520,7 @@ func TestDockerValidateChallengeRuntimeUsesCheckerRunnerClientWhenConfigured(t *
 		t.Fatalf("read docker log: %v", err)
 	}
 	logOutput := string(logBytes)
-	if !strings.Contains(logOutput, "run --rm --entrypoint /bin/sh registry.local/proxy:baseline -lc") {
+	if !strings.Contains(logOutput, "--entrypoint /bin/sh registry.local/proxy:baseline -lc") {
 		t.Fatalf("expected baseline validation docker call, got %q", logOutput)
 	}
 	if strings.Contains(logOutput, "registry.local/proxy-checker:latest") {

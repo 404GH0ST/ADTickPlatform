@@ -10,10 +10,11 @@ Use a static organizer bearer token for now:
 Authorization: Bearer <admin token>
 ```
 
-Default development token:
+Set `ADMIN_API_TOKEN` to a non-empty secret before starting the admin API. The
+production services reject example and development token values.
 
 ```text
-dev-admin-token
+ADMIN_API_TOKEN=<strong random admin token>
 ```
 
 ## Endpoints

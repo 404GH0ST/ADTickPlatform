@@ -50,6 +50,10 @@ require_wg_env() {
     echo "fill ${PROD_ENV} or export them before running this command" >&2
     exit 1
   fi
+  if is_placeholder_secret "${WIREGUARD_PRIVATE_KEY}"; then
+    echo "placeholder WireGuard private key is not allowed in ${PROD_ENV}" >&2
+    exit 1
+  fi
 }
 
 render_config() {

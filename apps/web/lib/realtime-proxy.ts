@@ -14,7 +14,11 @@ function realtimeBaseUrl() {
 }
 
 function adminToken() {
-  return process.env.ADMIN_API_TOKEN?.trim() || 'dev-admin-token';
+  const token = process.env.ADMIN_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error('ADMIN_API_TOKEN must be set for realtime admin proxy calls');
+  }
+  return token;
 }
 
 export async function proxyPublicRealtimeStream(path: string, failureMessage: string) {

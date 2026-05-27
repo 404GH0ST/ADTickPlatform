@@ -22,19 +22,26 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if err := recomputeScoreboardOnStartup(ctx, store); err != nil {
+		log.Fatal(err)
+	}
 
 	server := newGameCoreServer(
-		config.String("GAME_CORE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		store,
 		newCheckerClient(
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
-			config.String("CHECKER_RUNNER_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
-		newFlagCodec(config.String("GAME_CORE_FLAG_SECRET", "dev-flag-secret")),
+		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET")),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
-	)
+	).
+		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 8)).
+		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
+		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second)).
+		WithScoringTimeout(config.Duration("GAME_CORE_SCORING_TIMEOUT", 30*time.Second))
 	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {
@@ -72,6 +79,28 @@ func main() {
 		_ = scheduler.Close()
 		log.Fatal(err)
 	}
+}
+
+func recomputeScoreboardOnStartup(ctx context.Context, store gameStore) error {
+	timeout := config.Duration("GAME_CORE_STARTUP_RECOMPUTE_TIMEOUT", 30*time.Second)
+	return recomputeScoreboardWithTimeout(ctx, timeout, func(recomputeCtx context.Context) error {
+		_, err := store.RecomputeScoreboard(recomputeCtx)
+		return err
+	})
+}
+
+func recomputeScoreboardWithTimeout(ctx context.Context, timeout time.Duration, recompute func(context.Context) error) error {
+	recomputeCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		recomputeCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	if err := recompute(recomputeCtx); err != nil {
+		return fmt.Errorf("initial scoreboard recompute failed: %w", err)
+	}
+	return nil
 }
 
 func optionalRFC3339Env(key string) (*time.Time, error) {

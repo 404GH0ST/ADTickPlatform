@@ -104,9 +104,13 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		player.TeamName = "Organizer"
 	}
 
-	passwordHashMatch := passwordHash == hashSecret(password) || passwordHash == legacyMD5Secret(password)
-	if !passwordHashMatch {
+	if !passwordMatches(passwordHash, password) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if passwordHashNeedsUpgrade(passwordHash) {
+		if upgradedHash, hashErr := hashPassword(password); hashErr == nil {
+			_, _ = s.db.ExecContext(ctx, `UPDATE players SET password_hash = $2 WHERE id = $1`, player.PlayerID, upgradedHash)
+		}
 	}
 	return player, nil
 }
@@ -688,10 +692,14 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	if player.TeamID > 0 {
 		dbTeamID = sql.NullInt64{Int64: int64(player.TeamID), Valid: true}
 	}
+	passwordHash, err := hashPassword(input.Password)
+	if err != nil {
+		return adminPlayer{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, player.ID, dbTeamID, player.DisplayName, player.Email, hashSecret(input.Password), player.Role, player.WireGuardPeer, now.UTC()); err != nil {
+	`, player.ID, dbTeamID, player.DisplayName, player.Email, passwordHash, player.Role, player.WireGuardPeer, now.UTC()); err != nil {
 		return adminPlayer{}, err
 	}
 	wireGuardState, err := newWireGuardPeerState(player.ID, player.TeamID, player.TeamName, player.DisplayName, player.WireGuardPeer, now)
@@ -1875,7 +1883,10 @@ func (s *postgresStore) ensureWireGuardPeer(ctx context.Context, playerID int, n
 		return tx.Commit()
 	}
 
-	refreshedState, changed := refreshWireGuardPeerState(wireGuardState)
+	refreshedState, changed, err := refreshWireGuardPeerState(wireGuardState)
+	if err != nil {
+		return err
+	}
 	if changed {
 		if err := updateWireGuardPeerServerConfigTx(ctx, tx, refreshedState, now); err != nil {
 			return err

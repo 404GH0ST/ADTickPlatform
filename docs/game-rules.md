@@ -17,7 +17,7 @@ This document defines the default game behavior that the architecture is designe
 Suggested defaults:
 
 - tick duration: `120` seconds
-- flag validity window: `3` ticks
+- flag validity window: `1` tick
 - checker timeout per phase: `10` to `20` seconds
 - submission grace period: `0` seconds unless explicitly configured
 
@@ -150,17 +150,15 @@ The payload should be enough to identify the owner and validity period after dec
 
 ## 5.2 Validity
 
-Suggested rule:
+Default rule:
 
-- a flag issued in tick `N` is valid through the end of tick `N + 2`
+- a flag issued in tick `N` is valid only through the end of tick `N`
 
-This gives a `3`-tick validity window:
+This gives a `1`-tick validity window:
 
 - issued at `N`
 - valid in `N`
-- valid in `N + 1`
-- valid in `N + 2`
-- expired starting at `N + 3`
+- expired starting at `N + 1`
 
 ## 5.3 Submission
 

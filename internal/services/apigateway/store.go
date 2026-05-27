@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/md5" // #nosec G501 -- read-only compatibility for legacy stored tokens.
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -146,7 +147,7 @@ func sshConnectionHint(challengeID, teamID int) string {
 func stableRootPassword(secret string, teamID, challengeID int) string {
 	key := []byte(strings.TrimSpace(secret))
 	if len(key) == 0 {
-		key = []byte("dev-team-token")
+		panic("stableRootPassword requires a non-empty secret")
 	}
 	mac := hmac.New(sha256.New, key)
 	fmt.Fprintf(mac, "ssh-root:%d:%d", teamID, challengeID)
@@ -171,6 +172,87 @@ func legacyMD5Secret(value string) string {
 	// #nosec G401,G501 -- read-only compatibility for legacy stored tokens.
 	sum := md5.Sum([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+const (
+	passwordHashScheme     = "pbkdf2-sha256"
+	passwordHashIterations = 210000
+	passwordHashSaltBytes  = 16
+	passwordHashKeyBytes   = 32
+)
+
+func hashPassword(value string) (string, error) {
+	salt := make([]byte, passwordHashSaltBytes)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key, err := pbkdf2.Key(sha256.New, value, salt, passwordHashIterations, passwordHashKeyBytes)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"%s$i=%d$s=%s$h=%s",
+		passwordHashScheme,
+		passwordHashIterations,
+		base64.RawURLEncoding.EncodeToString(salt),
+		base64.RawURLEncoding.EncodeToString(key),
+	), nil
+}
+
+func mustHashPassword(value string) string {
+	hashed, err := hashPassword(value)
+	if err != nil {
+		panic(err)
+	}
+	return hashed
+}
+
+func passwordMatches(storedHash, password string) bool {
+	trimmed := strings.TrimSpace(storedHash)
+	if strings.HasPrefix(trimmed, passwordHashScheme+"$") {
+		return verifyPBKDF2Password(trimmed, password)
+	}
+	return trimmed == hashSecret(password) || trimmed == legacyMD5Secret(password)
+}
+
+func passwordHashNeedsUpgrade(storedHash string) bool {
+	return !strings.HasPrefix(strings.TrimSpace(storedHash), passwordHashScheme+"$")
+}
+
+func verifyPBKDF2Password(storedHash, password string) bool {
+	fields := strings.Split(storedHash, "$")
+	if len(fields) != 4 || fields[0] != passwordHashScheme {
+		return false
+	}
+	iterationsText, ok := strings.CutPrefix(fields[1], "i=")
+	if !ok {
+		return false
+	}
+	iterations, err := strconv.Atoi(iterationsText)
+	if err != nil || iterations <= 0 {
+		return false
+	}
+	saltText, ok := strings.CutPrefix(fields[2], "s=")
+	if !ok {
+		return false
+	}
+	hashText, ok := strings.CutPrefix(fields[3], "h=")
+	if !ok {
+		return false
+	}
+	salt, err := base64.RawURLEncoding.DecodeString(saltText)
+	if err != nil {
+		return false
+	}
+	expected, err := base64.RawURLEncoding.DecodeString(hashText)
+	if err != nil {
+		return false
+	}
+	actual, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(expected))
+	if err != nil {
+		return false
+	}
+	return hmac.Equal(actual, expected)
 }
 
 func wireguardPeerName(teamID, playerID int) string {

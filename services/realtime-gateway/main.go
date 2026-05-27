@@ -16,10 +16,10 @@ func main() {
 	gateway := newRealtimeGateway(
 		newHTTPPublicSnapshotClient(
 			config.String("REALTIME_SOURCE_URL", "http://127.0.0.1:8080"),
-			config.String("REALTIME_SOURCE_ADMIN_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+			config.Secret("REALTIME_SOURCE_ADMIN_TOKEN", "ADMIN_API_TOKEN"),
 		),
 		config.Duration("REALTIME_POLL_INTERVAL", 2*time.Second),
-		config.String("REALTIME_ADMIN_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("REALTIME_ADMIN_TOKEN", "ADMIN_API_TOKEN"),
 	)
 	httpapi.RegisterMetricsSource(info.Name, gateway)
 
