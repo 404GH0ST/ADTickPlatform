@@ -55,6 +55,37 @@ load_default_env_files() {
   fi
 }
 
+is_placeholder_secret() {
+  local value="${1:-}"
+
+  [[ -z "${value}" ]] && return 0
+  [[ "${value}" == "dev-admin-token" ]] && return 0
+  [[ "${value}" == "dev-team-token" ]] && return 0
+  [[ "${value}" == change-this-* ]] && return 0
+  [[ "${value}" == replace-with-* ]] && return 0
+
+  return 1
+}
+
+resolve_admin_api_token() {
+  local runtime_env="${1:-.runtime/backend-stack.env}"
+
+  if is_placeholder_secret "${ADMIN_API_TOKEN:-}" && [[ -f "${runtime_env}" ]]; then
+    load_env_file_override "${runtime_env}"
+  fi
+
+  if is_placeholder_secret "${ADMIN_API_TOKEN:-}"; then
+    cat >&2 <<'EOF'
+ADMIN_API_TOKEN is required and must not be a placeholder.
+Run `make generate-prod-env` for production, or start the local stack with
+`scripts/run-backend-stack.sh` so .runtime/backend-stack.env is generated.
+EOF
+    return 1
+  fi
+
+  printf '%s\n' "${ADMIN_API_TOKEN}"
+}
+
 require_bin() {
   local binary="$1"
   if ! command -v "${binary}" >/dev/null 2>&1; then

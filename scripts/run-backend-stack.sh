@@ -87,6 +87,49 @@ ensure_docker_network() {
   echo "created docker network ${network_name}"
 }
 
+placeholder_secret() {
+  local value="${1:-}"
+
+  [[ -z "${value}" ]] && return 0
+  [[ "${value}" == dev-* ]] && return 0
+  [[ "${value}" == change-this-* ]] && return 0
+  [[ "${value}" == replace-with-* ]] && return 0
+  return 1
+}
+
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+}
+
+ensure_runtime_secret() {
+  local key="$1"
+  local current="${!key:-}"
+
+  if placeholder_secret "${current}"; then
+    export "${key}=local-${key,,}-$(random_secret)"
+  fi
+}
+
+ensure_runtime_secret ADMIN_API_TOKEN
+ensure_runtime_secret TEAM_JWT_SECRET
+ensure_runtime_secret UNLOCK_PROOF_SECRET
+ensure_runtime_secret SSH_CREDENTIAL_SECRET
+ensure_runtime_secret GAME_CORE_FLAG_SECRET
+ensure_runtime_secret CONTROLLER_INTERNAL_TOKEN
+ensure_runtime_secret GAME_CORE_INTERNAL_TOKEN
+ensure_runtime_secret SUBMISSION_SERVICE_INTERNAL_TOKEN
+ensure_runtime_secret SCORING_WORKER_INTERNAL_TOKEN
+ensure_runtime_secret CHECKER_RUNNER_INTERNAL_TOKEN
+ensure_runtime_secret WIREGUARD_GATEWAY_INTERNAL_TOKEN
+ensure_runtime_secret REALTIME_ADMIN_TOKEN
+if placeholder_secret "${REALTIME_SOURCE_ADMIN_TOKEN:-}"; then
+  export REALTIME_SOURCE_ADMIN_TOKEN="${ADMIN_API_TOKEN}"
+fi
+
 if [[ "${MODE}" == "postgres" ]]; then
   export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-$(find_free_port 15432)}"
   export REDIS_HOST_PORT="${REDIS_HOST_PORT:-$(find_free_port 16379)}"
@@ -147,6 +190,19 @@ WIREGUARD_GATEWAY_INTERNAL_URL=${WIREGUARD_GATEWAY_INTERNAL_URL}
 SUBMISSION_SERVICE_INTERNAL_URL=${SUBMISSION_SERVICE_INTERNAL_URL}
 SCORING_WORKER_INTERNAL_URL=${SCORING_WORKER_INTERNAL_URL}
 REALTIME_SOURCE_URL=${REALTIME_SOURCE_URL}
+ADMIN_API_TOKEN=${ADMIN_API_TOKEN}
+TEAM_JWT_SECRET=${TEAM_JWT_SECRET}
+UNLOCK_PROOF_SECRET=${UNLOCK_PROOF_SECRET}
+SSH_CREDENTIAL_SECRET=${SSH_CREDENTIAL_SECRET}
+GAME_CORE_FLAG_SECRET=${GAME_CORE_FLAG_SECRET}
+CONTROLLER_INTERNAL_TOKEN=${CONTROLLER_INTERNAL_TOKEN}
+GAME_CORE_INTERNAL_TOKEN=${GAME_CORE_INTERNAL_TOKEN}
+SUBMISSION_SERVICE_INTERNAL_TOKEN=${SUBMISSION_SERVICE_INTERNAL_TOKEN}
+SCORING_WORKER_INTERNAL_TOKEN=${SCORING_WORKER_INTERNAL_TOKEN}
+CHECKER_RUNNER_INTERNAL_TOKEN=${CHECKER_RUNNER_INTERNAL_TOKEN}
+WIREGUARD_GATEWAY_INTERNAL_TOKEN=${WIREGUARD_GATEWAY_INTERNAL_TOKEN}
+REALTIME_SOURCE_ADMIN_TOKEN=${REALTIME_SOURCE_ADMIN_TOKEN}
+REALTIME_ADMIN_TOKEN=${REALTIME_ADMIN_TOKEN}
 AD_PLATFORM_API_URL=http://127.0.0.1:8080
 AD_PLATFORM_REALTIME_URL=http://127.0.0.1:8086
 AD_PLATFORM_NETWORK_LAYOUT=${AD_PLATFORM_NETWORK_LAYOUT}

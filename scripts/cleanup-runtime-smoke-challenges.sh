@@ -11,7 +11,7 @@ require_bin curl
 require_bin jq
 
 API_URL="${AD_PLATFORM_API_URL:-http://127.0.0.1:8080}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 PREFIX="${RUNTIME_SMOKE_PREFIX:-runtime-smoke-}"
 APPLY=0
 

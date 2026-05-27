@@ -14,7 +14,7 @@ require_bin jq
 
 API_URL="${AD_PLATFORM_API_URL:-http://localhost:8080}"
 PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
 if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
   API_URL="${PUBLIC_URL}"

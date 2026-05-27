@@ -15,6 +15,7 @@ PROD_HOST_OVERRIDE="${PROD_HOST_OVERRIDE:-deploy/compose/prod.host-enforcement.y
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-ad-platform-prod}"
 
 load_env_file "${PROD_ENV}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
 POSTGRES_DB="${POSTGRES_DB:-adplatform}"
 POSTGRES_USER="${POSTGRES_USER:-adplatform}"
@@ -66,7 +67,7 @@ wait_for_admin_json() {
   local i
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+    if curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
       "${EDGE_BASE_URL}${path}" >/dev/null 2>&1; then
       echo "organizer endpoint ready at ${EDGE_BASE_URL}${path}"
       return 0
@@ -81,7 +82,7 @@ wait_for_admin_json() {
 capture_admin_data() {
   local path="$1"
   local destination="$2"
-  curl -fsS -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     "${EDGE_BASE_URL}${path}" > "${destination}"
 }
 

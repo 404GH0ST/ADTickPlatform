@@ -19,7 +19,7 @@ PROD_ENV="${PROD_ENV:-deploy/compose/prod.env}"
 load_env_file "${PROD_ENV}"
 
 EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-}"
+ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 EMAIL="${AD_PLATFORM_EMAIL:-alpha.captain@example.com}"
 PASSWORD="${AD_PLATFORM_PASSWORD:-alpha-secret}"
 TEAM_ID="${AD_PLATFORM_TEAM_ID:-}"
@@ -28,11 +28,6 @@ WIREGUARD_FIREWALL_TABLE="${WIREGUARD_GATEWAY_FIREWALL_TABLE:-adplatform_wiregua
 ACCESS_FIREWALL_TABLE="${CONTROLLER_ACCESS_FIREWALL_TABLE:-adplatform_service_access}"
 ACCESS_FIREWALL_BACKEND="${CONTROLLER_ACCESS_FIREWALL_BACKEND:-iptables}"
 UNLOCK_SECRET="${UNLOCK_PROOF_SECRET:-}"
-
-if [[ -z "${ADMIN_TOKEN}" ]]; then
-  echo "ADMIN_API_TOKEN must be set in ${PROD_ENV} for host enforcement smoke." >&2
-  exit 1
-fi
 
 if [[ -z "${UNLOCK_SECRET}" ]]; then
   echo "UNLOCK_PROOF_SECRET must be set in ${PROD_ENV} for host enforcement smoke." >&2

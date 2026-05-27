@@ -21,7 +21,7 @@ NETWORK_LAYOUT="${AD_PLATFORM_NETWORK_LAYOUT:-per-service}"
 BASELINE_IMAGE="${SAMPLE_CHALLENGE_BASELINE_IMAGE:-adplatform/sample-http:baseline}"
 CHECKER_IMAGE="${SAMPLE_CHALLENGE_CHECKER_IMAGE:-adplatform/sample-http-checker:latest}"
 
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN=""
 API_URL="${AD_PLATFORM_API_URL:-http://127.0.0.1:8080}"
 READY_URL="${ORGANIZER_SMOKE_READY_URL:-${API_URL%/}/readyz}"
 SKIP_STACK_BOOTSTRAP="${ORGANIZER_SMOKE_SKIP_STACK_BOOTSTRAP:-false}"
@@ -161,6 +161,7 @@ fi
 
 echo "resetting platform to an empty organizer-managed state"
 BOOTSTRAP_CLEAR_TEAMS=true ./scripts/bootstrap-clean-match.sh >/dev/null
+ADMIN_TOKEN="$(resolve_admin_api_token "${STACK_ENV_FILE}")"
 
 UNIQUE_SUFFIX="$(date +%s)"
 TEAM_ONE_NAME="College Alpha ${UNIQUE_SUFFIX}"
