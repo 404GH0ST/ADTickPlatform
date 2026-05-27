@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"adplatform/internal/services/apigateway"
 )
@@ -25,6 +27,16 @@ func TestFaustDefensePenalty(t *testing.T) {
 				t.Fatalf("faustDefensePenalty(%d) = %f, want %f", tt.captureCount, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStartupRecomputeHonorsTimeout(t *testing.T) {
+	err := recomputeScoreboardWithTimeout(context.Background(), time.Nanosecond, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected startup recompute timeout, got %v", err)
 	}
 }
 
@@ -150,5 +162,58 @@ func TestMemoryStorePersistsCheckerServiceState(t *testing.T) {
 	}
 	if page.Items[0].ServiceState != "flag_not_found" {
 		t.Fatalf("expected checker run page to expose stored service state, got %+v", page.Items[0])
+	}
+}
+
+func TestMemoryStoreStartupRecomputeRepairsStaleScoreboard(t *testing.T) {
+	store, ok := newMemoryGameStore().(*memoryGameStore)
+	if !ok {
+		t.Fatal("expected concrete memory game store")
+	}
+	ctx := context.Background()
+	issued := issuedFlagRecord{
+		Flag:          "flag-1",
+		OwnerTeamID:   102,
+		OwnerTeamName: "Team Delta",
+		ChallengeID:   1,
+		ChallengeName: "banking",
+		IssuedTick:    1,
+		ExpiresTick:   1,
+	}
+	if err := store.IssueFlag(ctx, issued); err != nil {
+		t.Fatalf("IssueFlag: %v", err)
+	}
+	accepted, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
+		Flag:           issued.Flag,
+		SubmittingTeam: 101,
+		AttackerName:   "Team Alpha",
+		VictimName:     issued.OwnerTeamName,
+		ChallengeName:  issued.ChallengeName,
+		SubmissionTick: 1,
+	})
+	if err != nil {
+		t.Fatalf("AcceptFlagSubmission: %v", err)
+	}
+	if !accepted {
+		t.Fatal("expected accepted submission")
+	}
+	before, err := store.ListScoreboard(ctx)
+	if err != nil {
+		t.Fatalf("ListScoreboard before recompute: %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("expected stale stored scoreboard before recompute, got %+v", before)
+	}
+
+	recomputed, err := store.RecomputeScoreboard(ctx)
+	if err != nil {
+		t.Fatalf("RecomputeScoreboard: %v", err)
+	}
+	rows := scoreRowsByTeam(recomputed)
+	if !approxScore(rows["Team Alpha"].Attack, 2) {
+		t.Fatalf("expected recovered attack score, got %+v", rows["Team Alpha"])
+	}
+	if !approxScore(rows["Team Delta"].Defense, -1) {
+		t.Fatalf("expected recovered defense penalty, got %+v", rows["Team Delta"])
 	}
 }

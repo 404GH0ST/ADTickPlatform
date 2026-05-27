@@ -22,6 +22,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if err := recomputeScoreboardOnStartup(ctx, store); err != nil {
+		log.Fatal(err)
+	}
 
 	server := newGameCoreServer(
 		config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
@@ -75,6 +78,28 @@ func main() {
 		_ = scheduler.Close()
 		log.Fatal(err)
 	}
+}
+
+func recomputeScoreboardOnStartup(ctx context.Context, store gameStore) error {
+	timeout := config.Duration("GAME_CORE_STARTUP_RECOMPUTE_TIMEOUT", 30*time.Second)
+	return recomputeScoreboardWithTimeout(ctx, timeout, func(recomputeCtx context.Context) error {
+		_, err := store.RecomputeScoreboard(recomputeCtx)
+		return err
+	})
+}
+
+func recomputeScoreboardWithTimeout(ctx context.Context, timeout time.Duration, recompute func(context.Context) error) error {
+	recomputeCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		recomputeCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	if err := recompute(recomputeCtx); err != nil {
+		return fmt.Errorf("initial scoreboard recompute failed: %w", err)
+	}
+	return nil
 }
 
 func optionalRFC3339Env(key string) (*time.Time, error) {
