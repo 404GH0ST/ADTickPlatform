@@ -213,11 +213,11 @@ func wireGuardServerPublicKey() (string, error) {
 		return publicKey, nil
 	}
 	if privateKey := strings.TrimSpace(config.String("WIREGUARD_SERVER_PRIVATE_KEY", "")); privateKey != "" {
-		if publicKey, err := x25519PublicKeyFromBase64(privateKey); err == nil {
+		publicKey, err := x25519PublicKeyFromBase64(privateKey)
+		if err == nil {
 			return publicKey, nil
-		} else {
-			return "", fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
 		}
+		return "", fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
 	}
 	if !allowDevWireGuardServerKeyFallback() {
 		return "", fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY or WIREGUARD_SERVER_PUBLIC_KEY must be set outside dry-run memory mode")

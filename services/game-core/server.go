@@ -768,7 +768,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 		}
 
 		if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
-			return counts, fmt.Errorf("checker run persistence failed: %v", err)
+			return counts, fmt.Errorf("checker run persistence failed: %w", err)
 		}
 
 		if phase == "put" && run.Status == "success" {
@@ -783,7 +783,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 				CreatedAt:     run.CheckedAt,
 			}
 			if err := s.store.IssueFlag(ctx, flag); err != nil {
-				return counts, fmt.Errorf("flag issuance persistence failed: %v", err)
+				return counts, fmt.Errorf("flag issuance persistence failed: %w", err)
 			}
 		}
 
