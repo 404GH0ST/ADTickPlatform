@@ -26,6 +26,7 @@ type gameCoreServer struct {
 	checkerParallelism int
 	scoringDebounce    time.Duration
 	scoringRetryDelay  time.Duration
+	scoringTimeout     time.Duration
 	scoringMu          sync.Mutex
 	scoringTimer       *time.Timer
 	scoringStatus      scoringRecomputeStatus
@@ -58,6 +59,7 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		checkerParallelism: 1,
 		scoringDebounce:    time.Second,
 		scoringRetryDelay:  5 * time.Second,
+		scoringTimeout:     30 * time.Second,
 		now:                time.Now,
 	}
 }
@@ -79,6 +81,13 @@ func (s *gameCoreServer) WithScoringDebounce(value time.Duration) *gameCoreServe
 func (s *gameCoreServer) WithScoringRetryDelay(value time.Duration) *gameCoreServer {
 	if value >= 0 {
 		s.scoringRetryDelay = value
+	}
+	return s
+}
+
+func (s *gameCoreServer) WithScoringTimeout(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.scoringTimeout = value
 	}
 	return s
 }
@@ -897,7 +906,14 @@ func (s *gameCoreServer) runScheduledScoreboardRecompute() {
 	s.scoringTimer = nil
 	s.scoringMu.Unlock()
 
-	_, err := s.store.RecomputeScoreboard(context.Background())
+	ctx := context.Background()
+	cancel := func() {}
+	if s.scoringTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, s.scoringTimeout)
+	}
+	defer cancel()
+
+	_, err := s.store.RecomputeScoreboard(ctx)
 
 	s.scoringMu.Lock()
 	defer s.scoringMu.Unlock()

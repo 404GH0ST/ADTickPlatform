@@ -44,6 +44,30 @@ load_env_file_override() {
   done < "${env_file}"
 }
 
+load_env_key_override() {
+  local env_file="$1"
+  local wanted_key="$2"
+  local line key value
+
+  [[ -f "${env_file}" ]] || return 0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -z "${line}" ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" != *=* ]] && continue
+
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+
+    if [[ "${key}" == "${wanted_key}" ]]; then
+      export "${key}=${value}"
+      return 0
+    fi
+  done < "${env_file}"
+}
+
 load_env_file_over_placeholders() {
   local env_file="$1"
   local line key value current
@@ -184,7 +208,7 @@ resolve_admin_api_token() {
   local runtime_env="${1:-.runtime/backend-stack.env}"
 
   if is_placeholder_secret "${ADMIN_API_TOKEN:-}" && [[ -f "${runtime_env}" ]]; then
-    load_env_file_override "${runtime_env}"
+    load_env_key_override "${runtime_env}" ADMIN_API_TOKEN
   fi
 
   if is_placeholder_secret "${ADMIN_API_TOKEN:-}"; then

@@ -516,6 +516,9 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, secur
 		"run",
 		"-d",
 		"--restart", "unless-stopped",
+	}
+	args = append(args, security.dockerArgs()...)
+	args = append(args,
 		"--name", task.ContainerName,
 		"--hostname", task.ContainerName,
 		"--label", fmt.Sprintf("adplatform.team_id=%d", task.TeamID),
@@ -531,8 +534,7 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, secur
 		"-e", fmt.Sprintf("AD_PLATFORM_ENDPOINT=%s", task.Endpoint),
 		"-e", fmt.Sprintf("AD_PLATFORM_UNLOCK_PROOF=%s", unlockproof.Issue(unlockProofSecret, task.TeamID, task.ChallengeID)),
 		"-e", fmt.Sprintf("PORT=%d", servicePort),
-	}
-	args = append(args[:4], append(security.dockerArgs(), args[4:]...)...)
+	)
 	if strings.TrimSpace(task.StateVolume) != "" && strings.TrimSpace(stateMountPath) != "" {
 		args = append(args, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", task.StateVolume, stateMountPath))
 	}
@@ -594,6 +596,9 @@ func buildDockerBaselineValidationArgs(request apigateway.ChallengeValidationReq
 	args := []string{
 		"run",
 		"--rm",
+	}
+	args = append(args, defaultProbeSecurity().dockerArgs()...)
+	args = append(args,
 		"--entrypoint",
 		"/bin/sh",
 		request.BaselineImage,
@@ -611,14 +616,17 @@ else
   echo 'missing supported password setter inside image' >&2
   exit 1
 fi`,
-	}
-	return append(args[:2], append(defaultProbeSecurity().dockerArgs(), args[2:]...)...)
+	)
+	return args
 }
 
 func buildDockerCheckerValidationArgs(request apigateway.CheckerValidationRequest) []string {
 	args := []string{
 		"run",
 		"--rm",
+	}
+	args = append(args, defaultProbeSecurity().dockerArgs()...)
+	args = append(args,
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,
@@ -652,6 +660,6 @@ else
 fi
 echo 'checker entrypoint does not support validate or --help' >&2
 exit 1`,
-	}
-	return append(args[:2], append(defaultProbeSecurity().dockerArgs(), args[2:]...)...)
+	)
+	return args
 }

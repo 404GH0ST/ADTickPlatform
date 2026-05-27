@@ -40,7 +40,8 @@ func main() {
 	).
 		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 8)).
 		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
-		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second))
+		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second)).
+		WithScoringTimeout(config.Duration("GAME_CORE_SCORING_TIMEOUT", 30*time.Second))
 	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {

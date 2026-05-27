@@ -165,7 +165,7 @@ func TestMemoryStorePersistsCheckerServiceState(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreStartupRecomputeRepairsStaleScoreboard(t *testing.T) {
+func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 	store, ok := newMemoryGameStore().(*memoryGameStore)
 	if !ok {
 		t.Fatal("expected concrete memory game store")
@@ -199,17 +199,21 @@ func TestMemoryStoreStartupRecomputeRepairsStaleScoreboard(t *testing.T) {
 	}
 	before, err := store.ListScoreboard(ctx)
 	if err != nil {
-		t.Fatalf("ListScoreboard before recompute: %v", err)
+		t.Fatalf("ListScoreboard after accept: %v", err)
 	}
-	if len(before) != 0 {
-		t.Fatalf("expected stale stored scoreboard before recompute, got %+v", before)
+	rows := scoreRowsByTeam(before)
+	if !approxScore(rows["Team Alpha"].Attack, 2) {
+		t.Fatalf("expected accepted attack to refresh scoreboard, got %+v", rows["Team Alpha"])
+	}
+	if !approxScore(rows["Team Delta"].Defense, -1) {
+		t.Fatalf("expected accepted attack to refresh defense penalty, got %+v", rows["Team Delta"])
 	}
 
 	recomputed, err := store.RecomputeScoreboard(ctx)
 	if err != nil {
 		t.Fatalf("RecomputeScoreboard: %v", err)
 	}
-	rows := scoreRowsByTeam(recomputed)
+	rows = scoreRowsByTeam(recomputed)
 	if !approxScore(rows["Team Alpha"].Attack, 2) {
 		t.Fatalf("expected recovered attack score, got %+v", rows["Team Alpha"])
 	}

@@ -325,13 +325,16 @@ func buildDockerCheckerValidationArgs(security checkerDockerSecurity, request ap
 	args := []string{
 		"run",
 		"--rm",
+	}
+	args = append(args, security.dockerArgs()...)
+	args = append(args,
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,
 		"-lc",
 		checkerEntrypointValidationScript(),
-	}
-	return append(args[:2], append(security.dockerArgs(), args[2:]...)...)
+	)
+	return args
 }
 
 func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurity, request apigateway.CheckerExecutionRequest) []string {

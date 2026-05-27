@@ -316,6 +316,7 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 		Verdict:   "first valid submission accepted",
 		CreatedAt: submission.SubmittedAt.UTC(),
 	}}, s.attackFeed...)
+	s.recomputeScoreboardLocked()
 	return true, nil
 }
 
@@ -330,6 +331,11 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	rows := s.recomputeScoreboardLocked()
+	return append([]apigateway.ScoreRowAlias(nil), rows...), nil
+}
+
+func (s *memoryGameStore) recomputeScoreboardLocked() []apigateway.ScoreRowAlias {
 	previousRanks := make(map[string]int, len(s.scoreboard))
 	for _, row := range s.scoreboard {
 		previousRanks[row.Team] = row.Rank
@@ -438,7 +444,7 @@ func (s *memoryGameStore) RecomputeScoreboard(_ context.Context) ([]apigateway.S
 	}
 
 	s.scoreboard = append([]apigateway.ScoreRowAlias(nil), rows...)
-	return append([]apigateway.ScoreRowAlias(nil), rows...), nil
+	return rows
 }
 
 func (s *memoryGameStore) AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error) {

@@ -72,6 +72,20 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	if args[len(args)-1] != task.BaselineImage {
 		t.Fatalf("expected image %s, got %s", task.BaselineImage, args[len(args)-1])
 	}
+	assertArgSequence(t, args, []string{
+		"run", "-d", "--restart", "unless-stopped",
+		"--cap-drop", "ALL",
+		"--cap-add", "CHOWN",
+		"--cap-add", "DAC_OVERRIDE",
+		"--cap-add", "FOWNER",
+		"--cap-add", "SETGID",
+		"--cap-add", "SETUID",
+		"--cap-add", "NET_BIND_SERVICE",
+		"--pids-limit", "256",
+		"--memory", "512m",
+		"--cpus", "1.0",
+		"--name", task.ContainerName,
+	})
 }
 
 func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
@@ -131,6 +145,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		networkLayout:     "per-service",
 		stateMountPath:    "/opt/ad/state",
 		unlockProofSecret: "dev-unlock-secret",
+		serviceSecurity:   testServiceSecurity(),
 		timeout:           5 * time.Second,
 	}
 	t.Setenv("DOCKER_LOG", logPath)
@@ -153,7 +168,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"--name svc-storage-team-101 --hostname svc-storage-team-101",
+		"run -d --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3),
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",
@@ -244,6 +259,7 @@ func TestBuildDockerBaselineValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing ssh daemon binary inside image") || !strings.Contains(args[len(args)-1], "missing supported password setter inside image") {
 		t.Fatalf("expected challenge validation script, got %q", args[len(args)-1])
 	}
+	assertArgSequence(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func TestBuildDockerCheckerValidationArgs(t *testing.T) {
@@ -268,6 +284,19 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	}
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected checker validation script, got %q", args[len(args)-1])
+	}
+	assertArgSequence(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
+}
+
+func assertArgSequence(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(expected) > len(args) {
+		t.Fatalf("expected sequence %v in args %v", expected, args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("expected args prefix %v, got %v", expected, args[:len(expected)])
+		}
 	}
 }
 

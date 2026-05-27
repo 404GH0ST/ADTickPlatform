@@ -78,6 +78,7 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected validation script, got %q", args[len(args)-1])
 	}
+	assertArgPrefix(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
@@ -345,4 +346,16 @@ func contains(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func assertArgPrefix(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(expected) > len(args) {
+		t.Fatalf("expected prefix %v in args %v", expected, args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("expected args prefix %v, got %v", expected, args[:len(expected)])
+		}
+	}
 }
