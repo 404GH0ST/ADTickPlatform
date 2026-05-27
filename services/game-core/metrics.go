@@ -40,6 +40,34 @@ func (s *gameCoreServer) WritePrometheusMetrics(w io.Writer) {
 	fmt.Fprintf(w, "adplatform_game_core_checker_runs_total{status=%q} %d\n", "failed", status.FailedCheckerRuns)
 	fmt.Fprintf(w, "adplatform_game_core_checker_runs_total{status=%q} %d\n", "skipped", status.SkippedCheckerRuns)
 
+	scoringStatus := s.snapshotScoringStatus()
+	fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_pending Whether an async scoreboard recompute is pending.")
+	fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_pending gauge")
+	fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_pending %.0f\n", boolMetric(scoringStatus.Pending))
+
+	fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_in_flight Whether an async scoreboard recompute is currently running.")
+	fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_in_flight gauge")
+	fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_in_flight %.0f\n", boolMetric(scoringStatus.InFlight))
+
+	fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_failures_total Total async scoreboard recompute failures.")
+	fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_failures_total counter")
+	fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_failures_total %d\n", scoringStatus.FailureCount)
+
+	fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_degraded Whether the most recent async scoreboard recompute attempt failed.")
+	fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_degraded gauge")
+	fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_degraded %.0f\n", boolMetric(scoringStatus.LastError != ""))
+
+	if !scoringStatus.LastSuccessAt.IsZero() {
+		fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_last_success_unixtime Last successful async scoreboard recompute as a Unix timestamp.")
+		fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_last_success_unixtime gauge")
+		fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_last_success_unixtime %.0f\n", float64(scoringStatus.LastSuccessAt.Unix()))
+	}
+	if !scoringStatus.LastFailureAt.IsZero() {
+		fmt.Fprintln(w, "# HELP adplatform_game_core_scoreboard_recompute_last_failure_unixtime Last failed async scoreboard recompute as a Unix timestamp.")
+		fmt.Fprintln(w, "# TYPE adplatform_game_core_scoreboard_recompute_last_failure_unixtime gauge")
+		fmt.Fprintf(w, "adplatform_game_core_scoreboard_recompute_last_failure_unixtime %.0f\n", float64(scoringStatus.LastFailureAt.Unix()))
+	}
+
 	if status.Match != nil {
 		fmt.Fprintln(w, "# HELP adplatform_game_core_match_accepting_submissions Whether the match is accepting submissions.")
 		fmt.Fprintln(w, "# TYPE adplatform_game_core_match_accepting_submissions gauge")

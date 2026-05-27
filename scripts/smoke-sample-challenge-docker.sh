@@ -19,7 +19,7 @@ CHALLENGE_NAME="sample-http-$(date +%s)"
 STACK_LOG="${ROOT_DIR}/.runtime/logs/sample-docker-stack.log"
 STACK_PID=""
 STACK_OWNED="false"
-ADMIN_TOKEN="${ADMIN_API_TOKEN:-dev-admin-token}"
+ADMIN_TOKEN=""
 EMAIL="${AD_PLATFORM_EMAIL:-alpha.captain@example.com}"
 PASSWORD="${AD_PLATFORM_PASSWORD:-alpha-secret}"
 STACK_ENV_FILE="${ROOT_DIR}/.runtime/backend-stack.env"
@@ -103,6 +103,7 @@ else
 
   load_env_file_override "${STACK_ENV_FILE}"
 fi
+ADMIN_TOKEN="$(resolve_admin_api_token "${STACK_ENV_FILE}")"
 
 echo "resetting postgres state to a clean match baseline"
 ./scripts/bootstrap-clean-match.sh >/dev/null
@@ -113,6 +114,7 @@ runtime_output="$(
     RUNTIME_SMOKE_CHALLENGE_NAME="${CHALLENGE_NAME}" \
     RUNTIME_SMOKE_BASELINE_IMAGE="${BASELINE_IMAGE}" \
     RUNTIME_SMOKE_CHECKER_IMAGE="${CHECKER_IMAGE}" \
+    RUNTIME_SMOKE_KEEP_CHALLENGE=1 \
     ./scripts/smoke-admin-runtime-flow.sh
 )"
 printf '%s\n' "${runtime_output}"
@@ -221,7 +223,7 @@ scoreboard_response="$(
 )"
 printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {rank,team,attack,defense,sla,total,delta}'
 
-if ! printf '%s\n' "${scoreboard_response}" | jq -e 'length == 4 and all(.[]; .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)' >/dev/null; then
+if ! printf '%s\n' "${scoreboard_response}" | jq -e 'length == 4 and all(.[]; .attack == 0 and .defense == 0 and .sla == 2 and .total == 2)' >/dev/null; then
   echo "unexpected scoreboard after clean sample tick" >&2
   exit 1
 fi
@@ -256,8 +258,8 @@ submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,verdict}'
-if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag is correct."' >/dev/null; then
+printf '%s\n' "${submit_response}" | jq -c '.results[] | {flag,status,detail}'
+if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0].status == "accepted" and .[0].detail == "flag is correct."' >/dev/null; then
   echo "stolen flag submission did not return the expected success verdict" >&2
   exit 1
 fi
@@ -269,8 +271,8 @@ duplicate_submit_response="$(
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
-printf '%s\n' "${duplicate_submit_response}" | jq -c '.results[] | {flag,verdict}'
-if ! printf '%s\n' "${duplicate_submit_response}" | jq -e '.results | length == 1 and .[0].verdict == "flag already submitted."' >/dev/null; then
+printf '%s\n' "${duplicate_submit_response}" | jq -c '.results[] | {flag,status,detail}'
+if ! printf '%s\n' "${duplicate_submit_response}" | jq -e '.results | length == 1 and .[0].status == "duplicate" and .[0].detail == "flag already submitted."' >/dev/null; then
   echo "duplicate stolen flag submission did not return the expected duplicate verdict" >&2
   exit 1
 fi
@@ -300,10 +302,10 @@ printf '%s\n' "${post_submit_scoreboard}" | jq -c '.[] | {rank,team,attack,defen
 
 if ! printf '%s\n' "${post_submit_scoreboard}" | jq -e '
   length == 4 and
-  any(.[]; .team == "Team Alpha" and .attack == 10 and .defense == 1000 and .sla == 11 and .total == 1021) and
-  any(.[]; .team == "Team Delta" and .attack == 0 and .defense == 100 and .sla == 11 and .total == 111) and
-  any(.[]; .team == "Team Orchid" and .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011) and
-  any(.[]; .team == "Team Sigma" and .attack == 0 and .defense == 1000 and .sla == 11 and .total == 1011)
+  any(.[]; .team == "Team Alpha" and .attack == 2 and .defense == 0 and .sla == 2 and .total == 4) and
+  any(.[]; .team == "Team Delta" and .attack == 0 and .defense == -1 and .sla == 2 and .total == 1) and
+  any(.[]; .team == "Team Orchid" and .attack == 0 and .defense == 0 and .sla == 2 and .total == 2) and
+  any(.[]; .team == "Team Sigma" and .attack == 0 and .defense == 0 and .sla == 2 and .total == 2)
 ' >/dev/null; then
   echo "scoreboard did not reflect the accepted enemy-flag attack" >&2
   exit 1

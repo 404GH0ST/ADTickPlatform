@@ -24,17 +24,20 @@ func main() {
 	defer store.Close()
 
 	server := newGameCoreServer(
-		config.String("GAME_CORE_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+		config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		store,
 		newCheckerClient(
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
-			config.String("CHECKER_RUNNER_INTERNAL_TOKEN", config.String("ADMIN_API_TOKEN", "dev-admin-token")),
+			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
-		newFlagCodec(config.String("GAME_CORE_FLAG_SECRET", "dev-flag-secret")),
+		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET")),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
-	)
+	).
+		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 8)).
+		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
+		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second))
 	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {
