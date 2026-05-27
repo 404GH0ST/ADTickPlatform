@@ -87,48 +87,7 @@ ensure_docker_network() {
   echo "created docker network ${network_name}"
 }
 
-placeholder_secret() {
-  local value="${1:-}"
-
-  [[ -z "${value}" ]] && return 0
-  [[ "${value}" == dev-* ]] && return 0
-  [[ "${value}" == change-this-* ]] && return 0
-  [[ "${value}" == replace-with-* ]] && return 0
-  return 1
-}
-
-random_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 32
-    return
-  fi
-  od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
-}
-
-ensure_runtime_secret() {
-  local key="$1"
-  local current="${!key:-}"
-
-  if placeholder_secret "${current}"; then
-    export "${key}=local-${key,,}-$(random_secret)"
-  fi
-}
-
-ensure_runtime_secret ADMIN_API_TOKEN
-ensure_runtime_secret TEAM_JWT_SECRET
-ensure_runtime_secret UNLOCK_PROOF_SECRET
-ensure_runtime_secret SSH_CREDENTIAL_SECRET
-ensure_runtime_secret GAME_CORE_FLAG_SECRET
-ensure_runtime_secret CONTROLLER_INTERNAL_TOKEN
-ensure_runtime_secret GAME_CORE_INTERNAL_TOKEN
-ensure_runtime_secret SUBMISSION_SERVICE_INTERNAL_TOKEN
-ensure_runtime_secret SCORING_WORKER_INTERNAL_TOKEN
-ensure_runtime_secret CHECKER_RUNNER_INTERNAL_TOKEN
-ensure_runtime_secret WIREGUARD_GATEWAY_INTERNAL_TOKEN
-ensure_runtime_secret REALTIME_ADMIN_TOKEN
-if placeholder_secret "${REALTIME_SOURCE_ADMIN_TOKEN:-}"; then
-  export REALTIME_SOURCE_ADMIN_TOKEN="${ADMIN_API_TOKEN}"
-fi
+ensure_local_runtime_secrets
 
 if [[ "${MODE}" == "postgres" ]]; then
   export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-$(find_free_port 15432)}"
@@ -201,6 +160,7 @@ SUBMISSION_SERVICE_INTERNAL_TOKEN=${SUBMISSION_SERVICE_INTERNAL_TOKEN}
 SCORING_WORKER_INTERNAL_TOKEN=${SCORING_WORKER_INTERNAL_TOKEN}
 CHECKER_RUNNER_INTERNAL_TOKEN=${CHECKER_RUNNER_INTERNAL_TOKEN}
 WIREGUARD_GATEWAY_INTERNAL_TOKEN=${WIREGUARD_GATEWAY_INTERNAL_TOKEN}
+WIREGUARD_SERVER_PRIVATE_KEY=${WIREGUARD_SERVER_PRIVATE_KEY}
 REALTIME_SOURCE_ADMIN_TOKEN=${REALTIME_SOURCE_ADMIN_TOKEN}
 REALTIME_ADMIN_TOKEN=${REALTIME_ADMIN_TOKEN}
 AD_PLATFORM_API_URL=http://127.0.0.1:8080

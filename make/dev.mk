@@ -55,39 +55,39 @@ release-notes:
 
 run-api-gateway:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/api-gateway
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/api-gateway
 
 run-api-gateway-postgres:
 	@mkdir -p $(GOCACHE)
-	API_GATEWAY_STATE_BACKEND=postgres GOCACHE=$(GOCACHE) go run ./services/api-gateway
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; API_GATEWAY_STATE_BACKEND=postgres GOCACHE=$(GOCACHE) go run ./services/api-gateway
 
 run-game-core:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/game-core
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/game-core
 
 run-submission-service:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/submission-service
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/submission-service
 
 run-checker-runner:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/checker-runner
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/checker-runner
 
 run-controller-service:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/controller-service
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/controller-service
 
 run-scoring-worker:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/scoring-worker
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/scoring-worker
 
 run-realtime-gateway:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/realtime-gateway
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/realtime-gateway
 
 run-wireguard-gateway:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go run ./services/wireguard-gateway
+	@source scripts/lib/common.sh; load_default_env_files; load_runtime_env_if_present; ensure_local_runtime_env_file; GOCACHE=$(GOCACHE) go run ./services/wireguard-gateway
 
 run-backend-stack:
 	./scripts/run-backend-stack.sh memory

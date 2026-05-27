@@ -44,6 +44,29 @@ load_env_file_override() {
   done < "${env_file}"
 }
 
+load_env_file_over_placeholders() {
+  local env_file="$1"
+  local line key value current
+
+  [[ -f "${env_file}" ]] || return 0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -z "${line}" ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" != *=* ]] && continue
+
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    current="${!key:-}"
+
+    if is_placeholder_secret "${current}"; then
+      export "${key}=${value}"
+    fi
+  done < "${env_file}"
+}
+
 load_default_env_files() {
   if [[ -f .env ]]; then
     load_env_file .env
@@ -59,12 +82,102 @@ is_placeholder_secret() {
   local value="${1:-}"
 
   [[ -z "${value}" ]] && return 0
+  [[ "${value}" == dev-* ]] && return 0
   [[ "${value}" == "dev-admin-token" ]] && return 0
   [[ "${value}" == "dev-team-token" ]] && return 0
-  [[ "${value}" == change-this-* ]] && return 0
-  [[ "${value}" == replace-with-* ]] && return 0
+  [[ "${value}" == *change-this-* ]] && return 0
+  [[ "${value}" == *replace-with-* ]] && return 0
 
   return 1
+}
+
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+}
+
+random_wireguard_private_key() {
+  if command -v wg >/dev/null 2>&1; then
+    wg genkey
+    return
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 32
+    return
+  fi
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' | base64
+}
+
+ensure_runtime_secret() {
+  local key="$1"
+  local current="${!key:-}"
+  local key_slug
+
+  if is_placeholder_secret "${current}"; then
+    key_slug="$(printf '%s' "${key}" | tr '[:upper:]' '[:lower:]')"
+    export "${key}=local-${key_slug}-$(random_secret)"
+  fi
+}
+
+ensure_runtime_wireguard_private_key() {
+  if is_placeholder_secret "${WIREGUARD_SERVER_PRIVATE_KEY:-}"; then
+    export WIREGUARD_SERVER_PRIVATE_KEY="$(random_wireguard_private_key)"
+  fi
+}
+
+ensure_local_runtime_secrets() {
+  ensure_runtime_secret ADMIN_API_TOKEN
+  ensure_runtime_secret TEAM_JWT_SECRET
+  ensure_runtime_secret UNLOCK_PROOF_SECRET
+  ensure_runtime_secret SSH_CREDENTIAL_SECRET
+  ensure_runtime_secret GAME_CORE_FLAG_SECRET
+  ensure_runtime_secret CONTROLLER_INTERNAL_TOKEN
+  ensure_runtime_secret GAME_CORE_INTERNAL_TOKEN
+  ensure_runtime_secret SUBMISSION_SERVICE_INTERNAL_TOKEN
+  ensure_runtime_secret SCORING_WORKER_INTERNAL_TOKEN
+  ensure_runtime_secret CHECKER_RUNNER_INTERNAL_TOKEN
+  ensure_runtime_secret WIREGUARD_GATEWAY_INTERNAL_TOKEN
+  ensure_runtime_wireguard_private_key
+  ensure_runtime_secret REALTIME_ADMIN_TOKEN
+  if is_placeholder_secret "${REALTIME_SOURCE_ADMIN_TOKEN:-}"; then
+    export REALTIME_SOURCE_ADMIN_TOKEN="${ADMIN_API_TOKEN}"
+  fi
+}
+
+write_local_runtime_env_file() {
+  local runtime_env="${1:-.runtime/dev-secrets.env}"
+
+  mkdir -p "$(dirname "${runtime_env}")"
+  cat > "${runtime_env}" <<EOF
+ADMIN_API_TOKEN=${ADMIN_API_TOKEN}
+TEAM_JWT_SECRET=${TEAM_JWT_SECRET}
+UNLOCK_PROOF_SECRET=${UNLOCK_PROOF_SECRET}
+SSH_CREDENTIAL_SECRET=${SSH_CREDENTIAL_SECRET}
+GAME_CORE_FLAG_SECRET=${GAME_CORE_FLAG_SECRET}
+CONTROLLER_INTERNAL_TOKEN=${CONTROLLER_INTERNAL_TOKEN}
+GAME_CORE_INTERNAL_TOKEN=${GAME_CORE_INTERNAL_TOKEN}
+SUBMISSION_SERVICE_INTERNAL_TOKEN=${SUBMISSION_SERVICE_INTERNAL_TOKEN}
+SCORING_WORKER_INTERNAL_TOKEN=${SCORING_WORKER_INTERNAL_TOKEN}
+CHECKER_RUNNER_INTERNAL_TOKEN=${CHECKER_RUNNER_INTERNAL_TOKEN}
+WIREGUARD_GATEWAY_INTERNAL_TOKEN=${WIREGUARD_GATEWAY_INTERNAL_TOKEN}
+WIREGUARD_SERVER_PRIVATE_KEY=${WIREGUARD_SERVER_PRIVATE_KEY}
+REALTIME_SOURCE_ADMIN_TOKEN=${REALTIME_SOURCE_ADMIN_TOKEN}
+REALTIME_ADMIN_TOKEN=${REALTIME_ADMIN_TOKEN}
+EOF
+  chmod 600 "${runtime_env}"
+}
+
+ensure_local_runtime_env_file() {
+  local runtime_env="${1:-.runtime/dev-secrets.env}"
+
+  if [[ -f "${runtime_env}" ]]; then
+    load_env_file_over_placeholders "${runtime_env}"
+  fi
+  ensure_local_runtime_secrets
+  write_local_runtime_env_file "${runtime_env}"
 }
 
 resolve_admin_api_token() {
@@ -84,6 +197,14 @@ EOF
   fi
 
   printf '%s\n' "${ADMIN_API_TOKEN}"
+}
+
+load_runtime_env_if_present() {
+  local runtime_env="${1:-.runtime/backend-stack.env}"
+
+  if [[ -f "${runtime_env}" ]]; then
+    load_env_file_override "${runtime_env}"
+  fi
 }
 
 require_bin() {
