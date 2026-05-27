@@ -56,7 +56,7 @@ func TestCheckerRunnerRoutesRequireAdminAuth(t *testing.T) {
 }
 
 func TestBuildDockerCheckerValidationArgs(t *testing.T) {
-	args := buildDockerCheckerValidationArgs(apigateway.CheckerValidationRequest{
+	args := buildDockerCheckerValidationArgs(defaultCheckerSecurity(), apigateway.CheckerValidationRequest{
 		ChallengeID:  7,
 		Name:         "proxy",
 		CheckerImage: "registry.local/proxy-checker:latest",
@@ -81,7 +81,7 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 }
 
 func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
-	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", apigateway.CheckerExecutionRequest{
+	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", defaultCheckerSecurity(), apigateway.CheckerExecutionRequest{
 		ChallengeID:   7,
 		TeamID:        101,
 		TeamName:      "Team Alpha",
@@ -165,7 +165,7 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 		t.Fatalf("read docker log: %v", err)
 	}
 	logOutput := string(logBytes)
-	if !strings.Contains(logOutput, "run --rm --entrypoint /bin/sh registry.local/proxy-checker:latest -lc") {
+	if !strings.Contains(logOutput, "--entrypoint /bin/sh registry.local/proxy-checker:latest -lc") {
 		t.Fatalf("unexpected docker log %q", logOutput)
 	}
 	if !strings.Contains(logOutput, "checker entrypoint does not support validate or --help") {

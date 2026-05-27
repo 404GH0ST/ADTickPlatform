@@ -33,11 +33,19 @@ func newRuntimeExecutor() runtimeExecutor {
 			network:           strings.TrimSpace(config.String("CONTROLLER_DOCKER_NETWORK", "adplatform_game")),
 			networkLayout:     gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
 			stateMountPath:    strings.TrimSpace(config.String("CONTROLLER_STATE_MOUNT_PATH", "/opt/ad/state")),
-			unlockProofSecret: strings.TrimSpace(config.String("UNLOCK_PROOF_SECRET", config.String("TEAM_JWT_SECRET", config.String("TEAM_JWT_DEV_TOKEN", "dev-team-token")))),
-			sshApplyMode:      strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_PASSWORD_APPLY_MODE", "docker-exec"))),
-			sshContractMode:   strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_CONTRACT_MODE", "verify"))),
-			checkerValidator:  newCheckerValidationClient(),
-			timeout:           config.Duration("CONTROLLER_RUNTIME_TIMEOUT", 15*time.Second),
+			unlockProofSecret: strings.TrimSpace(config.Secret("UNLOCK_PROOF_SECRET", "TEAM_JWT_SECRET")),
+			serviceSecurity: dockerRunSecurity{
+				capDrop:     csvConfig("CONTROLLER_SERVICE_CAP_DROP", "ALL"),
+				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE"),
+				securityOpt: csvConfig("CONTROLLER_SERVICE_SECURITY_OPT", ""),
+				pidsLimit:   stringConfig("CONTROLLER_SERVICE_PIDS_LIMIT", "256"),
+				memory:      stringConfig("CONTROLLER_SERVICE_MEMORY", "512m"),
+				cpus:        stringConfig("CONTROLLER_SERVICE_CPUS", "1.0"),
+			},
+			sshApplyMode:     strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_PASSWORD_APPLY_MODE", "docker-exec"))),
+			sshContractMode:  strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_CONTRACT_MODE", "verify"))),
+			checkerValidator: newCheckerValidationClient(),
+			timeout:          config.Duration("CONTROLLER_RUNTIME_TIMEOUT", 15*time.Second),
 		}
 	default:
 		return dryRunExecutor{}
@@ -95,10 +103,82 @@ type dockerCLIExecutor struct {
 	networkLayout     string
 	stateMountPath    string
 	unlockProofSecret string
+	serviceSecurity   dockerRunSecurity
 	sshApplyMode      string
 	sshContractMode   string
 	checkerValidator  checkerValidationClient
 	timeout           time.Duration
+}
+
+type dockerRunSecurity struct {
+	capDrop     []string
+	capAdd      []string
+	securityOpt []string
+	pidsLimit   string
+	memory      string
+	cpus        string
+}
+
+func (s dockerRunSecurity) dockerArgs() []string {
+	args := make([]string, 0)
+	for _, capability := range s.capDrop {
+		args = append(args, "--cap-drop", capability)
+	}
+	for _, capability := range s.capAdd {
+		args = append(args, "--cap-add", capability)
+	}
+	for _, option := range s.securityOpt {
+		args = append(args, "--security-opt", option)
+	}
+	if s.pidsLimit != "" {
+		args = append(args, "--pids-limit", s.pidsLimit)
+	}
+	if s.memory != "" {
+		args = append(args, "--memory", s.memory)
+	}
+	if s.cpus != "" {
+		args = append(args, "--cpus", s.cpus)
+	}
+	return args
+}
+
+func csvConfig(key, fallback string) []string {
+	raw := config.String(key, fallback)
+	trimmedRaw := strings.TrimSpace(raw)
+	if dockerConfigDisabled(trimmedRaw) {
+		return nil
+	}
+	parts := strings.Split(trimmedRaw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
+func stringConfig(key, fallback string) string {
+	value := strings.TrimSpace(config.String(key, fallback))
+	if dockerConfigDisabled(value) {
+		return ""
+	}
+	return value
+}
+
+func dockerConfigDisabled(value string) bool {
+	return value == "" || strings.EqualFold(value, "none") || strings.EqualFold(value, "disabled")
+}
+
+func defaultProbeSecurity() dockerRunSecurity {
+	return dockerRunSecurity{
+		capDrop:     []string{"ALL"},
+		securityOpt: []string{"no-new-privileges:true"},
+		pidsLimit:   "128",
+		memory:      "256m",
+		cpus:        "0.5",
+	}
 }
 
 func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
@@ -360,7 +440,7 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 	if err := e.ensureNetwork(ctx, plan); err != nil {
 		return err
 	}
-	_, err = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, task)...)
+	_, err = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)...)
 	return err
 }
 
@@ -421,7 +501,7 @@ func (e *dockerCLIExecutor) ensureNetwork(ctx context.Context, plan gamenet.Dock
 	return err
 }
 
-func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, task apigateway.ControllerRuntimeTask) []string {
+func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, security dockerRunSecurity, task apigateway.ControllerRuntimeTask) []string {
 	serviceIP := strings.TrimSpace(task.SSHHost)
 	servicePort := task.ServicePort
 	if endpointHost, endpointPort := apigateway.ParseEndpoint(task.Endpoint); serviceIP == "" || servicePort == 0 {
@@ -452,6 +532,7 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, task 
 		"-e", fmt.Sprintf("AD_PLATFORM_UNLOCK_PROOF=%s", unlockproof.Issue(unlockProofSecret, task.TeamID, task.ChallengeID)),
 		"-e", fmt.Sprintf("PORT=%d", servicePort),
 	}
+	args = append(args[:4], append(security.dockerArgs(), args[4:]...)...)
 	if strings.TrimSpace(task.StateVolume) != "" && strings.TrimSpace(stateMountPath) != "" {
 		args = append(args, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", task.StateVolume, stateMountPath))
 	}
@@ -510,7 +591,7 @@ else
 }
 
 func buildDockerBaselineValidationArgs(request apigateway.ChallengeValidationRequest) []string {
-	return []string{
+	args := []string{
 		"run",
 		"--rm",
 		"--entrypoint",
@@ -531,10 +612,11 @@ else
   exit 1
 fi`,
 	}
+	return append(args[:2], append(defaultProbeSecurity().dockerArgs(), args[2:]...)...)
 }
 
 func buildDockerCheckerValidationArgs(request apigateway.CheckerValidationRequest) []string {
-	return []string{
+	args := []string{
 		"run",
 		"--rm",
 		"--entrypoint",
@@ -571,4 +653,5 @@ fi
 echo 'checker entrypoint does not support validate or --help' >&2
 exit 1`,
 	}
+	return append(args[:2], append(defaultProbeSecurity().dockerArgs(), args[2:]...)...)
 }

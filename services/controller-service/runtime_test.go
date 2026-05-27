@@ -19,6 +19,16 @@ type stubCheckerValidationClient struct {
 	called bool
 }
 
+func testServiceSecurity() dockerRunSecurity {
+	return dockerRunSecurity{
+		capDrop:   []string{"ALL"},
+		capAdd:    []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
+		pidsLimit: "256",
+		memory:    "512m",
+		cpus:      "1.0",
+	}
+}
+
 func (c *stubCheckerValidationClient) Validate(_ context.Context, _ apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
 	c.called = true
 	return c.result, c.err
@@ -36,7 +46,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		SSHHost:         "10.80.3.11",
 	}
 
-	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", "dev-unlock-secret", task)
+	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", "dev-unlock-secret", testServiceSecurity(), task)
 
 	if len(args) == 0 || args[0] != "run" {
 		t.Fatalf("expected docker run args, got %v", args)
@@ -75,7 +85,7 @@ func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
 		SSHHost:         "10.80.2.12",
 	}
 
-	args := buildDockerRunArgs("", "", "dev-unlock-secret", task)
+	args := buildDockerRunArgs("", "", "dev-unlock-secret", testServiceSecurity(), task)
 
 	if slices.Contains(args, "--network") || slices.Contains(args, "--ip") || slices.Contains(args, "--mount") {
 		t.Fatalf("did not expect network, ip, or mount args, got %v", args)
@@ -143,7 +153,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"run -d --restart unless-stopped --name svc-storage-team-101 --hostname svc-storage-team-101",
+		"--name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3),
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",
@@ -310,7 +320,7 @@ func TestDockerEnsureServiceVerifiesSSHContractAfterRun(t *testing.T) {
 		"ps -a --filter name=^/svc-banking-team-101$ --format {{.Names}}",
 		"network inspect adplatform_game_svc_001",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.1.0/24 adplatform_game_svc_001",
-		"run -d --restart unless-stopped --name svc-banking-team-101 --hostname svc-banking-team-101",
+		"--name svc-banking-team-101 --hostname svc-banking-team-101",
 		"exec svc-banking-team-101 /bin/sh -lc",
 	}
 	for _, fragment := range expected {
@@ -411,9 +421,9 @@ func TestDockerValidateChallengeRuntimeRunsEphemeralImageProbe(t *testing.T) {
 	}
 	logOutput := string(logBytes)
 	expected := []string{
-		"run --rm --entrypoint /bin/sh registry.local/proxy:baseline -lc",
+		"--entrypoint /bin/sh registry.local/proxy:baseline -lc",
 		"missing ssh daemon binary inside image",
-		"run --rm --entrypoint /bin/sh registry.local/proxy-checker:latest -lc",
+		"--entrypoint /bin/sh registry.local/proxy-checker:latest -lc",
 		"missing standard checker entrypoint inside image",
 	}
 	for _, fragment := range expected {
@@ -481,7 +491,7 @@ func TestDockerValidateChallengeRuntimeUsesCheckerRunnerClientWhenConfigured(t *
 		t.Fatalf("read docker log: %v", err)
 	}
 	logOutput := string(logBytes)
-	if !strings.Contains(logOutput, "run --rm --entrypoint /bin/sh registry.local/proxy:baseline -lc") {
+	if !strings.Contains(logOutput, "--entrypoint /bin/sh registry.local/proxy:baseline -lc") {
 		t.Fatalf("expected baseline validation docker call, got %q", logOutput)
 	}
 	if strings.Contains(logOutput, "registry.local/proxy-checker:latest") {

@@ -15,6 +15,10 @@ services:
     ports:
       - 127.0.0.1:${CHECKER_RUNNER_LOOPBACK_PORT:-18083}:8083
 
+  docker-socket-proxy:
+    ports:
+      - 127.0.0.1:${DOCKER_SOCKET_PROXY_LOOPBACK_PORT:-12375}:2375
+
   api-gateway:
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -41,7 +45,8 @@ services:
       CONTROLLER_ACCESS_STATUS_PATH: /runtime/controller/access-status.json
       CONTROLLER_ACCESS_TIMEOUT: ${CONTROLLER_ACCESS_TIMEOUT:-10s}
       WIREGUARD_GATEWAY_INTERNAL_URL: ${CONTROLLER_WIREGUARD_GATEWAY_INTERNAL_URL_HOST:-http://127.0.0.1:18087}
-      WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${ADMIN_API_TOKEN}
+      WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${WIREGUARD_GATEWAY_INTERNAL_TOKEN}
+      DOCKER_HOST: ${CONTROLLER_DOCKER_HOST:-tcp://127.0.0.1:12375}
 
   wireguard-gateway:
     networks: !reset []
