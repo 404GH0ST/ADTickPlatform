@@ -1883,7 +1883,10 @@ func (s *postgresStore) ensureWireGuardPeer(ctx context.Context, playerID int, n
 		return tx.Commit()
 	}
 
-	refreshedState, changed := refreshWireGuardPeerState(wireGuardState)
+	refreshedState, changed, err := refreshWireGuardPeerState(wireGuardState)
+	if err != nil {
+		return err
+	}
 	if changed {
 		if err := updateWireGuardPeerServerConfigTx(ctx, tx, refreshedState, now); err != nil {
 			return err

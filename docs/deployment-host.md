@@ -57,7 +57,7 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    secrets and refuses to overwrite an existing file unless `FORCE=true` is set.
    **Critical values to review**:
    - `EDGE_SITE_ADDRESS`: Your public domain or IP (e.g., `http://1.2.3.4`).
-   - `WIREGUARD_SERVER_ENDPOINT`: Your public IP (e.g., `1.2.3.4`).
+   - `WIREGUARD_SERVER_ENDPOINT`: Your public VPN endpoint with port (e.g., `1.2.3.4:51820`).
    - `AD_PLATFORM_EMAIL` / `AD_PLATFORM_PASSWORD`: Set these to a real participant account if you want to use the host smoke scripts. The example alpha credentials only work on seeded/demo data.
    - `AD_PLATFORM_TEAM_ID`: Leave this empty unless you need an explicit consistency check. The smoke scripts derive the team from the authenticated participant account.
 

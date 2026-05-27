@@ -132,7 +132,12 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 		return
 	}
 
-	snapshot := buildWireGuardGatewaySnapshot(peers, s.now())
+	snapshot, err := buildWireGuardGatewaySnapshot(peers, s.now())
+	if err != nil {
+		s.metrics.recordReconcile(time.Since(started), len(peers), true)
+		writeProblem(w, http.StatusInternalServerError, "WireGuard server configuration invalid", err.Error())
+		return
+	}
 	status, err := s.applier.Apply(r.Context(), snapshot)
 	if err != nil {
 		s.rememberStatus(status)
@@ -439,8 +444,11 @@ func ensureParentDir(path string) error {
 	return os.MkdirAll(filepath.Dir(trimmed), 0o750)
 }
 
-func buildWireGuardGatewaySnapshot(peers []apigateway.WireGuardGatewayPeer, now time.Time) wireGuardGatewaySnapshot {
-	settings := resolveWireGuardServerSettings()
+func buildWireGuardGatewaySnapshot(peers []apigateway.WireGuardGatewayPeer, now time.Time) (wireGuardGatewaySnapshot, error) {
+	settings, err := resolveWireGuardServerSettings()
+	if err != nil {
+		return wireGuardGatewaySnapshot{}, err
+	}
 	activePeers := activeWireGuardPeers(peers)
 	configBody := renderWireGuardGatewayConfig(settings, activePeers)
 	revision := wireGuardGatewayRevision(configBody)
@@ -453,7 +461,7 @@ func buildWireGuardGatewaySnapshot(peers []apigateway.WireGuardGatewayPeer, now 
 		PeersTotal:   len(peers),
 		PeersActive:  len(activePeers),
 		PeersRevoked: len(peers) - len(activePeers),
-	}
+	}, nil
 }
 
 func activeWireGuardPeers(peers []apigateway.WireGuardGatewayPeer) []apigateway.WireGuardGatewayPeer {
@@ -557,16 +565,42 @@ func wireGuardGatewayRevision(configBody string) string {
 	return hex.EncodeToString(digest[:8])
 }
 
-func resolveWireGuardServerSettings() wireGuardServerSettings {
+func resolveWireGuardServerSettings() (wireGuardServerSettings, error) {
 	privateKey := strings.TrimSpace(config.String("WIREGUARD_SERVER_PRIVATE_KEY", ""))
 	if privateKey == "" {
+		if !allowDevWireGuardGatewayKeyFallback() {
+			return wireGuardServerSettings{}, fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY must be set outside dry-run memory mode")
+		}
 		privateKey, _ = defaultWireGuardGatewayKeypair()
+	} else if err := validateWireGuardGatewayPrivateKey(privateKey); err != nil {
+		return wireGuardServerSettings{}, err
 	}
 	return wireGuardServerSettings{
 		PrivateKey: privateKey,
 		Address:    strings.TrimSpace(config.String("WIREGUARD_SERVER_ADDRESS", "10.70.0.1/16")),
 		ListenPort: config.Int("WIREGUARD_SERVER_LISTEN_PORT", 51820),
+	}, nil
+}
+
+func allowDevWireGuardGatewayKeyFallback() bool {
+	apiBackend := strings.ToLower(strings.TrimSpace(config.String("API_GATEWAY_STATE_BACKEND", "memory")))
+	wgBackend := strings.ToLower(strings.TrimSpace(config.String("WIREGUARD_GATEWAY_STATE_BACKEND", apiBackend)))
+	mode := strings.ToLower(strings.TrimSpace(config.String("WIREGUARD_GATEWAY_MODE", "dry-run")))
+	return apiBackend != "postgres" && wgBackend != "postgres" && mode == "dry-run"
+}
+
+func validateWireGuardGatewayPrivateKey(privateKey string) error {
+	decoded, err := base64.StdEncoding.DecodeString(privateKey)
+	if err != nil {
+		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
 	}
+	if len(decoded) != 32 {
+		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY must decode to 32 bytes")
+	}
+	if _, err := ecdh.X25519().NewPrivateKey(decoded); err != nil {
+		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
+	}
+	return nil
 }
 
 func defaultWireGuardGatewayKeypair() (string, string) {

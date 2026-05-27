@@ -578,7 +578,11 @@ func (s *memoryStore) GetAdminPlayerWireGuardConfig(_ context.Context, playerID 
 		return adminWireGuardPeer{}, ErrPlayerNotFound
 	}
 	record.WireGuard.TeamName = teamNameForID(s.teamNames, record.Player.TeamID)
-	if refreshedState, changed := refreshWireGuardPeerState(record.WireGuard); changed {
+	refreshedState, changed, err := refreshWireGuardPeerState(record.WireGuard)
+	if err != nil {
+		return adminWireGuardPeer{}, err
+	}
+	if changed {
 		record.WireGuard = refreshedState
 	}
 	return wireGuardAdminView(record.WireGuard), nil

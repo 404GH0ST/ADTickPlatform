@@ -62,6 +62,43 @@ func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
 	}
 }
 
+func TestResolveWireGuardServerSettingsRejectsMissingKeyOutsideDryRunMemory(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_PRIVATE_KEY", "")
+	t.Setenv("API_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_MODE", "host")
+
+	if _, err := resolveWireGuardServerSettings(); err == nil {
+		t.Fatal("expected missing WireGuard server key to fail outside dry-run memory mode")
+	}
+}
+
+func TestResolveWireGuardServerSettingsRejectsInvalidPrivateKey(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_PRIVATE_KEY", "not-base64")
+	t.Setenv("API_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_MODE", "host")
+
+	if _, err := resolveWireGuardServerSettings(); err == nil {
+		t.Fatal("expected invalid WireGuard server key to fail")
+	}
+}
+
+func TestResolveWireGuardServerSettingsAllowsDevFallbackInDryRunMemory(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_PRIVATE_KEY", "")
+	t.Setenv("API_GATEWAY_STATE_BACKEND", "memory")
+	t.Setenv("WIREGUARD_GATEWAY_STATE_BACKEND", "memory")
+	t.Setenv("WIREGUARD_GATEWAY_MODE", "dry-run")
+
+	settings, err := resolveWireGuardServerSettings()
+	if err != nil {
+		t.Fatalf("expected dry-run memory fallback, got %v", err)
+	}
+	if settings.PrivateKey == "" {
+		t.Fatal("expected dev fallback private key")
+	}
+}
+
 func TestFileWireGuardApplierWritesArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	applier := &fileWireGuardApplier{

@@ -21,7 +21,10 @@ func restoreWireGuardState(ctx context.Context, store wireGuardStartupStore, ser
 	if err != nil {
 		return err
 	}
-	snapshot := buildWireGuardGatewaySnapshot(peers, server.now())
+	snapshot, err := buildWireGuardGatewaySnapshot(peers, server.now())
+	if err != nil {
+		return err
+	}
 	status, err := server.applier.Apply(ctx, snapshot)
 	if err != nil {
 		server.rememberStatus(status)

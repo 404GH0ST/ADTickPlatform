@@ -18,6 +18,52 @@ func TestWireGuardServerEndpointDerivesFromPublicBaseURL(t *testing.T) {
 	}
 }
 
+func TestWireGuardServerEndpointAddsListenPortToBareHost(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_ENDPOINT", "192.0.2.10")
+	t.Setenv("WIREGUARD_SERVER_LISTEN_PORT", "51820")
+
+	if endpoint := wireGuardServerEndpoint(); endpoint != "192.0.2.10:51820" {
+		t.Fatalf("expected bare endpoint to include listen port, got %q", endpoint)
+	}
+}
+
+func TestWireGuardServerEndpointKeepsExplicitPort(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_ENDPOINT", "vpn.example.net:53123")
+	t.Setenv("WIREGUARD_SERVER_LISTEN_PORT", "51820")
+
+	if endpoint := wireGuardServerEndpoint(); endpoint != "vpn.example.net:53123" {
+		t.Fatalf("expected explicit endpoint port to be preserved, got %q", endpoint)
+	}
+}
+
+func TestWireGuardServerPublicKeyRejectsMissingKeyOutsideDryRunMemory(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_PUBLIC_KEY", "")
+	t.Setenv("WIREGUARD_SERVER_PRIVATE_KEY", "")
+	t.Setenv("API_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_STATE_BACKEND", "postgres")
+	t.Setenv("WIREGUARD_GATEWAY_MODE", "host")
+
+	if _, err := wireGuardServerPublicKey(); err == nil {
+		t.Fatal("expected missing WireGuard server key to fail outside dry-run memory mode")
+	}
+}
+
+func TestWireGuardServerPublicKeyAllowsDevFallbackInDryRunMemory(t *testing.T) {
+	t.Setenv("WIREGUARD_SERVER_PUBLIC_KEY", "")
+	t.Setenv("WIREGUARD_SERVER_PRIVATE_KEY", "")
+	t.Setenv("API_GATEWAY_STATE_BACKEND", "memory")
+	t.Setenv("WIREGUARD_GATEWAY_STATE_BACKEND", "memory")
+	t.Setenv("WIREGUARD_GATEWAY_MODE", "dry-run")
+
+	publicKey, err := wireGuardServerPublicKey()
+	if err != nil {
+		t.Fatalf("expected dry-run memory fallback, got %v", err)
+	}
+	if publicKey == "" {
+		t.Fatal("expected dev fallback public key")
+	}
+}
+
 func TestAdminPlayerWireGuardConfigRefreshesServerMetadata(t *testing.T) {
 	t.Setenv("WIREGUARD_SERVER_ENDPOINT", "vpn.adplatform.local:51820")
 	t.Setenv("AD_PLATFORM_PUBLIC_BASE_URL", "http://10.70.0.1")

@@ -24,6 +24,29 @@ require_env() {
   fi
 }
 
+require_secret_env() {
+  local name="$1"
+  require_env "${name}"
+  if is_placeholder_secret "${!name:-}"; then
+    echo "placeholder value is not allowed in ${PROD_ENV}: ${name}" >&2
+    exit 1
+  fi
+}
+
+wireguard_endpoint_with_port() {
+  local endpoint="$1"
+
+  endpoint="${endpoint#http://}"
+  endpoint="${endpoint#https://}"
+  if [[ "${endpoint}" == \[*\]:* ]]; then
+    return 0
+  fi
+  if [[ "${endpoint}" == *:* && "${endpoint}" != *:*:* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 port_from_addr() {
   local addr="$1"
   addr="${addr##*:}"
@@ -47,15 +70,30 @@ check_host_interface() {
   fi
 }
 
-require_env ADMIN_API_TOKEN
-require_env TEAM_JWT_SECRET
-require_env UNLOCK_PROOF_SECRET
-require_env GAME_CORE_FLAG_SECRET
+require_secret_env ADMIN_API_TOKEN
+require_secret_env CONTROLLER_INTERNAL_TOKEN
+require_secret_env GAME_CORE_INTERNAL_TOKEN
+require_secret_env SUBMISSION_SERVICE_INTERNAL_TOKEN
+require_secret_env SCORING_WORKER_INTERNAL_TOKEN
+require_secret_env CHECKER_RUNNER_INTERNAL_TOKEN
+require_secret_env WIREGUARD_GATEWAY_INTERNAL_TOKEN
+require_secret_env REALTIME_ADMIN_TOKEN
+require_secret_env TEAM_JWT_SECRET
+require_secret_env UNLOCK_PROOF_SECRET
+require_secret_env SSH_CREDENTIAL_SECRET
+require_secret_env GAME_CORE_FLAG_SECRET
+require_secret_env POSTGRES_PASSWORD
+require_secret_env POSTGRES_DSN
+require_secret_env POSTGRES_DSN_HOST_ENFORCEMENT
 require_env WIREGUARD_SERVER_ENDPOINT
 require_env WIREGUARD_SERVER_ADDRESS
 require_env WIREGUARD_SERVER_LISTEN_PORT
 require_env WIREGUARD_SERVER_ALLOWED_IPS
-require_env WIREGUARD_SERVER_PRIVATE_KEY
+require_secret_env WIREGUARD_SERVER_PRIVATE_KEY
+if ! wireguard_endpoint_with_port "${WIREGUARD_SERVER_ENDPOINT}"; then
+  echo "WIREGUARD_SERVER_ENDPOINT must include host:port in ${PROD_ENV}; use ${WIREGUARD_SERVER_ENDPOINT}:${WIREGUARD_SERVER_LISTEN_PORT}" >&2
+  exit 1
+fi
 
 POSTGRES_LOOPBACK_PORT="${POSTGRES_LOOPBACK_PORT:-15432}"
 CHECKER_RUNNER_LOOPBACK_PORT="${CHECKER_RUNNER_LOOPBACK_PORT:-18083}"
