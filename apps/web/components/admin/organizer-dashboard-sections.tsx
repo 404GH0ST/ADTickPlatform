@@ -9,7 +9,9 @@ import {
   Flag,
   LoaderCircle,
   Network,
+  Pause,
   Pencil,
+  Play,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -242,6 +244,8 @@ type GameTabProps = {
   onResetSchedulerEventFilters: () => void;
   onSchedulerEventFilterChange: (next: GameFilters["schedulerEvent"]) => void;
   onStartMatch: () => void;
+  onPauseMatch: () => void;
+  onResumeMatch: () => void;
   onStartScheduler: () => void;
   onStopMatch: () => void;
   onStopScheduler: () => void;
@@ -1395,6 +1399,8 @@ export function GameTab({
   onResetSchedulerEventFilters,
   onSchedulerEventFilterChange,
   onStartMatch,
+  onPauseMatch,
+  onResumeMatch,
   onStartScheduler,
   onStopMatch,
   onStopScheduler,
@@ -1471,6 +1477,8 @@ export function GameTab({
           onRefreshGameStatus={onRefreshGameStatus}
           onRecomputeScores={onRecomputeScores}
           onStartMatch={onStartMatch}
+          onPauseMatch={onPauseMatch}
+          onResumeMatch={onResumeMatch}
           onStopMatch={onStopMatch}
           onUpdateMatchSchedule={onUpdateMatchSchedule}
         />
@@ -1680,6 +1688,8 @@ function GameControlCard({
   onRefreshGameStatus,
   onRecomputeScores,
   onStartMatch,
+  onPauseMatch,
+  onResumeMatch,
   onStopMatch,
   onUpdateMatchSchedule,
 }: {
@@ -1692,6 +1702,8 @@ function GameControlCard({
   onRefreshGameStatus: () => void;
   onRecomputeScores: () => void;
   onStartMatch: () => void;
+  onPauseMatch: () => void;
+  onResumeMatch: () => void;
   onStopMatch: () => void;
   onUpdateMatchSchedule: (schedule: {
     scheduledStartAt?: string;
@@ -1705,6 +1717,8 @@ function GameControlCard({
         pendingAction={pendingAction}
         onRefreshGameStatus={onRefreshGameStatus}
         onStartMatch={onStartMatch}
+        onPauseMatch={onPauseMatch}
+        onResumeMatch={onResumeMatch}
         onStopMatch={onStopMatch}
       />
       <MatchScheduleCard
@@ -1732,12 +1746,16 @@ function MatchLifecycleCard({
   pendingAction,
   onRefreshGameStatus,
   onStartMatch,
+  onPauseMatch,
+  onResumeMatch,
   onStopMatch,
 }: {
   matchState: AdminGameStatus["match"];
   pendingAction: string | null;
   onRefreshGameStatus: () => void;
   onStartMatch: () => void;
+  onPauseMatch: () => void;
+  onResumeMatch: () => void;
   onStopMatch: () => void;
 }): ReactElement {
   return (
@@ -1796,6 +1814,7 @@ function MatchLifecycleCard({
             disabled={
               pendingAction !== null ||
               matchState?.state === "running" ||
+              matchState?.state === "paused" ||
               matchState?.state === "finished"
             }
             variant="outline"
@@ -1811,6 +1830,35 @@ function MatchLifecycleCard({
           </Button>
           <Button
             disabled={pendingAction !== null || matchState?.state !== "running"}
+            variant="outline"
+            data-testid="pause-match"
+            onClick={onPauseMatch}
+          >
+            {pendingAction === "game:match:pause" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Pause className="h-4 w-4" />
+            )}
+            Pause Game
+          </Button>
+          <Button
+            disabled={pendingAction !== null || matchState?.state !== "paused"}
+            variant="outline"
+            data-testid="resume-match"
+            onClick={onResumeMatch}
+          >
+            {pendingAction === "game:match:resume" ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            Resume Game
+          </Button>
+          <Button
+            disabled={
+              pendingAction !== null ||
+              (matchState?.state !== "running" && matchState?.state !== "paused")
+            }
             variant="outline"
             data-testid="stop-match"
             onClick={onStopMatch}

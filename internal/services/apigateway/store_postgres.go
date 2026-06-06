@@ -818,6 +818,18 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 	return peers, rows.Err()
 }
 
+func (s *postgresStore) IsMatchPaused(ctx context.Context) (bool, error) {
+	var state string
+	err := s.db.QueryRowContext(ctx, `SELECT state FROM game_match_state LIMIT 1`).Scan(&state)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return state == "paused", nil
+}
+
 func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallenge, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id,

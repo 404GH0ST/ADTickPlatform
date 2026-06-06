@@ -628,6 +628,18 @@ export async function startAdminGameMatch() {
   });
 }
 
+export async function pauseAdminGameMatch() {
+  return adminFetch<AdminGameMatchStatus>("/api/v2/admin/game/match/pause", {
+    method: "POST",
+  });
+}
+
+export async function resumeAdminGameMatch() {
+  return adminFetch<AdminGameMatchStatus>("/api/v2/admin/game/match/resume", {
+    method: "POST",
+  });
+}
+
 export async function stopAdminGameMatch() {
   return adminFetch<AdminGameMatchStatus>("/api/v2/admin/game/match/stop", {
     method: "POST",

@@ -131,6 +131,11 @@ func (s *gameCoreServer) applyMatchWindow(status apigateway.GameMatchStatus) api
 		return status
 	}
 
+	if status.State == "paused" {
+		status.AcceptingSubmissions = false
+		return status
+	}
+
 	if endAt != nil && !now.Before(endAt.UTC()) {
 		status.State = "finished"
 		status.AcceptingSubmissions = false
@@ -166,6 +171,8 @@ func (s *gameCoreServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/game/status", s.handleGameStatus)
 	mux.HandleFunc("GET /internal/v1/game/match", s.handleMatchStatus)
 	mux.HandleFunc("POST /internal/v1/game/match/start", s.handleStartMatch)
+	mux.HandleFunc("POST /internal/v1/game/match/pause", s.handlePauseMatch)
+	mux.HandleFunc("POST /internal/v1/game/match/resume", s.handleResumeMatch)
 	mux.HandleFunc("POST /internal/v1/game/match/stop", s.handleStopMatch)
 	mux.HandleFunc("PUT /internal/v1/game/match/schedule", s.handleUpdateMatchSchedule)
 	mux.HandleFunc("POST /internal/v1/game/ticks/advance", s.handleAdvanceTick)
@@ -214,7 +221,7 @@ func (s *gameCoreServer) handleAdvanceTick(w http.ResponseWriter, r *http.Reques
 		switch {
 		case err == errTickInProgress:
 			statusCode = http.StatusConflict
-		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
+		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver), errors.Is(err, errContestPaused):
 			statusCode = http.StatusBadRequest
 		}
 		writeProblem(w, statusCode, "Tick advance failed", err.Error())
@@ -264,6 +271,57 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 	}
 	status = s.applyMatchWindow(status)
 	writeData(w, http.StatusOK, status)
+}
+
+func (s *gameCoreServer) handlePauseMatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	current, err := s.matchStatus(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
+		return
+	}
+	if current.State == "finished" {
+		writeProblem(w, http.StatusConflict, "Request rejected", errContestOver.Error())
+		return
+	}
+	if current.State != "paused" {
+		status, err := s.store.PauseMatch(r.Context(), s.now())
+		if err != nil {
+			writeProblem(w, http.StatusInternalServerError, "Match pause failed", err.Error())
+			return
+		}
+		current = s.applyMatchWindow(status)
+	}
+	if s.scheduler != nil && s.scheduler.Status().State == "running" {
+		_, _ = s.scheduler.Stop()
+	}
+	writeData(w, http.StatusOK, current)
+}
+
+func (s *gameCoreServer) handleResumeMatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	current, err := s.matchStatus(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
+		return
+	}
+	if current.State == "finished" {
+		writeProblem(w, http.StatusConflict, "Request rejected", errContestOver.Error())
+		return
+	}
+	if current.State == "paused" {
+		status, err := s.store.ResumeMatch(r.Context(), s.now())
+		if err != nil {
+			writeProblem(w, http.StatusInternalServerError, "Match resume failed", err.Error())
+			return
+		}
+		current = s.applyMatchWindow(status)
+	}
+	writeData(w, http.StatusOK, current)
 }
 
 func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request) {
@@ -410,7 +468,7 @@ func (s *gameCoreServer) handleStartScheduler(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		switch {
-		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
+		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver), errors.Is(err, errContestPaused):
 			statusCode = http.StatusBadRequest
 		}
 		writeProblem(w, statusCode, "Scheduler start failed", err.Error())
@@ -481,7 +539,7 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		switch {
-		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver):
+		case errors.Is(err, errContestNotStarted), errors.Is(err, errContestOver), errors.Is(err, errContestPaused):
 			statusCode = http.StatusBadRequest
 		}
 		writeProblem(w, statusCode, "Flag submission failed", err.Error())
@@ -589,6 +647,8 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 	switch match.State {
 	case "finished":
 		return apigateway.GameTickStatus{}, errContestOver
+	case "paused":
+		return apigateway.GameTickStatus{}, errContestPaused
 	case "running":
 	default:
 		return apigateway.GameTickStatus{}, errContestNotStarted
@@ -808,6 +868,8 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 	switch match.State {
 	case "finished":
 		return nil, errContestOver
+	case "paused":
+		return nil, errContestPaused
 	case "running":
 	default:
 		return nil, errContestNotStarted

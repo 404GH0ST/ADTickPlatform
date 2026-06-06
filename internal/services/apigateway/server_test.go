@@ -340,6 +340,43 @@ func (c testGameCoreClient) StartMatch(_ context.Context) (GameMatchStatus, erro
 	return match, nil
 }
 
+func (c testGameCoreClient) PauseMatch(_ context.Context) (GameMatchStatus, error) {
+	if c.err != nil {
+		return GameMatchStatus{}, c.err
+	}
+	match := c.match
+	if match.State == "" {
+		match = GameMatchStatus{
+			State:                "paused",
+			StartedAt:            "2026-03-10T10:00:00Z",
+			AcceptingSubmissions: false,
+		}
+	} else {
+		match.State = "paused"
+		match.AcceptingSubmissions = false
+	}
+	return match, nil
+}
+
+func (c testGameCoreClient) ResumeMatch(_ context.Context) (GameMatchStatus, error) {
+	if c.err != nil {
+		return GameMatchStatus{}, c.err
+	}
+	match := c.match
+	if match.State == "" {
+		match = GameMatchStatus{
+			State:                "running",
+			StartedAt:            "2026-03-10T10:00:00Z",
+			AcceptingSubmissions: true,
+		}
+	} else {
+		match.State = "running"
+		match.AcceptingSubmissions = true
+	}
+	return match, nil
+}
+
+
 func (c testGameCoreClient) StopMatch(_ context.Context) (GameMatchStatus, error) {
 	if c.err != nil {
 		return GameMatchStatus{}, c.err

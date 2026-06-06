@@ -241,6 +241,8 @@ export type OrganizerDashboardState = {
   setSchedulerEventFilters: (next: SchedulerEventFilters) => void;
   setTeamDraft: (next: TeamDraft) => void;
   startGameMatch: () => Promise<void>;
+  pauseGameMatch: () => Promise<void>;
+  resumeGameMatch: () => Promise<void>;
   startGameScheduler: () => Promise<void>;
   stopGameMatch: () => Promise<void>;
   stopGameScheduler: () => Promise<void>;
@@ -1568,6 +1570,90 @@ export function useOrganizerDashboard({
     }
   }
 
+  async function pauseGameMatch(): Promise<void> {
+    suppressGameStatusRealtime();
+    setPendingAction("game:match:pause");
+    setActionError(null);
+    setActionNote(null);
+
+    try {
+      const response = await fetch("/api/admin/game/match/pause", {
+        method: "POST",
+      });
+      const payload = await processApiResponse<AdminGameStatus["match"]>(
+        response,
+        "/api/admin/game/match/pause",
+      );
+
+      setGameState((current) => ({
+        ...current,
+        match: payload,
+        scheduler: {
+          ...(current.scheduler ?? { interval_seconds: 60 }),
+          state: "stopped",
+          next_run_at: "",
+        },
+      }));
+      await refreshSchedulerEvents(true);
+      await refreshGameStatus(true);
+      await refreshWireGuardGatewayStatus(true);
+      setActionNote("Match paused. Submissions and participant traffic are now blocked.");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "game match pause failed",
+      );
+    } finally {
+      suppressGameStatusRealtime(1_000);
+      setPendingAction(null);
+    }
+  }
+
+  async function resumeGameMatch(): Promise<void> {
+    suppressGameStatusRealtime();
+    setPendingAction("game:match:resume");
+    setActionError(null);
+    setActionNote(null);
+
+    try {
+      const response = await fetch("/api/admin/game/match/resume", {
+        method: "POST",
+      });
+      const payload = await processApiResponse<AdminGameStatus["match"]>(
+        response,
+        "/api/admin/game/match/resume",
+      );
+
+      let schedulerPayload = gameState.scheduler;
+      try {
+        const schedulerResponse = await fetch("/api/admin/game/scheduler/start", {
+          method: "POST",
+        });
+        schedulerPayload = await processApiResponse<
+          AdminGameStatus["scheduler"]
+        >(schedulerResponse, "/api/admin/game/scheduler/start");
+      } catch (schedErr) {
+        console.warn("Could not auto-start scheduler on resume:", schedErr);
+      }
+
+      setGameState((current) => ({
+        ...current,
+        match: payload,
+        scheduler: schedulerPayload,
+      }));
+      await refreshSchedulerEvents(true);
+      await refreshGameStatus(true);
+      await refreshWireGuardGatewayStatus(true);
+      setActionNote("Match resumed. Submissions and participant traffic are now unblocked.");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "game match resume failed",
+      );
+    } finally {
+      suppressGameStatusRealtime(1_000);
+      setPendingAction(null);
+    }
+  }
+
   async function startGameScheduler(): Promise<void> {
     suppressGameStatusRealtime();
     setPendingAction("game:scheduler:start");
@@ -2339,6 +2425,8 @@ export function useOrganizerDashboard({
     setSchedulerEventFilters,
     setTeamDraft,
     startGameMatch,
+    pauseGameMatch,
+    resumeGameMatch,
     startGameScheduler,
     stopGameMatch,
     stopGameScheduler,

@@ -21,6 +21,7 @@ import (
 var (
 	errTickInProgress    = errors.New("a game tick is already running")
 	errContestNotStarted = errors.New("contest has not started yet.")
+	errContestPaused     = errors.New("contest is temporarily paused.")
 	errContestOver       = errors.New("contest is over.")
 )
 
@@ -106,6 +107,8 @@ type gameStore interface {
 	ListAttackFeed(ctx context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error)
 	MatchStatus(ctx context.Context) (apigateway.GameMatchStatus, error)
 	StartMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
+	PauseMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
+	ResumeMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	StopMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	UpdateMatchSchedule(ctx context.Context, startAt, endAt *time.Time) (apigateway.GameMatchStatus, error)
 	CompleteTick(ctx context.Context, tick apigateway.GameTickStatus) (apigateway.GameTickStatus, error)
@@ -522,6 +525,36 @@ func (s *memoryGameStore) StartMatch(_ context.Context, now time.Time) (apigatew
 		}
 		return s.match, nil
 	}
+}
+
+func (s *memoryGameStore) PauseMatch(_ context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.match.State == "finished" {
+		return apigateway.GameMatchStatus{}, errContestOver
+	}
+	if s.match.State == "not_started" {
+		return apigateway.GameMatchStatus{}, errContestNotStarted
+	}
+	s.match.State = "paused"
+	s.match.AcceptingSubmissions = false
+	return s.match, nil
+}
+
+func (s *memoryGameStore) ResumeMatch(_ context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.match.State == "finished" {
+		return apigateway.GameMatchStatus{}, errContestOver
+	}
+	if s.match.State != "paused" {
+		return s.match, nil
+	}
+	s.match.State = "running"
+	s.match.AcceptingSubmissions = true
+	return s.match, nil
 }
 
 func (s *memoryGameStore) StopMatch(_ context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
@@ -1534,7 +1567,7 @@ func buildSchedulerEventFilterQuery(query apigateway.GameSchedulerEventQuery) (s
 }
 
 func (s *postgresGameStore) ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
-	return s.listStoredScoreboard(ctx)
+	return s.buildScoreboard(ctx, false)
 }
 
 func (s *postgresGameStore) RecomputeScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
@@ -2013,6 +2046,61 @@ func (s *postgresGameStore) StartMatch(ctx context.Context, now time.Time) (apig
 		ScheduleConfigured:   current.ScheduleConfigured,
 		AcceptingSubmissions: true,
 	}, nil
+}
+
+func (s *postgresGameStore) PauseMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	current, err := s.MatchStatus(ctx)
+	if err != nil {
+		return apigateway.GameMatchStatus{}, err
+	}
+	if current.State == "finished" {
+		return apigateway.GameMatchStatus{}, errContestOver
+	}
+	if current.State == "not_started" {
+		return apigateway.GameMatchStatus{}, errContestNotStarted
+	}
+	if current.State == "paused" {
+		return current, nil
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO game_match_state (singleton, state, started_at, ended_at, scheduled_start_at, scheduled_end_at, schedule_configured, updated_at)
+		VALUES (TRUE, 'paused', $1, NULL, $2, $3, $4, $5)
+		ON CONFLICT (singleton) DO UPDATE SET
+			state = EXCLUDED.state,
+			updated_at = EXCLUDED.updated_at
+	`, nullTimeValue(current.StartedAt), nullTimeValue(current.ScheduledStartAt), nullTimeValue(current.ScheduledEndAt), current.ScheduleConfigured, now.UTC()); err != nil {
+		return apigateway.GameMatchStatus{}, err
+	}
+	current.State = "paused"
+	current.AcceptingSubmissions = false
+	return current, nil
+}
+
+func (s *postgresGameStore) ResumeMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	current, err := s.MatchStatus(ctx)
+	if err != nil {
+		return apigateway.GameMatchStatus{}, err
+	}
+	if current.State == "finished" {
+		return apigateway.GameMatchStatus{}, errContestOver
+	}
+	if current.State != "paused" {
+		return current, nil
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO game_match_state (singleton, state, started_at, ended_at, scheduled_start_at, scheduled_end_at, schedule_configured, updated_at)
+		VALUES (TRUE, 'running', $1, NULL, $2, $3, $4, $5)
+		ON CONFLICT (singleton) DO UPDATE SET
+			state = EXCLUDED.state,
+			updated_at = EXCLUDED.updated_at
+	`, nullTimeValue(current.StartedAt), nullTimeValue(current.ScheduledStartAt), nullTimeValue(current.ScheduledEndAt), current.ScheduleConfigured, now.UTC()); err != nil {
+		return apigateway.GameMatchStatus{}, err
+	}
+	current.State = "running"
+	current.AcceptingSubmissions = true
+	return current, nil
 }
 
 func (s *postgresGameStore) StopMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error) {

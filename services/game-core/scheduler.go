@@ -91,6 +91,8 @@ func (s *intervalGameScheduler) startLocked(source, message string) (apigateway.
 		switch match.State {
 		case "finished":
 			return s.status, errContestOver
+		case "paused":
+			return s.status, errContestPaused
 		case "running":
 		default:
 			return s.status, errContestNotStarted

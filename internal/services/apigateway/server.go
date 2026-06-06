@@ -140,6 +140,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/admin/game/status", s.handleAdminGameStatus)
 	mux.HandleFunc("GET /api/v2/admin/game/match", s.handleAdminGameMatchStatus)
 	mux.HandleFunc("POST /api/v2/admin/game/match/start", s.handleAdminStartGameMatch)
+	mux.HandleFunc("POST /api/v2/admin/game/match/pause", s.handleAdminPauseGameMatch)
+	mux.HandleFunc("POST /api/v2/admin/game/match/resume", s.handleAdminResumeGameMatch)
 	mux.HandleFunc("POST /api/v2/admin/game/match/stop", s.handleAdminStopGameMatch)
 	mux.HandleFunc("PUT /api/v2/admin/game/match/schedule", s.handleAdminUpdateGameMatchSchedule)
 	mux.HandleFunc("POST /api/v2/admin/game/ticks/advance", s.handleAdminAdvanceGameTick)
@@ -468,6 +470,9 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			case "not_started":
 				writeProblem(w, http.StatusBadRequest, "Submission rejected", "contest has not started yet.")
 				return
+			case "paused":
+				writeProblem(w, http.StatusBadRequest, "Submission rejected", "contest is temporarily paused.")
+				return
 			case "finished":
 				writeProblem(w, http.StatusBadRequest, "Submission rejected", "contest is over.")
 				return
@@ -651,6 +656,8 @@ func matchSubmissionState(match *GameMatchStatus) string {
 	switch strings.TrimSpace(match.State) {
 	case "finished":
 		return "finished"
+	case "paused":
+		return "paused"
 	case "running":
 		if match.AcceptingSubmissions {
 			return "running"

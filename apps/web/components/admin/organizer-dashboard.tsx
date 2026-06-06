@@ -202,6 +202,12 @@ export function OrganizerDashboard({
         onStartGameMatch: () => {
           void state.startGameMatch();
         },
+        onPauseGameMatch: () => {
+          void state.pauseGameMatch();
+        },
+        onResumeGameMatch: () => {
+          void state.resumeGameMatch();
+        },
         onStartGameScheduler: () => {
           void state.startGameScheduler();
         },
@@ -320,6 +326,8 @@ function renderOrganizerPanel({
   onSetAttackFilters,
   onSetCheckerRunFilters,
   onStartGameMatch,
+  onPauseGameMatch,
+  onResumeGameMatch,
   onStartGameScheduler,
   onStopGameMatch,
   onStopGameScheduler,
@@ -417,6 +425,8 @@ function renderOrganizerPanel({
   onSetAttackFilters: OrganizerDashboardState["setAttackFilters"];
   onSetCheckerRunFilters: OrganizerDashboardState["setCheckerRunFilters"];
   onStartGameMatch: () => void;
+  onPauseGameMatch: () => void;
+  onResumeGameMatch: () => void;
   onStartGameScheduler: () => void;
   onStopGameMatch: () => void;
   onStopGameScheduler: () => void;
@@ -579,6 +589,8 @@ function renderOrganizerPanel({
       onResetSchedulerEventFilters={onResetSchedulerEventFilters}
       onSchedulerEventFilterChange={onSchedulerEventFilterChange}
       onStartMatch={onStartGameMatch}
+      onPauseMatch={onPauseGameMatch}
+      onResumeMatch={onResumeGameMatch}
       onStartScheduler={onStartGameScheduler}
       onStopMatch={onStopGameMatch}
       onStopScheduler={onStopGameScheduler}

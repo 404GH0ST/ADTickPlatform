@@ -652,6 +652,10 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 	return peers, nil
 }
 
+func (s *memoryStore) IsMatchPaused(_ context.Context) (bool, error) {
+	return false, nil
+}
+
 func (s *memoryStore) ListAdminChallenges(_ context.Context) ([]adminChallenge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -29,6 +30,7 @@ type wireGuardGatewayServer struct {
 	now        func() time.Time
 
 	mu         sync.Mutex
+	applyMu    sync.Mutex
 	lastStatus apigateway.WireGuardGatewayStatus
 }
 
@@ -47,6 +49,7 @@ type wireGuardGatewaySnapshot struct {
 	PeersTotal   int
 	PeersActive  int
 	PeersRevoked int
+	MatchPaused  bool
 }
 
 type wireGuardServerSettings struct {
@@ -123,6 +126,8 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
 	started := time.Now()
 
 	peers, err := s.store.ListWireGuardGatewayPeers(r.Context())
@@ -132,12 +137,20 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 		return
 	}
 
+	paused, err := s.store.IsMatchPaused(r.Context())
+	if err != nil {
+		log.Printf("warning: could not determine match pause state, assuming false: %v", err)
+		paused = false
+	}
+
 	snapshot, err := buildWireGuardGatewaySnapshot(peers, s.now())
 	if err != nil {
 		s.metrics.recordReconcile(time.Since(started), len(peers), true)
 		writeProblem(w, http.StatusInternalServerError, "WireGuard server configuration invalid", err.Error())
 		return
 	}
+	snapshot.MatchPaused = paused
+
 	status, err := s.applier.Apply(r.Context(), snapshot)
 	if err != nil {
 		s.rememberStatus(status)
@@ -155,6 +168,8 @@ func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.R
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
 	started := time.Now()
 	if err := s.applier.Teardown(r.Context()); err != nil {
 		s.metrics.recordOperation(wireGuardOperationTeardown, time.Since(started), true)
@@ -336,7 +351,17 @@ func (a *hostWireGuardApplier) Apply(ctx context.Context, snapshot wireGuardGate
 
 	rulesBody := ""
 	if a.firewallBackend == "nftables" {
-		rulesBody = renderNftablesRules(a.nftTable, a.interfaceName, snapshot.ServerIP, activeWireGuardPeers(snapshot.Peers))
+		peers := snapshot.Peers
+		if snapshot.MatchPaused {
+			var organizers []apigateway.WireGuardGatewayPeer
+			for _, p := range peers {
+				if p.TeamName == "Organizer" {
+					organizers = append(organizers, p)
+				}
+			}
+			peers = organizers
+		}
+		rulesBody = renderNftablesRules(a.nftTable, a.interfaceName, snapshot.ServerIP, activeWireGuardPeers(peers))
 	}
 	if err := writeWireGuardArtifacts(a.paths, snapshot, status, rulesBody); err != nil {
 		status.State = "error"

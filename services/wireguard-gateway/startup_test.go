@@ -18,6 +18,11 @@ func (s wireGuardStartupStoreStub) ListWireGuardGatewayPeers(context.Context) ([
 	return s.peers, s.err
 }
 
+func (s wireGuardStartupStoreStub) IsMatchPaused(context.Context) (bool, error) {
+	return false, nil
+}
+
+
 type wireGuardApplierStub struct {
 	status   apigateway.WireGuardGatewayStatus
 	err      error

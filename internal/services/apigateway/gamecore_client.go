@@ -21,6 +21,8 @@ type gameCoreClient interface {
 	Status(ctx context.Context) (GameStatus, error)
 	MatchStatus(ctx context.Context) (GameMatchStatus, error)
 	StartMatch(ctx context.Context) (GameMatchStatus, error)
+	PauseMatch(ctx context.Context) (GameMatchStatus, error)
+	ResumeMatch(ctx context.Context) (GameMatchStatus, error)
 	StopMatch(ctx context.Context) (GameMatchStatus, error)
 	UpdateMatchSchedule(ctx context.Context, req UpdateMatchScheduleRequest) (GameMatchStatus, error)
 	AdvanceTick(ctx context.Context) (GameTickStatus, error)
@@ -48,6 +50,14 @@ func (noopGameCoreClient) MatchStatus(context.Context) (GameMatchStatus, error) 
 }
 
 func (noopGameCoreClient) StartMatch(context.Context) (GameMatchStatus, error) {
+	return GameMatchStatus{}, errGameCoreDisabled
+}
+
+func (noopGameCoreClient) PauseMatch(context.Context) (GameMatchStatus, error) {
+	return GameMatchStatus{}, errGameCoreDisabled
+}
+
+func (noopGameCoreClient) ResumeMatch(context.Context) (GameMatchStatus, error) {
 	return GameMatchStatus{}, errGameCoreDisabled
 }
 
@@ -156,6 +166,14 @@ func (c *httpGameCoreClient) MatchStatus(ctx context.Context) (GameMatchStatus, 
 
 func (c *httpGameCoreClient) StartMatch(ctx context.Context) (GameMatchStatus, error) {
 	return requestGameCoreJSON[GameMatchStatus](ctx, c, http.MethodPost, "/internal/v1/game/match/start")
+}
+
+func (c *httpGameCoreClient) PauseMatch(ctx context.Context) (GameMatchStatus, error) {
+	return requestGameCoreJSON[GameMatchStatus](ctx, c, http.MethodPost, "/internal/v1/game/match/pause")
+}
+
+func (c *httpGameCoreClient) ResumeMatch(ctx context.Context) (GameMatchStatus, error) {
+	return requestGameCoreJSON[GameMatchStatus](ctx, c, http.MethodPost, "/internal/v1/game/match/resume")
 }
 
 func (c *httpGameCoreClient) StopMatch(ctx context.Context) (GameMatchStatus, error) {

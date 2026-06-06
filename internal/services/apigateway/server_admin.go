@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -618,6 +619,48 @@ func (s *Server) handleAdminStopGameMatch(w http.ResponseWriter, r *http.Request
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
+	writeData(w, http.StatusOK, status)
+}
+
+func (s *Server) handleAdminPauseGameMatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	status, err := s.gameCore.PauseMatch(r.Context())
+	if err != nil {
+		writeGameCoreFailure(w, err, "game-core match pause failed.")
+		return
+	}
+	s.recordAdminAudit(r.Context(), "match.pause", "match", "primary-match", "paused match", map[string]any{
+		"state":                 status.State,
+		"accepting_submissions": status.AcceptingSubmissions,
+	})
+
+	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
+		log.Printf("warning: automatic wireguard reconcile on match pause failed: %v", wgErr)
+	}
+
+	writeData(w, http.StatusOK, status)
+}
+
+func (s *Server) handleAdminResumeGameMatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	status, err := s.gameCore.ResumeMatch(r.Context())
+	if err != nil {
+		writeGameCoreFailure(w, err, "game-core match resume failed.")
+		return
+	}
+	s.recordAdminAudit(r.Context(), "match.resume", "match", "primary-match", "resumed match", map[string]any{
+		"state":                 status.State,
+		"accepting_submissions": status.AcceptingSubmissions,
+	})
+
+	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
+		log.Printf("warning: automatic wireguard reconcile on match resume failed: %v", wgErr)
+	}
+
 	writeData(w, http.StatusOK, status)
 }
 

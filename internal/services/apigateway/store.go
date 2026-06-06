@@ -66,6 +66,7 @@ type Store interface {
 	RotateAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error)
 	RevokeAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error)
 	ListWireGuardGatewayPeers(ctx context.Context) ([]WireGuardGatewayPeer, error)
+	IsMatchPaused(ctx context.Context) (bool, error)
 	ListAdminChallenges(ctx context.Context) ([]adminChallenge, error)
 	CreateAdminChallenge(ctx context.Context, input adminCreateChallengeRequest, now time.Time) (adminChallenge, error)
 	UpdateAdminChallenge(ctx context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error)
