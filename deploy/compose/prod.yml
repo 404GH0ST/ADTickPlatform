@@ -33,7 +33,7 @@ services:
       - control
 
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
+    image: tecnativa/docker-socket-proxy:latest
     restart: unless-stopped
     environment:
       CONTAINERS: 1

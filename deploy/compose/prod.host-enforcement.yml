@@ -18,6 +18,9 @@ services:
   docker-socket-proxy:
     ports:
       - 127.0.0.1:${DOCKER_SOCKET_PROXY_LOOPBACK_PORT:-12375}:2375
+    networks:
+      - docker-control
+      - control
 
   api-gateway:
     extra_hosts:
