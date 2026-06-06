@@ -294,7 +294,7 @@ Success:
 ```
 
 The HTTP request succeeds when the batch is processed. Each submitted flag gets
-its own result entry.
+its own result entry. If the match is temporarily paused by the organizers, the entire submission request will fail with a `400 Bad Request` and the detail `"contest is temporarily paused."`.
 
 ## Error Shape
 

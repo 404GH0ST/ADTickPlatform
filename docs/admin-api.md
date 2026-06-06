@@ -264,7 +264,7 @@ Read the persisted match lifecycle state.
 
 Response shape:
 
-- `state` as `not_started`, `running`, or `finished`
+- `state` as `not_started`, `running`, `paused`, or `finished`
 - `started_at` optional RFC3339 timestamp
 - `ended_at` optional RFC3339 timestamp
 - `scheduled_start_at` optional RFC3339 timestamp from `GAME_CORE_MATCH_START_AT`
@@ -293,6 +293,28 @@ Behavior:
 - rejects `scheduled_end_at` earlier than `scheduled_start_at`
 - a background monitor persists `started_at` and `ended_at` automatically when the configured window opens or closes
 - returns the effective match status after applying the updated window
+
+### POST `/api/v2/admin/game/match/pause`
+
+Move the match into `paused` state.
+
+Behavior:
+
+- pauses authoritative participant flag submission (submissions return 400 Bad Request)
+- stops the tick scheduler if it is currently running
+- blocks manual tick advancements
+- triggers an automatic WireGuard gateway reconcile to restrict VPN network access to organizer-only peers
+
+### POST `/api/v2/admin/game/match/resume`
+
+Restore the match to `running` state from `paused`.
+
+Behavior:
+
+- re-opens authoritative participant flag submission
+- restarts the tick scheduler automatically
+- unblocks manual tick advancements
+- triggers an automatic WireGuard gateway reconcile to restore VPN network access for all active participant peers
 
 ### POST `/api/v2/admin/game/match/stop`
 

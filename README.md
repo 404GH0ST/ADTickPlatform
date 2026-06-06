@@ -1,58 +1,89 @@
-# AD Platform
+# ADTickPlatform
 
-A comprehensive Attack-Defense Tick CTF (Capture The Flag) platform. 
+A comprehensive, production-ready Attack-Defense Tick Capture The Flag (CTF) platform.
 
-This platform manages periodic ticks, per-team isolated service instances, checker-driven validations (PUT/GET/SLA), stolen-flag submissions, live scoring, and WireGuard-based team network access.
+[![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg?style=flat-squared&logo=go)](https://go.dev)
+[![TypeScript Version](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-squared&logo=typescript)](https://www.typescriptlang.org)
+[![Docker Support](https://img.shields.io/badge/Containerized-Docker%20Compose-blue.svg?style=flat-squared&logo=docker)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-squared)](LICENSE)
 
-## Features
+---
 
-- **Go Backend Services**: Highly concurrent control-plane services.
-- **Next.js Frontend**: Modern dashboard for participants and organizers built with TypeScript, Bun, and shadcn/ui.
-- **PostgreSQL**: Authoritative and auditable game state storage.
-- **Redis**: Fast caching, locks, and live event queue management.
-- **Docker Isolation**: Secure, per-team containerized service instances.
-- **WireGuard Access**: Secure VPN access to the game network for participants.
-- **Live Match Mechanics**: Real-time scoreboard, attack map, tick scheduling, and flag validation.
-- **Dynamic Access Control**: Exploit-gated SSH access into owned service containers for patching.
+## What is ADTickPlatform?
+
+ADTickPlatform is an all-in-one Attack-Defense CTF framework designed to manage and automate periodic game ticks, isolated service environments, automated flag validation, and secure participant connectivity.
+
+It comes equipped with highly concurrent Go-based microservices, a real-time responsive Next.js participant and operator interface, automatic WireGuard gateway management, and host-level firewall enforcement.
+
+---
+
+## Visual Showcases
+
+### Real-Time 3D Attack Globe & Leaderboard
+<p align="center">
+  <img src="docs/images/attack-globe.png" alt="3D Attack Globe" width="48%" />
+  <img src="docs/images/scoreboard.png" alt="Authoritative Scoreboard" width="48%" />
+</p>
+
+### Tick Scheduler & Live Attack Feed
+<p align="center">
+  <img src="docs/images/scheduler.png" alt="Tick Scheduler" width="48%" />
+  <img src="docs/images/attack-map.png" alt="Live Attack Feed" width="48%" />
+</p>
+
+---
+
+## Key Features
+
+- **Real-time Dynamic Scoreboard & Visuals**: An interactive 3D WebGL attack globe, real-time live-updating team scoreboard, and comprehensive attack feed powered by Server-Sent Events (SSE).
+- **Secure Tenant Isolation**: Automatic deployment of per-team challenge service instances isolated inside dedicated Docker runtimes.
+- **First-Class Match lifecycle Control**: Support for starting, stopping, freezing, and **first-class match pause/resume**. Pausing automatically blocks submissions, stops the scheduler, freezes tick advances, and restricts WireGuard access to organizer-only peers.
+- **WireGuard VPN Gateway & Firewall**: Automatic client certificate management for participant VPN profiles and integrated `nftables` host firewall rulesets to enforce tenant network isolation.
+- **FaustCTF-Style Scoring**: Built-in score calculations where flag points decay dynamically as more teams compromise a service, combined with SLA uptime scoring.
+- **Exploit-Gated SSH Credential Management**: Automated generation and deployment of stable SSH root credentials to let players patch and secure their challenge containers.
+
+---
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+Comprehensive documentation guides are available in the [docs/](file:///home/jergal/ADTickPlatform/docs) directory:
 
-- [System Architecture](docs/architecture.md)
-- [Deployment: Debian/Ubuntu Host](docs/deployment-host.md)
-- [Game Rules And Runtime Flows](docs/game-rules.md)
-- [Participant Platform Manual](docs/platform-manual.md)
-- [Participant OpenAPI Spec](docs/platform-api-v2.openapi.yaml)
-- [Challenge Runtime Contract](docs/challenge-runtime.md)
-- [Implementation Plan](docs/implementation-plan.md)
-- [Organizer Admin API](docs/admin-api.md)
-- [Final Rehearsal Checklist](docs/final-rehearsal-checklist.md)
-- [Sample HTTP Challenge](examples/sample-http-challenge/README.md)
-- [Sample LFI Challenge](examples/sample-lfi-challenge/README.md)
+- [System Architecture](file:///home/jergal/ADTickPlatform/docs/architecture.md) — Under-the-hood design and service relationships.
+- [Deployment: Ubuntu/Debian Host](file:///home/jergal/ADTickPlatform/docs/deployment-host.md) — Production setup guide.
+- [Game Rules & Runtime Flows](file:///home/jergal/ADTickPlatform/docs/game-rules.md) — Scoring formulas and tick structure.
+- [Participant Platform Manual](file:///home/jergal/ADTickPlatform/docs/platform-manual.md) — A guide for CTF competitors.
+- [Organizer Admin API Guide](file:///home/jergal/ADTickPlatform/docs/admin-api.md) — Controlling the match programmatically.
+- [Operator CLI Cheatsheet](file:///home/jergal/ADTickPlatform/docs/operator-cheatsheet.md) — Rapid control commands.
+- [Ops Runbook](file:///home/jergal/ADTickPlatform/docs/ops-runbook.md) & [Trusted Reconcile](file:///home/jergal/ADTickPlatform/docs/trusted-reconcile-runbook.md) — Operational guidelines.
+- [Final Rehearsal Checklist](file:///home/jergal/ADTickPlatform/docs/final-rehearsal-checklist.md) — Pre-flight sanity checks.
+- [Participant OpenAPI Spec](file:///home/jergal/ADTickPlatform/docs/platform-api-v2.openapi.yaml) — Platform API specs.
+- [Challenge Runtime Contract](file:///home/jergal/ADTickPlatform/docs/challenge-runtime.md) — Specifications for challenge builders.
 
-Participant web docs routes are available live at `/docs/participant`, `/docs/platform-api`, and `/docs/platform-api-v2.openapi.yaml`.
+Live documentation is also exposed on the running platform under `/docs/participant`, `/docs/platform-api`, and `/docs/platform-api-v2.openapi.yaml`.
+
+---
 
 ## Repository Layout
 
 ```text
 .
-├── apps/web                 # Next.js frontend application
-├── deploy/                  # Docker Compose and deployment configurations
-│   ├── caddy/               # Edge proxy configuration
-│   ├── compose/             # Local and production compose files
-│   └── docker/              # Dockerfiles for services
-├── docs/                    # Platform documentation
-├── examples/                # Example challenges
-├── internal/                # Shared Go packages (platform, database, game network)
-├── scripts/                 # Utility scripts for bootstrapping and smoke testing
-└── services/                # Go backend microservices
+├── apps/web                 # Next.js frontend application (Dashboard, Admin, Visuals)
+├── deploy/                  # Deployment files (Compose scripts, Dockerfiles, proxies)
+│   ├── caddy/               # Caddy reverse proxy & Virtual Host configurations
+│   ├── compose/             # Local & production compose configurations
+│   └── docker/              # Service build Dockerfiles
+├── docs/                    # Architectural and operational manuals
+├── examples/                # Example challenge service implementations
+├── internal/                # Shared Go utilities (network, databases, auth)
+├── scripts/                 # Setup scripts, data seeders, and validation smoke tests
+└── services/                # Go backend microservices (api-gateway, game-core, wireguard, etc.)
 ```
+
+---
 
 ## Quick Start (Local Development)
 
 ### Prerequisites
-
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose
 - [Go](https://go.dev/doc/install) 1.21+
 - [Bun](https://bun.sh/)
@@ -60,83 +91,77 @@ Participant web docs routes are available live at `/docs/participant`, `/docs/pl
 
 ### Setup
 
-1. Clone the repository and prepare your environment variables:
+1. Copy and configure your local environment settings:
    ```bash
    cp .env.example .env
    ```
 
-2. Start the local database stack (PostgreSQL and Redis):
+2. Spin up the local databases (PostgreSQL and Redis):
    ```bash
    docker compose -f deploy/compose/dev.yml up -d
    ```
 
-3. Run the backend services:
+3. Run the backend services in memory mode:
    ```bash
    make run-backend-stack-postgres
    ```
 
-4. In a separate terminal, install frontend dependencies and start the web app:
+4. Install dependencies and boot the Next.js frontend:
    ```bash
    cd apps/web
    bun install
    bun run dev
    ```
 
+---
+
 ## Production Deployment
 
-Production uses a unified Docker Compose setup behind a Caddy edge proxy.
+The production deployment runs behind a Caddy reverse proxy with automated database migrations and host network enforcement.
 
-1. Configure production environments:
+1. Configure production secrets and properties:
    ```bash
    cp deploy/compose/prod.env.example deploy/compose/prod.env
-   # Edit prod.env with your specific secrets and domain (EDGE_SITE_ADDRESS)
+   # Edit prod.env with your database credentials and EDGE_SITE_ADDRESS
    ```
 
-2. Bring up the production stack:
+2. Validate and spin up the production container stack:
    ```bash
-   make up-prod
+   make preflight-prod-host
+   make up-prod-host
    ```
-   *(Note: This automatically builds the Next.js standalone output prior to container creation).*
+   *Note: Operator operations require root execution or `sudo NOPASSWD` for host inspection commands.*
 
-For host-level WireGuard and firewall enforcement, use the host-enforcement profile:
-```bash
-make preflight-prod-host
-make up-prod-host
-```
-
-`make preflight-prod-host` now also verifies that host automation can obtain root non-interactively. Event-day commands such as `make go-live-check`, `make smoke-prod-host-enforcement`, and `make capture-prod-host-baseline` should be run either as `root` or by an operator with `sudo NOPASSWD` for the required host inspection commands.
+---
 
 ## Testing & Validation
 
-The repository includes extensive scripts for validating platform functionality.
+The platform includes a robust test and validation pipeline to ensure correctness:
 
-- **Full CI Gate**: `make ci`
-- **Backend Unit Tests**: `make test`
-- **Frontend Typecheck**: `bun run web:typecheck`
-- **Frontend Production Build**: `bun run web:build`
-- **Browser Regression Tests**: `bunx playwright install chromium && make e2e`
-- **Participant Flow Simulation**: `make smoke-participant`
-- **Full Docker Challenge Smoke Test**: `make smoke-sample-challenge-docker`
-- **Attack Map Load Validation**: `ATTACK_MAP_LOAD_MIN_SUBMISSIONS_PER_SECOND=5 ATTACK_MAP_LOAD_MAX_SUBMISSION_P95_MS=1500 ATTACK_MAP_LOAD_MAX_RECOMPUTE_MS=5000 ATTACK_MAP_LOAD_MAX_ATTACK_FEED_LAG_MS=3000 make simulate-attack-map-load`
-- **Release-Candidate Attack Map Validation**: `make validate-attack-map-load`
-- **Production Database Restore Drill**: `make smoke-prod-db-restore`
+- **Complete CI validation run**: `make ci`
+- **Go Unit Tests**: `make test`
+- **Next.js Typechecks**: `bun run web:typecheck`
+- **Visual Regression Tests**: `bunx playwright install chromium && make e2e`
+- **Challenge Simulation Smoke Test**: `make smoke-sample-challenge-docker`
+- **High-throughput load testing**: `make simulate-attack-map-load`
+- **Database rollback drill**: `make smoke-prod-db-restore`
 
-GitHub Actions runs `make ci` plus the Playwright browser regression suite on pushes and pull requests so the main branch stays aligned with the documented local validation path.
-When the browser job fails, CI uploads `apps/web/playwright-report` and `apps/web/test-results` so traces, screenshots, videos, and snapshot diffs are available from the failed run.
-`make simulate-attack-map-load` now also emits measured throughput and latency summaries, and it can fail the run when the optional threshold environment variables are exceeded. Use `ATTACK_MAP_LOAD_REPORT_FILE` to persist a JSON report for release-candidate evidence.
-`make validate-attack-map-load` applies a fixed threshold profile, waits for the edge endpoints, and stores the JSON report plus env metadata in `.runtime/attack-map-load-*`.
-
-If you need to reset the environment to a clean state during testing:
+To reset the database and runtime files to a clean starting state:
 ```bash
 make bootstrap-clean-match
 ```
 
-## Service Contracts
+---
 
-For challenges deployed to the platform, the service image must provide:
-- A working `/bin/sh`
-- An SSH daemon (`sshd`, `dropbear`)
-- A password setter (`chpasswd`, `passwd`)
-- Logic to expose or protect the injected `AD_PLATFORM_UNLOCK_PROOF` environment variable.
+## Challenge Development Contract
 
-For more details, see the [Challenge Runtime Contract](docs/challenge-runtime.md).
+Custom challenges deployed to the platform must conform to the [Challenge Runtime Contract](file:///home/jergal/ADTickPlatform/docs/challenge-runtime.md):
+- Provide a working `/bin/sh` shell environment.
+- Expose an SSH daemon (`sshd` or `dropbear`).
+- Include a password setting command (`chpasswd` or `passwd`).
+- Support exposing or protecting the generated `AD_PLATFORM_UNLOCK_PROOF` environment variable.
+
+See our included examples to get started:
+- [Sample HTTP Challenge](file:///home/jergal/ADTickPlatform/examples/sample-http-challenge/README.md)
+- [Sample LFI Challenge](file:///home/jergal/ADTickPlatform/examples/sample-lfi-challenge/README.md)
+- [Sample RCE Challenge](file:///home/jergal/ADTickPlatform/examples/sample-rce-challenge/README.md)
