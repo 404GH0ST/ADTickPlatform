@@ -51,7 +51,9 @@ test("organizer can create, edit, and delete a challenge", async ({
   await page.getByRole("button", { name: "Create Challenge" }).click();
   const createDialog = page.getByRole("dialog", { name: "Create challenge" });
   await expect(createDialog).toBeVisible();
-  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+  const createButton = createDialog.getByRole("button", { name: "Create" });
+  await expect(createButton).toBeDisabled();
+  await expect(createButton).toBeInViewport();
   await expect(createDialog.getByText("Challenge ID: #2")).toBeVisible();
   await expect(createDialog.getByText("Runtime network: 10.80.2.0/24")).toBeVisible();
   await expect(
@@ -65,13 +67,13 @@ test("organizer can create, edit, and delete a challenge", async ({
   await createDialog
     .getByLabel("Checker image")
     .fill("adplatform/sample-ftp-checker:latest");
-  await expect(createDialog.getByRole("button", { name: "Create" })).toBeEnabled();
+  await expect(createButton).toBeEnabled();
 
   await createDialog.getByLabel("Source bundle path").fill("/bad");
   await expect(
     createDialog.getByText("Use a relative path inside AD_CHALLENGE_SOURCE_ROOT."),
   ).toBeVisible();
-  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+  await expect(createButton).toBeDisabled();
 
   await createDialog
     .getByLabel("Source bundle path")
@@ -84,7 +86,7 @@ test("organizer can create, edit, and delete a challenge", async ({
       exact: true,
     }),
   ).toBeVisible();
-  await expect(createDialog.getByRole("button", { name: "Create" })).toBeDisabled();
+  await expect(createButton).toBeDisabled();
 
   await createDialog.getByLabel("Subnet octet").fill("60");
   await createDialog.getByLabel("Weight").fill("7");
@@ -93,7 +95,8 @@ test("organizer can create, edit, and delete a challenge", async ({
   await expect(
     createDialog.getByText("Participant source download: examples/sample-lfi-challenge"),
   ).toBeVisible();
-  await createDialog.getByRole("button", { name: "Create" }).click();
+  await expect(createButton).toBeInViewport();
+  await createButton.click();
 
   await expect(
     page.getByText(

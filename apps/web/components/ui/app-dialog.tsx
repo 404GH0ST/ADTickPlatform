@@ -36,7 +36,7 @@ export function AppDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent
         className={cn(
-          'max-h-[min(88vh,48rem)] overflow-hidden',
+          'grid-rows-[auto_minmax(0,1fr)_auto] max-h-[min(88vh,48rem)] overflow-hidden',
           contentClassName,
         )}
       >
