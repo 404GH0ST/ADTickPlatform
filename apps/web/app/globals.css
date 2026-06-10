@@ -56,9 +56,12 @@
   --tone-danger-background: oklch(0.97 0.02 25);
   --tone-danger-border: oklch(0.88 0.03 25);
   --tone-danger-foreground: oklch(0.48 0.09 25);
-  --tone-neutral-background: oklch(0.95 0.004 72);
-  --tone-neutral-border: oklch(0.87 0.005 72);
-  --tone-neutral-foreground: oklch(0.43 0.008 72);
+  --tone-info-background: oklch(0.95 0.026 230);
+  --tone-info-border: oklch(0.82 0.052 230);
+  --tone-info-foreground: oklch(0.39 0.078 230);
+  --tone-neutral-background: oklch(0.93 0.006 72);
+  --tone-neutral-border: oklch(0.78 0.01 72);
+  --tone-neutral-foreground: oklch(0.36 0.01 72);
   --signal-positive: oklch(0.46 0.09 150);
   --signal-negative: oklch(0.5 0.09 25);
   --signal-info: oklch(0.45 0.06 230);
@@ -113,9 +116,12 @@
   --tone-danger-background: oklch(0.28 0.025 25);
   --tone-danger-border: oklch(0.38 0.04 25);
   --tone-danger-foreground: oklch(0.82 0.05 25);
-  --tone-neutral-background: oklch(0.27 0.01 70);
-  --tone-neutral-border: oklch(0.35 0.01 70);
-  --tone-neutral-foreground: oklch(0.75 0.01 80);
+  --tone-info-background: oklch(0.27 0.03 230);
+  --tone-info-border: oklch(0.42 0.052 230);
+  --tone-info-foreground: oklch(0.82 0.052 230);
+  --tone-neutral-background: oklch(0.25 0.01 70);
+  --tone-neutral-border: oklch(0.43 0.012 70);
+  --tone-neutral-foreground: oklch(0.82 0.012 80);
   --signal-positive: oklch(0.82 0.06 150);
   --signal-negative: oklch(0.82 0.05 25);
   --signal-info: oklch(0.8 0.04 230);
@@ -192,6 +198,12 @@
     border-color: var(--tone-danger-border);
     background: var(--tone-danger-background);
     color: var(--tone-danger-foreground);
+  }
+
+  .tone-info {
+    border-color: var(--tone-info-border);
+    background: var(--tone-info-background);
+    color: var(--tone-info-foreground);
   }
 
   .tone-neutral {

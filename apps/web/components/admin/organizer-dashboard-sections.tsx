@@ -258,7 +258,7 @@ type GameTabProps = {
 
 const challengeTone = {
   ready: "tone-success",
-  deploying: "tone-neutral",
+  deploying: "tone-info",
   draft: "tone-warning",
 } as const;
 
