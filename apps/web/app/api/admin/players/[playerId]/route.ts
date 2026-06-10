@@ -9,8 +9,8 @@ export async function DELETE(
 ) {
   try {
     const { playerId } = await params;
-    const data = await deleteAdminPlayer(Number(playerId));
-    return NextResponse.json(data);
+    await deleteAdminPlayer(Number(playerId));
+    return new Response(null, { status: 204 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'player delete failed';
     return problemResponse(502, 'Upstream request failed', message);

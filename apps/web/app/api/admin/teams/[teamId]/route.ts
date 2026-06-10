@@ -10,8 +10,8 @@ export async function DELETE(
 ) {
   try {
     const { teamId } = await params;
-    const data = await deleteAdminTeam(Number(teamId));
-    return NextResponse.json(data);
+    await deleteAdminTeam(Number(teamId));
+    return new Response(null, { status: 204 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'team delete failed';
     return problemResponse(502, 'Upstream request failed', message);

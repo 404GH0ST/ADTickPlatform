@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from 'next/server';
+import { type NextRequest } from 'next/server';
 
 import { problemResponse } from '@/lib/api-handler';
 import { deleteAdminDeployment } from '@/lib/admin-api';
@@ -9,8 +9,8 @@ export async function DELETE(
 ) {
   try {
     const { deploymentId } = await params;
-    const data = await deleteAdminDeployment(Number(deploymentId));
-    return NextResponse.json(data);
+    await deleteAdminDeployment(Number(deploymentId));
+    return new Response(null, { status: 204 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'deployment delete failed';
     return problemResponse(502, 'Upstream request failed', message);
