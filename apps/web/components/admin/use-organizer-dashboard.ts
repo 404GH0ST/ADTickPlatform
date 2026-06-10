@@ -267,6 +267,19 @@ export type OrganizerDashboardState = {
   refreshServiceMetrics: (silent?: boolean) => Promise<void>;
 };
 
+function challengeValidationRowsFromChallenges(
+  challenges: AdminChallenge[],
+): Record<number, AdminChallengeValidationResult> {
+  return Object.fromEntries(
+    challenges
+      .filter((challenge) => challenge.last_validation)
+      .map((challenge) => [
+        challenge.id,
+        challenge.last_validation as AdminChallengeValidationResult,
+      ]),
+  );
+}
+
 export function useOrganizerDashboard({
   attackPage,
   challenges,
@@ -306,7 +319,7 @@ export function useOrganizerDashboard({
   );
   const [challengeValidationRows, setChallengeValidationRows] = useState<
     Record<number, AdminChallengeValidationResult>
-  >({});
+  >(() => challengeValidationRowsFromChallenges(challenges));
   const [selectedWireGuardPeer, setSelectedWireGuardPeer] =
     useState<AdminWireGuardPeer | null>(null);
   const [accessStatus, setAccessStatus] =
@@ -2306,6 +2319,11 @@ export function useOrganizerDashboard({
       setChallengeRows((current) =>
         current.map((c) => (c.id === editingId ? payload : c)),
       );
+      setChallengeValidationRows((current) => {
+        const next = { ...current };
+        delete next[editingId];
+        return next;
+      });
       setActionNote(`Updated challenge ${payload.name}.`);
       return true;
     } catch (error) {

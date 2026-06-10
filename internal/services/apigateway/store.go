@@ -72,6 +72,7 @@ type Store interface {
 	UpdateAdminChallenge(ctx context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error)
 	DeleteAdminChallenge(ctx context.Context, challengeID int) error
 	DeployAdminChallenge(ctx context.Context, challengeID int) (adminDeployment, error)
+	SaveAdminChallengeValidation(ctx context.Context, result ChallengeValidationResult) error
 	ListAdminDeployments(ctx context.Context) ([]adminDeploymentJob, error)
 	DeleteAdminDeployment(ctx context.Context, deploymentID int) error
 	ListAdminAuditLogs(ctx context.Context, query adminAuditLogQuery) (adminAuditLogPage, error)

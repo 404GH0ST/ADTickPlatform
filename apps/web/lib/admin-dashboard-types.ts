@@ -89,6 +89,7 @@ export type AdminChallenge = {
   queued_teams: number;
   ready_teams: number;
   created_at: string;
+  last_validation?: AdminChallengeValidationResult;
 };
 
 export type AdminChallengeValidationResult = {

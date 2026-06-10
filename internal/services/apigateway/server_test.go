@@ -376,7 +376,6 @@ func (c testGameCoreClient) ResumeMatch(_ context.Context) (GameMatchStatus, err
 	return match, nil
 }
 
-
 func (c testGameCoreClient) StopMatch(_ context.Context) (GameMatchStatus, error) {
 	if c.err != nil {
 		return GameMatchStatus{}, c.err
@@ -2766,6 +2765,21 @@ func TestAdminCanValidateChallengeBeforeDeploy(t *testing.T) {
 	payload := decodeCompat[ChallengeValidationResult](t, response.Body.Bytes())
 	if payload.Status != "valid" || !payload.BaselineSSHContractOK || !payload.CheckerContractOK || !payload.ServiceStateContractOK {
 		t.Fatalf("unexpected validation result %+v", payload)
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/challenges", nil)
+	listRequest.Header.Set("Authorization", adminAuth)
+	listResponse := httptest.NewRecorder()
+	mux.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d", listResponse.Code)
+	}
+	challenges := decodeCompat[[]adminChallenge](t, listResponse.Body.Bytes())
+	if len(challenges) == 0 || challenges[0].LastValidation == nil {
+		t.Fatalf("expected persisted validation in challenge list, got %+v", challenges)
+	}
+	if challenges[0].LastValidation.Status != "valid" {
+		t.Fatalf("unexpected persisted validation %+v", challenges[0].LastValidation)
 	}
 }
 

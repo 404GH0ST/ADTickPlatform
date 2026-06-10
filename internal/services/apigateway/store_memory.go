@@ -1234,6 +1234,19 @@ func (s *memoryStore) DeleteAdminChallenge(_ context.Context, challengeID int) e
 	return nil
 }
 
+func (s *memoryStore) SaveAdminChallengeValidation(_ context.Context, result ChallengeValidationResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	challenge, ok := s.challenges[result.ChallengeID]
+	if !ok {
+		return ErrChallengeNotFound
+	}
+	validation := result
+	challenge.LastValidation = &validation
+	return nil
+}
+
 func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input adminUpdateTeamRequest) (adminTeam, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1290,6 +1303,7 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	if input.Weight > 0 {
 		challenge.Weight = input.Weight
 	}
+	challenge.LastValidation = nil
 	s.challenges[challengeID] = challenge
 	return *challenge, nil
 }

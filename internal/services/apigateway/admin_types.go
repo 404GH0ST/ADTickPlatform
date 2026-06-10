@@ -114,21 +114,22 @@ type WireGuardGatewayStatus struct {
 }
 
 type adminChallenge struct {
-	ID                 int    `json:"id"`
-	Name               string `json:"name"`
-	BaselineImage      string `json:"baseline_image"`
-	CheckerImage       string `json:"checker_image"`
-	SourceBundlePath   string `json:"source_bundle_path"`
-	Weight             int    `json:"weight"`
-	ServicePort        int    `json:"service_port"`
-	ServiceSubnetOctet int    `json:"service_subnet_octet"`
-	Published          bool   `json:"published"`
-	DeployedTeams      int    `json:"deployed_teams"`
-	TotalTeams         int    `json:"total_teams"`
-	RuntimeStatus      string `json:"runtime_status"`
-	QueuedTeams        int    `json:"queued_teams"`
-	ReadyTeams         int    `json:"ready_teams"`
-	CreatedAt          string `json:"created_at"`
+	ID                 int                        `json:"id"`
+	Name               string                     `json:"name"`
+	BaselineImage      string                     `json:"baseline_image"`
+	CheckerImage       string                     `json:"checker_image"`
+	SourceBundlePath   string                     `json:"source_bundle_path"`
+	Weight             int                        `json:"weight"`
+	ServicePort        int                        `json:"service_port"`
+	ServiceSubnetOctet int                        `json:"service_subnet_octet"`
+	Published          bool                       `json:"published"`
+	DeployedTeams      int                        `json:"deployed_teams"`
+	TotalTeams         int                        `json:"total_teams"`
+	RuntimeStatus      string                     `json:"runtime_status"`
+	QueuedTeams        int                        `json:"queued_teams"`
+	ReadyTeams         int                        `json:"ready_teams"`
+	CreatedAt          string                     `json:"created_at"`
+	LastValidation     *ChallengeValidationResult `json:"last_validation,omitempty"`
 }
 
 type adminDeployment struct {

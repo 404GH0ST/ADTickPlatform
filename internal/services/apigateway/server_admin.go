@@ -449,6 +449,10 @@ func (s *Server) handleAdminValidateChallenge(w http.ResponseWriter, r *http.Req
 		writeProblem(w, http.StatusBadGateway, "Challenge validation unavailable", "challenge runtime validation failed.")
 		return
 	}
+	if err := s.store.SaveAdminChallengeValidation(r.Context(), result); err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
 	s.recordAdminAudit(r.Context(), "challenge.validate", "challenge", auditChallengeTarget(result.ChallengeID, result.Name), "validated challenge runtime", map[string]any{
 		"challenge_id":              result.ChallengeID,
 		"status":                    result.Status,
@@ -474,6 +478,10 @@ func (s *Server) handleAdminDeployChallenge(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		writeProblem(w, http.StatusBadGateway, "Challenge deployment unavailable", "challenge runtime validation failed.")
+		return
+	}
+	if err := s.store.SaveAdminChallengeValidation(r.Context(), validation); err != nil {
+		writeStoreFailure(w, err)
 		return
 	}
 	if validation.Status != "valid" || !validation.BaselineSSHContractOK || !validation.CheckerContractOK || !validation.ServiceStateContractOK {

@@ -842,13 +842,19 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
 		       c.published,
 		       c.created_at,
+		       c.last_validation_status,
+		       c.last_validation_baseline_ssh_contract_ok,
+		       c.last_validation_checker_contract_ok,
+		       c.last_validation_service_state_contract_ok,
+		       c.last_validation_checked_at,
+		       COALESCE(c.last_validation_message, ''),
 		       COUNT(DISTINCT si.team_id) AS deployed_teams,
 		       COUNT(DISTINCT CASE WHEN si.runtime_status = 'queued' THEN si.team_id END) AS queued_teams,
 		       COUNT(DISTINCT CASE WHEN si.runtime_status = 'ready' THEN si.team_id END) AS ready_teams,
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.published, c.created_at
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -860,6 +866,12 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 	for rows.Next() {
 		var challenge adminChallenge
 		var createdAt time.Time
+		var validationStatus sql.NullString
+		var validationBaselineOK sql.NullBool
+		var validationCheckerOK sql.NullBool
+		var validationServiceStateOK sql.NullBool
+		var validationCheckedAt sql.NullTime
+		var validationMessage string
 		if err := rows.Scan(
 			&challenge.ID,
 			&challenge.Name,
@@ -871,6 +883,12 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.ServiceSubnetOctet,
 			&challenge.Published,
 			&createdAt,
+			&validationStatus,
+			&validationBaselineOK,
+			&validationCheckerOK,
+			&validationServiceStateOK,
+			&validationCheckedAt,
+			&validationMessage,
 			&challenge.DeployedTeams,
 			&challenge.QueuedTeams,
 			&challenge.ReadyTeams,
@@ -879,6 +897,20 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			return nil, err
 		}
 		challenge.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		if validationStatus.Valid && validationCheckedAt.Valid {
+			challenge.LastValidation = &ChallengeValidationResult{
+				ChallengeID:            challenge.ID,
+				Name:                   challenge.Name,
+				BaselineImage:          challenge.BaselineImage,
+				CheckerImage:           challenge.CheckerImage,
+				Status:                 validationStatus.String,
+				BaselineSSHContractOK:  validationBaselineOK.Valid && validationBaselineOK.Bool,
+				CheckerContractOK:      validationCheckerOK.Valid && validationCheckerOK.Bool,
+				ServiceStateContractOK: validationServiceStateOK.Valid && validationServiceStateOK.Bool,
+				CheckedAt:              validationCheckedAt.Time.UTC().Format(time.RFC3339),
+				Message:                validationMessage,
+			}
+		}
 		challenge.RuntimeStatus = challengeRuntimeStatus(challenge.Published, challenge.TotalTeams, challenge.ReadyTeams, challenge.QueuedTeams)
 		result = append(result, challenge)
 	}
@@ -1043,7 +1075,21 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if duplicate {
 		return adminChallenge{}, ErrDuplicateResource
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE challenges SET name = $2, baseline_image = $3, checker_image = $4, source_bundle_path = $5, weight = $6 WHERE id = $1`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight); err != nil {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE challenges
+		SET name = $2,
+		    baseline_image = $3,
+		    checker_image = $4,
+		    source_bundle_path = $5,
+		    weight = $6,
+		    last_validation_status = NULL,
+		    last_validation_baseline_ssh_contract_ok = NULL,
+		    last_validation_checker_contract_ok = NULL,
+		    last_validation_service_state_contract_ok = NULL,
+		    last_validation_checked_at = NULL,
+		    last_validation_message = NULL
+		WHERE id = $1
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight); err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)
@@ -1775,6 +1821,42 @@ func (s *postgresStore) DeleteAdminTeam(ctx context.Context, teamID int) error {
 func (s *postgresStore) DeleteAdminChallenge(ctx context.Context, challengeID int) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM challenges WHERE id = $1`, challengeID)
 	return err
+}
+
+func (s *postgresStore) SaveAdminChallengeValidation(ctx context.Context, result ChallengeValidationResult) error {
+	checkedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(result.CheckedAt))
+	if err != nil {
+		checkedAt = time.Now().UTC()
+	}
+	command, err := s.db.ExecContext(ctx, `
+		UPDATE challenges
+		SET last_validation_status = $2,
+		    last_validation_baseline_ssh_contract_ok = $3,
+		    last_validation_checker_contract_ok = $4,
+		    last_validation_service_state_contract_ok = $5,
+		    last_validation_checked_at = $6,
+		    last_validation_message = $7
+		WHERE id = $1
+	`,
+		result.ChallengeID,
+		strings.TrimSpace(result.Status),
+		result.BaselineSSHContractOK,
+		result.CheckerContractOK,
+		result.ServiceStateContractOK,
+		checkedAt.UTC(),
+		strings.TrimSpace(result.Message),
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := command.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrChallengeNotFound
+	}
+	return nil
 }
 
 func (s *postgresStore) Close() error {
