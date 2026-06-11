@@ -107,3 +107,51 @@ Persistent data lives in Docker named volumes
 (`ad-platform-local_prometheus-data`, `ad-platform-local_grafana-data`).
 15 days of TSDB retention is configured; reduce in
 `deploy/compose/dev.yml` if disk is tight.
+
+### Production monitoring
+
+Production runs the same Prometheus + Grafana stack but mounted on the
+`ad-platform-prod` compose network. Key differences from dev:
+
+- **Prometheus config** uses Docker service DNS targets
+  (`api-gateway:8080`, `game-core:8081`, etc.) instead of
+  `host.docker.internal:PORT`, because in prod every backend service
+  runs in the same `control` network. Config is in
+  `deploy/prometheus/prometheus.prod.yml`.
+- **TSDB retention** defaults to 30d (configurable via
+  `PROMETHEUS_RETENTION` in `prod.env`).
+- **Ports** are bound to the host only (`127.0.0.1` semantics via the
+  default `0.0.0.0` bind, but the edge Caddy does NOT route to them).
+  Participants never see Grafana or Prometheus.
+- **Credentials** come from `prod.env`:
+  `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` /
+  `PROMETHEUS_HOST_PORT` / `GRAFANA_HOST_PORT`.
+
+Bring it up after `make up-prod`:
+
+```bash
+test -f deploy/compose/prod.env || cp deploy/compose/prod.env.example deploy/compose/prod.env
+$EDITOR deploy/compose/prod.env   # set GRAFANA_ADMIN_PASSWORD, ports, retention
+make monitoring-up-prod
+```
+
+This validates that `prod.env` exists, brings up Prometheus + Grafana,
+and prints the local URLs. From a remote host, use an SSH tunnel:
+
+```bash
+ssh -L 13000:127.0.0.1:13000 -L 19090:127.0.0.1:19090 user@prod-server
+# Then open http://localhost:13000 in your local browser
+```
+
+**Why two prometheus.yml files?** Prometheus' static_configs can't
+read environment variables, so the target list is baked into the file
+at compose-mount time. Dev uses `host.docker.internal` (services on
+the host), prod uses service DNS (services in Docker). If you need
+to add a service, edit both files.
+
+Clean shutdown:
+
+```bash
+make monitoring-down-prod    # stop, keep data
+make monitoring-clean-prod   # also delete volumes
+```

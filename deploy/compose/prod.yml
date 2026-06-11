@@ -400,6 +400,51 @@ services:
     networks:
       - control
 
+  # --- Monitoring (Prometheus + Grafana) ---------------------------------
+  # Both services bind to the host on dedicated ports that the edge Caddy
+  # does NOT route to. Organizer reaches them from the host directly
+  # (or via SSH tunnel: ssh -L 13000:127.0.0.1:13000). Participants
+  # never see these ports because they only know EDGE_*_PUBLIC_PORT.
+  # Service discovery uses Docker DNS (api-gateway:8080 etc.) because
+  # in prod every service runs inside the "control" network.
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-19090}:9090"
+    volumes:
+      - ../prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    networks:
+      - control
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-adplatform}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "${GRAFANA_HOST_PORT:-13000}:3000"
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - control
+
 volumes:
   postgres-data:
   redis-data:
@@ -407,6 +452,8 @@ volumes:
   controller-artifacts:
   caddy-data:
   caddy-config:
+  prometheus-data:
+  grafana-data:
 
 networks:
   control:

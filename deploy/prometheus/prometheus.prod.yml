@@ -1,0 +1,51 @@
+# Prometheus scrape config for ADTickPlatform (PRODUCTION).
+#
+# Differs from prometheus.yml (dev):
+#   - Targets use Docker service DNS names (api-gateway:8080, etc.)
+#     because in prod every backend service runs inside this compose
+#     network ("control"), not on the host.
+#   - Retention defaults to 30d (configurable via PROMETHEUS_RETENTION).
+#   - cluster label is "adplatform-prod" so dev + prod can scrape the
+#     same Grafana if needed.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: adplatform-prod
+    monitor: adplatform
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: prometheus
+
+  - job_name: adplatform-services
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - api-gateway:8080
+          - game-core:8081
+          - submission-service:8082
+          - checker-runner:8083
+          - controller-service:8084
+          - scoring-worker:8085
+          - realtime-gateway:8086
+          - wireguard-gateway:8087
+        labels:
+          cluster: adplatform-prod
+
+  - job_name: adplatform-rate-limit
+    metrics_path: /internal/v1/rate-limit/metrics
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['api-gateway:8080']
+        labels:
+          cluster: adplatform-prod
+          service: api-gateway

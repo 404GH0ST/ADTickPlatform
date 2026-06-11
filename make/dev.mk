@@ -6,7 +6,8 @@
 	validate-faust-target-shape report-faust-balance export-runtime-incident-bundle \
 	create-admin create-teams simulate-attack-map-load validate-attack-map-load \
 	prod-web-artifacts install-host-deps \
-	monitoring-up monitoring-down monitoring-tail monitoring-status monitoring-clean
+	monitoring-up monitoring-down monitoring-tail monitoring-status monitoring-clean \
+	monitoring-up-prod monitoring-down-prod monitoring-tail-prod monitoring-status-prod monitoring-clean-prod
 
 fmt:
 	@mkdir -p $(GOCACHE)
@@ -159,3 +160,31 @@ monitoring-status:
 monitoring-clean:
 	$(MONITORING_COMPOSE) rm -fsv prometheus grafana
 	docker volume rm -f ad-platform-local_prometheus-data ad-platform-local_grafana-data
+
+# Production monitoring — same stack, different compose + scrape targets.
+# Reads vars from deploy/compose/prod.env; requires the file to exist
+# (copy from prod.env.example first). Prometheus targets use Docker service
+# DNS names because in prod all services run in the same compose network.
+
+MONITORING_PROD_COMPOSE := docker compose -f deploy/compose/prod.yml --env-file deploy/compose/prod.env
+
+monitoring-up-prod:
+	@test -f deploy/compose/prod.env || (echo "deploy/compose/prod.env not found; copy from prod.env.example"; exit 1)
+	$(MONITORING_PROD_COMPOSE) up -d prometheus grafana
+	@echo
+	@echo "Grafana:    http://localhost:$${GRAFANA_HOST_PORT:-13000}  (admin / $$GRAFANA_ADMIN_PASSWORD)"
+	@echo "Prometheus: http://localhost:$${PROMETHEUS_HOST_PORT:-19090}"
+	@echo "Both bind to the host only. The edge Caddy does NOT route to them."
+
+monitoring-down-prod:
+	$(MONITORING_PROD_COMPOSE) stop prometheus grafana
+
+monitoring-tail-prod:
+	$(MONITORING_PROD_COMPOSE) logs -f prometheus grafana
+
+monitoring-status-prod:
+	$(MONITORING_PROD_COMPOSE) ps prometheus grafana
+
+monitoring-clean-prod:
+	$(MONITORING_PROD_COMPOSE) rm -fsv prometheus grafana
+	docker volume rm -f ad-platform-prod_prometheus-data ad-platform-prod_grafana-data
