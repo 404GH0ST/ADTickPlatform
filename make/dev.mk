@@ -172,9 +172,10 @@ monitoring-up-prod:
 	@test -f deploy/compose/prod.env || (echo "deploy/compose/prod.env not found; copy from prod.env.example"; exit 1)
 	$(MONITORING_PROD_COMPOSE) up -d prometheus grafana
 	@echo
-	@echo "Grafana:    http://localhost:$${GRAFANA_HOST_PORT:-13000}  (admin / $$GRAFANA_ADMIN_PASSWORD)"
+	@echo "Grafana:    http://localhost:$${GRAFANA_HOST_PORT:-13000}"
 	@echo "Prometheus: http://localhost:$${PROMETHEUS_HOST_PORT:-19090}"
 	@echo "Both bind to the host only. The edge Caddy does NOT route to them."
+	@echo "Grafana admin password: grep '^GRAFANA_ADMIN_PASSWORD=' deploy/compose/prod.env"
 
 monitoring-down-prod:
 	$(MONITORING_PROD_COMPOSE) stop prometheus grafana
