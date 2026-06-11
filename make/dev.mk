@@ -8,7 +8,7 @@
 	prod-web-artifacts install-host-deps \
 	monitoring-up monitoring-down monitoring-tail monitoring-status monitoring-clean \
 	monitoring-up-prod monitoring-down-prod monitoring-tail-prod monitoring-status-prod monitoring-clean-prod \
-	rotate-grafana-password-prod
+	rotate-grafana-password-prod test-alerts
 
 fmt:
 	@mkdir -p $(GOCACHE)
@@ -194,3 +194,11 @@ monitoring-clean-prod:
 rotate-grafana-password-prod:
 	@test -f deploy/compose/prod.env || (echo "deploy/compose/prod.env not found; copy from prod.env.example first"; exit 1)
 	./scripts/rotate-grafana-password.sh
+
+# Run promtool's rule unit tests against deploy/prometheus/rules/adplatform-alerts.test.yml.
+# Verifies each of the 5 alert rules actually fires under its target
+# condition (no more silent-broken alerts). Pulls a one-shot promtool
+# image so the host doesn't need a separate install.
+test-alerts:
+	docker run --rm -v "$(PWD)/deploy/prometheus/rules:/rules:ro" prom/prometheus:v2.55.1 \
+		promtool test rules /rules/adplatform-alerts.test.yml
