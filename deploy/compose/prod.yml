@@ -379,7 +379,7 @@ services:
       - control
 
   edge:
-    image: caddy:2.10-alpine
+    image: caddy:2.11-alpine
     restart: unless-stopped
     depends_on:
       web:
@@ -409,7 +409,7 @@ services:
   # in prod every service runs inside the "control" network.
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: prom/prometheus:v2.55.1
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -427,7 +427,7 @@ services:
       - control
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:11.4.0
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
