@@ -75,6 +75,40 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/session:
+    get:
+      tags:
+        - Authentication
+      summary: Validate bearer token and return current participant profile
+      description: |
+        Used by the web frontend on page load to confirm a stored token is still
+        valid and to populate the participant's team/role context. Re-validates
+        against the store on every call (a deleted player returns 403 even if
+        the JWT itself is still valid). Peserta tidak perlu panggil endpoint ini
+        secara langsung; itu dipakai oleh web frontend saat page load.
+      operationId: getSession
+      responses:
+        '200':
+          description: Token valid; returns the participant profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantSession'
+              examples:
+                default:
+                  value:
+                    player_id: 1
+                    team_id: 101
+                    team_name: Team Alpha
+                    display_name: Alpha Captain
+                    email: alpha.captain@example.com
+                    role: captain
+        '403':
+          description: Token missing, invalid, expired, or player no longer in store.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/challenges:
     get:
       tags:
@@ -805,6 +839,33 @@ components:
         token_type:
           type: string
           const: Bearer
+    ParticipantSession:
+      type: object
+      additionalProperties: false
+      required:
+        - player_id
+        - team_id
+        - team_name
+        - display_name
+        - email
+        - role
+      properties:
+        player_id:
+          type: integer
+          description: Authenticated player's id (used to scope requests).
+        team_id:
+          type: integer
+          description: Owning team id; organizer tokens report 0.
+        team_name:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [member, captain, organizer]
     Challenge:
       type: object
       additionalProperties: false
