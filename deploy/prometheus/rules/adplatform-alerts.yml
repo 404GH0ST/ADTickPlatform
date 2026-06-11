@@ -65,17 +65,19 @@ groups:
     interval: 1m
     rules:
       - alert: AdplatformSchedulerStuck
-        # Scheduler reported running but no tick advance in 10 minutes.
+        # Scheduler reports running but the next run is overdue by 10+ minutes.
+        # The seconds_until_next_run metric is negative when overdue, so the
+        # threshold flips the sign (alert when < -600s).
         expr: |
           adplatform_game_core_scheduler_running == 1
           and
-          (time() - adplatform_game_core_last_tick_completed_at_seconds) > 600
+          adplatform_game_core_scheduler_seconds_until_next_run < -600
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "Game scheduler stuck"
-          description: "Scheduler reports running but no tick completed in 10+ minutes. Investigate checker-runner health."
+          description: "Scheduler reports running but the next run is overdue by 10+ minutes. Investigate checker-runner health."
 
       - alert: AdplatformScoringAuditMismatch
         expr: adplatform_scoring_worker_last_audit_mismatches > 0
