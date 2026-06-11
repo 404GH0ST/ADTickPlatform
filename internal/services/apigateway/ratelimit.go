@@ -14,6 +14,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -301,12 +303,59 @@ func (s *Server) allowRateLimit(ctx context.Context, key string, policy rateLimi
 	if err != nil {
 		if policy.failClosedOnError {
 			log.Printf("rate limiter failed closed for key %q: %v", key, err)
+			s.rateLimitMetrics.recordHit(endpointFromKey(key))
 			return rateLimitDecision{allowed: false, retryAfter: 5 * time.Second}, false
 		}
 		log.Printf("rate limiter failed open for key %q: %v", key, err)
 		return rateLimitDecision{allowed: true}, true
 	}
+	if !decision.allowed {
+		s.rateLimitMetrics.recordHit(endpointFromKey(key))
+	}
 	return decision, decision.allowed
+}
+
+func endpointFromKey(key string) string {
+	if i := strings.IndexByte(key, ':'); i > 0 {
+		return key[:i]
+	}
+	return key
+}
+
+type rateLimitMetrics struct {
+	hits sync.Map // map[string]*atomic.Uint64
+}
+
+func newRateLimitMetrics() *rateLimitMetrics {
+	return &rateLimitMetrics{}
+}
+
+func (m *rateLimitMetrics) recordHit(endpoint string) {
+	if m == nil || endpoint == "" {
+		return
+	}
+	actual, _ := m.hits.LoadOrStore(endpoint, &atomic.Uint64{})
+	actual.(*atomic.Uint64).Add(1)
+}
+
+func (m *rateLimitMetrics) WritePrometheus(w io.Writer) {
+	if m == nil {
+		return
+	}
+	fmt.Fprintln(w, "# HELP adplatform_rate_limit_exceeded_total Requests rejected by the rate limiter, labelled by endpoint.")
+	fmt.Fprintln(w, "# TYPE adplatform_rate_limit_exceeded_total counter")
+	m.hits.Range(func(key, value any) bool {
+		endpoint, ok := key.(string)
+		if !ok {
+			return true
+		}
+		count, ok := value.(*atomic.Uint64)
+		if !ok {
+			return true
+		}
+		fmt.Fprintf(w, "adplatform_rate_limit_exceeded_total{endpoint=%q} %d\n", endpoint, count.Load())
+		return true
+	})
 }
 
 func writeRateLimitFailure(w http.ResponseWriter, decision rateLimitDecision, message string) {
@@ -320,6 +369,10 @@ func writeRateLimitFailure(w http.ResponseWriter, decision rateLimitDecision, me
 
 func rateLimitTeamKey(prefix string, teamID int) string {
 	return fmt.Sprintf("%s:team:%d", prefix, teamID)
+}
+
+func rateLimitUserKey(prefix string, userID int) string {
+	return fmt.Sprintf("%s:user:%d", prefix, userID)
 }
 
 func rateLimitClientKey(prefix, clientIP string) string {
@@ -341,13 +394,14 @@ func rateLimitAuthKey(email, clientIP string) string {
 var (
 	maxSubmitFlagsPerRequest       = 128
 	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
-	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2}
-	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
-	scoreboardRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
-	attacksReadRateLimitPolicy     = rateLimitPolicy{capacity: 6, refillPerSecond: 3}
-	teamServicesRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 2}
-	challengeSourceRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 1}
-	submitRateLimitPolicy          = rateLimitPolicy{capacity: 30, refillPerSecond: 10, failClosedOnError: true}
+	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2, failClosedOnError: true}
+	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
+	scoreboardRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
+	attacksReadRateLimitPolicy     = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
+	teamServicesRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
+	challengeSourceRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 1, failClosedOnError: true}
+	submitRateLimitPolicy          = rateLimitPolicy{capacity: 45, refillPerSecond: 15, failClosedOnError: true}
+	submitUserRateLimitPolicy     = rateLimitPolicy{capacity: 15, refillPerSecond: 5, failClosedOnError: true}
 	unlockRateLimitPolicy          = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0, failClosedOnError: true}
 	sshSessionRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
 	factoryResetRateLimitPolicy    = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}

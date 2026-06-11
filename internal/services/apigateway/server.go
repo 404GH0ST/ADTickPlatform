@@ -24,6 +24,7 @@ type Server struct {
 	scoring             scoringClient
 	gameCore            gameCoreClient
 	rateLimiter         rateLimiter
+	rateLimitMetrics    *rateLimitMetrics
 	unlockProofSecret   string
 	now                 func() time.Time
 }
@@ -52,6 +53,7 @@ func NewWithDeps(teamToken, adminToken string, teamID int, store Store, controll
 		scoring:             noopScoringClient{},
 		gameCore:            game,
 		rateLimiter:         noopRateLimiter{},
+		rateLimitMetrics:    newRateLimitMetrics(),
 		unlockProofSecret:   teamToken,
 		now:                 time.Now,
 	}
@@ -155,6 +157,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/admin/game/scoreboard", s.handleAdminGameScoreboard)
 	mux.HandleFunc("POST /api/v2/admin/game/scoring/recompute", s.handleAdminRecomputeScoring)
 	mux.HandleFunc("GET /api/v2/admin/game/scoring/audit", s.handleAdminAuditScoring)
+	mux.HandleFunc("GET /internal/v1/rate-limit/metrics", s.handleRateLimitMetrics)
 	mux.HandleFunc("GET /api/v2/admin/platform/settings", s.handleAdminGetPlatformSettings)
 	mux.HandleFunc("PUT /api/v2/admin/platform/settings", s.handleAdminUpdatePlatformSettings)
 	mux.HandleFunc("POST /api/v2/admin/platform/settings/reload", s.handleAdminReloadFlagFormat)
@@ -447,12 +450,22 @@ func (s *Server) handleTeamServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
-	teamID, ok := s.requireTeamAuth(w, r, "please authenticate before submit.")
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before submit.")
 	if !ok {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate before submit.")
+		return
+	}
+	teamID := player.TeamID
 
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamKey("submit", teamID), submitRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	decision, allowed = s.allowRateLimit(r.Context(), rateLimitUserKey("submit", player.PlayerID), submitUserRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
@@ -936,6 +949,11 @@ func writeStoreFailure(w http.ResponseWriter, err error) {
 		log.Printf("store failure: %v", err)
 	}
 	writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", "internal platform state is unavailable.")
+}
+
+func (s *Server) handleRateLimitMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	s.rateLimitMetrics.WritePrometheus(w)
 }
 
 func writeData(w http.ResponseWriter, statusCode int, value any) {
