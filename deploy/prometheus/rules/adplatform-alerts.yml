@@ -1,0 +1,87 @@
+# Alert rules for ADTickPlatform.
+# Evaluated by Prometheus every 15s. Wire to Alertmanager (not bundled
+# here) for routing; the rules below are useful even without Alertmanager
+# because they drive the "Alerts" panel in the bundled dashboard.
+groups:
+  - name: adplatform-availability
+    interval: 30s
+    rules:
+      - alert: AdplatformServiceDown
+        expr: up{job="adplatform-services"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "{{ $labels.instance }} has been unreachable for 1 minute."
+
+      - alert: AdplatformPrometheusTargetFailing
+        expr: up{job="adplatform-rate-limit"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Rate-limit metrics scrape failing"
+          description: "api-gateway /internal/v1/rate-limit/metrics has been unreachable for 1 minute."
+
+  - name: adplatform-rate-limit
+    interval: 30s
+    rules:
+      - alert: AdplatformRateLimitSustainedSpike
+        # More than 30 429s/min on a single endpoint for 3 minutes straight.
+        expr: |
+          sum by (endpoint) (
+            increase(adplatform_rate_limit_exceeded_total[1m])
+          ) > 30
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained 429 spike on {{ $labels.endpoint }}"
+          description: "Endpoint {{ $labels.endpoint }} is rejecting > 30 req/min for 3+ minutes. Either raise the policy or investigate the caller."
+
+  - name: adplatform-submissions
+    interval: 30s
+    rules:
+      - alert: AdplatformSubmitFailureRate
+        # Submit failure ratio > 25% over 5 minutes.
+        expr: |
+          (
+            rate(adplatform_submission_service_submit_failures_total[5m])
+            /
+            (
+              rate(adplatform_submission_service_submit_requests_total[5m])
+              + rate(adplatform_submission_service_submit_failures_total[5m])
+            )
+          ) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Submission failure rate > 25%"
+          description: "More than a quarter of submit requests are failing. Check game-core reachability and Redis."
+
+  - name: adplatform-match
+    interval: 1m
+    rules:
+      - alert: AdplatformSchedulerStuck
+        # Scheduler reported running but no tick advance in 10 minutes.
+        expr: |
+          adplatform_game_core_scheduler_running == 1
+          and
+          (time() - adplatform_game_core_last_tick_completed_at_seconds) > 600
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Game scheduler stuck"
+          description: "Scheduler reports running but no tick completed in 10+ minutes. Investigate checker-runner health."
+
+      - alert: AdplatformScoringAuditMismatch
+        expr: adplatform_scoring_worker_last_audit_mismatches > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scoring replay audit mismatches > 0"
+          description: "Scoring recompute and replay disagree on {{ $value }} rows. Investigate before publishing scores."

@@ -1,0 +1,59 @@
+# Prometheus scrape config for ADTickPlatform.
+#
+# Architecture assumption (local dev):
+#   - Postgres + Redis run in Docker (deploy/compose/dev.yml).
+#   - Backend Go services run on the host via `make run-backend-stack-postgres`,
+#     so Prometheus (running in Docker) scrapes them via host.docker.internal.
+#   - For Linux Docker Desktop, the `extra_hosts` directive in the compose file
+#     ensures host.docker.internal resolves to the host gateway.
+#   - For production, replace host.docker.internal with the Docker service
+#     DNS names (api-gateway:8080, game-core:8081, etc.) and add a `network:`
+#     directive so Prometheus shares the same Docker network as the services.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: adplatform-local
+    monitor: adplatform
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: prometheus
+
+  # All eight backend services. The /metrics path is wired by
+  # httpapi.NewBaseMux in each service's main.go, so no per-service
+  # override is needed.
+  - job_name: adplatform-services
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - host.docker.internal:8080  # api-gateway
+          - host.docker.internal:8081  # game-core
+          - host.docker.internal:8082  # submission-service
+          - host.docker.internal:8083  # checker-runner
+          - host.docker.internal:8084  # controller-service
+          - host.docker.internal:8085  # scoring-worker
+          - host.docker.internal:8086  # realtime-gateway
+          - host.docker.internal:8087  # wireguard-gateway
+        labels:
+          cluster: adplatform-local
+
+  # The dedicated rate-limit counter (separate /internal/v1/rate-limit/metrics
+  # endpoint on api-gateway). Scrape both so dashboards can join the two
+  # views without duplicating the rate-limit series.
+  - job_name: adplatform-rate-limit
+    metrics_path: /internal/v1/rate-limit/metrics
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          cluster: adplatform-local
+          service: api-gateway

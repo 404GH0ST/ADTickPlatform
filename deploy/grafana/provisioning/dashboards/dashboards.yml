@@ -1,0 +1,15 @@
+# Dashboard provider: tells Grafana to load every .json in
+# /var/lib/grafana/dashboards/ on boot and refresh them every 30s.
+apiVersion: 1
+
+providers:
+  - name: adplatform
+    orgId: 1
+    folder: ADTickPlatform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

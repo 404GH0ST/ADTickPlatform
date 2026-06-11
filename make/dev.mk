@@ -5,7 +5,8 @@
 	bootstrap-clean-match bootstrap-faust-target-shape finalize-faust-target-shape \
 	validate-faust-target-shape report-faust-balance export-runtime-incident-bundle \
 	create-admin create-teams simulate-attack-map-load validate-attack-map-load \
-	prod-web-artifacts install-host-deps
+	prod-web-artifacts install-host-deps \
+	monitoring-up monitoring-down monitoring-tail monitoring-status monitoring-clean
 
 fmt:
 	@mkdir -p $(GOCACHE)
@@ -130,3 +131,31 @@ prod-web-artifacts:
 
 install-host-deps:
 	./scripts/install-host-deps.sh
+
+# --- Monitoring (Prometheus + Grafana) -------------------------------------
+# Backend Go services run on the host via `make run-backend-stack-postgres`,
+# so Prometheus in Docker scrapes them via host.docker.internal. If you run
+# the backend inside docker compose too, change the targets in
+# deploy/prometheus/prometheus.yml to the service names (e.g. api-gateway:8080).
+
+MONITORING_COMPOSE := docker compose -f deploy/compose/dev.yml
+
+monitoring-up:
+	$(MONITORING_COMPOSE) up -d prometheus grafana
+	@echo
+	@echo "Grafana:    http://localhost:$${GRAFANA_HOST_PORT:-13000}  (default admin / adplatform)"
+	@echo "Prometheus: http://localhost:$${PROMETHEUS_HOST_PORT:-19090}"
+	@echo "Wait ~15s for first scrape, then open the 'ADTickPlatform — Match Overview' dashboard."
+
+monitoring-down:
+	$(MONITORING_COMPOSE) stop prometheus grafana
+
+monitoring-tail:
+	$(MONITORING_COMPOSE) logs -f prometheus grafana
+
+monitoring-status:
+	$(MONITORING_COMPOSE) ps prometheus grafana
+
+monitoring-clean:
+	$(MONITORING_COMPOSE) rm -fsv prometheus grafana
+	docker volume rm -f ad-platform-local_prometheus-data ad-platform-local_grafana-data
