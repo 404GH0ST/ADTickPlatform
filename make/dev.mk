@@ -7,7 +7,8 @@
 	create-admin create-teams simulate-attack-map-load validate-attack-map-load \
 	prod-web-artifacts install-host-deps \
 	monitoring-up monitoring-down monitoring-tail monitoring-status monitoring-clean \
-	monitoring-up-prod monitoring-down-prod monitoring-tail-prod monitoring-status-prod monitoring-clean-prod
+	monitoring-up-prod monitoring-down-prod monitoring-tail-prod monitoring-status-prod monitoring-clean-prod \
+	rotate-grafana-password-prod
 
 fmt:
 	@mkdir -p $(GOCACHE)
@@ -189,3 +190,7 @@ monitoring-status-prod:
 monitoring-clean-prod:
 	$(MONITORING_PROD_COMPOSE) rm -fsv prometheus grafana
 	docker volume rm -f ad-platform-prod_prometheus-data ad-platform-prod_grafana-data
+
+rotate-grafana-password-prod:
+	@test -f deploy/compose/prod.env || (echo "deploy/compose/prod.env not found; copy from prod.env.example first"; exit 1)
+	./scripts/rotate-grafana-password.sh
