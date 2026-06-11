@@ -99,7 +99,6 @@ type ChallengeDraft = {
   sourceBundlePath: string;
   servicePort: string;
   serviceSubnetOctet: string;
-  weight: string;
   egressEnabled: boolean;
 };
 
@@ -1037,7 +1036,6 @@ function ChallengeCatalogCard({
             { label: "Images" },
             { label: "Status" },
             { label: "Validation" },
-            { label: "Weight" },
             { label: "Network" },
             { label: "Egress" },
             { label: "Replication" },
@@ -1123,7 +1121,6 @@ function ChallengeCatalogRow({
           ) : null}
         </div>
       </TableCell>
-      <TableCell>{challenge.weight}</TableCell>
       <TableCell className="text-xs text-muted-foreground">
         <div>
           <p>10.80.{challenge.service_subnet_octet}.0/24</p>
@@ -4636,14 +4633,12 @@ type ChallengeDraftField =
   | "checkerImage"
   | "sourceBundlePath"
   | "servicePort"
-  | "serviceSubnetOctet"
-  | "weight";
+  | "serviceSubnetOctet";
 
 type ChallengeDraftValidation = {
   effectiveChallengeID: number;
   effectiveServicePort: number;
   effectiveServiceSubnetOctet: number;
-  effectiveWeight: number;
   endpointExample: string;
   errors: string[];
   fieldErrors: Partial<Record<ChallengeDraftField, string>>;
@@ -4762,11 +4757,6 @@ function validateChallengeDraft(
     formMode === "edit" && editingID !== null
       ? editingID
       : nextChallengeID(challengeRows);
-  const parsedWeight = parseOptionalInteger(challengeDraft.weight);
-  const effectiveWeight =
-    parsedWeight === null || Number.isNaN(parsedWeight) || parsedWeight <= 0
-      ? 1
-      : parsedWeight;
 
   if (challengeDraft.name.trim() === "") {
     fieldErrors.name = "Enter a challenge name.";
@@ -4792,14 +4782,6 @@ function validateChallengeDraft(
     fieldErrors.sourceBundlePath =
       "Use a relative path inside AD_CHALLENGE_SOURCE_ROOT.";
     errors.push("Source bundle path must stay inside AD_CHALLENGE_SOURCE_ROOT.");
-  }
-
-  if (
-    parsedWeight !== null &&
-    (Number.isNaN(parsedWeight) || parsedWeight <= 0)
-  ) {
-    fieldErrors.weight = "Enter a positive integer.";
-    errors.push("Weight must be a positive integer.");
   }
 
   const parsedServicePort = parseOptionalInteger(challengeDraft.servicePort);
@@ -4862,7 +4844,6 @@ function validateChallengeDraft(
     effectiveChallengeID,
     effectiveServicePort,
     effectiveServiceSubnetOctet,
-    effectiveWeight,
     endpointExample,
     errors,
     fieldErrors,
@@ -5325,33 +5306,6 @@ export function EntityFormDialog({
             </Field>
           </>
         )}
-        <Field label="Weight" htmlFor="form-challenge-weight">
-          <div className="space-y-2">
-            <Input
-              id="form-challenge-weight"
-              type="number"
-              min={1}
-              aria-invalid={fieldErrors.weight ? true : undefined}
-              className={
-                fieldErrors.weight
-                  ? "border-destructive focus-visible:ring-destructive/20"
-                  : undefined
-              }
-              value={challengeDraft.weight}
-              onChange={(event) =>
-                onChallengeDraftChange({
-                  ...challengeDraft,
-                  weight: event.target.value,
-                })
-              }
-            />
-            {fieldErrors.weight ? (
-              <p className="text-xs leading-5 text-destructive">
-                {fieldErrors.weight}
-              </p>
-            ) : null}
-          </div>
-        </Field>
         <Field label="Internet egress" htmlFor="form-challenge-egress">
           <label className="flex items-start gap-3 text-sm leading-6 text-foreground">
             <input
@@ -5397,10 +5351,6 @@ export function EntityFormDialog({
             <InfoLine
               label="Example team endpoint"
               value={challengeValidation.endpointExample}
-            />
-            <InfoLine
-              label="Effective weight"
-              value={challengeValidation.effectiveWeight}
             />
             <InfoLine
               label="Participant source download"

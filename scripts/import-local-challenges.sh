@@ -110,7 +110,6 @@ for manifest_ref in "${manifests[@]}"; do
   service_image="$(jq -r '.service_image' "${manifest_path}")"
   checker_image="$(jq -r '.checker_image' "${manifest_path}")"
   source_bundle_path="$(jq -r '(.source_bundle_path // .slug)' "${manifest_path}")"
-  weight="$(jq -r '(.weight // 1)' "${manifest_path}")"
   service_port="$(jq -r '(.service_port // 0)' "${manifest_path}")"
   service_subnet_octet="$(jq -r '(.service_subnet_octet // 0)' "${manifest_path}")"
 
@@ -127,7 +126,6 @@ for manifest_ref in "${manifests[@]}"; do
       --arg baseline_image "${service_image}" \
       --arg checker_image "${checker_image}" \
       --arg source_bundle_path "${source_bundle_path}" \
-      --argjson weight "${weight}" \
       --argjson service_port "${service_port}" \
       --argjson service_subnet_octet "${service_subnet_octet}" \
       '{
@@ -135,8 +133,6 @@ for manifest_ref in "${manifests[@]}"; do
         baseline_image: $baseline_image,
         checker_image: $checker_image,
         source_bundle_path: $source_bundle_path,
-        weight: $weight
-      }
       + (if $service_port > 0 then {service_port: $service_port} else {} end)
       + (if $service_subnet_octet > 0 then {service_subnet_octet: $service_subnet_octet} else {} end)'
   )"

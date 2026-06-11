@@ -268,7 +268,6 @@ const adminChallenges = [
     baseline_image: "adplatform/sample-http:baseline",
     checker_image: "adplatform/sample-http-checker:latest",
     source_bundle_path: "examples/sample-lfi-challenge",
-    weight: 10,
     service_port: 30050,
     service_subnet_octet: 50,
     egress_enabled: true,
@@ -1893,7 +1892,6 @@ async function handleCreateChallenge(req, res) {
     baseline_image: body?.baseline_image?.trim() || "",
     checker_image: body?.checker_image?.trim() || "",
     source_bundle_path: body?.source_bundle_path?.trim() || "",
-    weight: Number(body?.weight) || 1,
     service_port: Number(body?.service_port) || 30051,
     service_subnet_octet: Number(body?.service_subnet_octet) || 51,
     egress_enabled:
@@ -1927,7 +1925,6 @@ async function handleUpdateChallenge(req, res, challengeID) {
   challenge.baseline_image = body?.baseline_image?.trim() || "";
   challenge.checker_image = body?.checker_image?.trim() || "";
   challenge.source_bundle_path = body?.source_bundle_path?.trim() || "";
-  challenge.weight = Number(body?.weight) || 1;
   state.deployments = state.deployments.map((deployment) =>
     deployment.challenge_id === challengeID
       ? { ...deployment, challenge_name: challenge.name }

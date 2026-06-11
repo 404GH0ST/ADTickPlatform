@@ -373,7 +373,6 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 		"checker_image":        challenge.CheckerImage,
 		"service_port":         challenge.ServicePort,
 		"service_subnet_octet": challenge.ServiceSubnetOctet,
-		"weight":               challenge.Weight,
 	})
 	writeData(w, http.StatusOK, challenge)
 }
@@ -428,7 +427,6 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 		"name":           challenge.Name,
 		"baseline_image": challenge.BaselineImage,
 		"checker_image":  challenge.CheckerImage,
-		"weight":         challenge.Weight,
 	})
 	writeData(w, http.StatusOK, challenge)
 }

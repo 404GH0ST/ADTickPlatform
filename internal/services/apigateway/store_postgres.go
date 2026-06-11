@@ -837,7 +837,6 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       COALESCE(c.baseline_image, ''),
 		       COALESCE(c.checker_image, ''),
 		       COALESCE(c.source_bundle_path, ''),
-		       c.weight,
 		       COALESCE(NULLIF(c.service_port, 0), 10000 + c.id),
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
 		       c.egress_enabled,
@@ -855,7 +854,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -879,7 +878,6 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.BaselineImage,
 			&challenge.CheckerImage,
 			&challenge.SourceBundlePath,
-			&challenge.Weight,
 			&challenge.ServicePort,
 			&challenge.ServiceSubnetOctet,
 			&challenge.EgressEnabled,
@@ -943,10 +941,6 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 			checkerImage = defaultChecker
 		}
 	}
-	weight := input.Weight
-	if weight <= 0 {
-		weight = 1
-	}
 	sourceBundlePath := sanitizeSourceBundlePath(input.SourceBundlePath)
 
 	challengeID, err := s.nextID(ctx, `SELECT COALESCE(MAX(id), 0) + 1 FROM challenges`)
@@ -976,9 +970,9 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		egressEnabled = *input.EgressEnabled
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, weight, service_port, service_subnet_octet, egress_enabled, published, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, servicePort, serviceSubnetOctet, egressEnabled, now.UTC()); err != nil {
+		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, service_port, service_subnet_octet, egress_enabled, published, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, $9)
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, servicePort, serviceSubnetOctet, egressEnabled, now.UTC()); err != nil {
 		return adminChallenge{}, err
 	}
 	totalTeams, err := s.countTeams(ctx)
@@ -991,7 +985,6 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		BaselineImage:      baselineImage,
 		CheckerImage:       checkerImage,
 		SourceBundlePath:   sourceBundlePath,
-		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
@@ -1068,12 +1061,8 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	baselineImage := strings.TrimSpace(input.BaselineImage)
 	checkerImage := strings.TrimSpace(input.CheckerImage)
 	sourceBundlePath := sanitizeSourceBundlePath(input.SourceBundlePath)
-	weight := input.Weight
 	if name == "" {
 		return adminChallenge{}, fmt.Errorf("%w: name is required", ErrDuplicateResource)
-	}
-	if weight <= 0 {
-		weight = 1
 	}
 	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM challenges WHERE LOWER(name) = LOWER($1) AND id != $2)`, name, challengeID)
 	if err != nil {
@@ -1088,8 +1077,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    baseline_image = $3,
 		    checker_image = $4,
 		    source_bundle_path = $5,
-		    weight = $6,
-		    egress_enabled = COALESCE($7, egress_enabled),
+		    egress_enabled = COALESCE($6, egress_enabled),
 		    last_validation_status = NULL,
 		    last_validation_baseline_ssh_contract_ok = NULL,
 		    last_validation_checker_contract_ok = NULL,
@@ -1097,7 +1085,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    last_validation_checked_at = NULL,
 		    last_validation_message = NULL
 		WHERE id = $1
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, input.EgressEnabled); err != nil {
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, input.EgressEnabled); err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)

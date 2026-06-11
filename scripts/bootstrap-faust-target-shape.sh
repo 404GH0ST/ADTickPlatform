@@ -291,10 +291,9 @@ for ((i = 0; i < TARGET_SERVICE_COUNT; i++)); do
         --arg name "${challenge_name}" \
         --arg baseline_image "${baseline_image}" \
         --arg checker_image "${checker_image}" \
-        --argjson weight 1 \
         --argjson service_port "${service_port}" \
         --argjson service_subnet_octet "${subnet_octet}" \
-        '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,weight:$weight,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')"
+        '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')"
   )"
   challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 

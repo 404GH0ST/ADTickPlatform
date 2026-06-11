@@ -131,7 +131,6 @@ type ChallengeDraft = {
   sourceBundlePath: string;
   servicePort: string;
   serviceSubnetOctet: string;
-  weight: string;
   egressEnabled: boolean;
 };
 
@@ -359,7 +358,6 @@ export function useOrganizerDashboard({
     sourceBundlePath: "",
     servicePort: "",
     serviceSubnetOctet: "",
-    weight: "1",
     egressEnabled: true,
   });
   const [checkerRunFilters, setCheckerRunFilters] = useState<CheckerRunFilters>(
@@ -1209,7 +1207,6 @@ export function useOrganizerDashboard({
           baseline_image: challengeDraft.baselineImage,
           checker_image: challengeDraft.checkerImage,
           source_bundle_path: challengeDraft.sourceBundlePath,
-          weight: Number(challengeDraft.weight) || 1,
           service_port:
             challengeDraft.servicePort.trim() === ""
               ? undefined
@@ -1239,7 +1236,6 @@ export function useOrganizerDashboard({
         sourceBundlePath: "",
         servicePort: "",
         serviceSubnetOctet: "",
-        weight: "1",
         egressEnabled: true,
       });
       setActionNote(
@@ -2189,7 +2185,6 @@ export function useOrganizerDashboard({
         sourceBundlePath: "",
         servicePort: "",
         serviceSubnetOctet: "",
-        weight: "1",
         egressEnabled: true,
       });
     }
@@ -2230,7 +2225,6 @@ export function useOrganizerDashboard({
           sourceBundlePath: challenge.source_bundle_path,
           servicePort: String(challenge.service_port),
           serviceSubnetOctet: String(challenge.service_subnet_octet),
-          weight: String(challenge.weight),
           egressEnabled: challenge.egress_enabled,
         });
       }
@@ -2315,7 +2309,6 @@ export function useOrganizerDashboard({
           baseline_image: challengeDraft.baselineImage,
           checker_image: challengeDraft.checkerImage,
           source_bundle_path: challengeDraft.sourceBundlePath,
-          weight: Number(challengeDraft.weight) || 1,
           egress_enabled: challengeDraft.egressEnabled,
         }),
       });

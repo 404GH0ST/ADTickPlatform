@@ -142,7 +142,6 @@ type memoryGameStore struct {
 
 type memoryChallenge struct {
 	Name               string
-	Weight             int
 	ServicePort        int
 	ServiceSubnetOctet int
 }
@@ -176,7 +175,7 @@ func newMemoryGameStore() gameStore {
 		teamNames[team.id] = team.name
 	}
 	for _, challenge := range challenges {
-		challengeMap[challenge.id] = memoryChallenge{Name: challenge.name, Weight: 1, ServicePort: challenge.servicePort, ServiceSubnetOctet: challenge.subnetOctet}
+		challengeMap[challenge.id] = memoryChallenge{Name: challenge.name, ServicePort: challenge.servicePort, ServiceSubnetOctet: challenge.subnetOctet}
 	}
 	for _, team := range teams {
 		for _, challenge := range challenges {

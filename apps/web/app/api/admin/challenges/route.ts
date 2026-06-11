@@ -9,7 +9,6 @@ export async function POST(request: Request) {
     baseline_image?: string;
     checker_image?: string;
     source_bundle_path?: string;
-    weight?: number;
     service_port?: number;
     service_subnet_octet?: number;
   } | null;
@@ -24,7 +23,6 @@ export async function POST(request: Request) {
       baseline_image: body.baseline_image?.trim() || '',
       checker_image: body.checker_image?.trim() || '',
       source_bundle_path: body.source_bundle_path?.trim() || '',
-      weight: Number(body.weight) || 1,
       service_port: Number(body.service_port) || undefined,
       service_subnet_octet: Number(body.service_subnet_octet) || undefined,
     });

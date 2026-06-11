@@ -51,7 +51,6 @@ export type CreateChallengeInput = {
   baseline_image: string;
   checker_image: string;
   source_bundle_path?: string;
-  weight: number;
   service_port?: number;
   service_subnet_octet?: number;
   egress_enabled?: boolean;
@@ -73,7 +72,6 @@ export type UpdateChallengeInput = {
   baseline_image: string;
   checker_image: string;
   source_bundle_path?: string;
-  weight: number;
   egress_enabled?: boolean;
 };
 

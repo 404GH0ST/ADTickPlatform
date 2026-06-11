@@ -232,10 +232,9 @@ challenge_response="$(curl_json "create challenge" -X POST "${API_URL}/api/v2/ad
     --arg name "${CHALLENGE_NAME}" \
     --arg baseline_image "${BASELINE_IMAGE}" \
     --arg checker_image "${CHECKER_IMAGE}" \
-    --argjson weight 1 \
     --argjson service_port "${SERVICE_PORT}" \
     --argjson service_subnet_octet "${SERVICE_SUBNET_OCTET}" \
-    '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,weight:$weight,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')")"
+    '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,service_port:$service_port,service_subnet_octet:$service_subnet_octet}')")"
 challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 
 curl_json "validate challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \

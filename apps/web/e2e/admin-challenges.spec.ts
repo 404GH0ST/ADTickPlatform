@@ -89,7 +89,6 @@ test("organizer can create, edit, and delete a challenge", async ({
   await expect(createButton).toBeDisabled();
 
   await createDialog.getByLabel("Subnet octet").fill("60");
-  await createDialog.getByLabel("Weight").fill("7");
   await expect(createDialog.getByText("Runtime network: 10.80.60.0/24")).toBeVisible();
   await expect(createDialog.getByText("Example team endpoint: 10.80.60.11:30060")).toBeVisible();
   await expect(
@@ -122,7 +121,6 @@ test("organizer can create, edit, and delete a challenge", async ({
   await challengeDialog
     .getByLabel("Checker image")
     .fill("adplatform/sample-ftp-checker:v2");
-  await challengeDialog.getByLabel("Weight").fill("9");
   await challengeDialog.getByRole("button", { name: "Update" }).click();
 
   await expect(page.getByText("Updated challenge college-ftp-v2.")).toBeVisible();

@@ -79,7 +79,6 @@ export type AdminChallenge = {
   baseline_image: string;
   checker_image: string;
   source_bundle_path: string;
-  weight: number;
   service_port: number;
   service_subnet_octet: number;
   egress_enabled: boolean;

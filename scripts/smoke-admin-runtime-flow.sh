@@ -109,10 +109,9 @@ create_payload="$(
     --arg name "${CHALLENGE_NAME}" \
     --arg baseline_image "${BASELINE_IMAGE}" \
     --arg checker_image "${CHECKER_IMAGE}" \
-    --argjson weight 1 \
     --argjson service_port "${SERVICE_PORT}" \
     --argjson service_subnet_octet "${SERVICE_SUBNET_OCTET}" \
-    '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,weight:$weight,service_port:$service_port,service_subnet_octet:$service_subnet_octet}'
+    '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,service_port:$service_port,service_subnet_octet:$service_subnet_octet}'
 )"
 
 create_response="$(curl_json "challenge create" -X POST "${API_URL}/api/v2/admin/challenges" \

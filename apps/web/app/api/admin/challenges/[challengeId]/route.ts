@@ -21,7 +21,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ challengeId: string }> },
 ) {
-  const body = (await request.json().catch(() => null)) as { name?: string; baseline_image?: string; checker_image?: string; source_bundle_path?: string; weight?: number } | null;
+  const body = (await request.json().catch(() => null)) as { name?: string; baseline_image?: string; checker_image?: string; source_bundle_path?: string } | null;
   const name = body?.name?.trim();
   if (!name) {
     return problemResponse(400, 'Invalid request', 'challenge update request is invalid.');
@@ -33,7 +33,6 @@ export async function PUT(
       baseline_image: body?.baseline_image?.trim() || '',
       checker_image: body?.checker_image?.trim() || '',
       source_bundle_path: body?.source_bundle_path?.trim() || '',
-      weight: body?.weight || 1,
     });
     return NextResponse.json(data);
   } catch (error) {

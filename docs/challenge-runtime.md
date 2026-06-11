@@ -164,7 +164,6 @@ The admin challenge model now supports:
 - `name`
 - `baseline_image`
 - `checker_image`
-- `weight`
 - `service_port`
 - `service_subnet_octet`
 - `egress_enabled` (default `true`)

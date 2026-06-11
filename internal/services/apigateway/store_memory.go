@@ -76,9 +76,9 @@ func NewMemoryStore(teamID int) Store {
 			4: mustNewAdminPlayerRecord(4, 104, "Team Orchid", "Orchid Captain", "orchid.captain@example.com", "captain", "orchid-secret", now.Add(-69*time.Hour)),
 		},
 		challenges: map[int]*adminChallenge{
-			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", Weight: 1, ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
-			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", Weight: 1, ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
-			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", Weight: 1, ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
+			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
+			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
+			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
 		},
 		teamStates:  make(map[int]map[int]*serviceState),
 		instances:   make(map[int]map[int]*serviceInstanceRecord),
@@ -702,10 +702,6 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 			checkerImage = defaultChecker
 		}
 	}
-	weight := input.Weight
-	if weight <= 0 {
-		weight = 1
-	}
 
 	id := s.nextChallengeID
 	s.nextChallengeID++
@@ -738,7 +734,6 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		BaselineImage:      baselineImage,
 		CheckerImage:       checkerImage,
 		SourceBundlePath:   sanitizeSourceBundlePath(input.SourceBundlePath),
-		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
@@ -1346,9 +1341,6 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 		challenge.CheckerImage = img
 	}
 	challenge.SourceBundlePath = sanitizeSourceBundlePath(input.SourceBundlePath)
-	if input.Weight > 0 {
-		challenge.Weight = input.Weight
-	}
 	if input.EgressEnabled != nil {
 		challenge.EgressEnabled = *input.EgressEnabled
 	}

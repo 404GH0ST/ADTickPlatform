@@ -126,7 +126,6 @@ Request body:
   "name": "proxy",
   "baseline_image": "registry.local/proxy:baseline",
   "checker_image": "registry.local/proxy-checker:latest",
-  "weight": 2,
   "service_port": 10007,
   "service_subnet_octet": 7,
   "egress_enabled": true

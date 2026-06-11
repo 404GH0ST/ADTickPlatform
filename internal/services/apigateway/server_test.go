@@ -2261,7 +2261,7 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 func TestAdminAuditLogCanFilterChallengeCreate(t *testing.T) {
 	mux := newTestMux()
 
-	body := bytes.NewBufferString(`{"name":"audit-demo","baseline_image":"registry.local/audit-demo:baseline","checker_image":"registry.local/audit-demo-checker:latest","weight":1,"service_port":31010,"service_subnet_octet":10}`)
+	body := bytes.NewBufferString(`{"name":"audit-demo","baseline_image":"registry.local/audit-demo:baseline","checker_image":"registry.local/audit-demo-checker:latest","service_port":31010,"service_subnet_octet":10}`)
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", body)
 	createRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	createResponse := httptest.NewRecorder()
@@ -2321,7 +2321,7 @@ func TestAdminCanCreateTeamPlayerAndDeployChallenge(t *testing.T) {
 		t.Fatalf("expected player create 200, got %d", playerResponse.Code)
 	}
 
-	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","weight":2}`))
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest"}`))
 	challengeRequest.Header.Set("Authorization", adminAuth)
 	challengeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(challengeResponse, challengeRequest)
@@ -2410,7 +2410,7 @@ func TestAdminCreateChallengeRejectsInvalidSourceBundlePath(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v2/admin/challenges",
-		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"missing-source","weight":2}`),
+		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"missing-source"}`),
 	)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
 	response := httptest.NewRecorder()
@@ -2437,7 +2437,7 @@ func TestAdminCreateChallengeAcceptsValidSourceBundlePath(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v2/admin/challenges",
-		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"sample-lfi-challenge.tar.gz","weight":2}`),
+		bytes.NewBufferString(`{"name":"proxy","baseline_image":"registry.local/proxy:baseline","checker_image":"registry.local/proxy-checker:latest","source_bundle_path":"sample-lfi-challenge.tar.gz"}`),
 	)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
 	response := httptest.NewRecorder()
@@ -2460,7 +2460,7 @@ func TestAdminUpdateChallengeRejectsInvalidSourceBundlePath(t *testing.T) {
 	updateRequest := httptest.NewRequest(
 		http.MethodPut,
 		"/api/v2/admin/challenges/1",
-		bytes.NewBufferString(`{"name":"banking","baseline_image":"registry.local/banking:baseline","checker_image":"registry.local/banking-checker:latest","source_bundle_path":"missing-source","weight":1}`),
+		bytes.NewBufferString(`{"name":"banking","baseline_image":"registry.local/banking:baseline","checker_image":"registry.local/banking-checker:latest","source_bundle_path":"missing-source"}`),
 	)
 	updateRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	updateResponse := httptest.NewRecorder()
@@ -2480,7 +2480,7 @@ func TestAdminDeployUsesConfiguredServiceSubnetAndPort(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"
 
-	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"proxy-custom","baseline_image":"registry.local/proxy-custom:baseline","checker_image":"registry.local/proxy-custom-checker:latest","weight":2,"service_port":31337,"service_subnet_octet":77}`))
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"proxy-custom","baseline_image":"registry.local/proxy-custom:baseline","checker_image":"registry.local/proxy-custom-checker:latest","service_port":31337,"service_subnet_octet":77}`))
 	challengeRequest.Header.Set("Authorization", adminAuth)
 	challengeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(challengeResponse, challengeRequest)
@@ -2623,7 +2623,7 @@ func TestAdminCanDeleteCompletedDeploymentJob(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"
 
-	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"cleanup","baseline_image":"registry.local/cleanup:baseline","checker_image":"registry.local/cleanup-checker:latest","weight":1}`))
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"cleanup","baseline_image":"registry.local/cleanup:baseline","checker_image":"registry.local/cleanup-checker:latest"}`))
 	challengeRequest.Header.Set("Authorization", adminAuth)
 	challengeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(challengeResponse, challengeRequest)
@@ -2677,7 +2677,7 @@ func TestAdminRedeploySupersedesOlderQueuedJob(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"
 
-	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"redeploy","baseline_image":"registry.local/redeploy:baseline","checker_image":"registry.local/redeploy-checker:latest","weight":1}`))
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"redeploy","baseline_image":"registry.local/redeploy:baseline","checker_image":"registry.local/redeploy-checker:latest"}`))
 	challengeRequest.Header.Set("Authorization", adminAuth)
 	challengeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(challengeResponse, challengeRequest)
@@ -2733,7 +2733,7 @@ func TestAdminCannotDeleteActiveDeploymentJob(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"
 
-	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"active-job","baseline_image":"registry.local/active-job:baseline","checker_image":"registry.local/active-job-checker:latest","weight":1}`))
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"active-job","baseline_image":"registry.local/active-job:baseline","checker_image":"registry.local/active-job-checker:latest"}`))
 	challengeRequest.Header.Set("Authorization", adminAuth)
 	challengeResponse := httptest.NewRecorder()
 	mux.ServeHTTP(challengeResponse, challengeRequest)
