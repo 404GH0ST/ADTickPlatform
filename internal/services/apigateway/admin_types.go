@@ -21,6 +21,7 @@ type adminCreateChallengeRequest struct {
 	Weight             int    `json:"weight"`
 	ServicePort        int    `json:"service_port,omitempty"`
 	ServiceSubnetOctet int    `json:"service_subnet_octet,omitempty"`
+	EgressEnabled      *bool  `json:"egress_enabled,omitempty"`
 }
 
 type adminUpdateTeamRequest struct {
@@ -40,6 +41,7 @@ type adminUpdateChallengeRequest struct {
 	CheckerImage     string `json:"checker_image"`
 	SourceBundlePath string `json:"source_bundle_path"`
 	Weight           int    `json:"weight"`
+	EgressEnabled    *bool  `json:"egress_enabled,omitempty"`
 }
 
 type adminTeam struct {
@@ -122,6 +124,7 @@ type adminChallenge struct {
 	Weight             int                        `json:"weight"`
 	ServicePort        int                        `json:"service_port"`
 	ServiceSubnetOctet int                        `json:"service_subnet_octet"`
+	EgressEnabled      bool                       `json:"egress_enabled"`
 	Published          bool                       `json:"published"`
 	DeployedTeams      int                        `json:"deployed_teams"`
 	TotalTeams         int                        `json:"total_teams"`
@@ -225,4 +228,15 @@ type ChallengeValidationResult struct {
 	ServiceStateContractOK bool   `json:"service_state_contract_ok"`
 	CheckedAt              string `json:"checked_at"`
 	Message                string `json:"message,omitempty"`
+}
+
+type adminPlatformSettings struct {
+	FlagFormatPrefix string `json:"flag_format_prefix"`
+	FlagFormatActive string `json:"flag_format_active,omitempty"`
+	UpdatedAt        string `json:"updated_at,omitempty"`
+	UpdatedBy        string `json:"updated_by,omitempty"`
+}
+
+type adminUpdatePlatformSettingsRequest struct {
+	FlagFormatPrefix string `json:"flag_format_prefix"`
 }

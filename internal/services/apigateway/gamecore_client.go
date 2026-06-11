@@ -37,6 +37,8 @@ type gameCoreClient interface {
 	AttackFeed(ctx context.Context, query AttackFeedQuery) (AttackFeedPage, error)
 	RecomputeScoring(ctx context.Context) ([]scoreRow, error)
 	AuditScoring(ctx context.Context) (ScoringAuditAlias, error)
+	FlagFormat(ctx context.Context) (FlagFormatStatus, error)
+	RefreshFlagFormat(ctx context.Context, prefix string) (FlagFormatStatus, error)
 }
 
 type noopGameCoreClient struct{}
@@ -115,6 +117,14 @@ func (noopGameCoreClient) RecomputeScoring(context.Context) ([]scoreRow, error) 
 
 func (noopGameCoreClient) AuditScoring(context.Context) (ScoringAuditAlias, error) {
 	return ScoringAuditAlias{}, errGameCoreDisabled
+}
+
+func (noopGameCoreClient) FlagFormat(context.Context) (FlagFormatStatus, error) {
+	return FlagFormatStatus{}, errGameCoreDisabled
+}
+
+func (noopGameCoreClient) RefreshFlagFormat(context.Context, string) (FlagFormatStatus, error) {
+	return FlagFormatStatus{}, errGameCoreDisabled
 }
 
 type httpGameCoreClient struct {
@@ -305,6 +315,14 @@ func (c *httpGameCoreClient) RecomputeScoring(ctx context.Context) ([]scoreRow, 
 
 func (c *httpGameCoreClient) AuditScoring(ctx context.Context) (ScoringAuditAlias, error) {
 	return requestGameCoreJSON[ScoringAuditAlias](ctx, c, http.MethodGet, "/internal/v1/game/scoring/audit")
+}
+
+func (c *httpGameCoreClient) FlagFormat(ctx context.Context) (FlagFormatStatus, error) {
+	return requestGameCoreJSON[FlagFormatStatus](ctx, c, http.MethodGet, "/internal/v1/game/flag/format")
+}
+
+func (c *httpGameCoreClient) RefreshFlagFormat(ctx context.Context, prefix string) (FlagFormatStatus, error) {
+	return requestGameCoreJSON[FlagFormatStatus](ctx, c, http.MethodPost, "/internal/v1/game/flag/format/refresh", UpdateFlagFormatRequest{Prefix: prefix})
 }
 
 func requestGameCoreJSON[T any](ctx context.Context, c *httpGameCoreClient, method, path string, body ...any) (T, error) {

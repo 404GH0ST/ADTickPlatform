@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { Download } from 'lucide-react';
 
 import { AppShell } from '@/components/ui/app-shell';
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
@@ -44,6 +45,19 @@ export function ParticipantShell({
               <a href="/admin">Organizer</a>
             </Button>
           )}
+          {overview.authenticated &&
+          (overview.role === undefined || overview.role !== "organizer") ? (
+            <Button
+              asChild
+              data-testid="participant-vpn-config"
+              variant="outline"
+            >
+              <a href="/api/platform/me/wireguard" download>
+                <Download className="h-4 w-4" />
+                VPN Config
+              </a>
+            </Button>
+          ) : null}
           <Button asChild variant="outline">
             <Link href="/docs/participant">Manual</Link>
           </Button>

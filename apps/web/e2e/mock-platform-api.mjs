@@ -271,6 +271,7 @@ const adminChallenges = [
     weight: 10,
     service_port: 30050,
     service_subnet_octet: 50,
+    egress_enabled: true,
     published: true,
     deployed_teams: 3,
     total_teams: 3,
@@ -620,6 +621,12 @@ function createInitialState() {
     checkerRuns: checkerRuns.map((run) => ({ ...run })),
     scoreboard: scoreboard.map((row) => ({ ...row })),
     scoringAudit: buildScoringAudit(),
+    platformSettings: {
+      flag_format_prefix: "PLAYIT",
+      flag_format_active: "PLAYIT",
+      updated_at: "2026-03-10T10:00:00Z",
+      updated_by: "system",
+    },
     wireguardStatus: { ...wireguardStatus },
     accessStatus: { ...accessStatus },
     operationsStatus: { ...operationsStatus },
@@ -1889,6 +1896,8 @@ async function handleCreateChallenge(req, res) {
     weight: Number(body?.weight) || 1,
     service_port: Number(body?.service_port) || 30051,
     service_subnet_octet: Number(body?.service_subnet_octet) || 51,
+    egress_enabled:
+      body?.egress_enabled === undefined ? true : Boolean(body.egress_enabled),
     published: false,
     deployed_teams: 0,
     total_teams: state.teams.length,
@@ -1992,10 +2001,11 @@ function handleDeployChallenge(res, challengeID) {
   });
 }
 
-function handleAdminDeploymentRoutes({ res, url, method }) {
+async function handleAdminDeploymentRoutes({ req, res, url, method }) {
   const handled = writeGetRoute(res, method, url.pathname, {
     "/api/v2/admin/deployments": () => state.deployments,
     "/api/v2/admin/operations/status": () => state.operationsStatus,
+    "/api/v2/admin/platform/settings": () => state.platformSettings,
   });
   if (handled) {
     return true;
@@ -2008,6 +2018,35 @@ function handleAdminDeploymentRoutes({ res, url, method }) {
 
   if (method === "POST" && url.pathname === "/api/v2/admin/deployments/reconcile") {
     return reconcileDeployments(res);
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/admin/platform/settings/reload") {
+    state.platformSettings = {
+      ...state.platformSettings,
+      flag_format_active: state.platformSettings.flag_format_prefix,
+      updated_at: new Date().toISOString(),
+    };
+    return writeSuccess(res, state.platformSettings);
+  }
+
+  if (method === "PUT" && url.pathname === "/api/v2/admin/platform/settings") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (_err) {
+      return writeFailure(res, 400, "could not parse platform settings payload.");
+    }
+    const prefix = body && typeof body.flag_format_prefix === "string" ? body.flag_format_prefix.trim() : "";
+    if (!prefix) {
+      return writeFailure(res, 400, "flag_format_prefix must not be empty.");
+    }
+    state.platformSettings = {
+      ...state.platformSettings,
+      flag_format_prefix: prefix,
+      updated_at: new Date().toISOString(),
+      updated_by: "organizer",
+    };
+    return writeSuccess(res, state.platformSettings);
   }
 
   const deploymentID = routeID(url.pathname, /^\/api\/v2\/admin\/deployments\/(\d+)$/);

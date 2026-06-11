@@ -143,8 +143,16 @@ Each flag should be derived from:
 Example logical format:
 
 ```text
-FLAGv1.<payload>.<mac>
+PLAYIT{<payload>.<mac>}
 ```
+
+The `<payload>` is a base64url-encoded JSON blob containing `owner_team_id`,
+`challenge_id`, `issued_tick`, and `expires_tick`, signed with HMAC-SHA256
+using the platform flag secret. The `PLAYIT` prefix and the curly braces
+are the configurable flag format — the organizer can change the prefix
+from the admin dashboard (see [Platform Settings](admin-api.md#platform-settings)),
+and the codec re-wraps the signed payload accordingly. The default prefix
+is `PLAYIT`.
 
 The payload should be enough to identify the owner and validity period after decoding.
 

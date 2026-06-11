@@ -169,13 +169,13 @@ func (c explicitStateCheckerClient) Execute(_ context.Context, request apigatewa
 
 func newTestGameCoreMux(checker checkerClient) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
 	return mux
 }
 
 func newTestGameCoreMuxWithScheduler(checker checkerClient, scheduler gameScheduler) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
 	return mux
 }
 
@@ -266,7 +266,7 @@ func startTestMatch(t *testing.T, mux *http.ServeMux) {
 func TestAdvanceTickPassesStructuredCheckerTargetMetadata(t *testing.T) {
 	checker := &capturingCheckerClient{}
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret"), &testGameScheduler{}, []string{"put"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put"}, 15).RegisterRoutes(mux)
 
 	startTestMatch(t, mux)
 
@@ -378,7 +378,7 @@ func TestMetricsEndpointIncludesGameCoreMetrics(t *testing.T) {
 			LastTickID:      1,
 		},
 	}
-	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15)
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
 	httpapi.RegisterMetricsSource(info.Name, server)
 
 	mux := httpapi.NewBaseMux(info)
@@ -503,7 +503,7 @@ func TestSchedulerEndpointsExposeStatusAndControl(t *testing.T) {
 	defer scheduler.Close()
 
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/scheduler", nil)
 	statusRequest.Header.Set("Authorization", "Bearer dev-admin-token")
@@ -599,7 +599,7 @@ func TestMatchEndpointsExposeStatusAndControl(t *testing.T) {
 func TestMatchStatusUsesConfiguredWindow(t *testing.T) {
 	start := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
 	end := start.Add(4 * time.Hour)
-	server := newGameCoreServer("dev-admin-token", newMemoryGameStore(), testCheckerClient{}, newFlagCodec("test-flag-secret"), &testGameScheduler{}, []string{"put", "get", "check"}, 15)
+	server := newGameCoreServer("dev-admin-token", newMemoryGameStore(), testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15)
 	server.matchStartAt = &start
 	server.matchEndAt = &end
 	server.now = func() time.Time {
@@ -745,7 +745,7 @@ func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret").Issue(102, 1, 1, 1)
+	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`","`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -775,7 +775,7 @@ func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret").Issue(102, 1, 1, 1)
+	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
 	for _, teamID := range []int{101, 103} {
 		submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"flags":["%s"]}`, teamID, flag)))
 		submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
@@ -886,7 +886,7 @@ func TestSubmitFlagsRejectsOwnAndExpiredFlags(t *testing.T) {
 		}
 	}
 
-	codec := newFlagCodec("test-flag-secret")
+	codec := newFlagCodec("test-flag-secret", "PLAYIT")
 	ownFlag := codec.Issue(101, 1, 4, 6)
 	expiredFlag := codec.Issue(102, 1, 1, 1)
 
@@ -916,7 +916,7 @@ func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret").Issue(102, 1, 1, 1)
+	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -964,7 +964,7 @@ func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret").Issue(102, 1, 1, 1)
+	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -1005,7 +1005,7 @@ func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret")
+	codec := newFlagCodec("test-flag-secret", "PLAYIT")
 	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()
@@ -1051,7 +1051,7 @@ func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret")
+	codec := newFlagCodec("test-flag-secret", "PLAYIT")
 	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()
@@ -1097,7 +1097,7 @@ func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret")
+	codec := newFlagCodec("test-flag-secret", "PLAYIT")
 	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()

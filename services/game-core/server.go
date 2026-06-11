@@ -20,6 +20,7 @@ type gameCoreServer struct {
 	store              gameStore
 	checker            checkerClient
 	flags              flagCodec
+	flagsMu            sync.RWMutex
 	scheduler          gameScheduler
 	checkerPhases      []string
 	checkerTimeout     int
@@ -62,6 +63,33 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		scoringTimeout:     30 * time.Second,
 		now:                time.Now,
 	}
+}
+
+func (s *gameCoreServer) currentFlagFormat() string {
+	s.flagsMu.RLock()
+	defer s.flagsMu.RUnlock()
+	return s.flags.format()
+}
+
+func (s *gameCoreServer) reloadFlagFormat(prefix string) string {
+	s.flagsMu.Lock()
+	defer s.flagsMu.Unlock()
+	s.flags = s.flags.withPrefix(prefix)
+	return s.flags.format()
+}
+
+func (s *gameCoreServer) issueFlag(ownerTeamID, challengeID, issuedTick, expiresTick int) string {
+	s.flagsMu.RLock()
+	codec := s.flags
+	s.flagsMu.RUnlock()
+	return codec.Issue(ownerTeamID, challengeID, issuedTick, expiresTick)
+}
+
+func (s *gameCoreServer) parseFlag(value string) (flagClaims, bool) {
+	s.flagsMu.RLock()
+	codec := s.flags
+	s.flagsMu.RUnlock()
+	return codec.Parse(value)
 }
 
 func (s *gameCoreServer) WithCheckerParallelism(value int) *gameCoreServer {
@@ -187,6 +215,8 @@ func (s *gameCoreServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/v1/game/scheduler/stop", s.handleStopScheduler)
 	mux.HandleFunc("PUT /internal/v1/game/scheduler/interval", s.handleUpdateScheduler)
 	mux.HandleFunc("POST /internal/v1/flags/submit", s.handleSubmitFlags)
+	mux.HandleFunc("GET /internal/v1/game/flag/format", s.handleGetFlagFormat)
+	mux.HandleFunc("POST /internal/v1/game/flag/format/refresh", s.handleRefreshFlagFormat)
 }
 
 func (s *gameCoreServer) handleGameStatus(w http.ResponseWriter, r *http.Request) {
@@ -548,6 +578,36 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 	writeData(w, http.StatusOK, toSubmissionVerdictAliases(results))
 }
 
+func (s *gameCoreServer) handleGetFlagFormat(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	writeData(w, http.StatusOK, apigateway.FlagFormatStatus{
+		Format:    s.currentFlagFormat(),
+		UpdatedAt: s.now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *gameCoreServer) handleRefreshFlagFormat(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	var req apigateway.UpdateFlagFormatRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse flag format payload.")
+		return
+	}
+	if strings.TrimSpace(req.Prefix) == "" {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "prefix must not be empty.")
+		return
+	}
+	active := s.reloadFlagFormat(req.Prefix)
+	writeData(w, http.StatusOK, apigateway.FlagFormatStatus{
+		Format:    active,
+		UpdatedAt: s.now().UTC().Format(time.RFC3339),
+	})
+}
+
 func (s *gameCoreServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
 	if !ok || token != s.adminToken {
@@ -765,7 +825,7 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 
 func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
 	var counts checkerTargetTickResult
-	flagValue := s.flags.Issue(target.TeamID, target.ChallengeID, tickID, tickID)
+	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, tickID, tickID)
 	metadata := ""
 	halted := false
 
@@ -904,7 +964,7 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 		}
 		seen[trimmed] = struct{}{}
 
-		claims, ok := s.flags.Parse(trimmed)
+		claims, ok := s.parseFlag(trimmed)
 		if !ok || currentTick == 0 || currentTick > claims.ExpiresTick || claims.OwnerTeamID == teamID {
 			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "invalid", Detail: "flag is wrong or expired."})
 			continue

@@ -121,3 +121,12 @@ type GameSubmitFlagsRequest struct {
 	TeamID int      `json:"team_id"`
 	Flags  []string `json:"flags"`
 }
+
+type FlagFormatStatus struct {
+	Format    string `json:"format"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type UpdateFlagFormatRequest struct {
+	Prefix string `json:"prefix"`
+}

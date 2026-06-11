@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const defaultFlagFormatPrefix = "PLAYIT"
+
 type flagClaims struct {
 	Value       string
 	OwnerTeamID int
@@ -20,10 +22,24 @@ type flagClaims struct {
 
 type flagCodec struct {
 	secret []byte
+	prefix string
 }
 
-func newFlagCodec(secret string) flagCodec {
-	return flagCodec{secret: []byte(strings.TrimSpace(secret))}
+func newFlagCodec(secret, prefix string) flagCodec {
+	trimmedSecret := []byte(strings.TrimSpace(secret))
+	trimmedPrefix := strings.TrimSpace(prefix)
+	if trimmedPrefix == "" {
+		trimmedPrefix = defaultFlagFormatPrefix
+	}
+	return flagCodec{secret: trimmedSecret, prefix: trimmedPrefix}
+}
+
+func (c flagCodec) format() string {
+	return c.prefix
+}
+
+func (c flagCodec) withPrefix(prefix string) flagCodec {
+	return newFlagCodec(string(c.secret), prefix)
 }
 
 func (c flagCodec) Issue(ownerTeamID, challengeID, issuedTick, expiresTick int) string {
@@ -32,24 +48,29 @@ func (c flagCodec) Issue(ownerTeamID, challengeID, issuedTick, expiresTick int) 
 	mac := hmac.New(sha256.New, c.secret)
 	mac.Write([]byte(encodedPayload))
 	signature := hex.EncodeToString(mac.Sum(nil))
-	return "FLAGv1." + encodedPayload + "." + signature
+	return c.prefix + "{" + encodedPayload + "." + signature + "}"
 }
 
 func (c flagCodec) Parse(value string) (flagClaims, bool) {
 	trimmed := strings.TrimSpace(value)
-	parts := strings.Split(trimmed, ".")
-	if len(parts) != 3 || parts[0] != "FLAGv1" {
+	expectedPrefix := c.prefix + "{"
+	if !strings.HasPrefix(trimmed, expectedPrefix) || !strings.HasSuffix(trimmed, "}") {
+		return flagClaims{}, false
+	}
+	body := trimmed[len(expectedPrefix) : len(trimmed)-1]
+	parts := strings.Split(body, ".")
+	if len(parts) != 2 {
 		return flagClaims{}, false
 	}
 
 	mac := hmac.New(sha256.New, c.secret)
-	mac.Write([]byte(parts[1]))
+	mac.Write([]byte(parts[0]))
 	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(expected), []byte(parts[2])) {
+	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
 		return flagClaims{}, false
 	}
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
 		return flagClaims{}, false
 	}

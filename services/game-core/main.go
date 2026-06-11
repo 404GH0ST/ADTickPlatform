@@ -33,7 +33,7 @@ func main() {
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
 			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
-		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET")),
+		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET"), config.String("GAME_CORE_FLAG_FORMAT_PREFIX", "PLAYIT")),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),

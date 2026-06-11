@@ -5,7 +5,7 @@
 	bootstrap-clean-match bootstrap-faust-target-shape finalize-faust-target-shape \
 	validate-faust-target-shape report-faust-balance export-runtime-incident-bundle \
 	create-admin create-teams simulate-attack-map-load validate-attack-map-load \
-	prod-web-artifacts
+	prod-web-artifacts install-host-deps
 
 fmt:
 	@mkdir -p $(GOCACHE)
@@ -127,3 +127,6 @@ validate-attack-map-load:
 
 prod-web-artifacts:
 	bun run web:build
+
+install-host-deps:
+	./scripts/install-host-deps.sh

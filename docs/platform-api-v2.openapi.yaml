@@ -148,6 +148,59 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/me/wireguard:
+    get:
+      tags:
+        - Connection
+      summary: Download own WireGuard config
+      description: >
+        Return the generated WireGuard peer config for the authenticated
+        player. The response body is the full client .conf text and the
+        Content-Disposition header carries the suggested filename
+        `<peer_name>.conf`. Organizer accounts do not have a peer config
+        and receive 403.
+      operationId: downloadMyWireGuardConfig
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: WireGuard peer config
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'Suggested filename, formatted as attachment with the peer name.'
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  default:
+                    value: |
+                      # AD Platform WireGuard peer: alpha-captain
+                      [Interface]
+                      PrivateKey = ...
+                      Address = 10.70.0.20/32
+                      DNS = 1.1.1.1
+
+                      [Peer]
+                      PublicKey = ...
+                      PresharedKey = ...
+                      AllowedIPs = 10.70.0.0/16,10.80.0.0/16
+                      Endpoint = vpn.adplatform.local:51820
+                      PersistentKeepalive = 25
+        '403':
+          description: Authentication required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: WireGuard config unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services:
     get:
       tags:
@@ -370,12 +423,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SubmitFlagsRequest'
-            examples:
-              default:
-                value:
-                  flags:
-                    - FLAGv1.foo.bar
-                    - FLAGv1.baz.qux
+              examples:
+                default:
+                  value:
+                    flags:
+                      - "PLAYIT{Zm9vOmJhcjoxMjM0NTY3ODkw.YWJjZGVm}"
+                      - "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz}"
       responses:
         '200':
           description: Submission batch processed
@@ -387,13 +440,13 @@ paths:
                 default:
                   value:
                     results:
-                      - flag: FLAGv1.foo.bar
+                      - flag: "PLAYIT{Zm9vOmJhcjoxMjM0NTY3ODkw.YWJjZGVm}"
                         status: invalid
                         detail: flag is wrong or expired.
-                      - flag: FLAGv1.baz.qux
+                      - flag: "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz}"
                         status: accepted
                         detail: flag is correct.
-                      - flag: FLAGv1.baz.qux
+                      - flag: "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz}"
                         status: duplicate
                         detail: flag already submitted.
                     accepted_count: 1

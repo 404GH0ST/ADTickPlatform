@@ -13,9 +13,9 @@ import (
 )
 
 func TestRenderControllerAccessRulesEnforcesPublicServiceAndSSHAllowlist(t *testing.T) {
-	rules := renderControllerAccessRules("adplatform_service_access", "wg0", []apigateway.ControllerServiceAccessPolicy{
-		{TeamID: 101, ChallengeID: 1, ChallengeName: "banking", ServiceIP: "10.80.1.11", ServicePort: 10001, SSHPort: 22, SSHUnlocked: true, AllowedPeerAddresses: []string{"10.70.11.20", "10.70.11.21"}},
-		{TeamID: 102, ChallengeID: 1, ChallengeName: "banking", ServiceIP: "10.80.1.12", ServicePort: 10001, SSHPort: 22, SSHUnlocked: false},
+	rules := renderControllerAccessRules("adplatform_service_access", "wg0", "eth0", []apigateway.ControllerServiceAccessPolicy{
+		{TeamID: 101, ChallengeID: 1, ChallengeName: "banking", ServiceIP: "10.80.1.11", ServicePort: 10001, SSHPort: 22, SSHUnlocked: true, EgressEnabled: true, AllowedPeerAddresses: []string{"10.70.11.20", "10.70.11.21"}},
+		{TeamID: 102, ChallengeID: 1, ChallengeName: "banking", ServiceIP: "10.80.1.12", ServicePort: 10001, SSHPort: 22, SSHUnlocked: false, EgressEnabled: true},
 	})
 
 	if !strings.Contains(rules, `ct state established,related accept`) {
@@ -297,4 +297,132 @@ func containsControllerCommand(commands []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestHostServiceAccessExecutorIptablesDropsEgressWhenDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &recordingControllerCommandRunner{
+		failCommands: map[string]error{
+			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
+			"iptables -S DOCKER-USER":                            nil,
+			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
+			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
+			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
+			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
+			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
+			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
+		},
+	}
+	executor := &hostServiceAccessExecutor{
+		fileServiceAccessExecutor: fileServiceAccessExecutor{
+			mode:              "host",
+			interfaceName:     "wg0",
+			internetInterface: "eth0",
+			firewallBackend:   "iptables",
+			firewallTable:     "adplatform_service_access",
+			paths: controllerAccessArtifactPaths{
+				rulesPath:  filepath.Join(tmpDir, "access.nft"),
+				statusPath: filepath.Join(tmpDir, "access-status.json"),
+			},
+		},
+		nftBinary:      "nft",
+		iptablesBinary: "iptables",
+		applyTimeout:   5 * time.Second,
+		runner:         runner,
+	}
+
+	_, err := executor.Apply(context.Background(), []apigateway.ControllerServiceAccessPolicy{{
+		TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "airgapped",
+		ServiceIP: "10.80.7.11", ServicePort: 10007, SSHPort: 22, SSHUnlocked: false, EgressEnabled: false,
+	}}, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("expected apply to succeed, got %v", err)
+	}
+	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.7.11/32 -j DROP") {
+		t.Fatalf("expected iptables egress drop for airgapped service, got %#v", runner.commands)
+	}
+}
+
+func TestHostServiceAccessExecutorIptablesSkipsEgressDropWithoutInternetInterface(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &recordingControllerCommandRunner{
+		failCommands: map[string]error{
+			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
+			"iptables -S DOCKER-USER":                            nil,
+			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
+			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
+			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
+			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
+			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
+			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
+		},
+	}
+	executor := &hostServiceAccessExecutor{
+		fileServiceAccessExecutor: fileServiceAccessExecutor{
+			mode:              "host",
+			interfaceName:     "wg0",
+			internetInterface: "",
+			firewallBackend:   "iptables",
+			firewallTable:     "adplatform_service_access",
+			paths: controllerAccessArtifactPaths{
+				rulesPath:  filepath.Join(tmpDir, "access.nft"),
+				statusPath: filepath.Join(tmpDir, "access-status.json"),
+			},
+		},
+		nftBinary:      "nft",
+		iptablesBinary: "iptables",
+		applyTimeout:   5 * time.Second,
+		runner:         runner,
+	}
+
+	_, err := executor.Apply(context.Background(), []apigateway.ControllerServiceAccessPolicy{{
+		TeamID: 101, ServiceIP: "10.80.7.11", ServicePort: 10007, SSHPort: 22, SSHUnlocked: false, EgressEnabled: false,
+	}}, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("expected apply to succeed, got %v", err)
+	}
+	for _, cmd := range runner.commands {
+		if strings.HasPrefix(cmd, "iptables -A ADPLATFORM-WG-SERVICES -o eth0") {
+			t.Fatalf("expected no -o eth0 rule without internet interface, got %q", cmd)
+		}
+	}
+}
+
+func TestRenderControllerAccessRulesDropsEgressWhenDisabled(t *testing.T) {
+	rules := renderControllerAccessRules("adplatform_service_access", "wg0", "eth0", []apigateway.ControllerServiceAccessPolicy{
+		{TeamID: 101, ChallengeID: 1, ChallengeName: "airgapped", ServiceIP: "10.80.7.11", ServicePort: 10007, SSHPort: 22, SSHUnlocked: false, EgressEnabled: false},
+		{TeamID: 102, ChallengeID: 2, ChallengeName: "open", ServiceIP: "10.80.8.11", ServicePort: 10008, SSHPort: 22, SSHUnlocked: false, EgressEnabled: true},
+	})
+
+	if !strings.Contains(rules, `oifname "eth0" ip saddr 10.80.7.11 drop`) {
+		t.Fatalf("expected egress drop for airgapped service, got:\n%s", rules)
+	}
+	if strings.Contains(rules, `oifname "eth0" ip saddr 10.80.8.11 drop`) {
+		t.Fatalf("expected no egress drop for open service, got:\n%s", rules)
+	}
+}
+
+func TestRenderControllerAccessRulesSkipsEgressDropWithoutInternetInterface(t *testing.T) {
+	rules := renderControllerAccessRules("adplatform_service_access", "wg0", "", []apigateway.ControllerServiceAccessPolicy{
+		{TeamID: 101, ChallengeID: 1, ChallengeName: "airgapped", ServiceIP: "10.80.7.11", ServicePort: 10007, SSHPort: 22, SSHUnlocked: false, EgressEnabled: false},
+	})
+
+	if strings.Contains(rules, "eth0") {
+		t.Fatalf("expected no internet interface rules when controller is unconfigured, got:\n%s", rules)
+	}
+}
+
+func TestBuildControllerAccessStatusCountsEgressDisabledServices(t *testing.T) {
+	status := buildControllerAccessStatus("files", "wg0", "eth0", "nftables", "/tmp/rules", []apigateway.ControllerServiceAccessPolicy{
+		{TeamID: 101, ServiceIP: "10.80.7.11", ServicePort: 10007, EgressEnabled: false},
+		{TeamID: 102, ServiceIP: "10.80.7.12", ServicePort: 10007, EgressEnabled: false},
+		{TeamID: 103, ServiceIP: "10.80.7.13", ServicePort: 10007, EgressEnabled: true},
+	}, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC))
+
+	if status.EgressDisabledServices != 2 {
+		t.Fatalf("expected 2 egress disabled services, got %d", status.EgressDisabledServices)
+	}
+	if status.InternetInterface != "eth0" {
+		t.Fatalf("expected internet interface to be reported, got %q", status.InternetInterface)
+	}
 }

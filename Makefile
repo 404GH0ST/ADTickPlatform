@@ -21,6 +21,9 @@ include make/prod.mk
 
 help:
 	@printf '%s\n' \
+	  'Host setup (Ubuntu 22.04/24.04/26.04 or Debian 12+):' \
+	  '  make install-host-deps            Install Docker, WireGuard, nftables, iptables, and host build tools' \
+	  '' \
 	  'Core:' \
 	  '  make fmt | test | build | ci | e2e | premerge' \
 	  '  make run-api-gateway | run-game-core | run-submission-service | run-checker-runner | run-controller-service | run-scoring-worker | run-realtime-gateway | run-wireguard-gateway' \

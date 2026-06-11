@@ -671,6 +671,24 @@ func (c testGameCoreClient) AuditScoring(_ context.Context) (ScoringAuditAlias, 
 	return ScoringAuditAlias{Status: "ok", StoredRows: 2, ReplayedRows: 2}, nil
 }
 
+func (c testGameCoreClient) FlagFormat(_ context.Context) (FlagFormatStatus, error) {
+	if c.err != nil {
+		return FlagFormatStatus{}, c.err
+	}
+	return FlagFormatStatus{Format: "PLAYIT"}, nil
+}
+
+func (c testGameCoreClient) RefreshFlagFormat(_ context.Context, prefix string) (FlagFormatStatus, error) {
+	if c.err != nil {
+		return FlagFormatStatus{}, c.err
+	}
+	format := strings.TrimSpace(prefix)
+	if format == "" {
+		format = "PLAYIT"
+	}
+	return FlagFormatStatus{Format: format}, nil
+}
+
 func (c testSubmissionClient) SubmitFlags(_ context.Context, _ int, flags []string) ([]submissionVerdict, error) {
 	if c.err != nil {
 		return nil, c.err

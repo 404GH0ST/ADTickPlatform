@@ -31,11 +31,12 @@ type controllerAccessArtifactPaths struct {
 type dryRunServiceAccessExecutor struct{}
 
 type fileServiceAccessExecutor struct {
-	mode            string
-	interfaceName   string
-	firewallBackend string
-	firewallTable   string
-	paths           controllerAccessArtifactPaths
+	mode              string
+	interfaceName     string
+	internetInterface string
+	firewallBackend   string
+	firewallTable     string
+	paths             controllerAccessArtifactPaths
 }
 
 type hostServiceAccessExecutor struct {
@@ -54,10 +55,11 @@ type execControllerCommandRunner struct{}
 
 func newServiceAccessExecutor() serviceAccessExecutor {
 	base := fileServiceAccessExecutor{
-		mode:            strings.ToLower(config.String("CONTROLLER_ACCESS_MODE", "dry-run")),
-		interfaceName:   strings.TrimSpace(config.String("CONTROLLER_ACCESS_INTERFACE", "wg0")),
-		firewallBackend: strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_ACCESS_FIREWALL_BACKEND", "nftables"))),
-		firewallTable:   sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")),
+		mode:              strings.ToLower(config.String("CONTROLLER_ACCESS_MODE", "dry-run")),
+		interfaceName:     strings.TrimSpace(config.String("CONTROLLER_ACCESS_INTERFACE", "wg0")),
+		internetInterface: strings.TrimSpace(config.String("CONTROLLER_INTERNET_INTERFACE", "eth0")),
+		firewallBackend:   strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_ACCESS_FIREWALL_BACKEND", "nftables"))),
+		firewallTable:     sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")),
 		paths: controllerAccessArtifactPaths{
 			rulesPath:  strings.TrimSpace(config.String("CONTROLLER_ACCESS_RULES_PATH", ".runtime/controller/access.nft")),
 			statusPath: strings.TrimSpace(config.String("CONTROLLER_ACCESS_STATUS_PATH", ".runtime/controller/access-status.json")),
@@ -83,7 +85,7 @@ func (dryRunServiceAccessExecutor) Status() apigateway.ControllerAccessStatus {
 }
 
 func (dryRunServiceAccessExecutor) Apply(_ context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
-	return buildControllerAccessStatus("dry-run", "", "", "", policies, now), nil
+	return buildControllerAccessStatus("dry-run", "", "", "", "", policies, now), nil
 }
 
 func (dryRunServiceAccessExecutor) Teardown(_ context.Context) error {
@@ -129,8 +131,8 @@ func (e *fileServiceAccessExecutor) Status() apigateway.ControllerAccessStatus {
 }
 
 func (e *fileServiceAccessExecutor) Apply(_ context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
-	status := buildControllerAccessStatus(e.mode, e.interfaceName, e.firewallBackend, e.paths.rulesPath, policies, now)
-	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, policies)
+	status := buildControllerAccessStatus(e.mode, e.interfaceName, e.internetInterface, e.firewallBackend, e.paths.rulesPath, policies, now)
+	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, e.internetInterface, policies)
 	if err := writeControllerAccessArtifacts(e.paths, rules, status); err != nil {
 		status.State = "error"
 		status.LastError = err.Error()
@@ -157,8 +159,8 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 			p.TeamID, p.TeamName, p.ChallengeID, p.ChallengeName, p.ServiceIP, p.ServicePort, p.SSHUnlocked, p.AllowedPeerAddresses)
 	}
 
-	status := buildControllerAccessStatus("host", e.interfaceName, e.firewallBackend, e.paths.rulesPath, policies, now)
-	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, policies)
+	status := buildControllerAccessStatus("host", e.interfaceName, e.internetInterface, e.firewallBackend, e.paths.rulesPath, policies, now)
+	rules := renderControllerAccessRules(e.firewallTable, e.interfaceName, e.internetInterface, policies)
 	if err := writeControllerAccessArtifacts(e.paths, rules, status); err != nil {
 		status.State = "error"
 		status.LastError = err.Error()
@@ -328,6 +330,11 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 	for _, policy := range policies {
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		servicePort := fmt.Sprintf("%d", policy.ServicePort)
+		if !policy.EgressEnabled && strings.TrimSpace(e.internetInterface) != "" {
+			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.internetInterface, "-s", serviceCIDR, "-j", "DROP"); err != nil {
+				return err
+			}
+		}
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.ServicePort), "-j", "ACCEPT"); err != nil {
 			return err
 		}
@@ -412,34 +419,40 @@ func (e *hostServiceAccessExecutor) selectIptablesBinary(ctx context.Context) (s
 	return "", fmt.Errorf("no usable iptables backend found for controller access enforcement")
 }
 
-func buildControllerAccessStatus(mode, interfaceName, firewallBackend, rulesPath string, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) apigateway.ControllerAccessStatus {
+func buildControllerAccessStatus(mode, interfaceName, internetInterface, firewallBackend, rulesPath string, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) apigateway.ControllerAccessStatus {
 	sshOpen := 0
+	egressDisabled := 0
 	allowedPeers := make(map[string]struct{})
 	for _, policy := range policies {
 		if policy.SSHUnlocked {
 			sshOpen++
 		}
+		if !policy.EgressEnabled {
+			egressDisabled++
+		}
 		for _, peer := range policy.AllowedPeerAddresses {
 			allowedPeers[peer] = struct{}{}
 		}
 	}
-	rules := renderControllerAccessRules(sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")), interfaceName, policies)
+	rules := renderControllerAccessRules(sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")), interfaceName, internetInterface, policies)
 	return apigateway.ControllerAccessStatus{
-		State:             "applied",
-		Mode:              mode,
-		Interface:         interfaceName,
-		FirewallBackend:   firewallBackend,
-		RulesPath:         rulesPath,
-		PoliciesTotal:     len(policies),
-		SSHOpenServices:   sshOpen,
-		SSHLockedServices: len(policies) - sshOpen,
-		AllowedPeersTotal: len(allowedPeers),
-		Revision:          controllerAccessRevision(rules),
-		AppliedAt:         now.UTC().Format(time.RFC3339),
+		State:                  "applied",
+		Mode:                   mode,
+		Interface:              interfaceName,
+		InternetInterface:      internetInterface,
+		FirewallBackend:        firewallBackend,
+		RulesPath:              rulesPath,
+		PoliciesTotal:          len(policies),
+		SSHOpenServices:        sshOpen,
+		SSHLockedServices:      len(policies) - sshOpen,
+		EgressDisabledServices: egressDisabled,
+		AllowedPeersTotal:      len(allowedPeers),
+		Revision:               controllerAccessRevision(rules),
+		AppliedAt:              now.UTC().Format(time.RFC3339),
 	}
 }
 
-func renderControllerAccessRules(tableName, interfaceName string, policies []apigateway.ControllerServiceAccessPolicy) string {
+func renderControllerAccessRules(tableName, interfaceName, internetInterface string, policies []apigateway.ControllerServiceAccessPolicy) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
 	builder.WriteString("  chain forward {\n")
@@ -452,6 +465,9 @@ func renderControllerAccessRules(tableName, interfaceName string, policies []api
 		if strings.TrimSpace(interfaceName) != "" {
 			ingressPrefix = fmt.Sprintf("iifname \"%s\" ", interfaceName)
 			egressPrefix = fmt.Sprintf("oifname \"%s\" ", interfaceName)
+		}
+		if !policy.EgressEnabled && strings.TrimSpace(internetInterface) != "" {
+			builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip saddr %s drop\n", internetInterface, policy.ServiceIP))
 		}
 		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d accept\n", ingressPrefix, policy.ServiceIP, policy.ServicePort))
 		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d accept\n", policy.ServiceIP, policy.ServicePort))

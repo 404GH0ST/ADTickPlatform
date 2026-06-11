@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"adplatform/internal/platform/httpapi"
 )
@@ -881,6 +882,73 @@ func (s *Server) handleAdminAuditScoring(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeData(w, http.StatusOK, report)
+}
+
+func (s *Server) handleAdminGetPlatformSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	settings, err := s.store.GetPlatformSettings(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	var req adminUpdatePlatformSettingsRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse platform settings payload.")
+		return
+	}
+	if strings.TrimSpace(req.FlagFormatPrefix) == "" {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag_format_prefix must not be empty.")
+		return
+	}
+	actor := s.adminToken
+	settings, err := s.store.UpdatePlatformSettings(r.Context(), req, actor, time.Now().UTC())
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
+	s.recordAdminAudit(r.Context(), "platform.settings.update", "platform_settings", "platform_settings:1", "updated platform settings", map[string]any{
+		"flag_format_prefix": settings.FlagFormatPrefix,
+	})
+	writeData(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleAdminReloadFlagFormat(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	settings, err := s.store.GetPlatformSettings(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	now := time.Now().UTC()
+	if _, err := s.gameCore.RefreshFlagFormat(r.Context(), settings.FlagFormatPrefix); err != nil {
+		s.recordAdminAudit(r.Context(), "platform.settings.reload", "platform_settings", "platform_settings:1", "flag format reload failed", map[string]any{
+			"flag_format_prefix": settings.FlagFormatPrefix,
+			"error":              err.Error(),
+		})
+		writeProblem(w, http.StatusBadGateway, "Flag format reload failed", "game-core did not accept the new flag format: "+err.Error())
+		return
+	}
+	updated, err := s.store.SetActiveFlagFormat(r.Context(), settings.FlagFormatPrefix, now)
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(r.Context(), "platform.settings.reload", "platform_settings", "platform_settings:1", "flag format reloaded", map[string]any{
+		"flag_format_prefix": updated.FlagFormatPrefix,
+		"flag_format_active": updated.FlagFormatActive,
+	})
+	writeData(w, http.StatusOK, updated)
 }
 
 func parseAdminCheckerRunQuery(r *http.Request) GameCheckerRunQuery {

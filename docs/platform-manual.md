@@ -26,15 +26,18 @@ request and response shapes.
    - `GET /api/v2/game/status`
 3. Download whitebox source when available with
    `GET /api/v2/challenges/{challenge_id}/source`.
-4. Inspect your own service state with `GET /api/v2/team/services`.
-5. Extract the unlock proof from your own service and submit it to
+4. Download your own WireGuard peer config with `GET /api/v2/me/wireguard`.
+   The response is the rendered client `.conf` text and the response headers
+   carry the suggested filename via `Content-Disposition`.
+5. Inspect your own service state with `GET /api/v2/team/services`.
+6. Extract the unlock proof from your own service and submit it to
    `POST /api/v2/services/{challenge_id}/unlock`.
-6. Retrieve the stable team SSH credential from
+7. Retrieve the stable team SSH credential from
    `POST /api/v2/services/{challenge_id}/ssh-session`.
-7. Use restart or factory reset when needed:
+8. Use restart or factory reset when needed:
    - `POST /api/v2/services/{challenge_id}/reset/restart`
    - `POST /api/v2/services/{challenge_id}/reset/factory`
-8. Submit captured flags with `POST /api/v2/submit`.
+9. Submit captured flags with `POST /api/v2/submit`.
 
 ## Authentication
 
@@ -130,6 +133,31 @@ state.
 - Requires participant authentication.
 - Streams the configured whitebox challenge source bundle.
 - The payload may be a generated archive or a stored artifact file.
+
+## WireGuard Config Download
+
+`GET /api/v2/me/wireguard`
+
+- Requires participant authentication; the team JWT must resolve to a player
+  with a generated peer.
+- Returns the rendered client `.conf` text for the authenticated player. The
+  body is the full `[Interface]`/`[Peer]` block the participant imports into
+  their WireGuard client.
+- The `Content-Type` is `text/plain; charset=utf-8` and `Content-Disposition`
+  is `attachment; filename="<peer-name>.conf"` so a browser saves the file
+  with the correct name and never tries to render it inline.
+- Organizer accounts have no peer config and receive `403`.
+- A revoked peer still resolves to a config (so the participant can replace a
+  previously downloaded file); the body reflects the current `status`.
+- Rate limited per team alongside other credential download endpoints.
+
+Notes:
+
+- The config contains the per-player private key, preshared key, and assigned
+  `Address` inside the WireGuard game network. Treat the file as a secret.
+- Import the file directly into WireGuard, `wg-quick`, or any compatible
+  client. The `Endpoint` is the configured gateway; the `AllowedIPs` cover
+  the game-network subnets.
 
 ## Owned Service State
 
@@ -261,11 +289,15 @@ Request:
 ```json
 {
   "flags": [
-    "FLAGv1.foo.bar",
-    "FLAGv1.baz.qux"
+    "PLAYIT{Zm9vOmJhcjoxMjM0NTY3ODkw.YWJjZGVm}",
+    "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz"]
   ]
 }
 ```
+
+> **Note:** The default flag format is `PLAYIT{<payload>.<mac>}`. Organizers can change
+> the prefix from the admin dashboard (Platform Settings → Flag Format). The payload is
+> base64url-encoded and the MAC is an HMAC-SHA256 signature computed by the platform.
 
 Success:
 
@@ -273,17 +305,17 @@ Success:
 {
   "results": [
     {
-      "flag": "FLAGv1.foo.bar",
+      "flag": "PLAYIT{Zm9vOmJhcjoxMjM0NTY3ODkw.YWJjZGVm}",
       "status": "invalid",
       "detail": "flag is wrong or expired."
     },
     {
-      "flag": "FLAGv1.baz.qux",
+      "flag": "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz]",
       "status": "accepted",
       "detail": "flag is correct."
     },
     {
-      "flag": "FLAGv1.baz.qux",
+      "flag": "PLAYIT{eHl6OmJhcjoxMjM0NTY3ODkw.bXlrZXlz]",
       "status": "duplicate",
       "detail": "flag already submitted."
     }

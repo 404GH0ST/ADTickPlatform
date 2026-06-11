@@ -370,3 +370,7 @@ export async function restartService(challengeID: number) {
 export async function downloadChallengeSource(challengeID: number) {
   return participantFetchResponse(`/api/v2/challenges/${challengeID}/source`);
 }
+
+export async function downloadParticipantWireGuard() {
+  return participantFetchResponse("/api/v2/me/wireguard");
+}

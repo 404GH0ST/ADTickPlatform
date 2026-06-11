@@ -82,6 +82,7 @@ export type AdminChallenge = {
   weight: number;
   service_port: number;
   service_subnet_octet: number;
+  egress_enabled: boolean;
   published: boolean;
   deployed_teams: number;
   total_teams: number;
@@ -429,4 +430,15 @@ export type AdminRuntimeEvidenceReport = {
   operations_status: AdminOperationsStatus | null;
   service_metrics: AdminServiceMetricSnapshot | null;
   wireguard_status: AdminWireGuardGatewayStatus | null;
+};
+
+export type AdminPlatformSettings = {
+  flag_format_prefix: string;
+  flag_format_active: string;
+  updated_at: string;
+  updated_by: string;
+};
+
+export type AdminPlatformSettingsInput = {
+  flag_format_prefix: string;
 };

@@ -8,6 +8,7 @@ coverage.out
 
 .cache/
 .runtime/
+.omo/
 apps/web/playwright-report/
 apps/web/test-results/
 

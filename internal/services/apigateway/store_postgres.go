@@ -840,6 +840,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       c.weight,
 		       COALESCE(NULLIF(c.service_port, 0), 10000 + c.id),
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
+		       c.egress_enabled,
 		       c.published,
 		       c.created_at,
 		       c.last_validation_status,
@@ -854,7 +855,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.weight, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -881,6 +882,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.Weight,
 			&challenge.ServicePort,
 			&challenge.ServiceSubnetOctet,
+			&challenge.EgressEnabled,
 			&challenge.Published,
 			&createdAt,
 			&validationStatus,
@@ -969,10 +971,14 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 	if subnetTaken {
 		return adminChallenge{}, fmt.Errorf("%w: service_subnet_octet %d is already assigned to another challenge", ErrInvalidRuntimeConfig, serviceSubnetOctet)
 	}
+	egressEnabled := true
+	if input.EgressEnabled != nil {
+		egressEnabled = *input.EgressEnabled
+	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, weight, service_port, service_subnet_octet, published, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, $9)
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, servicePort, serviceSubnetOctet, now.UTC()); err != nil {
+		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, weight, service_port, service_subnet_octet, egress_enabled, published, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, servicePort, serviceSubnetOctet, egressEnabled, now.UTC()); err != nil {
 		return adminChallenge{}, err
 	}
 	totalTeams, err := s.countTeams(ctx)
@@ -988,6 +994,7 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
+		EgressEnabled:      egressEnabled,
 		Published:          false,
 		DeployedTeams:      0,
 		TotalTeams:         totalTeams,
@@ -1082,6 +1089,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    checker_image = $4,
 		    source_bundle_path = $5,
 		    weight = $6,
+		    egress_enabled = COALESCE($7, egress_enabled),
 		    last_validation_status = NULL,
 		    last_validation_baseline_ssh_contract_ok = NULL,
 		    last_validation_checker_contract_ok = NULL,
@@ -1089,7 +1097,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    last_validation_checked_at = NULL,
 		    last_validation_message = NULL
 		WHERE id = $1
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight); err != nil {
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, weight, input.EgressEnabled); err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)
@@ -1505,6 +1513,63 @@ func (s *postgresStore) AppendAdminAuditLog(ctx context.Context, entry adminAudi
 	return err
 }
 
+func (s *postgresStore) GetPlatformSettings(ctx context.Context) (adminPlatformSettings, error) {
+	var settings adminPlatformSettings
+	var updatedAt time.Time
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT flag_format_prefix, flag_format_active, updated_at, updated_by
+		FROM platform_settings
+		WHERE id = 1
+	`).Scan(
+		&settings.FlagFormatPrefix,
+		&settings.FlagFormatActive,
+		&updatedAt,
+		&settings.UpdatedBy,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", UpdatedBy: "system"}, nil
+		}
+		return adminPlatformSettings{}, err
+	}
+	settings.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return settings, nil
+}
+
+func (s *postgresStore) UpdatePlatformSettings(ctx context.Context, input adminUpdatePlatformSettingsRequest, actor string, now time.Time) (adminPlatformSettings, error) {
+	prefix := strings.TrimSpace(input.FlagFormatPrefix)
+	if prefix == "" {
+		return adminPlatformSettings{}, fmt.Errorf("flag_format_prefix must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO platform_settings (id, flag_format_prefix, flag_format_active, updated_at, updated_by)
+		VALUES (1, $1, COALESCE((SELECT flag_format_active FROM platform_settings WHERE id = 1), $1), $2, $3)
+		ON CONFLICT (id) DO UPDATE SET
+			flag_format_prefix = EXCLUDED.flag_format_prefix,
+			updated_at = EXCLUDED.updated_at,
+			updated_by = EXCLUDED.updated_by
+	`, prefix, now.UTC(), strings.TrimSpace(actor)); err != nil {
+		return adminPlatformSettings{}, err
+	}
+	return s.GetPlatformSettings(ctx)
+}
+
+func (s *postgresStore) SetActiveFlagFormat(ctx context.Context, format string, now time.Time) (adminPlatformSettings, error) {
+	active := strings.TrimSpace(format)
+	if active == "" {
+		return adminPlatformSettings{}, fmt.Errorf("active flag format must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO platform_settings (id, flag_format_prefix, flag_format_active, updated_at, updated_by)
+		VALUES (1, $1, $2, $3, '')
+		ON CONFLICT (id) DO UPDATE SET
+			flag_format_active = EXCLUDED.flag_format_active,
+			updated_at = EXCLUDED.updated_at
+	`, active, active, now.UTC()); err != nil {
+		return adminPlatformSettings{}, err
+	}
+	return s.GetPlatformSettings(ctx)
+}
+
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.endpoint, si.ssh_host, c.service_port
@@ -1580,6 +1645,7 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 			split_part(tss.endpoint, ':', 1),
 			split_part(tss.endpoint, ':', 2),
 			tss.unlocked,
+			c.egress_enabled,
 			COALESCE((
 				SELECT string_agg(wp.address, ',')
 				FROM players p
@@ -1610,6 +1676,7 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 			&policy.ServiceIP,
 			&servicePortText,
 			&policy.SSHUnlocked,
+			&policy.EgressEnabled,
 			&allowedPeersCSV,
 		); err != nil {
 			return nil, err
@@ -1635,6 +1702,7 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 			split_part(tss.endpoint, ':', 1),
 			split_part(tss.endpoint, ':', 2),
 			tss.unlocked,
+			c.egress_enabled,
 			COALESCE((
 				SELECT string_agg(wp.address, ',')
 				FROM players p
@@ -1654,6 +1722,7 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 		&policy.ServiceIP,
 		&servicePortText,
 		&policy.SSHUnlocked,
+		&policy.EgressEnabled,
 		&allowedPeersCSV,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

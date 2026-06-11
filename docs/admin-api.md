@@ -128,7 +128,8 @@ Request body:
   "checker_image": "registry.local/proxy-checker:latest",
   "weight": 2,
   "service_port": 10007,
-  "service_subnet_octet": 7
+  "service_subnet_octet": 7,
+  "egress_enabled": true
 }
 ```
 
@@ -136,9 +137,16 @@ Behavior:
 
 - `service_port` controls the target port that both participants and checkers use
 - `service_subnet_octet` controls the `10.80.x.y` subnet assigned to that challenge
+- `egress_enabled` (default `true`) controls whether the per-team service container
+  is allowed to reach the public internet. When `false`, the controller emits an
+  nftables/iptables DROP rule that blocks outbound traffic from that challenge's
+  service containers to the `CONTROLLER_INTERNET_INTERFACE` (default `eth0`).
+  Use this for air-gapped challenges that must not phone home or coordinate over
+  external channels.
 - if omitted:
   - `service_port = 10000 + challenge_id`
   - `service_subnet_octet = challenge_id`
+  - `egress_enabled = true`
 
 ### DELETE `/api/v2/admin/challenges/{challenge_id}`
 

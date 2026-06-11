@@ -132,6 +132,7 @@ type ChallengeDraft = {
   servicePort: string;
   serviceSubnetOctet: string;
   weight: string;
+  egressEnabled: boolean;
 };
 
 export type DeleteTarget = {
@@ -359,6 +360,7 @@ export function useOrganizerDashboard({
     servicePort: "",
     serviceSubnetOctet: "",
     weight: "1",
+    egressEnabled: true,
   });
   const [checkerRunFilters, setCheckerRunFilters] = useState<CheckerRunFilters>(
     defaultCheckerRunFilters,
@@ -1216,6 +1218,7 @@ export function useOrganizerDashboard({
             challengeDraft.serviceSubnetOctet.trim() === ""
               ? undefined
               : Number(challengeDraft.serviceSubnetOctet),
+          egress_enabled: challengeDraft.egressEnabled,
         }),
       });
       const payload = await processApiResponse<AdminChallenge>(
@@ -1237,6 +1240,7 @@ export function useOrganizerDashboard({
         servicePort: "",
         serviceSubnetOctet: "",
         weight: "1",
+        egressEnabled: true,
       });
       setActionNote(
         `Created draft challenge ${payload.name}. Deploy it to replicate one service per team.`,
@@ -2186,6 +2190,7 @@ export function useOrganizerDashboard({
         servicePort: "",
         serviceSubnetOctet: "",
         weight: "1",
+        egressEnabled: true,
       });
     }
   }
@@ -2226,6 +2231,7 @@ export function useOrganizerDashboard({
           servicePort: String(challenge.service_port),
           serviceSubnetOctet: String(challenge.service_subnet_octet),
           weight: String(challenge.weight),
+          egressEnabled: challenge.egress_enabled,
         });
       }
     }
@@ -2310,6 +2316,7 @@ export function useOrganizerDashboard({
           checker_image: challengeDraft.checkerImage,
           source_bundle_path: challengeDraft.sourceBundlePath,
           weight: Number(challengeDraft.weight) || 1,
+          egress_enabled: challengeDraft.egressEnabled,
         }),
       });
       const payload = await processApiResponse<AdminChallenge>(

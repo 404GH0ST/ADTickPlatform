@@ -13,6 +13,8 @@ import type {
   AdminDeployment,
   AdminDeploymentJob,
   AdminGameScoreRow,
+  AdminPlatformSettings,
+  AdminPlatformSettingsInput,
   AdminScoringAudit,
   AdminGameMatchStatus,
   AdminOperationsStatus,
@@ -52,6 +54,7 @@ export type CreateChallengeInput = {
   weight: number;
   service_port?: number;
   service_subnet_octet?: number;
+  egress_enabled?: boolean;
 };
 
 export type UpdateTeamInput = {
@@ -71,6 +74,7 @@ export type UpdateChallengeInput = {
   checker_image: string;
   source_bundle_path?: string;
   weight: number;
+  egress_enabled?: boolean;
 };
 
 export type UpdateGameMatchScheduleInput = {
@@ -734,4 +738,31 @@ export async function recomputeAdminGameScoring() {
 
 export async function auditAdminGameScoring() {
   return adminFetch<AdminScoringAudit>("/api/v2/admin/game/scoring/audit");
+}
+
+export async function getAdminPlatformSettings() {
+  return adminFetch<AdminPlatformSettings>(
+    "/api/v2/admin/platform/settings",
+  );
+}
+
+export async function updateAdminPlatformSettings(
+  input: AdminPlatformSettingsInput,
+) {
+  return adminFetch<AdminPlatformSettings>(
+    "/api/v2/admin/platform/settings",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function reloadAdminFlagFormat() {
+  return adminFetch<AdminPlatformSettings>(
+    "/api/v2/admin/platform/settings/reload",
+    {
+      method: "POST",
+    },
+  );
 }

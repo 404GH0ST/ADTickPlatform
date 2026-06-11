@@ -69,7 +69,7 @@ func (s *monitorTestScheduler) Close() error {
 func TestMatchWindowMonitorStartsAndStopsScheduler(t *testing.T) {
 	store := newMemoryGameStore()
 	scheduler := &monitorTestScheduler{}
-	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15)
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
 
 	base := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
 	start := base.Add(20 * time.Millisecond)
@@ -120,7 +120,7 @@ func TestMatchWindowMonitorStartsAndStopsScheduler(t *testing.T) {
 func TestMatchWindowMonitorDoesNotAutoStartWithoutConfiguredWindow(t *testing.T) {
 	store := newMemoryGameStore()
 	scheduler := &monitorTestScheduler{}
-	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret"), scheduler, []string{"put", "get", "check"}, 15)
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
 
 	base := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
 	server.now = func() time.Time { return base.Add(time.Minute) }

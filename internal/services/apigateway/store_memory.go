@@ -45,6 +45,7 @@ type memoryStore struct {
 	auditLogs        []adminAuditLog
 	scoreboard       []scoreRow
 	attackFeed       []attackEvent
+	platformSettings adminPlatformSettings
 	nextTeamID       int
 	nextPlayerID     int
 	nextChallengeID  int
@@ -75,9 +76,9 @@ func NewMemoryStore(teamID int) Store {
 			4: mustNewAdminPlayerRecord(4, 104, "Team Orchid", "Orchid Captain", "orchid.captain@example.com", "captain", "orchid-secret", now.Add(-69*time.Hour)),
 		},
 		challenges: map[int]*adminChallenge{
-			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", Weight: 1, ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
-			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", Weight: 1, ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
-			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", Weight: 1, ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
+			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", Weight: 1, ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
+			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", Weight: 1, ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
+			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", Weight: 1, ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
 		},
 		teamStates:  make(map[int]map[int]*serviceState),
 		instances:   make(map[int]map[int]*serviceInstanceRecord),
@@ -90,6 +91,7 @@ func NewMemoryStore(teamID int) Store {
 			{Rank: 4, Team: "Team Orchid", Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "0"},
 		},
 		attackFeed:       []attackEvent{},
+		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", UpdatedBy: "system"},
 		nextTeamID:       105,
 		nextPlayerID:     5,
 		nextChallengeID:  4,
@@ -726,6 +728,10 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 			return adminChallenge{}, fmt.Errorf("%w: service_subnet_octet %d is already assigned to challenge %d", ErrInvalidRuntimeConfig, serviceSubnetOctet, challenge.ID)
 		}
 	}
+	egressEnabled := true
+	if input.EgressEnabled != nil {
+		egressEnabled = *input.EgressEnabled
+	}
 	challenge := adminChallenge{
 		ID:                 id,
 		Name:               name,
@@ -735,6 +741,7 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		Weight:             weight,
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
+		EgressEnabled:      egressEnabled,
 		Published:          false,
 		TotalTeams:         len(s.teams),
 		RuntimeStatus:      "draft",
@@ -965,6 +972,39 @@ func (s *memoryStore) AppendAdminAuditLog(_ context.Context, entry adminAuditLog
 	return nil
 }
 
+func (s *memoryStore) GetPlatformSettings(_ context.Context) (adminPlatformSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.platformSettings, nil
+}
+
+func (s *memoryStore) UpdatePlatformSettings(_ context.Context, input adminUpdatePlatformSettingsRequest, actor string, now time.Time) (adminPlatformSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	prefix := strings.TrimSpace(input.FlagFormatPrefix)
+	if prefix == "" {
+		return adminPlatformSettings{}, fmt.Errorf("flag_format_prefix must not be empty")
+	}
+	s.platformSettings.FlagFormatPrefix = prefix
+	s.platformSettings.UpdatedAt = now.UTC().Format(time.RFC3339)
+	s.platformSettings.UpdatedBy = strings.TrimSpace(actor)
+	return s.platformSettings, nil
+}
+
+func (s *memoryStore) SetActiveFlagFormat(_ context.Context, format string, now time.Time) (adminPlatformSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	active := strings.TrimSpace(format)
+	if active == "" {
+		active = s.platformSettings.FlagFormatPrefix
+	}
+	s.platformSettings.FlagFormatActive = active
+	s.platformSettings.UpdatedAt = now.UTC().Format(time.RFC3339)
+	return s.platformSettings, nil
+}
+
 func (s *memoryStore) ListControllerRuntimeTasks(_ context.Context) ([]ControllerRuntimeTask, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1085,6 +1125,11 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 	slices.Sort(allowedPeers)
 	allowedPeers = slices.Compact(allowedPeers)
 
+	egressEnabled := true
+	if challenge, ok := s.challenges[challengeID]; ok && challenge != nil {
+		egressEnabled = challenge.EgressEnabled
+	}
+
 	return ControllerServiceAccessPolicy{
 		TeamID:               teamID,
 		TeamName:             teamNameForID(s.teamNames, teamID),
@@ -1095,6 +1140,7 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 		SSHPort:              22,
 		SSHUnlocked:          state.Unlocked,
 		AllowedPeerAddresses: allowedPeers,
+		EgressEnabled:        egressEnabled,
 	}
 }
 
@@ -1302,6 +1348,9 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	challenge.SourceBundlePath = sanitizeSourceBundlePath(input.SourceBundlePath)
 	if input.Weight > 0 {
 		challenge.Weight = input.Weight
+	}
+	if input.EgressEnabled != nil {
+		challenge.EgressEnabled = *input.EgressEnabled
 	}
 	challenge.LastValidation = nil
 	s.challenges[challengeID] = challenge

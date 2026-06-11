@@ -44,6 +44,7 @@ import { AttackMapPanel } from "@/components/ui/attack-map-panel";
 import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
 import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
 import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
+import { PlatformSettingsCard } from "@/components/admin/platform-settings-card";
 import { Badge } from "@/components/ui/badge";
 import { AdminTable, AdminTableHeader } from "@/components/ui/admin-table";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ type ChallengeDraft = {
   servicePort: string;
   serviceSubnetOctet: string;
   weight: string;
+  egressEnabled: boolean;
 };
 
 type TeamsTabProps = {
@@ -1037,6 +1039,7 @@ function ChallengeCatalogCard({
             { label: "Validation" },
             { label: "Weight" },
             { label: "Network" },
+            { label: "Egress" },
             { label: "Replication" },
             { label: "Runtime" },
             { label: "Action" },
@@ -1126,6 +1129,18 @@ function ChallengeCatalogRow({
           <p>10.80.{challenge.service_subnet_octet}.0/24</p>
           <p>port {challenge.service_port}</p>
         </div>
+      </TableCell>
+      <TableCell>
+        <Badge
+          className={
+            challenge.egress_enabled
+              ? "tone-success"
+              : "tone-warning"
+          }
+          variant="outline"
+        >
+          {challenge.egress_enabled ? "internet" : "air-gapped"}
+        </Badge>
       </TableCell>
       <TableCell>
         {challenge.deployed_teams}/{challenge.total_teams}
@@ -1482,6 +1497,7 @@ export function GameTab({
           onStopMatch={onStopMatch}
           onUpdateMatchSchedule={onUpdateMatchSchedule}
         />
+        <PlatformSettingsCard />
       </section>
 
       <section className="grid gap-3">
@@ -5335,6 +5351,34 @@ export function EntityFormDialog({
               </p>
             ) : null}
           </div>
+        </Field>
+        <Field label="Internet egress" htmlFor="form-challenge-egress">
+          <label className="flex items-start gap-3 text-sm leading-6 text-foreground">
+            <input
+              type="checkbox"
+              id="form-challenge-egress"
+              data-testid="form-challenge-egress"
+              checked={challengeDraft.egressEnabled}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  egressEnabled: event.target.checked,
+                })
+              }
+              className="mt-1 h-4 w-4 rounded-sm border border-border bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+            />
+            <span>
+              Allow service containers to reach the public internet
+              (default ON).
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                When disabled, the controller emits a nftables/iptables DROP
+                rule that blocks outbound traffic from this challenge&apos;s
+                service containers to the configured internet interface. Use
+                this for fully air-gapped challenges that must not phone home
+                or coordinate over external channels.
+              </span>
+            </span>
+          </label>
         </Field>
         {challengeValidation ? (
           <InfoPanel tone={challengeFormInvalid ? "warning" : "surface"}>

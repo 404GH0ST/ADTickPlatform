@@ -167,6 +167,7 @@ The admin challenge model now supports:
 - `weight`
 - `service_port`
 - `service_subnet_octet`
+- `egress_enabled` (default `true`)
 
 This means the organizer can control:
 
@@ -174,6 +175,31 @@ This means the organizer can control:
 - which checker image is executed
 - which in-container service port is targeted
 - which `10.80.x.y` subnet octet is assigned for that challenge
+- whether each per-team service container is allowed to reach the public internet
+  (see [Internet Egress](#internet-egress) below)
+
+## Internet Egress
+
+By default, service containers are allowed to reach the public internet
+(needed for patch operations like `apt install`, `pip install`, or challenges
+that legitimately call external services). The organizer can disable egress
+per challenge by setting `egress_enabled = false` on the challenge model.
+
+When `egress_enabled = false`, the controller renders an extra rule in the
+service access table that drops outbound traffic from that challenge's service
+containers to the host's internet interface:
+
+- nftables: `oifname "<internet-iface>" ip saddr <service-ip> drop`
+- iptables: `-A ADPLATFORM-WG-SERVICES -o <internet-iface> -s <service-ip>/32 -j DROP`
+
+The internet interface defaults to `eth0` and is configured via
+`CONTROLLER_INTERNET_INTERFACE`. When set to an empty string, the egress DROP
+is omitted (the operator is opting in to the host's default firewall to handle
+egress).
+
+Existing established/related connections (conntrack) are still allowed by the
+chain's first rule, so the DROP only blocks new outbound connections — return
+traffic for an existing connection is unaffected.
 
 A working reference package is included in:
 

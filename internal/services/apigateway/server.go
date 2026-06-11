@@ -97,6 +97,7 @@ func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
+	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
 	mux.HandleFunc("GET /api/v2/challenges/{challenge_id}/source", s.handleChallengeSourceDownload)
 	mux.HandleFunc("GET /api/v2/services", s.handleServices)
@@ -154,6 +155,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/admin/game/scoreboard", s.handleAdminGameScoreboard)
 	mux.HandleFunc("POST /api/v2/admin/game/scoring/recompute", s.handleAdminRecomputeScoring)
 	mux.HandleFunc("GET /api/v2/admin/game/scoring/audit", s.handleAdminAuditScoring)
+	mux.HandleFunc("GET /api/v2/admin/platform/settings", s.handleAdminGetPlatformSettings)
+	mux.HandleFunc("PUT /api/v2/admin/platform/settings", s.handleAdminUpdatePlatformSettings)
+	mux.HandleFunc("POST /api/v2/admin/platform/settings/reload", s.handleAdminReloadFlagFormat)
 }
 
 func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {

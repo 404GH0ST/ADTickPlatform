@@ -82,6 +82,9 @@ type Store interface {
 	ListControllerServiceAccessPolicies(ctx context.Context) ([]ControllerServiceAccessPolicy, error)
 	GetControllerServiceAccessPolicy(ctx context.Context, teamID, challengeID int) (ControllerServiceAccessPolicy, error)
 	ReconcileAdminDeployments(ctx context.Context, now time.Time) (adminReconcileResult, error)
+	GetPlatformSettings(ctx context.Context) (adminPlatformSettings, error)
+	UpdatePlatformSettings(ctx context.Context, input adminUpdatePlatformSettingsRequest, actor string, now time.Time) (adminPlatformSettings, error)
+	SetActiveFlagFormat(ctx context.Context, format string, now time.Time) (adminPlatformSettings, error)
 	Close() error
 }
 

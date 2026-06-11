@@ -74,6 +74,7 @@ const adminApiCases: ApiCase[] = [
 const participantOwnedApiCases: ApiCase[] = [
   { method: "GET", path: "/api/platform/team/services" },
   { method: "GET", path: "/api/platform/challenges/1/source" },
+  { method: "GET", path: "/api/platform/me/wireguard" },
   { method: "POST", path: "/api/platform/services/1/ssh-session" },
   { method: "POST", path: "/api/platform/services/1/reset/factory" },
   { method: "POST", path: "/api/platform/services/1/reset/restart" },
