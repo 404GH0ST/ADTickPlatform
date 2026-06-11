@@ -64,7 +64,7 @@ services:
       - "${GRAFANA_HOST_PORT:-13000}:3000"
     volumes:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../grafana/dashboards/dev:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
