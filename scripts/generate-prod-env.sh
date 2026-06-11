@@ -45,6 +45,7 @@ team_jwt_secret="$(random_hex 32)"
 unlock_secret="$(random_hex 32)"
 ssh_secret="$(random_hex 32)"
 flag_secret="$(random_hex 32)"
+grafana_admin_password="$(random_hex 24)"
 wg_private_key="$(wireguard_private_key)"
 
 postgres_dsn="postgres://adplatform:${postgres_password}@postgres:5432/adplatform?sslmode=disable"
@@ -80,6 +81,7 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
     UNLOCK_PROOF_SECRET) value="${unlock_secret}" ;;
     SSH_CREDENTIAL_SECRET) value="${ssh_secret}" ;;
     GAME_CORE_FLAG_SECRET) value="${flag_secret}" ;;
+    GRAFANA_ADMIN_PASSWORD) value="${grafana_admin_password}" ;;
     WIREGUARD_SERVER_PRIVATE_KEY) value="${wg_private_key}" ;;
     *)
       printf '%s\n' "${line}" >>"${tmp_file}"
