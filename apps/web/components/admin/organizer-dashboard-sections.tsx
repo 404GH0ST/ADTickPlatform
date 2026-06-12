@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   Copy,
   Download,
@@ -77,6 +77,10 @@ import {
 import { cn } from "@/lib/utils";
 import { formatIndonesianDate } from "@/lib/date-format";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
+import {
+  computeCategoryLeaders,
+  type CategoryLeader,
+} from "@/lib/scoring-leaders";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
 type TeamDraft = {
@@ -1575,6 +1579,113 @@ export function GameTab({
   );
 }
 
+function CategoryLeaderRow({
+  leader,
+  scoreFormatter,
+}: {
+  leader: CategoryLeader;
+  scoreFormatter: (n: number) => string;
+}): ReactElement {
+  return (
+    <li className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="w-6 font-mono text-xs tabular-nums text-muted-foreground">
+          #{leader.rank}
+        </span>
+        <span className="truncate font-medium text-foreground">{leader.team}</span>
+      </div>
+      <span className="shrink-0 font-mono text-sm tabular-nums text-foreground">
+        {scoreFormatter(leader.score)}
+      </span>
+    </li>
+  );
+}
+
+function CategoryLeaderCard({
+  title,
+  caption,
+  leaders,
+  scoreFormatter,
+}: {
+  title: string;
+  caption: string;
+  leaders: CategoryLeader[];
+  scoreFormatter: (n: number) => string;
+}): ReactElement {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>{caption}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {leaders.length === 0 ? (
+          <EmptyStateText message="Belum ada tim yang bermain." />
+        ) : (
+          <ol className="grid gap-2" aria-label={title}>
+            {leaders.map((leader) => (
+              <CategoryLeaderRow
+                key={leader.team}
+                leader={leader}
+                scoreFormatter={scoreFormatter}
+              />
+            ))}
+          </ol>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function ScoreboardCategoryLeadersPanel({
+  scoreRows,
+  topN = 3,
+}: {
+  scoreRows: AdminGameScoreRow[];
+  topN?: number;
+}): ReactElement {
+  const summary = useMemo(
+    () => computeCategoryLeaders(scoreRows, topN),
+    [scoreRows, topN],
+  );
+
+  const formatScore = (n: number) => n.toFixed(2);
+
+  return (
+    <Card data-testid="scoreboard-category-leaders-panel">
+      <CardHeader>
+        <CardTitle>Kandidat Penghargaan Tim</CardTitle>
+        <CardDescription>
+          {topN} tim teratas dari setiap kategori skor kumulatif (attack,
+          defense, SLA). Sumber data untuk pemilihan gelar Best Attacker,
+          Best Defender, dan Best Availability — semuanya diberikan kepada
+          tim, bukan pemain individual.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-3">
+        <CategoryLeaderCard
+          title="Tim Penyerang Terbaik"
+          caption="Poin serangan kumulatif dari seluruh flag yang berhasil ditangkap."
+          leaders={summary.attacker}
+          scoreFormatter={formatScore}
+        />
+        <CategoryLeaderCard
+          title="Tim Bertahan Terbaik"
+          caption="Poin bertahan kumulatif (penalitas paling kecil untuk flag yang dicuri)."
+          leaders={summary.defender}
+          scoreFormatter={formatScore}
+        />
+        <CategoryLeaderCard
+          title="Tim dengan Ketersediaan Terbaik"
+          caption="Poin SLA kumulatif dari uptime checker tiap service."
+          leaders={summary.availability}
+          scoreFormatter={formatScore}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ScoreboardTab({
   pendingAction,
   scoringAudit,
@@ -1616,6 +1727,7 @@ export function ScoreboardTab({
 
   return (
     <div className="grid gap-4">
+      <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
       <Card>
         <CardHeader>
           <CardTitle>Scoreboard View</CardTitle>
