@@ -655,9 +655,15 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 }
 
 func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error) {
-	teamName, err := s.lookupTeamName(ctx, input.TeamID)
-	if err != nil {
-		return adminPlayer{}, err
+	var teamName string
+	if input.TeamID == 0 {
+		teamName = "Organizer"
+	} else {
+		var err error
+		teamName, err = s.lookupTeamName(ctx, input.TeamID)
+		if err != nil {
+			return adminPlayer{}, err
+		}
 	}
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email)
