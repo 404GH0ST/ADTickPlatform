@@ -1,4 +1,4 @@
-.PHONY: firewall-cleanup generate-prod-env compose-config prod-config prod-host-config preflight-prod-host \
+.PHONY: firewall-cleanup generate-prod-env setup-prod-env compose-config prod-config prod-host-config preflight-prod-host \
 	wg-host-keygen wg-host-render wg-host-install wg-host-up wg-host-down \
 	wg-host-show wg-host-setup up-prod up-prod-host down-prod down-prod-host \
 	logs-prod logs-prod-host prod-config-arm64 prod-host-config-arm64 \
@@ -20,6 +20,10 @@ compose-config:
 
 generate-prod-env:
 	./scripts/generate-prod-env.sh $(PROD_ENV)
+
+setup-prod-env:
+	./scripts/setup-prod-env.sh "$(DOMAIN)" "$(SCHEME)" "$(WG_PORT)"
+
 
 prod-config:
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
