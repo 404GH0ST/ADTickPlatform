@@ -33,6 +33,7 @@ type checkerTarget struct {
 	ChallengeID   int
 	ChallengeName string
 	CheckerImage  string
+	CheckerToken  string
 	Target        string
 	TargetHost    string
 	TargetIP      string
@@ -186,6 +187,7 @@ func newMemoryGameStore() gameStore {
 				ChallengeID:   challenge.id,
 				ChallengeName: challenge.name,
 				CheckerImage:  challenge.checkerImage,
+				CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", team.id, challenge.id),
 				Target:        apigateway.ServiceEndpointFor(challenge.subnetOctet, challenge.servicePort, team.id),
 				TargetHost:    targetHost,
 				TargetIP:      targetHost,
@@ -772,7 +774,7 @@ func newPostgresGameStore(db *sql.DB) gameStore {
 
 func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, c.id, c.name, c.checker_image, tss.endpoint, split_part(tss.endpoint, ':', 1), split_part(tss.endpoint, ':', 2)
+		SELECT t.id, t.name, c.id, c.name, c.checker_image, COALESCE(si.checker_token, ''), tss.endpoint, split_part(tss.endpoint, ':', 1), split_part(tss.endpoint, ':', 2)
 		FROM teams t
 		JOIN team_service_states tss ON tss.team_id = t.id
 		JOIN challenges c ON c.id = tss.challenge_id
@@ -790,7 +792,7 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 	for rows.Next() {
 		var item checkerTarget
 		var targetPortText string
-		if err := rows.Scan(&item.TeamID, &item.TeamName, &item.ChallengeID, &item.ChallengeName, &item.CheckerImage, &item.Target, &item.TargetHost, &targetPortText); err != nil {
+		if err := rows.Scan(&item.TeamID, &item.TeamName, &item.ChallengeID, &item.ChallengeName, &item.CheckerImage, &item.CheckerToken, &item.Target, &item.TargetHost, &targetPortText); err != nil {
 			return nil, err
 		}
 		item.TargetIP = item.TargetHost

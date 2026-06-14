@@ -291,6 +291,9 @@ func TestAdvanceTickPassesStructuredCheckerTargetMetadata(t *testing.T) {
 	if first.TeamName == "" || first.ChallengeName == "" {
 		t.Fatalf("expected team and challenge names in checker request %+v", first)
 	}
+	if first.CheckerToken != "dev-checker-token-101-1" {
+		t.Fatalf("expected per-instance checker token, got %q", first.CheckerToken)
+	}
 }
 
 func TestAdvanceTickPersistsRunsAndStatus(t *testing.T) {

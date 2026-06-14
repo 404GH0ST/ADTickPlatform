@@ -862,6 +862,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 				TickID:         tickID,
 				Flag:           flagValue,
 				Metadata:       metadata,
+				CheckerToken:   target.CheckerToken,
 				TimeoutSeconds: s.checkerTimeout,
 			})
 			if execErr != nil {

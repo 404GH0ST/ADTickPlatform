@@ -31,6 +31,7 @@ type CheckerExecutionRequest struct {
 	TickID         int    `json:"tick_id"`
 	Flag           string `json:"flag,omitempty"`
 	Metadata       string `json:"metadata,omitempty"`
+	CheckerToken   string `json:"checker_token,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 

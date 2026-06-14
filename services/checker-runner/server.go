@@ -359,6 +359,7 @@ func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurit
 		"-e", fmt.Sprintf("AD_TICK_ID=%d", request.TickID),
 		"-e", fmt.Sprintf("AD_FLAG=%s", request.Flag),
 		"-e", fmt.Sprintf("AD_METADATA=%s", request.Metadata),
+		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", request.CheckerToken),
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,

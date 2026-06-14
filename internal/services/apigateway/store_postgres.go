@@ -395,24 +395,57 @@ func (s *postgresStore) MarkSSHSessionApplyFailure(ctx context.Context, teamID, 
 	return nil
 }
 
-func (s *postgresStore) FactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	checkerToken, err := newCheckerToken()
+	if err != nil {
+		return resetData{}, err
+	}
+	var unlocked bool
+	if err := s.db.QueryRowContext(ctx, `
+		WITH updated_instance AS (
+			UPDATE service_instances si
+			SET checker_token = $3,
+			    updated_at = NOW()
+			FROM challenges c
+			WHERE si.team_id = $1
+			  AND si.challenge_id = $2
+			  AND c.id = si.challenge_id
+			  AND c.published = TRUE
+			  AND si.runtime_status = 'ready'
+			RETURNING si.team_id, si.challenge_id
+		)
+		UPDATE team_service_states
+		SET status = 'resetting',
+		    checker = 'warning',
+		    last_event = 'factory reset started via participant API',
+		    reset_cooldown = 'resetting'
+		WHERE team_id = $1 AND challenge_id = $2
+		  AND EXISTS (
+			SELECT 1
+			FROM updated_instance ui
+			WHERE ui.team_id = team_service_states.team_id
+			  AND ui.challenge_id = team_service_states.challenge_id
+		  )
+		RETURNING unlocked
+	`, teamID, challengeID, checkerToken).Scan(&unlocked); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return resetData{}, ErrChallengeNotFound
+		}
+		return resetData{}, err
+	}
+	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked}, nil
+}
+
+func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
 	var unlocked bool
 	if err := s.db.QueryRowContext(ctx, `
 		UPDATE team_service_states
 		SET status = 'warming',
 		    checker = 'warning',
-		    last_event = 'factory reset triggered via participant API',
+		    last_event = 'factory reset completed; waiting for checker verification',
 		    reset_cooldown = 'cooldown: 90s',
 		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; open SSH Access to reapply the team credential' ELSE ssh_hint END
 		WHERE team_id = $1 AND challenge_id = $2
-		  AND EXISTS (
-			SELECT 1
-			FROM challenges c
-			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
-			WHERE c.id = team_service_states.challenge_id
-			  AND c.published = TRUE
-			  AND si.runtime_status = 'ready'
-		  )
 		RETURNING unlocked
 	`, teamID, challengeID).Scan(&unlocked); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -423,13 +456,31 @@ func (s *postgresStore) FactoryResetService(ctx context.Context, teamID, challen
 	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked}, nil
 }
 
+func (s *postgresStore) MarkFactoryResetFailure(ctx context.Context, teamID, challengeID int) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET status = 'degraded',
+		    checker = 'warning',
+		    last_event = 'factory reset runtime failed',
+		    reset_cooldown = 'ready'
+		WHERE team_id = $1 AND challenge_id = $2
+	`, teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrChallengeNotFound
+	}
+	return nil
+}
+
 func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
-		SET status = 'stable',
-		    checker = 'passing',
-		    last_event = 'service restart triggered via participant API',
-		    reset_cooldown = 'ready'
+		SET status = 'warming',
+		    checker = 'warning',
+		    last_event = 'service restart completed; waiting for checker verification',
+		    reset_cooldown = 'cooldown: 30s'
 		WHERE team_id = $1 AND challenge_id = $2
 		  AND EXISTS (
 			SELECT 1
@@ -561,6 +612,10 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 
 		deployedChallenges := 0
 		for _, challengeConfig := range challenges {
+			checkerToken, err := newCheckerToken()
+			if err != nil {
+				return adminTeam{}, err
+			}
 			state := defaultServiceStateForConfig(challengeConfig.ID, teamID, challengeConfig.Name, challengeConfig.ServicePort, challengeConfig.ServiceSubnetOctet)
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO team_service_states (team_id, challenge_id, endpoint, status, checker, unlocked, ssh_hint, last_event, reset_cooldown)
@@ -569,9 +624,9 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 				return adminTeam{}, fmt.Errorf("insert team service state for challenge %d: %w", challengeConfig.ID, err)
 			}
 			if _, err := tx.ExecContext(ctx, `
-					INSERT INTO service_instances (team_id, challenge_id, deployment_job_id, runtime_kind, runtime_status, container_name, state_volume, baseline_image, checker_image, endpoint, ssh_host, created_at, updated_at)
-					VALUES ($1, $2, NULL, 'docker', 'queued', $3, $4, $5, $6, $7, $8, NOW(), NOW())
-				`, teamID, challengeConfig.ID, serviceContainerName(challengeConfig.Name, teamID), serviceStateVolumeName(challengeConfig.Name, teamID), challengeConfig.BaselineImage, challengeConfig.CheckerImage, state.Endpoint, ServiceIP(challengeConfig.ServiceSubnetOctet, teamID)); err != nil {
+					INSERT INTO service_instances (team_id, challenge_id, deployment_job_id, runtime_kind, runtime_status, container_name, state_volume, baseline_image, checker_image, checker_token, endpoint, ssh_host, created_at, updated_at)
+					VALUES ($1, $2, NULL, 'docker', 'queued', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+				`, teamID, challengeConfig.ID, serviceContainerName(challengeConfig.Name, teamID), serviceStateVolumeName(challengeConfig.Name, teamID), challengeConfig.BaselineImage, challengeConfig.CheckerImage, checkerToken, state.Endpoint, ServiceIP(challengeConfig.ServiceSubnetOctet, teamID)); err != nil {
 				return adminTeam{}, fmt.Errorf("insert service instance for challenge %d: %w", challengeConfig.ID, err)
 			}
 			deployedChallenges++
@@ -1219,12 +1274,16 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 			return adminDeployment{}, err
 		}
 
+		checkerToken, err := newCheckerToken()
+		if err != nil {
+			return adminDeployment{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO service_instances (
 					team_id, challenge_id, deployment_job_id, runtime_kind, runtime_status, container_name,
-					state_volume, baseline_image, checker_image, endpoint, ssh_host, created_at, updated_at
+					state_volume, baseline_image, checker_image, checker_token, endpoint, ssh_host, created_at, updated_at
 				)
-				VALUES ($1, $2, $3, 'docker', 'queued', $4, $5, $6, $7, $8, $9, $10, $10)
+				VALUES ($1, $2, $3, 'docker', 'queued', $4, $5, $6, $7, $8, $9, $10, $11, $11)
 				ON CONFLICT (team_id, challenge_id) DO UPDATE SET
 					deployment_job_id = EXCLUDED.deployment_job_id,
 					runtime_kind = EXCLUDED.runtime_kind,
@@ -1233,10 +1292,11 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 					state_volume = EXCLUDED.state_volume,
 					baseline_image = EXCLUDED.baseline_image,
 					checker_image = EXCLUDED.checker_image,
+					checker_token = EXCLUDED.checker_token,
 					endpoint = EXCLUDED.endpoint,
 					ssh_host = EXCLUDED.ssh_host,
 					updated_at = EXCLUDED.updated_at
-			`, teamID, challengeID, jobID, serviceContainerName(challengeName, teamID), serviceStateVolumeName(challengeName, teamID), baselineImage, checkerImage, ServiceEndpointFor(serviceSubnetOctet, servicePort, teamID), ServiceIP(serviceSubnetOctet, teamID), createdAt); err != nil {
+			`, teamID, challengeID, jobID, serviceContainerName(challengeName, teamID), serviceStateVolumeName(challengeName, teamID), baselineImage, checkerImage, checkerToken, ServiceEndpointFor(serviceSubnetOctet, servicePort, teamID), ServiceIP(serviceSubnetOctet, teamID), createdAt); err != nil {
 			return adminDeployment{}, err
 		}
 		queuedCount++
@@ -1566,7 +1626,7 @@ func (s *postgresStore) SetActiveFlagFormat(ctx context.Context, format string, 
 
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		LEFT JOIN deployment_jobs dj ON dj.id = si.deployment_job_id
@@ -1590,6 +1650,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 			&task.ContainerName,
 			&task.StateVolume,
 			&task.BaselineImage,
+			&task.CheckerToken,
 			&task.Endpoint,
 			&task.SSHHost,
 			&task.ServicePort,
@@ -1604,7 +1665,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (ControllerRuntimeTask, error) {
 	var task ControllerRuntimeTask
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		WHERE si.team_id = $1 AND si.challenge_id = $2
@@ -1617,6 +1678,7 @@ func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, ch
 		&task.ContainerName,
 		&task.StateVolume,
 		&task.BaselineImage,
+		&task.CheckerToken,
 		&task.Endpoint,
 		&task.SSHHost,
 		&task.ServicePort,

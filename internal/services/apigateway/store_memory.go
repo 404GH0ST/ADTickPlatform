@@ -26,6 +26,7 @@ type serviceInstanceRecord struct {
 	StateVolume     string
 	BaselineImage   string
 	CheckerImage    string
+	CheckerToken    string
 	Endpoint        string
 	SSHHost         string
 	ServicePort     int
@@ -115,6 +116,7 @@ func NewMemoryStore(teamID int) Store {
 					StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
 					BaselineImage: challenge.BaselineImage,
 					CheckerImage:  challenge.CheckerImage,
+					CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", teamID, challengeID),
 					Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
 					SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, teamID),
 					ServicePort:   challenge.ServicePort,
@@ -143,6 +145,7 @@ func NewMemoryStore(teamID int) Store {
 					StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
 					BaselineImage: challenge.BaselineImage,
 					CheckerImage:  challenge.CheckerImage,
+					CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", teamID, challengeID),
 					Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
 					SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, teamID),
 					ServicePort:   challenge.ServicePort,
@@ -380,7 +383,7 @@ func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, chal
 	return nil
 }
 
-func (s *memoryStore) FactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
+func (s *memoryStore) PrepareFactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -399,15 +402,50 @@ func (s *memoryStore) FactoryResetService(_ context.Context, teamID, challengeID
 	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
 		return resetData{}, ErrServiceUnavailable
 	}
+	checkerToken, err := newCheckerToken()
+	if err != nil {
+		return resetData{}, err
+	}
+	instance.CheckerToken = checkerToken
+	state.Status = "resetting"
+	state.Checker = "warning"
+	state.LastEvent = "factory reset started via participant API"
+	state.ResetCooldown = "resetting"
+
+	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked}, nil
+}
+
+func (s *memoryStore) CompleteFactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	if err != nil {
+		return resetData{}, err
+	}
 	state.Status = "warming"
 	state.Checker = "warning"
-	state.LastEvent = "factory reset triggered via participant API"
+	state.LastEvent = "factory reset completed; waiting for checker verification"
 	state.ResetCooldown = "cooldown: 90s"
 	if state.Unlocked {
 		state.SSHHint = "unlock preserved; open SSH Access to reapply the team credential"
 	}
-
 	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked}, nil
+}
+
+func (s *memoryStore) MarkFactoryResetFailure(_ context.Context, teamID, challengeID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	state.Status = "degraded"
+	state.Checker = "warning"
+	state.LastEvent = "factory reset runtime failed"
+	state.ResetCooldown = "ready"
+	return nil
 }
 
 func (s *memoryStore) RestartService(_ context.Context, teamID, challengeID int) (resetData, error) {
@@ -429,10 +467,10 @@ func (s *memoryStore) RestartService(_ context.Context, teamID, challengeID int)
 	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
 		return resetData{}, ErrServiceUnavailable
 	}
-	state.Status = "stable"
-	state.Checker = "passing"
-	state.LastEvent = "service restart triggered via participant API"
-	state.ResetCooldown = "ready"
+	state.Status = "warming"
+	state.Checker = "warning"
+	state.LastEvent = "service restart completed; waiting for checker verification"
+	state.ResetCooldown = "cooldown: 30s"
 
 	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "restart"}, nil
 }
@@ -484,6 +522,10 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 			state.ResetCooldown = "deploying"
 			s.teamStates[id][challengeID] = state
 
+			checkerToken, err := newCheckerToken()
+			if err != nil {
+				return adminTeam{}, err
+			}
 			s.instances[id][challengeID] = &serviceInstanceRecord{
 				TeamID:        id,
 				ChallengeID:   challengeID,
@@ -494,6 +536,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 				StateVolume:   serviceStateVolumeName(challenge.Name, id),
 				BaselineImage: challenge.BaselineImage,
 				CheckerImage:  challenge.CheckerImage,
+				CheckerToken:  checkerToken,
 				Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, id),
 				SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, id),
 				ServicePort:   challenge.ServicePort,
@@ -776,6 +819,10 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 			jobID = s.nextDeploymentID
 			s.nextDeploymentID++
 		}
+		checkerToken, err := newCheckerToken()
+		if err != nil {
+			return adminDeployment{}, err
+		}
 		instance := &serviceInstanceRecord{
 			TeamID:          teamID,
 			ChallengeID:     challengeID,
@@ -787,6 +834,7 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 			StateVolume:     serviceStateVolumeName(challenge.Name, teamID),
 			BaselineImage:   challenge.BaselineImage,
 			CheckerImage:    challenge.CheckerImage,
+			CheckerToken:    checkerToken,
 			Endpoint:        ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
 			SSHHost:         ServiceIP(challenge.ServiceSubnetOctet, teamID),
 			ServicePort:     challenge.ServicePort,
@@ -1019,6 +1067,7 @@ func (s *memoryStore) ListControllerRuntimeTasks(_ context.Context) ([]Controlle
 				ContainerName:   instance.ContainerName,
 				StateVolume:     instance.StateVolume,
 				BaselineImage:   instance.BaselineImage,
+				CheckerToken:    instance.CheckerToken,
 				Endpoint:        instance.Endpoint,
 				SSHHost:         instance.SSHHost,
 				ServicePort:     instance.ServicePort,
@@ -1059,6 +1108,7 @@ func (s *memoryStore) GetControllerRuntimeTask(_ context.Context, teamID, challe
 		ContainerName:   instance.ContainerName,
 		StateVolume:     instance.StateVolume,
 		BaselineImage:   instance.BaselineImage,
+		CheckerToken:    instance.CheckerToken,
 		Endpoint:        instance.Endpoint,
 		SSHHost:         instance.SSHHost,
 		ServicePort:     instance.ServicePort,

@@ -533,6 +533,7 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, secur
 		"-e", fmt.Sprintf("AD_PLATFORM_SERVICE_PORT=%d", servicePort),
 		"-e", fmt.Sprintf("AD_PLATFORM_ENDPOINT=%s", task.Endpoint),
 		"-e", fmt.Sprintf("AD_PLATFORM_UNLOCK_PROOF=%s", unlockproof.Issue(unlockProofSecret, task.TeamID, task.ChallengeID)),
+		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", task.CheckerToken),
 		"-e", fmt.Sprintf("PORT=%d", servicePort),
 	)
 	if strings.TrimSpace(task.StateVolume) != "" && strings.TrimSpace(stateMountPath) != "" {

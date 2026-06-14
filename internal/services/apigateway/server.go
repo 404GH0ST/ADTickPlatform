@@ -786,7 +786,13 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeDomainFailure(w, err)
 		return
 	}
+	prepared, err := s.store.PrepareFactoryResetService(r.Context(), teamID, challengeID)
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
 	if err := s.controller.FactoryResetService(r.Context(), teamID, challengeID); err != nil {
+		_ = s.store.MarkFactoryResetFailure(r.Context(), teamID, challengeID)
 		if errors.Is(err, ErrChallengeNotFound) {
 			writeDomainFailure(w, err)
 			return
@@ -794,14 +800,14 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadGateway, "Reset unavailable", "factory reset runtime failed.")
 		return
 	}
-	data, err := s.store.FactoryResetService(r.Context(), teamID, challengeID)
+	data, err := s.store.CompleteFactoryResetService(r.Context(), teamID, challengeID)
 	if err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
 	s.recordTeamAudit(r.Context(), teamID, "service.factory_reset", "service", auditServiceTarget(teamID, challengeID), "triggered factory reset", map[string]any{
 		"challenge_id":     challengeID,
-		"unlock_preserved": data.UnlockPreserved,
+		"unlock_preserved": prepared.UnlockPreserved,
 	})
 	writeData(w, http.StatusOK, data)
 }

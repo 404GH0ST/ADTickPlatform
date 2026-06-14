@@ -9,6 +9,7 @@ type ControllerRuntimeTask struct {
 	ContainerName   string `json:"container_name"`
 	StateVolume     string `json:"state_volume"`
 	BaselineImage   string `json:"baseline_image"`
+	CheckerToken    string `json:"checker_token,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	SSHHost         string `json:"ssh_host"`
 	ServicePort     int    `json:"service_port"`

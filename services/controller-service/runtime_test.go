@@ -42,6 +42,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		ContainerName:   "svc-storage-team-101",
 		StateVolume:     "svc-storage-team-101-state",
 		BaselineImage:   "registry.local/storage:baseline",
+		CheckerToken:    "checker-secret-101-3",
 		Endpoint:        "10.80.3.11:10003",
 		SSHHost:         "10.80.3.11",
 	}
@@ -66,7 +67,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	if !slices.Contains(args, "-e") || !slices.Contains(args, "AD_PLATFORM_UNLOCK_PROOF="+unlockproof.Issue("dev-unlock-secret", 101, 3)) {
 		t.Fatalf("expected unlock proof env args, got %v", args)
 	}
-	if !slices.Contains(args, "AD_PLATFORM_SERVICE_IP=10.80.3.11") || !slices.Contains(args, "AD_PLATFORM_SERVICE_PORT=10003") || !slices.Contains(args, "PORT=10003") {
+	if !slices.Contains(args, "AD_PLATFORM_SERVICE_IP=10.80.3.11") || !slices.Contains(args, "AD_PLATFORM_SERVICE_PORT=10003") || !slices.Contains(args, "AD_CHECKER_TOKEN=checker-secret-101-3") || !slices.Contains(args, "PORT=10003") {
 		t.Fatalf("expected service ip/port env args, got %v", args)
 	}
 	if args[len(args)-1] != task.BaselineImage {
@@ -136,6 +137,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		ContainerName: "svc-storage-team-101",
 		StateVolume:   "svc-storage-team-101-state",
 		BaselineImage: "registry.local/storage:baseline",
+		CheckerToken:  "checker-secret-101-3",
 		Endpoint:      "10.80.3.11:10003",
 		SSHHost:       "10.80.3.11",
 	}
@@ -170,6 +172,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
 		"run -d --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3),
+		"-e AD_CHECKER_TOKEN=checker-secret-101-3",
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",
 	}

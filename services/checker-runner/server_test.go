@@ -96,6 +96,7 @@ func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
 		TickID:        19,
 		Flag:          "FLAG{demo}",
 		Metadata:      `{"slot":"demo"}`,
+		CheckerToken:  "checker-secret-101-7",
 	})
 
 	expected := []string{
@@ -116,6 +117,7 @@ func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
 		"AD_TICK_ID=19",
 		"AD_FLAG=FLAG{demo}",
 		`AD_METADATA={"slot":"demo"}`,
+		"AD_CHECKER_TOKEN=checker-secret-101-7",
 		"--entrypoint",
 		"/bin/sh",
 		"registry.local/proxy-checker:latest",

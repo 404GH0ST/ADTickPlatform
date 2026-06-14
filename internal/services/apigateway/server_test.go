@@ -22,6 +22,7 @@ type testControllerClient struct {
 	deployReconcileErr    error
 	deployReconcileResult adminReconcileResult
 	sshApplyErr           error
+	factoryResetErr       error
 	validationErr         error
 	validationResult      ChallengeValidationResult
 	accessStatus          ControllerAccessStatus
@@ -65,6 +66,12 @@ type testScoringClient struct {
 type testRateLimiter struct {
 	denyKeys   map[string]bool
 	retryAfter time.Duration
+}
+
+type recordingResetControllerClient struct {
+	store Store
+	token string
+	err   error
 }
 
 func (l testRateLimiter) Allow(_ context.Context, key string, _ rateLimitPolicy) (rateLimitDecision, error) {
@@ -155,10 +162,67 @@ func (storeBackedControllerClient) RemoveChallengeServices(_ context.Context, _ 
 }
 
 func (c testControllerClient) FactoryResetService(_ context.Context, _, _ int) error {
-	return nil
+	return c.factoryResetErr
 }
 
 func (c testControllerClient) RestartService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (c *recordingResetControllerClient) ReconcileDeployments(_ context.Context) (adminReconcileResult, error) {
+	return adminReconcileResult{}, errControllerDisabled
+}
+
+func (c *recordingResetControllerClient) FactoryResetService(ctx context.Context, teamID, challengeID int) error {
+	task, err := c.store.GetControllerRuntimeTask(ctx, teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	c.token = task.CheckerToken
+	return c.err
+}
+
+func (*recordingResetControllerClient) RestartService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) ReconcileServiceAccess(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) ApplySSHCredential(_ context.Context, _, _ int, _ ControllerSSHCredential) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) ValidateChallengeRuntime(_ context.Context, request ChallengeValidationRequest) (ChallengeValidationResult, error) {
+	return ChallengeValidationResult{ChallengeID: request.ChallengeID, Name: request.Name, Status: "valid", BaselineSSHContractOK: true, CheckerContractOK: true, ServiceStateContractOK: true}, nil
+}
+
+func (*recordingResetControllerClient) ReconcileServiceAccessPolicies(_ context.Context) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) ReconcileAccessPolicies(_ context.Context) (ControllerAccessStatus, error) {
+	return ControllerAccessStatus{State: "ready"}, nil
+}
+
+func (*recordingResetControllerClient) AccessStatus(_ context.Context) (ControllerAccessStatus, error) {
+	return ControllerAccessStatus{State: "ready"}, nil
+}
+
+func (*recordingResetControllerClient) TeardownAccessPolicies(_ context.Context) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) RemoveService(_ context.Context, _, _ int) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) RemoveTeamServices(_ context.Context, _ int) error {
+	return nil
+}
+
+func (*recordingResetControllerClient) RemoveChallengeServices(_ context.Context, _ int) error {
 	return nil
 }
 
@@ -793,6 +857,17 @@ func newTestMuxWithLimiter(limiter rateLimiter) *http.ServeMux {
 
 func testUnlockProof(teamID, challengeID int) string {
 	return unlockproof.Issue("dev-team-token", teamID, challengeID)
+}
+
+func findServiceStateForTest(t *testing.T, services []serviceState, challengeID int) serviceState {
+	t.Helper()
+	for _, service := range services {
+		if service.ChallengeID == challengeID {
+			return service
+		}
+	}
+	t.Fatalf("service state for challenge %d not found", challengeID)
+	return serviceState{}
 }
 
 func testTeamBearerToken(t *testing.T, teamID int) string {
@@ -2152,6 +2227,89 @@ func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	}
 	if payload.ConnectionHint != "ssh root@10.80.1.11" {
 		t.Fatalf("unexpected connection hint: %s", payload.ConnectionHint)
+	}
+}
+
+func TestFactoryResetRotatesCheckerTokenBeforeControllerReset(t *testing.T) {
+	store := NewMemoryStore(101)
+	before, err := store.GetControllerRuntimeTask(context.Background(), 101, 1)
+	if err != nil {
+		t.Fatalf("get initial runtime task: %v", err)
+	}
+	controller := &recordingResetControllerClient{store: store}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
+	setTestTeamAuthHeader(t, resetRequest)
+	resetResponse := httptest.NewRecorder()
+	mux.ServeHTTP(resetResponse, resetRequest)
+	if resetResponse.Code != http.StatusOK {
+		t.Fatalf("expected reset 200, got %d: %s", resetResponse.Code, resetResponse.Body.String())
+	}
+
+	after, err := store.GetControllerRuntimeTask(context.Background(), 101, 1)
+	if err != nil {
+		t.Fatalf("get rotated runtime task: %v", err)
+	}
+	if before.CheckerToken == "" || after.CheckerToken == "" {
+		t.Fatalf("expected non-empty checker tokens before=%q after=%q", before.CheckerToken, after.CheckerToken)
+	}
+	if before.CheckerToken == after.CheckerToken {
+		t.Fatalf("expected checker token rotation, still %q", after.CheckerToken)
+	}
+	if controller.token != after.CheckerToken {
+		t.Fatalf("controller saw token %q, expected rotated token %q", controller.token, after.CheckerToken)
+	}
+}
+
+func TestFactoryResetFailureMarksServiceDegraded(t *testing.T) {
+	store := NewMemoryStore(101)
+	controller := &recordingResetControllerClient{store: store, err: errors.New("runtime reset failed")}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
+	setTestTeamAuthHeader(t, resetRequest)
+	resetResponse := httptest.NewRecorder()
+	mux.ServeHTTP(resetResponse, resetRequest)
+	if resetResponse.Code != http.StatusBadGateway {
+		t.Fatalf("expected reset 502, got %d", resetResponse.Code)
+	}
+
+	services, err := store.ListTeamServices(context.Background(), 101)
+	if err != nil {
+		t.Fatalf("list services: %v", err)
+	}
+	state := findServiceStateForTest(t, services, 1)
+	if state.Status != "degraded" || state.Checker != "warning" {
+		t.Fatalf("expected degraded warning state after failed reset, got %+v", state)
+	}
+	if state.LastEvent != "factory reset runtime failed" {
+		t.Fatalf("unexpected last event %q", state.LastEvent)
+	}
+}
+
+func TestRestartWaitsForCheckerVerification(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	restartRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/restart", nil)
+	setTestTeamAuthHeader(t, restartRequest)
+	restartResponse := httptest.NewRecorder()
+	mux.ServeHTTP(restartResponse, restartRequest)
+	if restartResponse.Code != http.StatusOK {
+		t.Fatalf("expected restart 200, got %d", restartResponse.Code)
+	}
+
+	services, err := store.ListTeamServices(context.Background(), 101)
+	if err != nil {
+		t.Fatalf("list services: %v", err)
+	}
+	state := findServiceStateForTest(t, services, 1)
+	if state.Status != "warming" || state.Checker != "warning" {
+		t.Fatalf("expected restart to wait for checker verification, got %+v", state)
 	}
 }
 
