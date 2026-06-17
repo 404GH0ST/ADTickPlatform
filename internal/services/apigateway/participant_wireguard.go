@@ -11,6 +11,10 @@ func (s *Server) handleParticipantWireGuardConfig(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") || player.TeamID <= 0 {
+		writeProblem(w, http.StatusForbidden, "Team membership required", "please join a team before downloading VPN config.")
+		return
+	}
 
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamKey("wireguard-download", player.TeamID), challengeSourceRateLimitPolicy)
 	if !allowed {

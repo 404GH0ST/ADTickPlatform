@@ -394,6 +394,7 @@ export function TeamsTab({
                 <TableHead>ID</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Contact</TableHead>
+                <TableHead>Join key</TableHead>
                 <TableHead>Players</TableHead>
                 <TableHead>Deployed</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -402,7 +403,7 @@ export function TeamsTab({
             <TableBody>
               {teamRows.length === 0 && (
                 <EmptyTableRow
-                  colSpan={6}
+                  colSpan={7}
                   message="No teams yet. Click Create Team to add one."
                 />
               )}
@@ -411,6 +412,7 @@ export function TeamsTab({
                   <TableCell className="font-semibold">#{team.id}</TableCell>
                   <TableCell>{team.name}</TableCell>
                   <TableCell>{team.contact_email}</TableCell>
+                  <TableCell className="font-mono text-xs">{team.join_key}</TableCell>
                   <TableCell>{team.player_count}</TableCell>
                   <TableCell>{team.deployed_challenges}</TableCell>
                   <TableCell className="text-right">

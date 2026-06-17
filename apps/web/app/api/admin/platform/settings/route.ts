@@ -19,13 +19,19 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as {
     flag_format_prefix?: string;
+    max_team_members?: number;
   } | null;
   const prefix = body?.flag_format_prefix?.trim();
-  if (!prefix) {
-    return problemResponse(400, 'Invalid request', 'flag_format_prefix must not be empty.');
+  const maxTeamMembers =
+    typeof body?.max_team_members === "number" ? body.max_team_members : Number(body?.max_team_members ?? 0);
+  if (!prefix || !Number.isInteger(maxTeamMembers) || maxTeamMembers < 0) {
+    return problemResponse(400, 'Invalid request', 'flag_format_prefix must not be empty and max_team_members must not be negative.');
   }
   try {
-    const data = await updateAdminPlatformSettings({ flag_format_prefix: prefix });
+    const data = await updateAdminPlatformSettings({
+      flag_format_prefix: prefix,
+      max_team_members: maxTeamMembers,
+    });
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'platform settings update failed';

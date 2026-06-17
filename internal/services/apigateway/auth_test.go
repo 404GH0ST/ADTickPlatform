@@ -72,21 +72,25 @@ func TestVerifyTeamJWTAcceptsOrganizerWithoutTeam(t *testing.T) {
 	}
 }
 
-func TestVerifyTeamJWTRejectsParticipantWithoutTeam(t *testing.T) {
+func TestVerifyTeamJWTAcceptsRegisteredParticipantWithoutTeam(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	token, err := issueTeamJWT("dev-team-token", authenticatedPlayer{
 		PlayerID:    8,
 		TeamID:      0,
 		TeamName:    "",
-		DisplayName: "Broken Captain",
-		Email:       "broken@example.com",
-		Role:        "captain",
+		DisplayName: "Pending Player",
+		Email:       "pending@example.com",
+		Role:        "member",
 	}, now)
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
 
-	if _, err := verifyTeamJWT("dev-team-token", token, now.Add(time.Hour)); err == nil {
-		t.Fatal("expected participant token without team to be rejected")
+	claims, err := verifyTeamJWT("dev-team-token", token, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("verify registered participant token: %v", err)
+	}
+	if claims.TeamID != 0 || claims.Role != "member" {
+		t.Fatalf("unexpected registered participant claims: %+v", claims)
 	}
 }

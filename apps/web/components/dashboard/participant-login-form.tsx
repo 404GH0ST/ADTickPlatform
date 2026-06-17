@@ -11,6 +11,9 @@ import { parseApiError } from "@/lib/api-utils";
 
 export function ParticipantLoginForm() {
   const router = useRouter();
+  const [mode, setMode] = useState<"login" | "register" | "join">("login");
+  const [teamKey, setTeamKey] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -22,17 +25,46 @@ export function ParticipantLoginForm() {
     setError(null);
 
     try {
-      const response = await fetch("/api/platform/session/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        mode === "join"
+          ? "/api/platform/session/join"
+          : mode === "register"
+            ? "/api/platform/session/register"
+            : "/api/platform/session/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            mode === "join"
+              ? {
+                  team_key: teamKey,
+                  display_name: displayName,
+                  email,
+                  password,
+                }
+              : mode === "register"
+                ? {
+                    display_name: displayName,
+                    email,
+                    password,
+                  }
+                : { email, password },
+          ),
         },
-        body: JSON.stringify({ email, password }),
-      });
+      );
 
       if (!response.ok) {
         throw new Error(
-          await parseApiError(response, "/api/platform/session/login"),
+          await parseApiError(
+            response,
+            mode === "join"
+              ? "/api/platform/session/join"
+              : mode === "register"
+                ? "/api/platform/session/register"
+                : "/api/platform/session/login",
+          ),
         );
       }
 
@@ -42,7 +74,11 @@ export function ParticipantLoginForm() {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "participant login failed",
+          : mode === "join"
+            ? "team join failed"
+            : mode === "register"
+              ? "player registration failed"
+              : "participant login failed",
       );
     } finally {
       setPending(false);
@@ -51,6 +87,79 @@ export function ParticipantLoginForm() {
 
   return (
     <form className="grid gap-4" onSubmit={submit}>
+      <div className="grid grid-cols-3 gap-2 rounded-sm border border-border bg-muted p-1">
+        <button
+          type="button"
+          className={`rounded-sm px-3 py-2 text-sm font-semibold transition ${
+            mode === "login"
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => {
+            setMode("login");
+            setError(null);
+          }}
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          className={`rounded-sm px-3 py-2 text-sm font-semibold transition ${
+            mode === "register"
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => {
+            setMode("register");
+            setError(null);
+          }}
+        >
+          Register
+        </button>
+        <button
+          type="button"
+          className={`rounded-sm px-3 py-2 text-sm font-semibold transition ${
+            mode === "join"
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => {
+            setMode("join");
+            setError(null);
+          }}
+        >
+          Join Team
+        </button>
+      </div>
+
+      {mode === "join" || mode === "register" ? (
+        <>
+          {mode === "join" ? (
+            <div className="grid gap-2">
+              <Label htmlFor="participant-team-key">Team key</Label>
+              <Input
+                id="participant-team-key"
+                autoComplete="one-time-code"
+                value={teamKey}
+                onChange={(event) => setTeamKey(event.target.value)}
+                required={mode === "join"}
+              />
+            </div>
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label htmlFor="participant-display-name">Display name</Label>
+            <Input
+              id="participant-display-name"
+              autoComplete="name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              required={mode === "join" || mode === "register"}
+            />
+          </div>
+        </>
+      ) : null}
+
       <div className="grid gap-2">
         <Label htmlFor="participant-email">Email</Label>
         <Input
@@ -79,7 +188,17 @@ export function ParticipantLoginForm() {
 
       <div className="flex items-center gap-3">
         <Button type="submit" className="w-full" disabled={pending}>
-          {pending ? "Signing In..." : "Sign In"}
+          {pending
+            ? mode === "join"
+              ? "Joining..."
+              : mode === "register"
+                ? "Registering..."
+                : "Signing In..."
+            : mode === "join"
+              ? "Join Team"
+              : mode === "register"
+                ? "Register"
+                : "Sign In"}
         </Button>
       </div>
     </form>

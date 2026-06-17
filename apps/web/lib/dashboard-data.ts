@@ -77,7 +77,8 @@ export async function loadDashboardData(
 ): Promise<DashboardData> {
   const session = await getParticipantSession();
   const ownID = session.teamID ? String(session.teamID) : "";
-  const results = await fetchDashboardResults(session.authenticated, options);
+  const hasTeam = session.authenticated && (session.teamID ?? 0) > 0;
+  const results = await fetchDashboardResults(hasTeam, options);
   const data = readDashboardResults(results, options);
   const services = buildServiceRows(data, ownID);
   const source = dashboardSource(results);
@@ -230,7 +231,7 @@ function buildPlatformOverview(
 ): PlatformOverview {
   return {
     source,
-    message: dashboardMessage(session.authenticated, source),
+    message: dashboardMessage(session, source),
     authenticated: session.authenticated,
     teamID: session.teamID,
     teamName: session.teamName,
@@ -249,13 +250,17 @@ function buildPlatformOverview(
 }
 
 function dashboardMessage(
-  authenticated: boolean,
+  session: Awaited<ReturnType<typeof getParticipantSession>>,
   source: PlatformOverview["source"],
 ): string | undefined {
   const messageParts: string[] = [];
-  if (!authenticated) {
+  if (!session.authenticated) {
     messageParts.push(
       "Participant login is required for owned services, unlock, SSH, and reset actions.",
+    );
+  } else if ((session.teamID ?? 0) <= 0 && session.role !== "organizer") {
+    messageParts.push(
+      "Join a team before accessing owned services, unlock, SSH, reset actions, or VPN config.",
     );
   }
   if (source === "degraded") {

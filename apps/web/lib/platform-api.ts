@@ -271,6 +271,79 @@ export async function authenticateParticipant(email: string, password: string) {
   return payload.token;
 }
 
+export async function registerParticipant(input: {
+  displayName: string;
+  email: string;
+  password: string;
+}) {
+  const response = await fetch(`${apiBaseUrl()}/api/v2/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      display_name: input.displayName,
+      email: input.email,
+      password: input.password,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "/api/v2/register"));
+  }
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
+}
+
+export async function joinParticipantTeam(input: {
+  teamKey: string;
+  displayName: string;
+  email: string;
+  password: string;
+}) {
+  const response = await fetch(`${apiBaseUrl()}/api/v2/team/join`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      team_key: input.teamKey,
+      display_name: input.displayName,
+      email: input.email,
+      password: input.password,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "/api/v2/team/join"));
+  }
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
+}
+
+export async function joinCurrentParticipantTeam(teamKey: string) {
+  const token = await getParticipantToken();
+  const response = await fetch(`${apiBaseUrl()}/api/v2/me/team`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      team_key: teamKey,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "/api/v2/me/team"));
+  }
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
+}
+
 async function participantFetch<T>(
   path: string,
   init?: RequestInit,

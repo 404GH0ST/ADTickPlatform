@@ -2,6 +2,7 @@ export type AdminTeam = {
   id: number;
   name: string;
   contact_email: string;
+  join_key: string;
   player_count: number;
   deployed_challenges: number;
 };
@@ -434,10 +435,12 @@ export type AdminRuntimeEvidenceReport = {
 export type AdminPlatformSettings = {
   flag_format_prefix: string;
   flag_format_active: string;
+  max_team_members: number;
   updated_at: string;
   updated_by: string;
 };
 
 export type AdminPlatformSettingsInput = {
   flag_format_prefix: string;
+  max_team_members: number;
 };

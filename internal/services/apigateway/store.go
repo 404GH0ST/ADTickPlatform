@@ -28,6 +28,7 @@ var (
 	ErrInvalidCredentials    = errors.New("invalid credentials")
 	ErrInvalidRuntimeConfig  = errors.New("invalid runtime config")
 	ErrSubmissionUnavailable = errors.New("authoritative submission backend unavailable")
+	ErrTeamMemberLimit       = errors.New("team member limit reached")
 )
 
 type authenticatedPlayer struct {
@@ -41,6 +42,7 @@ type authenticatedPlayer struct {
 
 type Store interface {
 	AuthenticatePlayer(ctx context.Context, email, password string) (authenticatedPlayer, error)
+	RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error)
 	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error)
 	ListChallenges(ctx context.Context) ([]challenge, error)
 	ListPublicServices(ctx context.Context) (map[string]map[string][]string, error)
@@ -77,6 +79,8 @@ type Store interface {
 	SaveAdminChallengeValidation(ctx context.Context, result ChallengeValidationResult) error
 	ListAdminDeployments(ctx context.Context) ([]adminDeploymentJob, error)
 	DeleteAdminDeployment(ctx context.Context, deploymentID int) error
+	JoinTeam(ctx context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error)
+	JoinExistingPlayerTeam(ctx context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error)
 	ListAdminAuditLogs(ctx context.Context, query adminAuditLogQuery) (adminAuditLogPage, error)
 	AppendAdminAuditLog(ctx context.Context, entry adminAuditLogEntry) error
 	ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error)
@@ -88,6 +92,19 @@ type Store interface {
 	UpdatePlatformSettings(ctx context.Context, input adminUpdatePlatformSettingsRequest, actor string, now time.Time) (adminPlatformSettings, error)
 	SetActiveFlagFormat(ctx context.Context, format string, now time.Time) (adminPlatformSettings, error)
 	Close() error
+}
+
+func NewTeamJoinKey() (string, error) {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"TEAM-%s-%s-%s",
+		strings.ToUpper(hex.EncodeToString(raw[:4])),
+		strings.ToUpper(hex.EncodeToString(raw[4:8])),
+		strings.ToUpper(hex.EncodeToString(raw[8:])),
+	), nil
 }
 
 func DefaultServicePort(challengeID int) int {

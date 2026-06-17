@@ -200,6 +200,7 @@ const teams = [
     id: 101,
     name: "College Alpha",
     contact_email: "alpha@college.local",
+    join_key: "TEAM-ALPHA-JOIN",
     player_count: 2,
     deployed_challenges: 1,
   },
@@ -207,6 +208,7 @@ const teams = [
     id: 102,
     name: "College Beta",
     contact_email: "beta@college.local",
+    join_key: "TEAM-BETA-JOIN",
     player_count: 2,
     deployed_challenges: 1,
   },
@@ -214,6 +216,7 @@ const teams = [
     id: 103,
     name: "College Gamma",
     contact_email: "gamma@college.local",
+    join_key: "TEAM-GAMMA-JOIN",
     player_count: 1,
     deployed_challenges: 1,
   },
@@ -615,6 +618,11 @@ function createInitialState() {
     ],
     teams: teams.map((team) => ({ ...team })),
     players: players.map((player) => ({ ...player })),
+    playerPasswords: {
+      "alpha.captain@college.local": "alpha-password",
+      "beta.member@college.local": "beta-password",
+      "organizer@college.local": "organizer-password",
+    },
     challenges: adminChallenges.map((challenge) => ({ ...challenge })),
     deployments: deployments.map((deployment) => ({ ...deployment })),
     checkerRuns: checkerRuns.map((run) => ({ ...run })),
@@ -623,6 +631,7 @@ function createInitialState() {
     platformSettings: {
       flag_format_prefix: "PLAYIT",
       flag_format_active: "PLAYIT",
+      max_team_members: 0,
       updated_at: "2026-03-10T10:00:00Z",
       updated_by: "system",
     },
@@ -1473,6 +1482,135 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
     });
   }
 
+  if (method === "POST" && url.pathname === "/api/v2/team/join") {
+    const body = await readJsonBody(req);
+    const teamKey = body?.team_key?.trim();
+    const displayName = body?.display_name?.trim();
+    const email = body?.email?.trim();
+    const password = body?.password?.trim();
+    const team = state.teams.find((item) => item.join_key === teamKey);
+
+    if (!team) {
+      return writeFailure(res, 403, "team key is invalid.", "forbidden");
+    }
+    if (!displayName || !email || !password || state.players.some((item) => item.email === email)) {
+      return writeFailure(res, 400, "display name, email, password, and a unique email are required.");
+    }
+    if (
+      state.platformSettings.max_team_members > 0 &&
+      state.players.filter((item) => item.team_id === team.id).length >=
+        state.platformSettings.max_team_members
+    ) {
+      return writeFailure(res, 400, "team has reached the maximum member count.");
+    }
+
+    const player = {
+      id: state.nextPlayerID,
+      team_id: team.id,
+      team_name: team.name,
+      display_name: displayName,
+      email,
+      role: "member",
+      wireguard_peer: `wg-joined-${state.nextPlayerID}`,
+      wireguard_address: `10.70.${team.id - 90}.${20 + state.nextPlayerID}/32`,
+      wireguard_status: "active",
+      wireguard_issued_at: "2026-03-20T11:00:00Z",
+      created_at: "2026-03-20T11:00:00Z",
+    };
+    state.nextPlayerID += 1;
+    state.players.push(player);
+    state.playerPasswords[email] = password;
+    state.teams = state.teams.map((item) =>
+      item.id === team.id
+        ? { ...item, player_count: item.player_count + 1 }
+        : item,
+    );
+
+    return writeSuccess(res, {
+      token: buildParticipantToken(player),
+      token_type: "Bearer",
+    });
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/register") {
+    const body = await readJsonBody(req);
+    const displayName = body?.display_name?.trim();
+    const email = body?.email?.trim();
+    const password = body?.password?.trim();
+
+    if (!displayName || !email || !password || state.players.some((item) => item.email === email)) {
+      return writeFailure(res, 400, "display name, email, password, and a unique email are required.");
+    }
+
+    const player = {
+      id: state.nextPlayerID,
+      team_id: 0,
+      team_name: "",
+      display_name: displayName,
+      email,
+      role: "member",
+      wireguard_peer: `pending-player-${state.nextPlayerID}`,
+      wireguard_address: "",
+      wireguard_status: "",
+      wireguard_issued_at: "",
+      created_at: "2026-03-20T11:00:00Z",
+    };
+    state.nextPlayerID += 1;
+    state.players.push(player);
+    state.playerPasswords[email] = password;
+
+    return writeSuccess(res, {
+      token: buildParticipantToken(player),
+      token_type: "Bearer",
+    });
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/me/team") {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+    const claims = decodeParticipantToken(token);
+    const player = claims
+      ? state.players.find((item) => item.id === claims.player_id)
+      : null;
+    if (!claims || !player || player.team_id !== claims.team_id || player.role !== claims.role) {
+      return writeFailure(res, 403, "please authenticate before joining a team.", "forbidden");
+    }
+
+    const body = await readJsonBody(req);
+    const teamKey = body?.team_key?.trim();
+    const team = state.teams.find((item) => item.join_key === teamKey);
+    if (!team) {
+      return writeFailure(res, 403, "team key is invalid.", "forbidden");
+    }
+    if (player.role === "organizer" || player.team_id > 0) {
+      return writeFailure(res, 400, "player has already joined a team.");
+    }
+    if (
+      state.platformSettings.max_team_members > 0 &&
+      state.players.filter((item) => item.team_id === team.id).length >=
+        state.platformSettings.max_team_members
+    ) {
+      return writeFailure(res, 400, "team has reached the maximum member count.");
+    }
+
+    player.team_id = team.id;
+    player.team_name = team.name;
+    player.wireguard_peer = `wg-joined-${player.id}`;
+    player.wireguard_address = `10.70.${team.id - 90}.${20 + player.id}/32`;
+    player.wireguard_status = "active";
+    player.wireguard_issued_at = "2026-03-20T11:00:00Z";
+    state.teams = state.teams.map((item) =>
+      item.id === team.id
+        ? { ...item, player_count: item.player_count + 1 }
+        : item,
+    );
+
+    return writeSuccess(res, {
+      token: buildParticipantToken(player),
+      token_type: "Bearer",
+    });
+  }
+
   if (method !== "POST" || url.pathname !== "/api/v2/authenticate") {
     return false;
   }
@@ -1480,14 +1618,9 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
   const body = await readJsonBody(req);
   const email = body?.email?.trim();
   const password = body?.password?.trim();
-  const knownPasswords = {
-    "alpha.captain@college.local": "alpha-password",
-    "beta.member@college.local": "beta-password",
-    "organizer@college.local": "organizer-password",
-  };
   const player = state.players.find((item) => item.email === email);
 
-  if (!player || !password || knownPasswords[email] !== password) {
+  if (!player || !password || state.playerPasswords[email] !== password) {
     return writeFailure(res, 403, "email or password is wrong.", "forbidden");
   }
 
@@ -1658,6 +1791,7 @@ async function handleAdminTeamRoutes({ req, res, url, method }) {
       id: state.nextTeamID,
       name,
       contact_email: contactEmail,
+      join_key: `TEAM-${state.nextTeamID}-JOIN`,
       player_count: 0,
       deployed_challenges: publishedChallenges,
     };
@@ -2030,16 +2164,18 @@ async function handleAdminDeploymentRoutes({ req, res, url, method }) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch (_err) {
+    } catch {
       return writeFailure(res, 400, "could not parse platform settings payload.");
     }
     const prefix = body && typeof body.flag_format_prefix === "string" ? body.flag_format_prefix.trim() : "";
-    if (!prefix) {
-      return writeFailure(res, 400, "flag_format_prefix must not be empty.");
+    const maxTeamMembers = Number(body?.max_team_members ?? 0);
+    if (!prefix || !Number.isInteger(maxTeamMembers) || maxTeamMembers < 0) {
+      return writeFailure(res, 400, "flag_format_prefix must not be empty and max_team_members must not be negative.");
     }
     state.platformSettings = {
       ...state.platformSettings,
       flag_format_prefix: prefix,
+      max_team_members: maxTeamMembers,
       updated_at: new Date().toISOString(),
       updated_by: "organizer",
     };

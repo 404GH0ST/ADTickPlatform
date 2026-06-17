@@ -1148,6 +1148,169 @@ func TestParticipantTokenCannotAccessAdminRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminTeamListIncludesJoinKeys(t *testing.T) {
+	mux := newTestMux()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/admin/teams", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected teams 200, got %d", response.Code)
+	}
+	payload := decodeCompat[[]adminTeam](t, response.Body.Bytes())
+	if len(payload) == 0 || strings.TrimSpace(payload[0].JoinKey) == "" {
+		t.Fatalf("expected seeded team join key, got %+v", payload)
+	}
+}
+
+func TestParticipantCanJoinTeamWithKey(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"team_key":"TEAM-ALPHA-JOIN","display_name":"New Member","email":"new.member@example.com","password":"member-secret"}`
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	authPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+	if authPayload.Token == "" || authPayload.TokenType != "Bearer" {
+		t.Fatalf("unexpected join auth payload %+v", authPayload)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v2/authenticate", bytes.NewBufferString(`{"email":"new.member@example.com","password":"member-secret"}`))
+	loginResponse := httptest.NewRecorder()
+	mux.ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("expected login 200 after join, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	}
+}
+
+func TestParticipantJoinRejectsInvalidTeamKey(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"team_key":"wrong","display_name":"New Member","email":"bad.member@example.com","password":"member-secret"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected join 403, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestParticipantCanRegisterWithoutTeam(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"display_name":"Pending Player","email":"pending.player@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	authPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+	if authPayload.Token == "" || authPayload.TokenType != "Bearer" {
+		t.Fatalf("unexpected register auth payload %+v", authPayload)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v2/authenticate", bytes.NewBufferString(`{"email":"pending.player@example.com","password":"pending-secret"}`))
+	loginResponse := httptest.NewRecorder()
+	mux.ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("expected login 200 after register, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	}
+}
+
+func TestTeamlessParticipantCannotAccessEventOrVPN(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"display_name":"Pending Player","email":"pending.blocked@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	authPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	eventRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	eventRequest.Header.Set("Authorization", "Bearer "+authPayload.Token)
+	eventResponse := httptest.NewRecorder()
+	mux.ServeHTTP(eventResponse, eventRequest)
+	if eventResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected team services 403, got %d: %s", eventResponse.Code, eventResponse.Body.String())
+	}
+
+	vpnRequest := httptest.NewRequest(http.MethodGet, "/api/v2/me/wireguard", nil)
+	vpnRequest.Header.Set("Authorization", "Bearer "+authPayload.Token)
+	vpnResponse := httptest.NewRecorder()
+	mux.ServeHTTP(vpnResponse, vpnRequest)
+	if vpnResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected vpn 403, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
+	}
+}
+
+func TestRegisteredParticipantCanJoinExistingAccountToTeam(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"display_name":"Pending Player","email":"pending.join@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected existing join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+	eventRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	eventRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	eventResponse := httptest.NewRecorder()
+	mux.ServeHTTP(eventResponse, eventRequest)
+	if eventResponse.Code != http.StatusOK {
+		t.Fatalf("expected team services 200 after join, got %d: %s", eventResponse.Code, eventResponse.Body.String())
+	}
+
+	vpnRequest := httptest.NewRequest(http.MethodGet, "/api/v2/me/wireguard", nil)
+	vpnRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	vpnResponse := httptest.NewRecorder()
+	mux.ServeHTTP(vpnResponse, vpnRequest)
+	if vpnResponse.Code != http.StatusOK {
+		t.Fatalf("expected vpn 200 after join, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
+	}
+}
+
+func TestParticipantJoinRespectsMaxTeamMembers(t *testing.T) {
+	store := NewMemoryStore(101)
+	maxTeamMembers := 1
+	if _, err := store.UpdatePlatformSettings(context.Background(), adminUpdatePlatformSettingsRequest{
+		FlagFormatPrefix: "PLAYIT",
+		MaxTeamMembers:   &maxTeamMembers,
+	}, "test", time.Now().UTC()); err != nil {
+		t.Fatalf("update platform settings: %v", err)
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	body := `{"team_key":"TEAM-ALPHA-JOIN","display_name":"Overflow Member","email":"overflow.member@example.com","password":"member-secret"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected join 400 for full team, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAllAdminRoutesRejectUnauthenticatedAndParticipantCallers(t *testing.T) {
 	mux := newTestMux()
 	cases := []struct {

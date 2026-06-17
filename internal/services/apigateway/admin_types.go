@@ -46,6 +46,7 @@ type adminTeam struct {
 	ID                 int    `json:"id"`
 	Name               string `json:"name"`
 	ContactEmail       string `json:"contact_email"`
+	JoinKey            string `json:"join_key"`
 	PlayerCount        int    `json:"player_count"`
 	DeployedChallenges int    `json:"deployed_challenges"`
 }
@@ -63,6 +64,23 @@ type adminPlayer struct {
 	WireGuardIssuedAt  string `json:"wireguard_issued_at"`
 	WireGuardRevokedAt string `json:"wireguard_revoked_at,omitempty"`
 	CreatedAt          string `json:"created_at"`
+}
+
+type participantJoinRequest struct {
+	TeamKey     string `json:"team_key"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+}
+
+type participantRegisterRequest struct {
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+}
+
+type participantJoinExistingTeamRequest struct {
+	TeamKey string `json:"team_key"`
 }
 
 type adminWireGuardPeer struct {
@@ -230,10 +248,12 @@ type ChallengeValidationResult struct {
 type adminPlatformSettings struct {
 	FlagFormatPrefix string `json:"flag_format_prefix"`
 	FlagFormatActive string `json:"flag_format_active,omitempty"`
+	MaxTeamMembers   int    `json:"max_team_members"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
 	UpdatedBy        string `json:"updated_by,omitempty"`
 }
 
 type adminUpdatePlatformSettingsRequest struct {
 	FlagFormatPrefix string `json:"flag_format_prefix"`
+	MaxTeamMembers   *int   `json:"max_team_members,omitempty"`
 }

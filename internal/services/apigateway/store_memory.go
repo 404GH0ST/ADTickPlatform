@@ -65,10 +65,10 @@ func NewMemoryStore(teamID int) Store {
 			104: "Team Orchid",
 		},
 		teams: map[int]*adminTeam{
-			101: {ID: 101, Name: "Team Alpha", ContactEmail: "team-alpha@example.com"},
-			102: {ID: 102, Name: "Team Delta", ContactEmail: "team-delta@example.com"},
-			103: {ID: 103, Name: "Team Sigma", ContactEmail: "team-sigma@example.com"},
-			104: {ID: 104, Name: "Team Orchid", ContactEmail: "team-orchid@example.com"},
+			101: {ID: 101, Name: "Team Alpha", ContactEmail: "team-alpha@example.com", JoinKey: "TEAM-ALPHA-JOIN"},
+			102: {ID: 102, Name: "Team Delta", ContactEmail: "team-delta@example.com", JoinKey: "TEAM-DELTA-JOIN"},
+			103: {ID: 103, Name: "Team Sigma", ContactEmail: "team-sigma@example.com", JoinKey: "TEAM-SIGMA-JOIN"},
+			104: {ID: 104, Name: "Team Orchid", ContactEmail: "team-orchid@example.com", JoinKey: "TEAM-ORCHID-JOIN"},
 		},
 		players: map[int]*adminPlayerRecord{
 			1: mustNewAdminPlayerRecord(1, 101, "Team Alpha", "Alpha Captain", "alpha.captain@example.com", "captain", "alpha-secret", now.Add(-72*time.Hour)),
@@ -92,7 +92,7 @@ func NewMemoryStore(teamID int) Store {
 			{Rank: 4, Team: "Team Orchid", Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "0"},
 		},
 		attackFeed:       []attackEvent{},
-		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", UpdatedBy: "system"},
+		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 0, UpdatedBy: "system"},
 		nextTeamID:       105,
 		nextPlayerID:     5,
 		nextChallengeID:  4,
@@ -128,7 +128,7 @@ func NewMemoryStore(teamID int) Store {
 
 	if _, ok := store.teams[teamID]; !ok {
 		teamName := fmt.Sprintf("Team %d", teamID)
-		store.teams[teamID] = &adminTeam{ID: teamID, Name: teamName, ContactEmail: fmt.Sprintf("team-%d@example.com", teamID)}
+		store.teams[teamID] = &adminTeam{ID: teamID, Name: teamName, ContactEmail: fmt.Sprintf("team-%d@example.com", teamID), JoinKey: fmt.Sprintf("TEAM-%d-JOIN", teamID)}
 		store.teamNames[teamID] = teamName
 		store.teamStates[teamID] = make(map[int]*serviceState)
 		store.instances[teamID] = make(map[int]*serviceInstanceRecord)
@@ -175,10 +175,14 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 		if passwordHashNeedsUpgrade(record.PasswordHash) {
 			record.PasswordHash = mustHashPassword(password)
 		}
+		teamName := teamNameForID(s.teamNames, record.Player.TeamID)
+		if record.Player.TeamID == 0 && !strings.EqualFold(record.Player.Role, "organizer") {
+			teamName = ""
+		}
 		return authenticatedPlayer{
 			PlayerID:    record.Player.ID,
 			TeamID:      record.Player.TeamID,
-			TeamName:    teamNameForID(s.teamNames, record.Player.TeamID),
+			TeamName:    teamName,
 			DisplayName: record.Player.DisplayName,
 			Email:       record.Player.Email,
 			Role:        record.Player.Role,
@@ -186,6 +190,45 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 	}
 
 	return authenticatedPlayer{}, ErrInvalidCredentials
+}
+
+func (s *memoryStore) RegisterPlayer(_ context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if displayName == "" || email == "" || strings.TrimSpace(input.Password) == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+	for _, record := range s.players {
+		if strings.EqualFold(record.Player.Email, email) {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+	}
+
+	id := s.nextPlayerID
+	s.nextPlayerID++
+	wireGuardPeer := wireguardPeerName(0, id)
+	player := adminPlayer{
+		ID:            id,
+		TeamID:        0,
+		TeamName:      "",
+		DisplayName:   displayName,
+		Email:         email,
+		Role:          "member",
+		WireGuardPeer: wireGuardPeer,
+		CreatedAt:     now.UTC().Format(time.RFC3339),
+	}
+	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password)}
+	return authenticatedPlayer{
+		PlayerID:    id,
+		TeamID:      0,
+		TeamName:    "",
+		DisplayName: displayName,
+		Email:       email,
+		Role:        "member",
+	}, nil
 }
 
 func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID int, role string) (authenticatedPlayer, error) {
@@ -202,10 +245,14 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 	if strings.TrimSpace(record.Player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
+	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
+	if record.Player.TeamID == 0 && !strings.EqualFold(record.Player.Role, "organizer") {
+		teamName = ""
+	}
 	return authenticatedPlayer{
 		PlayerID:    record.Player.ID,
 		TeamID:      record.Player.TeamID,
-		TeamName:    teamNameForID(s.teamNames, record.Player.TeamID),
+		TeamName:    teamName,
 		DisplayName: record.Player.DisplayName,
 		Email:       record.Player.Email,
 		Role:        record.Player.Role,
@@ -507,7 +554,11 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 
 	id := s.nextTeamID
 	s.nextTeamID++
-	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail}
+	joinKey, err := NewTeamJoinKey()
+	if err != nil {
+		return adminTeam{}, err
+	}
+	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail, JoinKey: joinKey}
 	s.teams[id] = team
 	s.teamNames[id] = name
 	s.teamStates[id] = make(map[int]*serviceState)
@@ -575,6 +626,9 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 		if _, ok := s.teams[input.TeamID]; !ok {
 			return adminPlayer{}, ErrTeamNotFound
 		}
+		if s.teamMemberLimitReachedLocked(input.TeamID) {
+			return adminPlayer{}, ErrTeamMemberLimit
+		}
 	}
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	for _, record := range s.players {
@@ -612,6 +666,130 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 	}
 	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), WireGuard: wireGuardState}
 	return player, nil
+}
+
+func (s *memoryStore) JoinTeam(_ context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	teamKey := strings.TrimSpace(input.TeamKey)
+	var team *adminTeam
+	for _, candidate := range s.teams {
+		if strings.EqualFold(candidate.JoinKey, teamKey) {
+			team = candidate
+			break
+		}
+	}
+	if team == nil {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if s.teamMemberLimitReachedLocked(team.ID) {
+		return authenticatedPlayer{}, ErrTeamMemberLimit
+	}
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if displayName == "" || email == "" || strings.TrimSpace(input.Password) == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+	for _, record := range s.players {
+		if strings.EqualFold(record.Player.Email, email) {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+	}
+
+	id := s.nextPlayerID
+	s.nextPlayerID++
+	wireGuardPeer := wireguardPeerName(team.ID, id)
+	wireGuardState, err := newWireGuardPeerState(id, team.ID, team.Name, displayName, wireGuardPeer, now)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	player := adminPlayer{
+		ID:                id,
+		TeamID:            team.ID,
+		TeamName:          team.Name,
+		DisplayName:       displayName,
+		Email:             email,
+		Role:              "member",
+		WireGuardPeer:     wireGuardPeer,
+		WireGuardAddress:  wireGuardState.Address,
+		WireGuardStatus:   wireGuardState.Status,
+		WireGuardIssuedAt: wireGuardState.IssuedAt,
+		CreatedAt:         now.UTC().Format(time.RFC3339),
+	}
+	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), WireGuard: wireGuardState}
+	return authenticatedPlayer{
+		PlayerID:    id,
+		TeamID:      team.ID,
+		TeamName:    team.Name,
+		DisplayName: displayName,
+		Email:       email,
+		Role:        "member",
+	}, nil
+}
+
+func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.players[playerID]
+	if !ok {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") || record.Player.TeamID > 0 {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	var team *adminTeam
+	for _, candidate := range s.teams {
+		if strings.EqualFold(candidate.JoinKey, strings.TrimSpace(teamKey)) {
+			team = candidate
+			break
+		}
+	}
+	if team == nil {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if s.teamMemberLimitReachedLocked(team.ID) {
+		return authenticatedPlayer{}, ErrTeamMemberLimit
+	}
+
+	wireGuardPeer := wireguardPeerName(team.ID, playerID)
+	wireGuardState, err := newWireGuardPeerState(playerID, team.ID, team.Name, record.Player.DisplayName, wireGuardPeer, now)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	record.Player.TeamID = team.ID
+	record.Player.TeamName = team.Name
+	record.Player.WireGuardPeer = wireGuardPeer
+	record.Player.WireGuardAddress = wireGuardState.Address
+	record.Player.WireGuardStatus = wireGuardState.Status
+	record.Player.WireGuardIssuedAt = wireGuardState.IssuedAt
+	record.Player.WireGuardRevokedAt = wireGuardState.RevokedAt
+	record.WireGuard = wireGuardState
+
+	return authenticatedPlayer{
+		PlayerID:    playerID,
+		TeamID:      team.ID,
+		TeamName:    team.Name,
+		DisplayName: record.Player.DisplayName,
+		Email:       record.Player.Email,
+		Role:        record.Player.Role,
+	}, nil
+}
+
+func (s *memoryStore) teamMemberLimitReachedLocked(teamID int) bool {
+	limit := s.platformSettings.MaxTeamMembers
+	if teamID <= 0 || limit <= 0 {
+		return false
+	}
+	count := 0
+	for _, record := range s.players {
+		if record.Player.TeamID == teamID {
+			count++
+		}
+	}
+	return count >= limit
 }
 
 func (s *memoryStore) GetAdminPlayerWireGuardConfig(_ context.Context, playerID int) (adminWireGuardPeer, error) {
@@ -1029,7 +1207,13 @@ func (s *memoryStore) UpdatePlatformSettings(_ context.Context, input adminUpdat
 	if prefix == "" {
 		return adminPlatformSettings{}, fmt.Errorf("flag_format_prefix must not be empty")
 	}
+	if input.MaxTeamMembers != nil && *input.MaxTeamMembers < 0 {
+		return adminPlatformSettings{}, fmt.Errorf("max_team_members must not be negative")
+	}
 	s.platformSettings.FlagFormatPrefix = prefix
+	if input.MaxTeamMembers != nil {
+		s.platformSettings.MaxTeamMembers = *input.MaxTeamMembers
+	}
 	s.platformSettings.UpdatedAt = now.UTC().Format(time.RFC3339)
 	s.platformSettings.UpdatedBy = strings.TrimSpace(actor)
 	return s.platformSettings, nil

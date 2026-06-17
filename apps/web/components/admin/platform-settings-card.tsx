@@ -32,6 +32,7 @@ const flagFormatPattern = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 export function PlatformSettingsCard(): ReactElement {
   const [settings, setSettings] = useState<AdminPlatformSettings | null>(null);
   const [prefix, setPrefix] = useState<string>("");
+  const [maxTeamMembers, setMaxTeamMembers] = useState<string>("0");
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
 
   const load = useCallback(async () => {
@@ -39,6 +40,7 @@ export function PlatformSettingsCard(): ReactElement {
       const data = await getAdminPlatformSettings();
       setSettings(data);
       setPrefix(data.flag_format_prefix);
+      setMaxTeamMembers(String(data.max_team_members ?? 0));
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "failed to load platform settings.";
@@ -51,23 +53,32 @@ export function PlatformSettingsCard(): ReactElement {
   }, [load]);
 
   const trimmed = prefix.trim();
+  const parsedMaxTeamMembers = Number(maxTeamMembers.trim());
+  const maxTeamMembersValid =
+    Number.isInteger(parsedMaxTeamMembers) && parsedMaxTeamMembers >= 0;
   const isValid = flagFormatPattern.test(trimmed);
   const inSync = settings
     ? settings.flag_format_prefix === settings.flag_format_active
     : true;
-  const dirty = settings ? trimmed !== settings.flag_format_prefix : false;
+  const dirty = settings
+    ? trimmed !== settings.flag_format_prefix ||
+      parsedMaxTeamMembers !== settings.max_team_members
+    : false;
 
   const onSave = useCallback(async () => {
-    if (!isValid) {
+    if (!isValid || !maxTeamMembersValid) {
       setSaveState({
         kind: "error",
-        message: "flag_format_prefix must start with a letter and contain only letters, digits, '-' or '_' (max 32 chars).",
+        message: "flag_format_prefix must be valid and max_team_members must be a non-negative whole number.",
       });
       return;
     }
     setSaveState({ kind: "saving" });
     try {
-      const updated = await updateAdminPlatformSettings({ flag_format_prefix: trimmed });
+      const updated = await updateAdminPlatformSettings({
+        flag_format_prefix: trimmed,
+        max_team_members: parsedMaxTeamMembers,
+      });
       setSettings(updated);
       setSaveState({ kind: "saved" });
     } catch (error) {
@@ -75,19 +86,22 @@ export function PlatformSettingsCard(): ReactElement {
         error instanceof Error ? error.message : "failed to save platform settings.";
       setSaveState({ kind: "error", message });
     }
-  }, [isValid, trimmed]);
+  }, [isValid, maxTeamMembersValid, parsedMaxTeamMembers, trimmed]);
 
   const onSaveAndReload = useCallback(async () => {
-    if (!isValid) {
+    if (!isValid || !maxTeamMembersValid) {
       setSaveState({
         kind: "error",
-        message: "flag_format_prefix must start with a letter and contain only letters, digits, '-' or '_' (max 32 chars).",
+        message: "flag_format_prefix must be valid and max_team_members must be a non-negative whole number.",
       });
       return;
     }
     setSaveState({ kind: "saving" });
     try {
-      const updated = await updateAdminPlatformSettings({ flag_format_prefix: trimmed });
+      const updated = await updateAdminPlatformSettings({
+        flag_format_prefix: trimmed,
+        max_team_members: parsedMaxTeamMembers,
+      });
       setSettings(updated);
       setSaveState({ kind: "reloading" });
       const reloaded = await reloadAdminFlagFormat();
@@ -98,7 +112,7 @@ export function PlatformSettingsCard(): ReactElement {
         error instanceof Error ? error.message : "failed to save or reload flag format.";
       setSaveState({ kind: "error", message });
     }
-  }, [isValid, trimmed]);
+  }, [isValid, maxTeamMembersValid, parsedMaxTeamMembers, trimmed]);
 
   const onReloadOnly = useCallback(async () => {
     setSaveState({ kind: "reloading" });
@@ -147,6 +161,26 @@ export function PlatformSettingsCard(): ReactElement {
               Example flag: <code className="font-mono">{trimmed || "PLAYIT"}{'{payload.signature}'}</code>
             </p>
           </div>
+          <div className="w-full space-y-1.5 sm:w-48">
+            <label
+              htmlFor="platform-max-team-members"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Max Team Members
+            </label>
+            <Input
+              id="platform-max-team-members"
+              name="max_team_members"
+              data-testid="input-max-team-members"
+              type="number"
+              min={0}
+              step={1}
+              value={maxTeamMembers}
+              onChange={(event) => setMaxTeamMembers(event.target.value)}
+              disabled={saveState.kind === "saving" || saveState.kind === "reloading"}
+            />
+            <p className="text-xs text-muted-foreground">0 allows unlimited members.</p>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -157,6 +191,7 @@ export function PlatformSettingsCard(): ReactElement {
               }}
               disabled={
                 !isValid ||
+                !maxTeamMembersValid ||
                 !dirty ||
                 saveState.kind === "saving" ||
                 saveState.kind === "reloading"
@@ -172,6 +207,7 @@ export function PlatformSettingsCard(): ReactElement {
               }}
               disabled={
                 !isValid ||
+                !maxTeamMembersValid ||
                 !dirty ||
                 saveState.kind === "saving" ||
                 saveState.kind === "reloading"
@@ -197,7 +233,7 @@ export function PlatformSettingsCard(): ReactElement {
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
           <div className="rounded border border-border bg-card/40 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Stored</p>
             <p className="mt-1 font-mono text-sm">
@@ -222,6 +258,14 @@ export function PlatformSettingsCard(): ReactElement {
                   out of sync
                 </Badge>
               )}
+            </p>
+          </div>
+          <div className="rounded border border-border bg-card/40 p-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Team Limit</p>
+            <p className="mt-1 font-mono text-sm">
+              {settings?.max_team_members && settings.max_team_members > 0
+                ? settings.max_team_members
+                : "unlimited"}
             </p>
           </div>
         </div>

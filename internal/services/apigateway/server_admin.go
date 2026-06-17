@@ -903,8 +903,8 @@ func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *htt
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse platform settings payload.")
 		return
 	}
-	if strings.TrimSpace(req.FlagFormatPrefix) == "" {
-		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag_format_prefix must not be empty.")
+	if strings.TrimSpace(req.FlagFormatPrefix) == "" || (req.MaxTeamMembers != nil && *req.MaxTeamMembers < 0) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag_format_prefix must not be empty and max_team_members must not be negative.")
 		return
 	}
 	actor := s.adminToken
@@ -915,6 +915,7 @@ func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *htt
 	}
 	s.recordAdminAudit(r.Context(), "platform.settings.update", "platform_settings", "platform_settings:1", "updated platform settings", map[string]any{
 		"flag_format_prefix": settings.FlagFormatPrefix,
+		"max_team_members":   settings.MaxTeamMembers,
 	})
 	writeData(w, http.StatusOK, settings)
 }

@@ -100,7 +100,7 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	}
 	if teamName.Valid {
 		player.TeamName = teamName.String
-	} else {
+	} else if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
 		player.TeamName = "Organizer"
 	}
 
@@ -113,6 +113,56 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		}
 	}
 	return player, nil
+}
+
+func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error) {
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	password := input.Password
+	if displayName == "" || email == "" || strings.TrimSpace(password) == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	defer tx.Rollback()
+
+	var duplicate bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email).Scan(&duplicate); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if duplicate {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	wireGuardPeer := wireguardPeerName(0, playerID)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
+		VALUES ($1, NULL, $2, $3, $4, 'member', $5, $6)
+	`, playerID, displayName, email, passwordHash, wireGuardPeer, now.UTC()); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	return authenticatedPlayer{
+		PlayerID:    playerID,
+		TeamID:      0,
+		TeamName:    "",
+		DisplayName: displayName,
+		Email:       email,
+		Role:        "member",
+	}, nil
 }
 
 func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error) {
@@ -144,14 +194,20 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 		return player, nil
 	}
 
-	if !currentTeamID.Valid || int(currentTeamID.Int64) != teamID {
+	if !currentTeamID.Valid {
+		if teamID != 0 {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		player.TeamID = 0
+		player.TeamName = ""
+		return player, nil
+	}
+	if int(currentTeamID.Int64) != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	player.TeamID = teamID
 	if currentTeamName.Valid {
 		player.TeamName = currentTeamName.String
-	} else {
-		player.TeamName = "Organizer"
 	}
 	return player, nil
 }
@@ -502,11 +558,11 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 
 func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.email, COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges
+		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges
 		FROM teams t
 		LEFT JOIN players p ON p.team_id = t.id
 		LEFT JOIN team_service_states tss ON tss.team_id = t.id
-		GROUP BY t.id, t.name, t.email
+		GROUP BY t.id, t.name, t.email, t.join_key
 		ORDER BY t.id
 	`)
 	if err != nil {
@@ -517,7 +573,7 @@ func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 	result := make([]adminTeam, 0)
 	for rows.Next() {
 		var team adminTeam
-		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.PlayerCount, &team.DeployedChallenges); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); err != nil {
 			return nil, err
 		}
 		result = append(result, team)
@@ -551,7 +607,11 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 		if err != nil {
 			return adminTeam{}, fmt.Errorf("allocate team id: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO teams (id, name, email) VALUES ($1, $2, $3)`, teamID, name, contactEmail); err != nil {
+		joinKey, err := NewTeamJoinKey()
+		if err != nil {
+			return adminTeam{}, fmt.Errorf("generate team join key: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO teams (id, name, email, join_key) VALUES ($1, $2, $3, $4)`, teamID, name, contactEmail, joinKey); err != nil {
 			return adminTeam{}, fmt.Errorf("insert team: %w", err)
 		}
 
@@ -635,7 +695,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 			return adminTeam{}, fmt.Errorf("commit create team tx: %w", err)
 		}
 
-		return adminTeam{ID: teamID, Name: name, ContactEmail: contactEmail, PlayerCount: 0, DeployedChallenges: deployedChallenges}, nil
+		return adminTeam{ID: teamID, Name: name, ContactEmail: contactEmail, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: deployedChallenges}, nil
 	})
 }
 
@@ -735,6 +795,16 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	}
 	defer tx.Rollback()
 
+	if input.TeamID > 0 {
+		limited, err := teamMemberLimitReachedTx(ctx, tx, input.TeamID)
+		if err != nil {
+			return adminPlayer{}, err
+		}
+		if limited {
+			return adminPlayer{}, ErrTeamMemberLimit
+		}
+	}
+
 	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
 	if err != nil {
 		return adminPlayer{}, err
@@ -777,6 +847,194 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 		return adminPlayer{}, err
 	}
 	return player, nil
+}
+
+func (s *postgresStore) JoinTeam(ctx context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error) {
+	teamKey := strings.TrimSpace(input.TeamKey)
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	password := input.Password
+	if teamKey == "" || displayName == "" || email == "" || strings.TrimSpace(password) == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	defer tx.Rollback()
+
+	var teamID int
+	var teamName string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id, name
+		FROM teams
+		WHERE join_key = $1
+	`, teamKey).Scan(&teamID, &teamName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		return authenticatedPlayer{}, err
+	}
+	limited, err := teamMemberLimitReachedTx(ctx, tx, teamID)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if limited {
+		return authenticatedPlayer{}, ErrTeamMemberLimit
+	}
+
+	var duplicate bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email).Scan(&duplicate); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if duplicate {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	wireGuardPeer := wireguardPeerName(teamID, playerID)
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
+		VALUES ($1, $2, $3, $4, $5, 'member', $6, $7)
+	`, playerID, teamID, displayName, email, passwordHash, wireGuardPeer, now.UTC()); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	wireGuardState, err := newWireGuardPeerState(playerID, teamID, teamName, displayName, wireGuardPeer, now)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := upsertWireGuardPeerTx(ctx, tx, wireGuardState); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	return authenticatedPlayer{
+		PlayerID:    playerID,
+		TeamID:      teamID,
+		TeamName:    teamName,
+		DisplayName: displayName,
+		Email:       email,
+		Role:        "member",
+	}, nil
+}
+
+func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error) {
+	key := strings.TrimSpace(teamKey)
+	if key == "" {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	defer tx.Rollback()
+
+	var player authenticatedPlayer
+	var currentTeamID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id, team_id, display_name, email, role
+		FROM players
+		WHERE id = $1
+		FOR UPDATE
+	`, playerID).Scan(
+		&player.PlayerID,
+		&currentTeamID,
+		&player.DisplayName,
+		&player.Email,
+		&player.Role,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		return authenticatedPlayer{}, err
+	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") || (currentTeamID.Valid && currentTeamID.Int64 > 0) {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	var teamID int
+	var teamName string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id, name
+		FROM teams
+		WHERE join_key = $1
+	`, key).Scan(&teamID, &teamName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		return authenticatedPlayer{}, err
+	}
+	limited, err := teamMemberLimitReachedTx(ctx, tx, teamID)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if limited {
+		return authenticatedPlayer{}, ErrTeamMemberLimit
+	}
+
+	wireGuardPeer := wireguardPeerName(teamID, playerID)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE players
+		SET team_id = $2, wireguard_peer = $3
+		WHERE id = $1
+	`, playerID, teamID, wireGuardPeer); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	wireGuardState, err := newWireGuardPeerState(playerID, teamID, teamName, player.DisplayName, wireGuardPeer, now)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := upsertWireGuardPeerTx(ctx, tx, wireGuardState); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	player.TeamID = teamID
+	player.TeamName = teamName
+	return player, nil
+}
+
+func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool, error) {
+	if teamID <= 0 {
+		return false, nil
+	}
+	var limit int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT max_team_members
+		FROM platform_settings
+		WHERE id = 1
+	`).Scan(&limit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if limit <= 0 {
+		return false, nil
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM players
+		WHERE team_id = $1
+	`, teamID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count >= limit, nil
 }
 
 func (s *postgresStore) GetAdminPlayerWireGuardConfig(ctx context.Context, playerID int) (adminWireGuardPeer, error) {
@@ -1078,11 +1336,11 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 	}
 	var team adminTeam
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT t.id, t.name, t.email,
+		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''),
 		       COALESCE((SELECT COUNT(*) FROM players p WHERE p.team_id = t.id), 0),
 		       COALESCE((SELECT COUNT(DISTINCT si.challenge_id) FROM service_instances si WHERE si.team_id = t.id AND si.runtime_status = 'ready'), 0)
 		FROM teams t WHERE t.id = $1
-	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.PlayerCount, &team.DeployedChallenges); err != nil {
+	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); err != nil {
 		return adminTeam{}, fmt.Errorf("read updated team: %w", err)
 	}
 	return team, nil
@@ -1571,17 +1829,18 @@ func (s *postgresStore) GetPlatformSettings(ctx context.Context) (adminPlatformS
 	var settings adminPlatformSettings
 	var updatedAt time.Time
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT flag_format_prefix, flag_format_active, updated_at, updated_by
+		SELECT flag_format_prefix, flag_format_active, max_team_members, updated_at, updated_by
 		FROM platform_settings
 		WHERE id = 1
 	`).Scan(
 		&settings.FlagFormatPrefix,
 		&settings.FlagFormatActive,
+		&settings.MaxTeamMembers,
 		&updatedAt,
 		&settings.UpdatedBy,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", UpdatedBy: "system"}, nil
+			return adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 0, UpdatedBy: "system"}, nil
 		}
 		return adminPlatformSettings{}, err
 	}
@@ -1594,14 +1853,26 @@ func (s *postgresStore) UpdatePlatformSettings(ctx context.Context, input adminU
 	if prefix == "" {
 		return adminPlatformSettings{}, fmt.Errorf("flag_format_prefix must not be empty")
 	}
+	if input.MaxTeamMembers != nil && *input.MaxTeamMembers < 0 {
+		return adminPlatformSettings{}, fmt.Errorf("max_team_members must not be negative")
+	}
+	maxTeamMembers := 0
+	if input.MaxTeamMembers != nil {
+		maxTeamMembers = *input.MaxTeamMembers
+	} else if current, err := s.GetPlatformSettings(ctx); err == nil {
+		maxTeamMembers = current.MaxTeamMembers
+	} else {
+		return adminPlatformSettings{}, err
+	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO platform_settings (id, flag_format_prefix, flag_format_active, updated_at, updated_by)
-		VALUES (1, $1, COALESCE((SELECT flag_format_active FROM platform_settings WHERE id = 1), $1), $2, $3)
+		INSERT INTO platform_settings (id, flag_format_prefix, flag_format_active, max_team_members, updated_at, updated_by)
+		VALUES (1, $1, COALESCE((SELECT flag_format_active FROM platform_settings WHERE id = 1), $1), $2, $3, $4)
 		ON CONFLICT (id) DO UPDATE SET
 			flag_format_prefix = EXCLUDED.flag_format_prefix,
+			max_team_members = EXCLUDED.max_team_members,
 			updated_at = EXCLUDED.updated_at,
 			updated_by = EXCLUDED.updated_by
-	`, prefix, now.UTC(), strings.TrimSpace(actor)); err != nil {
+	`, prefix, maxTeamMembers, now.UTC(), strings.TrimSpace(actor)); err != nil {
 		return adminPlatformSettings{}, err
 	}
 	return s.GetPlatformSettings(ctx)

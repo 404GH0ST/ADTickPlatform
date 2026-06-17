@@ -98,6 +98,9 @@ func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
+	mux.HandleFunc("POST /api/v2/register", s.handleRegisterPlayer)
+	mux.HandleFunc("POST /api/v2/team/join", s.handleJoinTeam)
+	mux.HandleFunc("POST /api/v2/me/team", s.handleJoinExistingTeam)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
 	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
@@ -194,6 +197,117 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Authentication failed", "team authentication token could not be issued.")
+		return
+	}
+
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
+}
+
+func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
+	var req participantRegisterRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player registration request is invalid.")
+		return
+	}
+
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+
+	player, err := s.store.RegisterPlayer(r.Context(), req, s.now())
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDuplicateResource):
+			writeProblem(w, http.StatusBadRequest, "Registration failed", "display name, email, password, and a unique email are required.")
+		default:
+			writeStoreFailure(w, err)
+		}
+		return
+	}
+
+	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Registration failed", "team authentication token could not be issued.")
+		return
+	}
+
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
+}
+
+func (s *Server) handleJoinTeam(w http.ResponseWriter, r *http.Request) {
+	var req participantJoinRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team join request is invalid.")
+		return
+	}
+
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+
+	player, err := s.store.JoinTeam(r.Context(), req, s.now())
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			writeProblem(w, http.StatusForbidden, "Team join failed", "team key is invalid.")
+		case errors.Is(err, ErrTeamMemberLimit):
+			writeProblem(w, http.StatusBadRequest, "Team join failed", "team has reached the maximum member count.")
+		case errors.Is(err, ErrDuplicateResource):
+			writeProblem(w, http.StatusBadRequest, "Team join failed", "display name, email, password, and a unique email are required.")
+		default:
+			writeStoreFailure(w, err)
+		}
+		return
+	}
+
+	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Team join failed", "team authentication token could not be issued.")
+		return
+	}
+
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
+}
+
+func (s *Server) handleJoinExistingTeam(w http.ResponseWriter, r *http.Request) {
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before joining a team.")
+	if !ok {
+		return
+	}
+	var req participantJoinExistingTeamRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.TeamKey) == "" {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "team key is required.")
+		return
+	}
+
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(player.Email, clientRateLimitKey(r)), authRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+
+	updatedPlayer, err := s.store.JoinExistingPlayerTeam(r.Context(), player.PlayerID, req.TeamKey, s.now())
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			writeProblem(w, http.StatusForbidden, "Team join failed", "team key is invalid.")
+		case errors.Is(err, ErrTeamMemberLimit):
+			writeProblem(w, http.StatusBadRequest, "Team join failed", "team has reached the maximum member count.")
+		case errors.Is(err, ErrDuplicateResource):
+			writeProblem(w, http.StatusBadRequest, "Team join failed", "player has already joined a team.")
+		default:
+			writeStoreFailure(w, err)
+		}
+		return
+	}
+
+	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Team join failed", "team authentication token could not be issued.")
 		return
 	}
 
@@ -858,6 +972,10 @@ func (s *Server) requireTeamAuth(w http.ResponseWriter, r *http.Request, message
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return 0, false
 	}
+	if player.TeamID <= 0 {
+		writeProblem(w, http.StatusForbidden, "Team membership required", "please join a team before accessing event resources.")
+		return 0, false
+	}
 	return player.TeamID, true
 }
 
@@ -943,6 +1061,8 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "deployment job is still active.")
 	case errors.Is(err, ErrDuplicateResource):
 		writeProblem(w, http.StatusConflict, "Duplicate resource", "resource already exists.")
+	case errors.Is(err, ErrTeamMemberLimit):
+		writeProblem(w, http.StatusBadRequest, "Request rejected", "team has reached the maximum member count.")
 	case errors.Is(err, ErrInvalidRuntimeConfig):
 		writeProblem(w, http.StatusBadRequest, "Invalid runtime configuration", err.Error())
 	default:

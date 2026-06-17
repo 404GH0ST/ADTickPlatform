@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Download } from 'lucide-react';
 
 import { AppShell } from '@/components/ui/app-shell';
+import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join-team-form';
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
 import { Button } from '@/components/ui/button';
 import { StatusBanner } from '@/components/ui/status-banner';
@@ -31,6 +32,14 @@ export function ParticipantShell({
   description = 'Live standings, owned service controls, and accepted attacks.',
 }: Props) {
   const gameAlertMessage = getParticipantGameAlertMessage(overview);
+  const hasParticipantTeam =
+    overview.authenticated &&
+    overview.role !== "organizer" &&
+    (overview.teamID ?? 0) > 0;
+  const needsTeamJoin =
+    overview.authenticated &&
+    overview.role !== "organizer" &&
+    (overview.teamID ?? 0) <= 0;
 
   return (
     <AppShell
@@ -45,8 +54,7 @@ export function ParticipantShell({
               <a href="/admin">Organizer</a>
             </Button>
           )}
-          {overview.authenticated &&
-          (overview.role === undefined || overview.role !== "organizer") ? (
+          {hasParticipantTeam ? (
             <Button
               asChild
               data-testid="participant-vpn-config"
@@ -93,6 +101,7 @@ export function ParticipantShell({
       alertSection={
         <>
           {overview.message ? <StatusBanner message={overview.message} variant="warning" /> : null}
+          {needsTeamJoin ? <ParticipantJoinTeamForm /> : null}
           {gameAlertMessage ? (
             <StatusBanner message={gameAlertMessage} variant="warning" />
           ) : null}

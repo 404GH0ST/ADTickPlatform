@@ -111,8 +111,5 @@ func verifyTeamJWT(secret, token string, now time.Time) (teamTokenClaims, error)
 		}
 		return claims, nil
 	}
-	if claims.TeamID <= 0 {
-		return teamTokenClaims{}, ErrInvalidTeamToken
-	}
 	return claims, nil
 }
