@@ -3,9 +3,15 @@ set -euo pipefail
 
 # This script configures deploy/compose/prod.env with a custom domain/IP and port settings.
 # It automatically aligns EDGE_SITE_ADDRESS, AD_PLATFORM_PUBLIC_BASE_URL, and WIREGUARD_SERVER_ENDPOINT.
+# When scheme is https, it also generates a local self-signed certificate for the edge Caddy proxy.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROD_ENV="${ROOT_DIR}/deploy/compose/prod.env"
+PROD_ENV="${PROD_ENV:-${ROOT_DIR}/deploy/compose/prod.env}"
+CADDY_CERT_DIR="${CADDY_CERT_DIR:-${ROOT_DIR}/deploy/caddy/certs}"
+CADDY_CERT_FILE="${CADDY_CERT_DIR}/adplatform-selfsigned.crt"
+CADDY_KEY_FILE="${CADDY_CERT_DIR}/adplatform-selfsigned.key"
+EDGE_CERT_FILE="/etc/caddy/certs/adplatform-selfsigned.crt"
+EDGE_KEY_FILE="/etc/caddy/certs/adplatform-selfsigned.key"
 
 # Ensure generate-prod-env.sh has been run to initialize secrets
 if [[ ! -f "${PROD_ENV}" ]]; then
@@ -45,15 +51,60 @@ if [[ "${SCHEME}" != "http" && "${SCHEME}" != "https" ]]; then
   exit 1
 fi
 
+is_ip_address() {
+  local value="$1"
+  [[ "${value}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "${value}" =~ ^[0-9A-Fa-f:]+$ ]]
+}
+
+generate_self_signed_cert() {
+  local host="$1"
+  local san
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "Error: openssl is required to generate a self-signed HTTPS certificate." >&2
+    exit 1
+  fi
+
+  mkdir -p "${CADDY_CERT_DIR}"
+  chmod 700 "${CADDY_CERT_DIR}"
+
+  if is_ip_address "${host}"; then
+    san="IP:${host}"
+  else
+    san="DNS:${host}"
+  fi
+
+  openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+    -keyout "${CADDY_KEY_FILE}" \
+    -out "${CADDY_CERT_FILE}" \
+    -subj "/CN=${host}" \
+    -addext "subjectAltName=${san}" >/dev/null 2>&1
+
+  chmod 600 "${CADDY_KEY_FILE}"
+  chmod 644 "${CADDY_CERT_FILE}"
+}
+
 # Construct values
 edge_site_address="${SCHEME}://${DOMAIN_OR_IP}"
 ad_platform_public_url="${SCHEME}://${DOMAIN_OR_IP}"
 wireguard_endpoint="${DOMAIN_OR_IP}:${WG_PORT}"
+edge_tls_directive=""
+
+if [[ "${SCHEME}" == "https" ]]; then
+  generate_self_signed_cert "${DOMAIN_OR_IP}"
+  edge_tls_directive="tls ${EDGE_CERT_FILE} ${EDGE_KEY_FILE}"
+fi
 
 echo "Updating environment configurations in prod.env..."
 echo "  EDGE_SITE_ADDRESS           -> ${edge_site_address}"
 echo "  AD_PLATFORM_PUBLIC_BASE_URL -> ${ad_platform_public_url}"
 echo "  WIREGUARD_SERVER_ENDPOINT   -> ${wireguard_endpoint}"
+if [[ "${SCHEME}" == "https" ]]; then
+  echo "  EDGE_TLS_DIRECTIVE          -> ${edge_tls_directive}"
+  echo "  Self-signed cert            -> ${CADDY_CERT_FILE}"
+else
+  echo "  EDGE_TLS_DIRECTIVE          -> disabled"
+fi
 
 tmp_file="$(mktemp "${PROD_ENV}.tmp.XXXXXX")"
 cleanup() {
@@ -62,6 +113,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Read and replace keys in-place
+seen_edge_tls_directive=0
 while IFS= read -r line || [[ -n "${line}" ]]; do
   if [[ "${line}" != *=* || "${line}" =~ ^[[:space:]]*# ]]; then
     printf '%s\n' "${line}" >>"${tmp_file}"
@@ -73,6 +125,13 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
     EDGE_SITE_ADDRESS) value="${edge_site_address}" ;;
     AD_PLATFORM_PUBLIC_BASE_URL) value="${ad_platform_public_url}" ;;
     WIREGUARD_SERVER_ENDPOINT) value="${wireguard_endpoint}" ;;
+    EDGE_TLS_DIRECTIVE)
+      if [[ "${seen_edge_tls_directive}" -eq 1 ]]; then
+        continue
+      fi
+      value="${edge_tls_directive}"
+      seen_edge_tls_directive=1
+      ;;
     *)
       printf '%s\n' "${line}" >>"${tmp_file}"
       continue
@@ -80,6 +139,10 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   esac
   printf '%s=%s\n' "${key}" "${value}" >>"${tmp_file}"
 done <"${PROD_ENV}"
+
+if [[ "${seen_edge_tls_directive}" -eq 0 ]]; then
+  printf 'EDGE_TLS_DIRECTIVE=%s\n' "${edge_tls_directive}" >>"${tmp_file}"
+fi
 
 mv "${tmp_file}" "${PROD_ENV}"
 chmod 600 "${PROD_ENV}"

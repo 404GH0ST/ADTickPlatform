@@ -22,7 +22,7 @@ generate-prod-env:
 	./scripts/generate-prod-env.sh $(PROD_ENV)
 
 setup-prod-env:
-	./scripts/setup-prod-env.sh "$(DOMAIN)" "$(SCHEME)" "$(WG_PORT)"
+	./scripts/setup-prod-env.sh "$(DOMAIN)" "$(or $(SCHEME),$(SCHEMA))" "$(WG_PORT)"
 
 
 prod-config:

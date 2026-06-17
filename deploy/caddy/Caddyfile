@@ -1,4 +1,6 @@
 {$EDGE_SITE_ADDRESS:http://localhost} {
+  {$EDGE_TLS_DIRECTIVE}
+
   encode zstd gzip
 
   @api path /api/v2/* /healthz

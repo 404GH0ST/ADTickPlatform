@@ -393,8 +393,10 @@ services:
       - "${EDGE_HTTPS_PUBLIC_PORT:-443}:443"
     environment:
       EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-http://localhost}
+      EDGE_TLS_DIRECTIVE: ${EDGE_TLS_DIRECTIVE:-}
     volumes:
       - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../caddy/certs:/etc/caddy/certs:ro
       - caddy-data:/data
       - caddy-config:/config
     networks:
