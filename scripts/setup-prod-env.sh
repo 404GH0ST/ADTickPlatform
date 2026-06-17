@@ -86,6 +86,11 @@ generate_self_signed_cert() {
 
 # Construct values
 edge_site_address="${SCHEME}://${DOMAIN_OR_IP}"
+if [[ "${SCHEME}" == "https" ]] && is_ip_address "${DOMAIN_OR_IP}"; then
+  # Most clients do not send SNI for IP literals. Use a catch-all TLS listener
+  # so Caddy can serve the self-signed IP-SAN certificate during handshake.
+  edge_site_address="https://:443"
+fi
 ad_platform_public_url="${SCHEME}://${DOMAIN_OR_IP}"
 wireguard_endpoint="${DOMAIN_OR_IP}:${WG_PORT}"
 edge_tls_directive=""
