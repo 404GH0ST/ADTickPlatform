@@ -21,6 +21,22 @@ if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
   API_URL="${PUBLIC_URL}"
 fi
 
+CURL_TLS_ARGS=()
+if [[ "${API_URL}" == https://* ]]; then
+  custom_admin_ca_cert="${ADMIN_CA_CERT:-}"
+  default_admin_ca_cert="${ROOT_DIR}/deploy/caddy/certs/adplatform-selfsigned.crt"
+  if [[ "${ADMIN_CURL_INSECURE:-false}" == "true" ]]; then
+    CURL_TLS_ARGS=(-k)
+    echo "warning: ADMIN_CURL_INSECURE=true; skipping TLS certificate verification for ${API_URL}" >&2
+  elif [[ -n "${custom_admin_ca_cert}" && -f "${custom_admin_ca_cert}" ]]; then
+    CURL_TLS_ARGS=(--cacert "${custom_admin_ca_cert}")
+    echo "using TLS CA certificate: ${custom_admin_ca_cert}"
+  elif [[ "${EDGE_TLS_DIRECTIVE:-}" == *"adplatform-selfsigned.crt"* && -f "${default_admin_ca_cert}" ]]; then
+    CURL_TLS_ARGS=(--cacert "${default_admin_ca_cert}")
+    echo "using TLS CA certificate: ${default_admin_ca_cert}"
+  fi
+fi
+
 ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
 # User information from environment or positional arguments
@@ -46,7 +62,7 @@ curl_json() {
   response_file="$(mktemp)"
 
   local status
-  status="$(curl -sS -o "${response_file}" -w '%{http_code}' "$@")"
+  status="$(curl "${CURL_TLS_ARGS[@]}" -sS -o "${response_file}" -w '%{http_code}' "$@")"
   if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
     echo "${label} failed (status=${status}):" >&2
     cat "${response_file}" >&2
@@ -94,10 +110,10 @@ echo "${WIREGUARD_RESPONSE}" | jq -r '.config' > "${WIREGUARD_CONFIG_PATH}"
 
 if [[ "${AUTO_RECONCILE}" == "true" ]]; then
   echo "reconciling wireguard/access runtime state..."
-  if ! curl -s -X POST "${API_URL}/api/v2/admin/wireguard/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
+  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/wireguard/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
     echo "warning: wireguard reconcile request failed; run it manually from organizer dashboard or API." >&2
   fi
-  if ! curl -s -X POST "${API_URL}/api/v2/admin/access/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
+  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/access/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
     echo "warning: access reconcile request failed; run it manually from organizer dashboard or API." >&2
   fi
 fi
