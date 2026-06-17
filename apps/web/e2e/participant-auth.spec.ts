@@ -127,18 +127,23 @@ test("participant can sign in and sign out through the session routes", async ({
   await expect(page.getByRole("link", { name: "Sign In" })).toBeVisible();
 });
 
-test("participant can join a team with a team key", async ({ page }) => {
+test("registered participant can join a team with a team key", async ({ page }) => {
   await page.goto("/login");
 
-  await page.getByRole("button", { name: "Join Team" }).first().click();
-  await page.getByLabel("Team key").fill("TEAM-ALPHA-JOIN");
+  await page.getByRole("button", { name: "Register" }).click();
   await page.getByLabel("Display name").fill("Joined Member");
   await page.getByLabel("Email").fill("joined.member@college.local");
   await page.getByLabel("Password").fill("joined-password");
-  await page.locator("form").getByRole("button", { name: "Join Team" }).click();
+  await page.locator("form").getByRole("button", { name: "Register" }).click();
 
   await expect(page).toHaveURL(/\/services$/);
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
+  await expect(page.getByLabel("Team key")).toBeVisible();
+
+  await page.getByLabel("Team key").fill("TEAM-ALPHA-JOIN");
+  await page.getByRole("button", { name: "Join Team" }).click();
+
+  await expect(page.getByTestId("participant-vpn-config")).toBeVisible();
 });
 
 test("authenticated participants are redirected away from organizer routes and the login page", async ({
