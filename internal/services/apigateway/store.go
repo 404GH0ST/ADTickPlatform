@@ -79,7 +79,6 @@ type Store interface {
 	SaveAdminChallengeValidation(ctx context.Context, result ChallengeValidationResult) error
 	ListAdminDeployments(ctx context.Context) ([]adminDeploymentJob, error)
 	DeleteAdminDeployment(ctx context.Context, deploymentID int) error
-	JoinTeam(ctx context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error)
 	JoinExistingPlayerTeam(ctx context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error)
 	ListAdminAuditLogs(ctx context.Context, query adminAuditLogQuery) (adminAuditLogPage, error)
 	AppendAdminAuditLog(ctx context.Context, entry adminAuditLogEntry) error

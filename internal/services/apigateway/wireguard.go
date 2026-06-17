@@ -140,8 +140,45 @@ func renderWireGuardConfig(state wireGuardPeerState) string {
 	)
 }
 
-func wireGuardDownloadName(peerName string) string {
-	return fmt.Sprintf("%s.conf", strings.TrimSpace(peerName))
+func wireGuardDownloadName(usernameSource, fallback string) string {
+	username := strings.TrimSpace(usernameSource)
+	if beforeAt, _, found := strings.Cut(username, "@"); found {
+		username = beforeAt
+	}
+	stem := sanitizeWireGuardDownloadStem(username)
+	if stem == "" {
+		stem = sanitizeWireGuardDownloadStem(fallback)
+	}
+	if stem == "" {
+		stem = "wireguard"
+	}
+	return fmt.Sprintf("%s.conf", stem)
+}
+
+func sanitizeWireGuardDownloadStem(value string) string {
+	var builder strings.Builder
+	previousSeparator := false
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+			previousSeparator = false
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			previousSeparator = false
+		case r == '-' || r == '_' || r == '.':
+			if builder.Len() > 0 && !previousSeparator {
+				builder.WriteRune(r)
+				previousSeparator = true
+			}
+		default:
+			if builder.Len() > 0 && !previousSeparator {
+				builder.WriteRune('-')
+				previousSeparator = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-_.")
 }
 
 func wireGuardPeerAddress(teamID, playerID int) string {
@@ -307,12 +344,13 @@ func isExampleWireGuardEndpoint(endpoint string) bool {
 	return host == "vpn.adplatform.local" || host == "vpn.example.com"
 }
 
-func wireGuardAdminView(state wireGuardPeerState) adminWireGuardPeer {
+func wireGuardAdminView(state wireGuardPeerState, email string) adminWireGuardPeer {
 	return adminWireGuardPeer{
 		PlayerID:        state.PlayerID,
 		TeamID:          state.TeamID,
 		TeamName:        state.TeamName,
 		DisplayName:     state.DisplayName,
+		Email:           email,
 		WireGuardPeer:   state.WireGuardPeer,
 		Address:         state.Address,
 		Status:          state.Status,
@@ -322,7 +360,7 @@ func wireGuardAdminView(state wireGuardPeerState) adminWireGuardPeer {
 		AllowedIPs:      state.AllowedIPs,
 		DNS:             state.DNS,
 		Config:          state.Config,
-		DownloadName:    wireGuardDownloadName(state.WireGuardPeer),
+		DownloadName:    wireGuardDownloadName(email, state.WireGuardPeer),
 		IssuedAt:        state.IssuedAt,
 		RevokedAt:       state.RevokedAt,
 	}

@@ -849,85 +849,6 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	return player, nil
 }
 
-func (s *postgresStore) JoinTeam(ctx context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error) {
-	teamKey := strings.TrimSpace(input.TeamKey)
-	displayName := strings.TrimSpace(input.DisplayName)
-	email := strings.TrimSpace(strings.ToLower(input.Email))
-	password := input.Password
-	if teamKey == "" || displayName == "" || email == "" || strings.TrimSpace(password) == "" {
-		return authenticatedPlayer{}, ErrDuplicateResource
-	}
-
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	defer tx.Rollback()
-
-	var teamID int
-	var teamName string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT id, name
-		FROM teams
-		WHERE join_key = $1
-	`, teamKey).Scan(&teamID, &teamName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return authenticatedPlayer{}, ErrInvalidCredentials
-		}
-		return authenticatedPlayer{}, err
-	}
-	limited, err := teamMemberLimitReachedTx(ctx, tx, teamID)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	if limited {
-		return authenticatedPlayer{}, ErrTeamMemberLimit
-	}
-
-	var duplicate bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email).Scan(&duplicate); err != nil {
-		return authenticatedPlayer{}, err
-	}
-	if duplicate {
-		return authenticatedPlayer{}, ErrDuplicateResource
-	}
-
-	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	wireGuardPeer := wireguardPeerName(teamID, playerID)
-	passwordHash, err := hashPassword(password)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
-		VALUES ($1, $2, $3, $4, $5, 'member', $6, $7)
-	`, playerID, teamID, displayName, email, passwordHash, wireGuardPeer, now.UTC()); err != nil {
-		return authenticatedPlayer{}, err
-	}
-
-	wireGuardState, err := newWireGuardPeerState(playerID, teamID, teamName, displayName, wireGuardPeer, now)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	if err := upsertWireGuardPeerTx(ctx, tx, wireGuardState); err != nil {
-		return authenticatedPlayer{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return authenticatedPlayer{}, err
-	}
-	return authenticatedPlayer{
-		PlayerID:    playerID,
-		TeamID:      teamID,
-		TeamName:    teamName,
-		DisplayName: displayName,
-		Email:       email,
-		Role:        "member",
-	}, nil
-}
-
 func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error) {
 	key := strings.TrimSpace(teamKey)
 	if key == "" {
@@ -1065,7 +986,7 @@ func (s *postgresStore) RotateAdminPlayerWireGuardConfig(ctx context.Context, pl
 	if err := tx.Commit(); err != nil {
 		return adminWireGuardPeer{}, err
 	}
-	return wireGuardAdminView(wireGuardState), nil
+	return wireGuardAdminView(wireGuardState, identity.Email), nil
 }
 
 func (s *postgresStore) RevokeAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error) {
@@ -2310,6 +2231,7 @@ type wireGuardProvisionIdentity struct {
 	TeamID        int
 	TeamName      string
 	DisplayName   string
+	Email         string
 	WireGuardPeer string
 }
 
@@ -2392,7 +2314,7 @@ func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int
 	var issuedAt time.Time
 	var revokedAt sql.NullTime
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, p.display_name, p.wireguard_peer,
+		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.wireguard_peer,
 		       wp.address, wp.status, wp.server_endpoint, wp.server_public_key,
 		       wp.public_key, wp.allowed_ips, wp.dns, wp.config, wp.issued_at, wp.revoked_at
 		FROM players p
@@ -2404,6 +2326,7 @@ func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int
 		&teamID,
 		&teamName,
 		&peer.DisplayName,
+		&peer.Email,
 		&peer.WireGuardPeer,
 		&peer.Address,
 		&peer.Status,
@@ -2429,7 +2352,7 @@ func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int
 	} else {
 		peer.TeamName = "Organizer"
 	}
-	peer.DownloadName = wireGuardDownloadName(peer.WireGuardPeer)
+	peer.DownloadName = wireGuardDownloadName(peer.Email, peer.WireGuardPeer)
 	peer.IssuedAt = issuedAt.UTC().Format(time.RFC3339)
 	if revokedAt.Valid {
 		peer.RevokedAt = revokedAt.Time.UTC().Format(time.RFC3339)
@@ -2442,7 +2365,7 @@ func loadWireGuardProvisionIdentityTx(ctx context.Context, tx *sql.Tx, playerID 
 	var teamID sql.NullInt64
 	var teamName sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, p.display_name, p.wireguard_peer
+		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.wireguard_peer
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE p.id = $1
@@ -2452,6 +2375,7 @@ func loadWireGuardProvisionIdentityTx(ctx context.Context, tx *sql.Tx, playerID 
 		&teamID,
 		&teamName,
 		&identity.DisplayName,
+		&identity.Email,
 		&identity.WireGuardPeer,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -438,11 +438,19 @@ const operationsStatus = {
 
 function buildWireGuardPeer(player) {
   const suffix = player.id;
+  const username = String(player.email ?? player.display_name ?? player.wireguard_peer ?? "")
+    .split("@")[0]
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/[-_.]+$/g, "")
+    .replace(/^[-_.]+/g, "") || player.wireguard_peer;
   return {
     player_id: player.id,
     team_id: player.team_id,
     team_name: player.team_name,
     display_name: player.display_name,
+    email: player.email,
     wireguard_peer: player.wireguard_peer,
     address: player.wireguard_address,
     status: player.wireguard_status,
@@ -461,7 +469,7 @@ PublicKey = server-public-key
 Endpoint = vpn.college.local:51820
 AllowedIPs = 10.70.0.0/16
 `,
-    download_name: `${player.display_name.toLowerCase().replace(/\s+/g, "-")}.conf`,
+    download_name: `${username}.conf`,
     issued_at: player.wireguard_issued_at,
     revoked_at: player.wireguard_revoked_at,
   };
@@ -1479,56 +1487,6 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
       display_name: player.display_name,
       email: player.email,
       role: player.role,
-    });
-  }
-
-  if (method === "POST" && url.pathname === "/api/v2/team/join") {
-    const body = await readJsonBody(req);
-    const teamKey = body?.team_key?.trim();
-    const displayName = body?.display_name?.trim();
-    const email = body?.email?.trim();
-    const password = body?.password?.trim();
-    const team = state.teams.find((item) => item.join_key === teamKey);
-
-    if (!team) {
-      return writeFailure(res, 403, "team key is invalid.", "forbidden");
-    }
-    if (!displayName || !email || !password || state.players.some((item) => item.email === email)) {
-      return writeFailure(res, 400, "display name, email, password, and a unique email are required.");
-    }
-    if (
-      state.platformSettings.max_team_members > 0 &&
-      state.players.filter((item) => item.team_id === team.id).length >=
-        state.platformSettings.max_team_members
-    ) {
-      return writeFailure(res, 400, "team has reached the maximum member count.");
-    }
-
-    const player = {
-      id: state.nextPlayerID,
-      team_id: team.id,
-      team_name: team.name,
-      display_name: displayName,
-      email,
-      role: "member",
-      wireguard_peer: `wg-joined-${state.nextPlayerID}`,
-      wireguard_address: `10.70.${team.id - 90}.${20 + state.nextPlayerID}/32`,
-      wireguard_status: "active",
-      wireguard_issued_at: "2026-03-20T11:00:00Z",
-      created_at: "2026-03-20T11:00:00Z",
-    };
-    state.nextPlayerID += 1;
-    state.players.push(player);
-    state.playerPasswords[email] = password;
-    state.teams = state.teams.map((item) =>
-      item.id === team.id
-        ? { ...item, player_count: item.player_count + 1 }
-        : item,
-    );
-
-    return writeSuccess(res, {
-      token: buildParticipantToken(player),
-      token_type: "Bearer",
     });
   }
 

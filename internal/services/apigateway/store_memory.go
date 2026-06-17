@@ -668,66 +668,6 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 	return player, nil
 }
 
-func (s *memoryStore) JoinTeam(_ context.Context, input participantJoinRequest, now time.Time) (authenticatedPlayer, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	teamKey := strings.TrimSpace(input.TeamKey)
-	var team *adminTeam
-	for _, candidate := range s.teams {
-		if strings.EqualFold(candidate.JoinKey, teamKey) {
-			team = candidate
-			break
-		}
-	}
-	if team == nil {
-		return authenticatedPlayer{}, ErrInvalidCredentials
-	}
-	if s.teamMemberLimitReachedLocked(team.ID) {
-		return authenticatedPlayer{}, ErrTeamMemberLimit
-	}
-	displayName := strings.TrimSpace(input.DisplayName)
-	email := strings.TrimSpace(strings.ToLower(input.Email))
-	if displayName == "" || email == "" || strings.TrimSpace(input.Password) == "" {
-		return authenticatedPlayer{}, ErrDuplicateResource
-	}
-	for _, record := range s.players {
-		if strings.EqualFold(record.Player.Email, email) {
-			return authenticatedPlayer{}, ErrDuplicateResource
-		}
-	}
-
-	id := s.nextPlayerID
-	s.nextPlayerID++
-	wireGuardPeer := wireguardPeerName(team.ID, id)
-	wireGuardState, err := newWireGuardPeerState(id, team.ID, team.Name, displayName, wireGuardPeer, now)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
-	player := adminPlayer{
-		ID:                id,
-		TeamID:            team.ID,
-		TeamName:          team.Name,
-		DisplayName:       displayName,
-		Email:             email,
-		Role:              "member",
-		WireGuardPeer:     wireGuardPeer,
-		WireGuardAddress:  wireGuardState.Address,
-		WireGuardStatus:   wireGuardState.Status,
-		WireGuardIssuedAt: wireGuardState.IssuedAt,
-		CreatedAt:         now.UTC().Format(time.RFC3339),
-	}
-	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), WireGuard: wireGuardState}
-	return authenticatedPlayer{
-		PlayerID:    id,
-		TeamID:      team.ID,
-		TeamName:    team.Name,
-		DisplayName: displayName,
-		Email:       email,
-		Role:        "member",
-	}, nil
-}
-
 func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, teamKey string, now time.Time) (authenticatedPlayer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -808,7 +748,7 @@ func (s *memoryStore) GetAdminPlayerWireGuardConfig(_ context.Context, playerID 
 	if changed {
 		record.WireGuard = refreshedState
 	}
-	return wireGuardAdminView(record.WireGuard), nil
+	return wireGuardAdminView(record.WireGuard, record.Player.Email), nil
 }
 
 func (s *memoryStore) RotateAdminPlayerWireGuardConfig(_ context.Context, playerID int, now time.Time) (adminWireGuardPeer, error) {
@@ -828,7 +768,7 @@ func (s *memoryStore) RotateAdminPlayerWireGuardConfig(_ context.Context, player
 	record.Player.WireGuardStatus = wireGuardState.Status
 	record.Player.WireGuardIssuedAt = wireGuardState.IssuedAt
 	record.Player.WireGuardRevokedAt = ""
-	return wireGuardAdminView(record.WireGuard), nil
+	return wireGuardAdminView(record.WireGuard, record.Player.Email), nil
 }
 
 func (s *memoryStore) RevokeAdminPlayerWireGuardConfig(_ context.Context, playerID int, now time.Time) (adminWireGuardPeer, error) {
@@ -843,7 +783,7 @@ func (s *memoryStore) RevokeAdminPlayerWireGuardConfig(_ context.Context, player
 	record.WireGuard.RevokedAt = now.UTC().Format(time.RFC3339)
 	record.Player.WireGuardStatus = record.WireGuard.Status
 	record.Player.WireGuardRevokedAt = record.WireGuard.RevokedAt
-	return wireGuardAdminView(record.WireGuard), nil
+	return wireGuardAdminView(record.WireGuard, record.Player.Email), nil
 }
 
 func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardGatewayPeer, error) {

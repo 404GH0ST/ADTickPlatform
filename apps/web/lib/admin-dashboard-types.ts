@@ -27,6 +27,7 @@ export type AdminWireGuardPeer = {
   team_id: number;
   team_name: string;
   display_name: string;
+  email?: string;
   wireguard_peer: string;
   address: string;
   status: string;

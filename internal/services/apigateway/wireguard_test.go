@@ -91,6 +91,9 @@ func TestAdminPlayerWireGuardConfigRefreshesServerMetadata(t *testing.T) {
 	}
 
 	initialPayload := decodeCompat[adminWireGuardPeer](t, getResponse.Body.Bytes())
+	if initialPayload.DownloadName != "wg.member.conf" {
+		t.Fatalf("expected username-based download name, got %q", initialPayload.DownloadName)
+	}
 	if initialPayload.ServerEndpoint != "10.70.0.1:51820" {
 		t.Fatalf("expected derived endpoint, got %q", initialPayload.ServerEndpoint)
 	}

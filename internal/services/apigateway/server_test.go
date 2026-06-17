@@ -1165,34 +1165,32 @@ func TestAdminTeamListIncludesJoinKeys(t *testing.T) {
 	}
 }
 
-func TestParticipantCanJoinTeamWithKey(t *testing.T) {
+func TestLegacyParticipantJoinEndpointIsRemoved(t *testing.T) {
 	mux := newTestMux()
 
 	body := `{"team_key":"TEAM-ALPHA-JOIN","display_name":"New Member","email":"new.member@example.com","password":"member-secret"}`
 	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
 	joinResponse := httptest.NewRecorder()
 	mux.ServeHTTP(joinResponse, joinRequest)
-	if joinResponse.Code != http.StatusOK {
-		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
-	}
-	authPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
-	if authPayload.Token == "" || authPayload.TokenType != "Bearer" {
-		t.Fatalf("unexpected join auth payload %+v", authPayload)
-	}
-
-	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v2/authenticate", bytes.NewBufferString(`{"email":"new.member@example.com","password":"member-secret"}`))
-	loginResponse := httptest.NewRecorder()
-	mux.ServeHTTP(loginResponse, loginRequest)
-	if loginResponse.Code != http.StatusOK {
-		t.Fatalf("expected login 200 after join, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	if joinResponse.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy join 404, got %d: %s", joinResponse.Code, joinResponse.Body.String())
 	}
 }
 
-func TestParticipantJoinRejectsInvalidTeamKey(t *testing.T) {
+func TestRegisteredParticipantJoinRejectsInvalidTeamKey(t *testing.T) {
 	mux := newTestMux()
 
-	body := `{"team_key":"wrong","display_name":"New Member","email":"bad.member@example.com","password":"member-secret"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
+	body := `{"display_name":"Pending Player","email":"bad.member@example.com","password":"member-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"wrong"}`))
+	request.Header.Set("Authorization", "Bearer "+registerPayload.Token)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
@@ -1302,8 +1300,17 @@ func TestParticipantJoinRespectsMaxTeamMembers(t *testing.T) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
 
-	body := `{"team_key":"TEAM-ALPHA-JOIN","display_name":"Overflow Member","email":"overflow.member@example.com","password":"member-secret"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/team/join", bytes.NewBufferString(body))
+	body := `{"display_name":"Overflow Member","email":"overflow.member@example.com","password":"member-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	request.Header.Set("Authorization", "Bearer "+registerPayload.Token)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -3263,6 +3270,9 @@ func TestAdminPlayerWireGuardLifecycle(t *testing.T) {
 	getPayload := decodeCompat[adminWireGuardPeer](t, getResponse.Body.Bytes())
 	if getPayload.Status != "active" {
 		t.Fatalf("expected active peer, got %s", getPayload.Status)
+	}
+	if getPayload.DownloadName != "alpha.member.conf" {
+		t.Fatalf("expected username-based download name, got %q", getPayload.DownloadName)
 	}
 	if !bytes.Contains([]byte(getPayload.Config), []byte("[Interface]")) {
 		t.Fatalf("expected wireguard config body, got %q", getPayload.Config)

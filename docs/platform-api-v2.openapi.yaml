@@ -4,8 +4,9 @@ info:
   version: 2.0.0
   summary: Participant-facing API for attack-defense automation
   description: >
-    Participant API for target discovery, whitebox source download, flag
-    submission, service unlock, SSH access, and service recovery workflows.
+    Participant API for authentication, player registration, team join, target
+    discovery, whitebox source download, flag submission, service unlock, SSH
+    access, and service recovery workflows.
 servers:
   - url: https://api.example.com
     description: Replace with the real participant API host
@@ -71,6 +72,78 @@ paths:
                     detail: email or password is wrong.
         '429':
           description: Authentication rate limited
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register a participant account
+      description: >
+        Creates a participant account without assigning a team. The participant
+        receives a bearer token but must join a team before accessing event
+        resources such as challenges, services, submissions, and WireGuard VPN.
+      operationId: registerParticipant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantRegisterRequest'
+      responses:
+        '200':
+          description: Registration succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticateResponse'
+        '400':
+          description: Invalid or duplicate registration
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          description: Registration rate limited
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/me/team:
+    post:
+      tags:
+        - Authentication
+      summary: Join a team after signing in
+      description: >
+        Attaches the authenticated participant account to the team identified by
+        the unique team key. This is the normal next action after registering or
+        signing in without a team.
+      operationId: joinTeamForCurrentParticipant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantJoinExistingTeamRequest'
+      responses:
+        '200':
+          description: Team join succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticateResponse'
+        '400':
+          description: Invalid request, already joined, or full team
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Bearer token missing/invalid or team key invalid
           content:
             application/problem+json:
               schema:
@@ -826,6 +899,33 @@ components:
         password:
           type: string
           minLength: 1
+    ParticipantRegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - email
+        - password
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+    ParticipantJoinExistingTeamRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - team_key
+      properties:
+        team_key:
+          type: string
+          minLength: 1
+          description: Unique team join key issued by the organizer.
     AuthenticateResponse:
       type: object
       additionalProperties: false

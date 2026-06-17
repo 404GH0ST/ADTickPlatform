@@ -66,13 +66,6 @@ type adminPlayer struct {
 	CreatedAt          string `json:"created_at"`
 }
 
-type participantJoinRequest struct {
-	TeamKey     string `json:"team_key"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-}
-
 type participantRegisterRequest struct {
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
@@ -88,6 +81,7 @@ type adminWireGuardPeer struct {
 	TeamID          int    `json:"team_id"`
 	TeamName        string `json:"team_name"`
 	DisplayName     string `json:"display_name"`
+	Email           string `json:"email,omitempty"`
 	WireGuardPeer   string `json:"wireguard_peer"`
 	Address         string `json:"address"`
 	Status          string `json:"status"`

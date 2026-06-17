@@ -99,7 +99,6 @@ func (s *Server) WithRateLimiter(limiter rateLimiter) *Server {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
 	mux.HandleFunc("POST /api/v2/register", s.handleRegisterPlayer)
-	mux.HandleFunc("POST /api/v2/team/join", s.handleJoinTeam)
 	mux.HandleFunc("POST /api/v2/me/team", s.handleJoinExistingTeam)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
 	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
@@ -230,43 +229,6 @@ func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Registration failed", "team authentication token could not be issued.")
-		return
-	}
-
-	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
-}
-
-func (s *Server) handleJoinTeam(w http.ResponseWriter, r *http.Request) {
-	var req participantJoinRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		writeProblem(w, http.StatusBadRequest, "Invalid request", "team join request is invalid.")
-		return
-	}
-
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
-	if !allowed {
-		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
-		return
-	}
-
-	player, err := s.store.JoinTeam(r.Context(), req, s.now())
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidCredentials):
-			writeProblem(w, http.StatusForbidden, "Team join failed", "team key is invalid.")
-		case errors.Is(err, ErrTeamMemberLimit):
-			writeProblem(w, http.StatusBadRequest, "Team join failed", "team has reached the maximum member count.")
-		case errors.Is(err, ErrDuplicateResource):
-			writeProblem(w, http.StatusBadRequest, "Team join failed", "display name, email, password, and a unique email are required.")
-		default:
-			writeStoreFailure(w, err)
-		}
-		return
-	}
-
-	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
-	if err != nil {
-		writeProblem(w, http.StatusInternalServerError, "Team join failed", "team authentication token could not be issued.")
 		return
 	}
 
