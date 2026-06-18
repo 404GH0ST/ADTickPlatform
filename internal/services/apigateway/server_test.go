@@ -1510,6 +1510,42 @@ func TestOrganizerBearerTokenCannotAccessParticipantRoutes(t *testing.T) {
 	}
 }
 
+func TestSubmitRequiresTeamMembership(t *testing.T) {
+	store := NewMemoryStore(101)
+	player, err := store.RegisterPlayer(context.Background(), participantRegisterRequest{
+		DisplayName: "Pending Player",
+		Email:       "pending@example.com",
+		Password:    "pending-secret",
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("register pending player: %v", err)
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	token, err := issueTeamJWT("dev-team-token", player, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("issue pending player token: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewBufferString(`{"flags":["FLAGv1.demo"]}`))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", response.Code, response.Body.String())
+	}
+	problem := decodeProblemCompat(t, response.Body.Bytes())
+	if problem.Title != "Team membership required" {
+		t.Fatalf("unexpected title %q", problem.Title)
+	}
+	if problem.Detail != "please join a team before submitting flags." {
+		t.Fatalf("unexpected detail %q", problem.Detail)
+	}
+}
+
 func TestSubmitReturnsRateLimit429(t *testing.T) {
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{

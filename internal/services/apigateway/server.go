@@ -534,6 +534,10 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate before submit.")
 		return
 	}
+	if player.TeamID <= 0 {
+		writeProblem(w, http.StatusForbidden, "Team membership required", "please join a team before submitting flags.")
+		return
+	}
 	teamID := player.TeamID
 
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamKey("submit", teamID), submitRateLimitPolicy)
