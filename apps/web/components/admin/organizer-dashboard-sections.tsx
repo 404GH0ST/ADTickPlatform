@@ -897,111 +897,122 @@ function PlayerRegistryCard({
             { label: "Action" },
           ]} />
           <TableBody>
-            {playerRows.map((player) => (
-              <TableRow key={player.id} data-testid={`player-row-${player.id}`}>
-                <TableCell className="font-semibold text-muted-foreground">#{player.id}</TableCell>
-                <TableCell>
-                  <div>
-                    <p>{player.display_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {player.email}
-                    </p>
-                  </div>
-                </TableCell>
-                <TableCell>{player.team_name}</TableCell>
-                <TableCell>{player.role}</TableCell>
-                <TableCell className="font-mono text-xs">
-                  {player.wireguard_peer}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {player.wireguard_address}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    className={
-                      player.wireguard_status === "active"
-                        ? peerTone.active
-                        : peerTone.revoked
-                    }
-                    variant="outline"
-                  >
-                    {player.wireguard_status}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      disabled={pendingAction !== null}
-                      size="sm"
-                      variant="ghost"
-                      data-testid={`edit-player-${player.id}`}
-                      onClick={() => onOpenEditDialog(player.id)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      disabled={pendingAction !== null}
-                      size="sm"
-                      variant="outline"
-                      data-testid={`inspect-wireguard-${player.id}`}
-                      onClick={() => onInspectWireGuard(player)}
-                    >
-                      {pendingAction === `wireguard:get:${player.id}` ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4" />
-                      )}
-                      Config
-                    </Button>
-                    <Button
-                      disabled={pendingAction !== null}
-                      size="sm"
-                      variant="outline"
-                      data-testid={`rotate-wireguard-${player.id}`}
-                      onClick={() => onRotateWireGuard(player)}
-                    >
-                      {pendingAction === `wireguard:rotate:${player.id}` ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      Rotate
-                    </Button>
-                    <Button
-                      disabled={
-                        pendingAction !== null ||
-                        player.wireguard_status === "revoked"
-                      }
-                      size="sm"
-                      variant="outline"
-                      data-testid={`revoke-wireguard-${player.id}`}
-                      onClick={() => onRevokeWireGuard(player)}
-                    >
-                      {pendingAction === `wireguard:revoke:${player.id}` ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : null}
-                      Revoke
-                    </Button>
-                    <Button
-                      disabled={pendingAction !== null}
-                      size="sm"
-                      variant="ghost"
-                      className="button-danger-subtle"
-                      data-testid={`delete-player-${player.id}`}
-                      onClick={() =>
-                        onSelectDeleteTarget({
-                          kind: "player",
-                          id: player.id,
-                          label: player.display_name,
-                        })
-                      }
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {playerRows.map((player) => {
+              const hasWireGuardPeer =
+                Boolean(player.wireguard_peer) &&
+                Boolean(player.wireguard_address) &&
+                Boolean(player.wireguard_status);
+              return (
+                <TableRow key={player.id} data-testid={`player-row-${player.id}`}>
+                  <TableCell className="font-semibold text-muted-foreground">#{player.id}</TableCell>
+                  <TableCell>
+                    <div>
+                      <p>{player.display_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {player.email}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>{player.team_name || "Unjoined"}</TableCell>
+                  <TableCell>{player.role}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {player.wireguard_peer || "—"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {player.wireguard_address || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {hasWireGuardPeer ? (
+                      <Badge
+                        className={
+                          player.wireguard_status === "active"
+                            ? peerTone.active
+                            : peerTone.revoked
+                        }
+                        variant="outline"
+                      >
+                        {player.wireguard_status}
+                      </Badge>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">pending</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        disabled={pendingAction !== null}
+                        size="sm"
+                        variant="ghost"
+                        data-testid={`edit-player-${player.id}`}
+                        onClick={() => onOpenEditDialog(player.id)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        disabled={pendingAction !== null || !hasWireGuardPeer}
+                        size="sm"
+                        variant="outline"
+                        data-testid={`inspect-wireguard-${player.id}`}
+                        onClick={() => onInspectWireGuard(player)}
+                      >
+                        {pendingAction === `wireguard:get:${player.id}` ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                        Config
+                      </Button>
+                      <Button
+                        disabled={pendingAction !== null || !hasWireGuardPeer}
+                        size="sm"
+                        variant="outline"
+                        data-testid={`rotate-wireguard-${player.id}`}
+                        onClick={() => onRotateWireGuard(player)}
+                      >
+                        {pendingAction === `wireguard:rotate:${player.id}` ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        Rotate
+                      </Button>
+                      <Button
+                        disabled={
+                          pendingAction !== null ||
+                          !hasWireGuardPeer ||
+                          player.wireguard_status === "revoked"
+                        }
+                        size="sm"
+                        variant="outline"
+                        data-testid={`revoke-wireguard-${player.id}`}
+                        onClick={() => onRevokeWireGuard(player)}
+                      >
+                        {pendingAction === `wireguard:revoke:${player.id}` ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        Revoke
+                      </Button>
+                      <Button
+                        disabled={pendingAction !== null}
+                        size="sm"
+                        variant="ghost"
+                        className="button-danger-subtle"
+                        data-testid={`delete-player-${player.id}`}
+                        onClick={() =>
+                          onSelectDeleteTarget({
+                            kind: "player",
+                            id: player.id,
+                            label: player.display_name,
+                          })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
           </AdminTable>
     </AdminRegistryCard>

@@ -1288,6 +1288,81 @@ func TestRegisteredParticipantCanJoinExistingAccountToTeam(t *testing.T) {
 	}
 }
 
+func TestRegisteredParticipantHasNoWireGuardBeforeJoin(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"display_name":"Pending WireGuard","email":"pending.wg@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	adminPlayersRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/players", nil)
+	setTestAdminAuthHeader(adminPlayersRequest)
+	adminPlayersResponse := httptest.NewRecorder()
+	mux.ServeHTTP(adminPlayersResponse, adminPlayersRequest)
+	if adminPlayersResponse.Code != http.StatusOK {
+		t.Fatalf("expected admin players 200, got %d: %s", adminPlayersResponse.Code, adminPlayersResponse.Body.String())
+	}
+	players := decodeCompat[[]adminPlayer](t, adminPlayersResponse.Body.Bytes())
+	var pending adminPlayer
+	for _, player := range players {
+		if player.Email == "pending.wg@example.com" {
+			pending = player
+			break
+		}
+	}
+	if pending.ID == 0 {
+		t.Fatal("expected pending player in admin list")
+	}
+	if pending.TeamID != 0 || pending.TeamName != "" {
+		t.Fatalf("expected pending player without team, got %+v", pending)
+	}
+	if pending.WireGuardPeer != "" || pending.WireGuardAddress != "" || pending.WireGuardStatus != "" {
+		t.Fatalf("expected pending player without wireguard peer, got %+v", pending)
+	}
+
+	wireGuardRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/admin/players/%d/wireguard", pending.ID), nil)
+	setTestAdminAuthHeader(wireGuardRequest)
+	wireGuardResponse := httptest.NewRecorder()
+	mux.ServeHTTP(wireGuardResponse, wireGuardRequest)
+	if wireGuardResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected pending wireguard 400, got %d: %s", wireGuardResponse.Code, wireGuardResponse.Body.String())
+	}
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+
+	adminPlayersAfterJoinRequest := httptest.NewRequest(http.MethodGet, "/api/v2/admin/players", nil)
+	setTestAdminAuthHeader(adminPlayersAfterJoinRequest)
+	adminPlayersAfterJoinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(adminPlayersAfterJoinResponse, adminPlayersAfterJoinRequest)
+	if adminPlayersAfterJoinResponse.Code != http.StatusOK {
+		t.Fatalf("expected admin players 200 after join, got %d: %s", adminPlayersAfterJoinResponse.Code, adminPlayersAfterJoinResponse.Body.String())
+	}
+	players = decodeCompat[[]adminPlayer](t, adminPlayersAfterJoinResponse.Body.Bytes())
+	for _, player := range players {
+		if player.ID == pending.ID {
+			pending = player
+			break
+		}
+	}
+	if pending.TeamID != 101 || pending.TeamName != "Team Alpha" {
+		t.Fatalf("expected joined team after join, got %+v", pending)
+	}
+	if pending.WireGuardPeer == "" || pending.WireGuardAddress == "" || pending.WireGuardStatus != "active" {
+		t.Fatalf("expected wireguard peer after join, got %+v", pending)
+	}
+}
+
 func TestParticipantJoinRespectsMaxTeamMembers(t *testing.T) {
 	store := NewMemoryStore(101)
 	maxTeamMembers := 1

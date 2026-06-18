@@ -709,7 +709,7 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 		       wp.address, wp.status, wp.issued_at, wp.revoked_at
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
-		LEFT JOIN wireguard_peers wp ON wp.player_id = p.id
+		LEFT JOIN wireguard_peers wp ON wp.player_id = p.id AND (p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer')
 		ORDER BY p.id
 	`)
 	if err != nil {
@@ -748,8 +748,11 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 		}
 		if teamName.Valid {
 			player.TeamName = teamName.String
-		} else {
+		} else if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
 			player.TeamName = "Organizer"
+		}
+		if player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+			player.WireGuardPeer = ""
 		}
 		if wgAddress.Valid {
 			player.WireGuardAddress = wgAddress.String
@@ -770,9 +773,12 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 }
 
 func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error) {
+	role := normalizedRole(input.Role)
 	var teamName string
 	if input.TeamID == 0 {
-		teamName = "Organizer"
+		if role == "organizer" {
+			teamName = "Organizer"
+		}
 	} else {
 		var err error
 		teamName, err = s.lookupTeamName(ctx, input.TeamID)
@@ -815,7 +821,7 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 		TeamName:      teamName,
 		DisplayName:   strings.TrimSpace(input.DisplayName),
 		Email:         email,
-		Role:          normalizedRole(input.Role),
+		Role:          role,
 		WireGuardPeer: wireguardPeerName(input.TeamID, playerID),
 		CreatedAt:     now.UTC().Format(time.RFC3339),
 	}
@@ -833,16 +839,18 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	`, player.ID, dbTeamID, player.DisplayName, player.Email, passwordHash, player.Role, player.WireGuardPeer, now.UTC()); err != nil {
 		return adminPlayer{}, err
 	}
-	wireGuardState, err := newWireGuardPeerState(player.ID, player.TeamID, player.TeamName, player.DisplayName, player.WireGuardPeer, now)
-	if err != nil {
-		return adminPlayer{}, err
+	if player.TeamID > 0 || player.Role == "organizer" {
+		wireGuardState, err := newWireGuardPeerState(player.ID, player.TeamID, player.TeamName, player.DisplayName, player.WireGuardPeer, now)
+		if err != nil {
+			return adminPlayer{}, err
+		}
+		if err := insertWireGuardPeerTx(ctx, tx, wireGuardState); err != nil {
+			return adminPlayer{}, err
+		}
+		player.WireGuardAddress = wireGuardState.Address
+		player.WireGuardStatus = wireGuardState.Status
+		player.WireGuardIssuedAt = wireGuardState.IssuedAt
 	}
-	if err := insertWireGuardPeerTx(ctx, tx, wireGuardState); err != nil {
-		return adminPlayer{}, err
-	}
-	player.WireGuardAddress = wireGuardState.Address
-	player.WireGuardStatus = wireGuardState.Status
-	player.WireGuardIssuedAt = wireGuardState.IssuedAt
 	if err := tx.Commit(); err != nil {
 		return adminPlayer{}, err
 	}
@@ -1020,6 +1028,7 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		JOIN wireguard_peers wp ON wp.player_id = p.id
+		WHERE p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer'
 		ORDER BY p.id
 	`)
 	if err != nil {
@@ -2225,6 +2234,7 @@ func (s *postgresStore) ensureAllWireGuardPeers(ctx context.Context, now time.Ti
 		FROM players p
 		LEFT JOIN wireguard_peers wp ON wp.player_id = p.id
 		WHERE wp.player_id IS NULL
+		  AND (p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer')
 		ORDER BY p.id
 	`)
 	if err != nil {
@@ -2304,7 +2314,7 @@ func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		JOIN wireguard_peers wp ON wp.player_id = p.id
-		WHERE p.id = $1
+		WHERE p.id = $1 AND (p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer')
 	`, playerID).Scan(
 		&peer.PlayerID,
 		&teamID,
@@ -2348,8 +2358,9 @@ func loadWireGuardProvisionIdentityTx(ctx context.Context, tx *sql.Tx, playerID 
 	var identity wireGuardProvisionIdentity
 	var teamID sql.NullInt64
 	var teamName sql.NullString
+	var role string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.wireguard_peer
+		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.wireguard_peer, p.role
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE p.id = $1
@@ -2361,6 +2372,7 @@ func loadWireGuardProvisionIdentityTx(ctx context.Context, tx *sql.Tx, playerID 
 		&identity.DisplayName,
 		&identity.Email,
 		&identity.WireGuardPeer,
+		&role,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return wireGuardProvisionIdentity{}, ErrPlayerNotFound
@@ -2372,8 +2384,11 @@ func loadWireGuardProvisionIdentityTx(ctx context.Context, tx *sql.Tx, playerID 
 	}
 	if teamName.Valid {
 		identity.TeamName = teamName.String
-	} else {
+	} else if strings.EqualFold(strings.TrimSpace(role), "organizer") {
 		identity.TeamName = "Organizer"
+	}
+	if identity.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(role), "organizer") {
+		return wireGuardProvisionIdentity{}, ErrPlayerNotFound
 	}
 	return identity, nil
 }

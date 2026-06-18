@@ -607,11 +607,21 @@ func (s *memoryStore) ListAdminPlayers(_ context.Context) ([]adminPlayer, error)
 	players := make([]adminPlayer, 0, len(s.players))
 	for _, record := range s.players {
 		player := record.Player
-		player.TeamName = teamNameForID(s.teamNames, player.TeamID)
-		player.WireGuardAddress = record.WireGuard.Address
-		player.WireGuardStatus = record.WireGuard.Status
-		player.WireGuardIssuedAt = record.WireGuard.IssuedAt
-		player.WireGuardRevokedAt = record.WireGuard.RevokedAt
+		if player.TeamID > 0 {
+			player.TeamName = teamNameForID(s.teamNames, player.TeamID)
+		} else if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+			player.TeamName = "Organizer"
+		} else {
+			player.TeamName = ""
+		}
+		if player.TeamID > 0 || strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+			player.WireGuardAddress = record.WireGuard.Address
+			player.WireGuardStatus = record.WireGuard.Status
+			player.WireGuardIssuedAt = record.WireGuard.IssuedAt
+			player.WireGuardRevokedAt = record.WireGuard.RevokedAt
+		} else {
+			player.WireGuardPeer = ""
+		}
 		players = append(players, player)
 	}
 	slices.SortFunc(players, func(a, b adminPlayer) int { return a.ID - b.ID })
@@ -641,30 +651,38 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 	s.nextPlayerID++
 	wireGuardPeer := wireguardPeerName(input.TeamID, id)
 
-	teamName := "Organizer"
+	role := normalizedRole(input.Role)
+	teamName := ""
 	if input.TeamID != 0 {
 		teamName = teamNameForID(s.teamNames, input.TeamID)
+	} else if role == "organizer" {
+		teamName = "Organizer"
 	}
 
-	wireGuardState, err := newWireGuardPeerState(id, input.TeamID, teamName, strings.TrimSpace(input.DisplayName), wireGuardPeer, now)
-	if err != nil {
-		return adminPlayer{}, err
-	}
 	player := adminPlayer{
-		ID:                 id,
-		TeamID:             input.TeamID,
-		TeamName:           teamName,
-		DisplayName:        strings.TrimSpace(input.DisplayName),
-		Email:              email,
-		Role:               normalizedRole(input.Role),
-		WireGuardPeer:      wireGuardPeer,
-		WireGuardAddress:   wireGuardState.Address,
-		WireGuardStatus:    wireGuardState.Status,
-		WireGuardIssuedAt:  wireGuardState.IssuedAt,
-		WireGuardRevokedAt: wireGuardState.RevokedAt,
-		CreatedAt:          now.UTC().Format(time.RFC3339),
+		ID:            id,
+		TeamID:        input.TeamID,
+		TeamName:      teamName,
+		DisplayName:   strings.TrimSpace(input.DisplayName),
+		Email:         email,
+		Role:          role,
+		WireGuardPeer: wireGuardPeer,
+		CreatedAt:     now.UTC().Format(time.RFC3339),
 	}
-	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), WireGuard: wireGuardState}
+	record := &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password)}
+	if player.TeamID > 0 || player.Role == "organizer" {
+		wireGuardState, err := newWireGuardPeerState(id, input.TeamID, teamName, strings.TrimSpace(input.DisplayName), wireGuardPeer, now)
+		if err != nil {
+			return adminPlayer{}, err
+		}
+		player.WireGuardAddress = wireGuardState.Address
+		player.WireGuardStatus = wireGuardState.Status
+		player.WireGuardIssuedAt = wireGuardState.IssuedAt
+		player.WireGuardRevokedAt = wireGuardState.RevokedAt
+		record.Player = player
+		record.WireGuard = wireGuardState
+	}
+	s.players[id] = record
 	return player, nil
 }
 
@@ -740,7 +758,13 @@ func (s *memoryStore) GetAdminPlayerWireGuardConfig(_ context.Context, playerID 
 	if !ok {
 		return adminWireGuardPeer{}, ErrPlayerNotFound
 	}
+	if record.Player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+		return adminWireGuardPeer{}, ErrPlayerNotFound
+	}
 	record.WireGuard.TeamName = teamNameForID(s.teamNames, record.Player.TeamID)
+	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && record.Player.TeamID == 0 {
+		record.WireGuard.TeamName = "Organizer"
+	}
 	refreshedState, changed, err := refreshWireGuardPeerState(record.WireGuard)
 	if err != nil {
 		return adminWireGuardPeer{}, err
@@ -759,7 +783,14 @@ func (s *memoryStore) RotateAdminPlayerWireGuardConfig(_ context.Context, player
 	if !ok {
 		return adminWireGuardPeer{}, ErrPlayerNotFound
 	}
-	wireGuardState, err := newWireGuardPeerState(record.Player.ID, record.Player.TeamID, teamNameForID(s.teamNames, record.Player.TeamID), record.Player.DisplayName, record.Player.WireGuardPeer, now)
+	if record.Player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+		return adminWireGuardPeer{}, ErrPlayerNotFound
+	}
+	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
+	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && record.Player.TeamID == 0 {
+		teamName = "Organizer"
+	}
+	wireGuardState, err := newWireGuardPeerState(record.Player.ID, record.Player.TeamID, teamName, record.Player.DisplayName, record.Player.WireGuardPeer, now)
 	if err != nil {
 		return adminWireGuardPeer{}, err
 	}
@@ -777,6 +808,9 @@ func (s *memoryStore) RevokeAdminPlayerWireGuardConfig(_ context.Context, player
 
 	record, ok := s.players[playerID]
 	if !ok {
+		return adminWireGuardPeer{}, ErrPlayerNotFound
+	}
+	if record.Player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
 		return adminWireGuardPeer{}, ErrPlayerNotFound
 	}
 	record.WireGuard.Status = "revoked"
@@ -799,7 +833,13 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 	peers := make([]WireGuardGatewayPeer, 0, len(playerIDs))
 	for _, playerID := range playerIDs {
 		record := s.players[playerID]
+		if record.Player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+			continue
+		}
 		record.WireGuard.TeamName = teamNameForID(s.teamNames, record.Player.TeamID)
+		if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && record.Player.TeamID == 0 {
+			record.WireGuard.TeamName = "Organizer"
+		}
 		peers = append(peers, WireGuardGatewayPeer{
 			PlayerID:        record.Player.ID,
 			TeamID:          record.Player.TeamID,
