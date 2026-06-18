@@ -211,6 +211,18 @@ Firewall teardown if rules drift badly:
 make firewall-cleanup
 ```
 
+Stop host enforcement, remove volumes, and clean managed firewall rules first:
+
+```bash
+make down-prod-host-clean
+```
+
+Remove only controller-created challenge service containers, their named state volumes, and platform-labelled game networks:
+
+```bash
+make prod-runtime-cleanup
+```
+
 ## Network Triage
 
 Filter chain counters:

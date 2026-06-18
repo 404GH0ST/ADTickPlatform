@@ -130,6 +130,16 @@ If you have existing rules that conflict with the platform, you can perform a to
 make firewall-cleanup
 ```
 
+To stop the host-enforcement stack and remove Compose volumes without leaving managed host firewall rules behind:
+```bash
+make down-prod-host-clean
+```
+
+That target also removes controller-created challenge service containers, their named state volumes, and platform-labelled game networks. To run only that runtime cleanup:
+```bash
+make prod-runtime-cleanup
+```
+
 ### Logs
 Monitor the control plane and runtime enforcement:
 ```bash
