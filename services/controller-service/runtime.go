@@ -36,7 +36,7 @@ func newRuntimeExecutor() runtimeExecutor {
 			unlockProofSecret: strings.TrimSpace(config.Secret("UNLOCK_PROOF_SECRET", "TEAM_JWT_SECRET")),
 			serviceSecurity: dockerRunSecurity{
 				capDrop:     csvConfig("CONTROLLER_SERVICE_CAP_DROP", "ALL"),
-				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE"),
+				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE,SYS_CHROOT,AUDIT_WRITE"),
 				securityOpt: csvConfig("CONTROLLER_SERVICE_SECURITY_OPT", ""),
 				pidsLimit:   stringConfig("CONTROLLER_SERVICE_PIDS_LIMIT", "256"),
 				memory:      stringConfig("CONTROLLER_SERVICE_MEMORY", "512m"),
