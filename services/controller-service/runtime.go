@@ -194,7 +194,9 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 		return err
 	}
 	if exists {
-		return e.verifySSHContract(runCtx, task)
+		if err := e.removeContainerIfExists(runCtx, task.ContainerName); err != nil {
+			return err
+		}
 	}
 
 	if err := e.runFreshContainer(runCtx, task); err != nil {
@@ -403,8 +405,34 @@ func (e *dockerCLIExecutor) verifySSHContract(ctx context.Context, task apigatew
 	if e.sshContractMode == "disabled" {
 		return nil
 	}
-	_, err := e.execDocker(ctx, buildDockerSSHContractProbeArgs(task)...)
-	return err
+	args := buildDockerSSHContractProbeArgs(task)
+	var lastErr error
+	for {
+		_, err := e.execDocker(ctx, args...)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientDockerExecState(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("container %s did not become ready for SSH contract verification: %w", task.ContainerName, lastErr)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func isTransientDockerExecState(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "is restarting") ||
+		strings.Contains(message, "is not running") ||
+		strings.Contains(message, "container is restarting") ||
+		strings.Contains(message, "container is not running")
 }
 
 func (e *dockerCLIExecutor) containerExists(ctx context.Context, containerName string) (bool, error) {
@@ -437,11 +465,29 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 	if err != nil {
 		return err
 	}
+	if err := e.refreshServiceImage(ctx, task.BaselineImage); err != nil {
+		return err
+	}
 	if err := e.ensureNetwork(ctx, plan); err != nil {
 		return err
 	}
 	_, err = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)...)
 	return err
+}
+
+func (e *dockerCLIExecutor) refreshServiceImage(ctx context.Context, image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return nil
+	}
+	if _, err := e.execDocker(ctx, "pull", image); err == nil {
+		return nil
+	} else if _, inspectErr := e.execDocker(ctx, "image", "inspect", image); inspectErr == nil {
+		log.Printf("warning: docker pull failed for %s; using existing local image: %v", image, err)
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (e *dockerCLIExecutor) networkPlan(task apigateway.ControllerRuntimeTask) (gamenet.DockerNetworkPlan, error) {

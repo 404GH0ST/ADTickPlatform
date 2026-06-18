@@ -362,6 +362,240 @@ func TestDockerEnsureServiceVerifiesSSHContractAfterRun(t *testing.T) {
 	}
 }
 
+func TestDockerEnsureServiceRecreatesExistingContainer(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"case \"$1\" in\n" +
+		"  ps)\n" +
+		"    printf '%s\\n' svc-banking-team-101\n" +
+		"    ;;\n" +
+		"  network)\n" +
+		"    if [ \"$2\" = \"inspect\" ]; then\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	task := apigateway.ControllerRuntimeTask{
+		TeamID:        101,
+		ChallengeID:   1,
+		ContainerName: "svc-banking-team-101",
+		BaselineImage: "registry.local/banking:baseline",
+		Endpoint:      "10.80.1.11:10001",
+		SSHHost:       "10.80.1.11",
+	}
+	executor := &dockerCLIExecutor{
+		binary:          binPath,
+		network:         "adplatform_game",
+		networkLayout:   "per-service",
+		sshContractMode: "verify",
+		timeout:         5 * time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	if err := executor.EnsureService(context.Background(), task); err != nil {
+		t.Fatalf("ensure service failed: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake docker log: %v", err)
+	}
+	logOutput := string(logBytes)
+	for _, fragment := range []string{
+		"ps -a --filter name=^/svc-banking-team-101$ --format {{.Names}}",
+		"rm -f svc-banking-team-101",
+		"pull registry.local/banking:baseline",
+		"run -d",
+		"exec svc-banking-team-101 /bin/sh -lc",
+	} {
+		if !strings.Contains(logOutput, fragment) {
+			t.Fatalf("expected log fragment %q in %q", fragment, logOutput)
+		}
+	}
+}
+
+func TestDockerEnsureServiceFallsBackToLocalImageWhenPullFails(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"case \"$1\" in\n" +
+		"  ps)\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  pull)\n" +
+		"    echo 'pull unavailable' >&2\n" +
+		"    exit 1\n" +
+		"    ;;\n" +
+		"  image)\n" +
+		"    if [ \"$2\" = \"inspect\" ]; then\n" +
+		"      exit 0\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"  network)\n" +
+		"    if [ \"$2\" = \"inspect\" ]; then\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	task := apigateway.ControllerRuntimeTask{
+		TeamID:        101,
+		ChallengeID:   1,
+		ContainerName: "svc-banking-team-101",
+		BaselineImage: "local/banking:baseline",
+		Endpoint:      "10.80.1.11:10001",
+		SSHHost:       "10.80.1.11",
+	}
+	executor := &dockerCLIExecutor{
+		binary:          binPath,
+		network:         "adplatform_game",
+		networkLayout:   "per-service",
+		sshContractMode: "verify",
+		timeout:         5 * time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	if err := executor.EnsureService(context.Background(), task); err != nil {
+		t.Fatalf("ensure service should use existing local image after pull failure: %v", err)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake docker log: %v", err)
+	}
+	logOutput := string(logBytes)
+	for _, fragment := range []string{
+		"pull local/banking:baseline",
+		"image inspect local/banking:baseline",
+		"run -d",
+	} {
+		if !strings.Contains(logOutput, fragment) {
+			t.Fatalf("expected log fragment %q in %q", fragment, logOutput)
+		}
+	}
+}
+
+func TestDockerEnsureServiceRetriesSSHContractWhileContainerRestarts(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "docker.log")
+	countPath := filepath.Join(tempDir, "exec.count")
+	binPath := filepath.Join(tempDir, "docker")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"case \"$1\" in\n" +
+		"  ps)\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  network)\n" +
+		"    if [ \"$2\" = \"inspect\" ]; then\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"  exec)\n" +
+		"    count=0\n" +
+		"    if [ -f \"$EXEC_COUNT\" ]; then count=$(cat \"$EXEC_COUNT\"); fi\n" +
+		"    count=$((count + 1))\n" +
+		"    printf '%s' \"$count\" > \"$EXEC_COUNT\"\n" +
+		"    if [ \"$count\" -eq 1 ]; then\n" +
+		"      echo 'Error response from daemon: Container abc is restarting, wait until the container is running' >&2\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	task := apigateway.ControllerRuntimeTask{
+		TeamID:        101,
+		ChallengeID:   1,
+		ContainerName: "svc-banking-team-101",
+		BaselineImage: "registry.local/banking:baseline",
+		Endpoint:      "10.80.1.11:10001",
+		SSHHost:       "10.80.1.11",
+	}
+	executor := &dockerCLIExecutor{
+		binary:          binPath,
+		network:         "adplatform_game",
+		networkLayout:   "per-service",
+		sshContractMode: "verify",
+		timeout:         3 * time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+	t.Setenv("EXEC_COUNT", countPath)
+
+	if err := executor.EnsureService(context.Background(), task); err != nil {
+		t.Fatalf("ensure service failed after transient restart: %v", err)
+	}
+	countBytes, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatalf("read exec count: %v", err)
+	}
+	if strings.TrimSpace(string(countBytes)) != "2" {
+		t.Fatalf("expected ssh probe to retry once, got count %q", string(countBytes))
+	}
+}
+
+func TestDockerEnsureServiceTimesOutWhenContainerKeepsRestarting(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"case \"$1\" in\n" +
+		"  ps)\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  network)\n" +
+		"    if [ \"$2\" = \"inspect\" ]; then\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    ;;\n" +
+		"  exec)\n" +
+		"    echo 'Error response from daemon: Container abc is restarting, wait until the container is running' >&2\n" +
+		"    exit 1\n" +
+		"    ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	task := apigateway.ControllerRuntimeTask{
+		TeamID:        101,
+		ChallengeID:   1,
+		ContainerName: "svc-banking-team-101",
+		BaselineImage: "registry.local/banking:baseline",
+		Endpoint:      "10.80.1.11:10001",
+		SSHHost:       "10.80.1.11",
+	}
+	executor := &dockerCLIExecutor{
+		binary:          binPath,
+		network:         "adplatform_game",
+		networkLayout:   "per-service",
+		sshContractMode: "verify",
+		timeout:         time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	err := executor.EnsureService(context.Background(), task)
+	if err == nil {
+		t.Fatal("expected timeout while container keeps restarting")
+	}
+	if !strings.Contains(err.Error(), "did not become ready for SSH contract verification") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "docker.log")
 	binPath := filepath.Join(t.TempDir(), "docker")
