@@ -4,11 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
 import type { AdminPlatformSettings } from "@/lib/admin-dashboard-types";
-import {
-  getAdminPlatformSettings,
-  reloadAdminFlagFormat,
-  updateAdminPlatformSettings,
-} from "@/lib/admin-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +24,50 @@ type SaveState =
 
 const flagFormatPattern = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 
+async function readPlatformSettingsResponse(response: Response): Promise<AdminPlatformSettings> {
+  if (response.ok) {
+    return (await response.json()) as AdminPlatformSettings;
+  }
+  const payload = (await response.json().catch(() => null)) as
+    | { detail?: string; title?: string; message?: string }
+    | null;
+  throw new Error(
+    payload?.detail ??
+      payload?.message ??
+      payload?.title ??
+      `platform settings request failed with status ${response.status}`,
+  );
+}
+
+async function getPlatformSettings(): Promise<AdminPlatformSettings> {
+  return readPlatformSettingsResponse(
+    await fetch("/api/admin/platform/settings", { cache: "no-store" }),
+  );
+}
+
+async function updatePlatformSettings(input: {
+  flag_format_prefix: string;
+  max_team_members: number;
+}): Promise<AdminPlatformSettings> {
+  return readPlatformSettingsResponse(
+    await fetch("/api/admin/platform/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      cache: "no-store",
+    }),
+  );
+}
+
+async function reloadPlatformFlagFormat(): Promise<AdminPlatformSettings> {
+  return readPlatformSettingsResponse(
+    await fetch("/api/admin/platform/settings/reload", {
+      method: "POST",
+      cache: "no-store",
+    }),
+  );
+}
+
 export function PlatformSettingsCard(): ReactElement {
   const [settings, setSettings] = useState<AdminPlatformSettings | null>(null);
   const [prefix, setPrefix] = useState<string>("");
@@ -37,7 +76,7 @@ export function PlatformSettingsCard(): ReactElement {
 
   const load = useCallback(async () => {
     try {
-      const data = await getAdminPlatformSettings();
+      const data = await getPlatformSettings();
       setSettings(data);
       setPrefix(data.flag_format_prefix);
       setMaxTeamMembers(String(data.max_team_members ?? 0));
@@ -75,7 +114,7 @@ export function PlatformSettingsCard(): ReactElement {
     }
     setSaveState({ kind: "saving" });
     try {
-      const updated = await updateAdminPlatformSettings({
+      const updated = await updatePlatformSettings({
         flag_format_prefix: trimmed,
         max_team_members: parsedMaxTeamMembers,
       });
@@ -98,13 +137,13 @@ export function PlatformSettingsCard(): ReactElement {
     }
     setSaveState({ kind: "saving" });
     try {
-      const updated = await updateAdminPlatformSettings({
+      const updated = await updatePlatformSettings({
         flag_format_prefix: trimmed,
         max_team_members: parsedMaxTeamMembers,
       });
       setSettings(updated);
       setSaveState({ kind: "reloading" });
-      const reloaded = await reloadAdminFlagFormat();
+      const reloaded = await reloadPlatformFlagFormat();
       setSettings(reloaded);
       setSaveState({ kind: "saved" });
     } catch (error) {
@@ -117,7 +156,7 @@ export function PlatformSettingsCard(): ReactElement {
   const onReloadOnly = useCallback(async () => {
     setSaveState({ kind: "reloading" });
     try {
-      const reloaded = await reloadAdminFlagFormat();
+      const reloaded = await reloadPlatformFlagFormat();
       setSettings(reloaded);
       setSaveState({ kind: "saved" });
     } catch (error) {
