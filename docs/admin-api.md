@@ -277,6 +277,10 @@ Response shape:
 - `scheduled_start_at` optional RFC3339 timestamp from `GAME_CORE_MATCH_START_AT`
 - `scheduled_end_at` optional RFC3339 timestamp from `GAME_CORE_MATCH_END_AT`
 - `accepting_submissions` boolean
+- `warmup` optional latest in-memory pre-match warmup result from `game-core`
+
+The `warmup` field is diagnostic state only. It is not persisted across
+`game-core` restarts.
 
 ### POST `/api/v2/admin/game/match/start`
 
@@ -284,10 +288,18 @@ Move the match into `running` state.
 
 Behavior:
 
+- runs pre-match warmup first when `GAME_CORE_WARMUP_REQUIRED=true` (default)
+- returns `409 Conflict` with the full warmup result when required warmup fails
 - opens authoritative participant flag submission
 - sets `started_at` on first start
+- runs one real tick immediately after the match enters `running` when
+  `GAME_CORE_AUTO_TICK_ON_MATCH_START=true` (default)
 - refuses restart after the match has already been finished
 - when a configured schedule is already active, returns the effective running match state without mutating storage
+
+The immediate startup tick is best-effort. If it fails after the match has
+already entered `running`, the failure is logged by `game-core`; the scheduler
+or a manual tick advance can still produce the next tick.
 
 ### PUT `/api/v2/admin/game/match/schedule`
 
@@ -502,7 +514,15 @@ This is implemented and now wired into the manual `game-core` tick-advance path.
 The repository now also exposes `game-core` endpoints:
 
 - `GET /internal/v1/game/status`
+- `GET /internal/v1/game/match`
+- `POST /internal/v1/game/match/start`
+- `POST /internal/v1/game/match/pause`
+- `POST /internal/v1/game/match/resume`
+- `POST /internal/v1/game/match/stop`
+- `PUT /internal/v1/game/match/schedule`
 - `POST /internal/v1/game/ticks/advance`
+- `POST /internal/v1/game/warmup`
+- `GET /internal/v1/game/warmup`
 - `GET /internal/v1/game/checker-runs`
 - `GET /internal/v1/game/scheduler`
 - `GET /internal/v1/game/scheduler/events`
@@ -518,12 +538,17 @@ Current behavior:
 
 - `game-core` owns persisted `game_ticks` and `checker_runs`
 - `game-core` also persists scheduler state and scheduler audit events
+- required pre-match warmup runs checker `put` for every target before match start
+- warmup uses real tick-0 flags but does not persist flags, ticks, checker runs,
+  or scoreboard rows
 - successful `put` phases issue persisted HMAC-backed flags in `issued_flags`
 - participant submissions can be validated against `issued_flags` through `game-core`
 - scoreboard rows are recomputed from persisted checker and submission state
 - attack feed rows are read from authoritative `attack_events`
 - organizer traffic reaches it indirectly through `api-gateway`
 - tick advance can be manual or interval-scheduled through organizer controls
+- the initial `not_started` to `running` transition can fire tick 1 immediately
+  before the regular scheduler interval
 - scheduler state can resume automatically after process restart when the last persisted state was `running`
 - checker failures produce persisted `failed` rows
 - checker executions may also report a canonical service state directly

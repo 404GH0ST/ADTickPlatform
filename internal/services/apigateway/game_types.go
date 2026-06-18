@@ -65,6 +65,26 @@ type GameMatchStatus struct {
 	ScheduledEndAt       string `json:"scheduled_end_at,omitempty"`
 	ScheduleConfigured   bool   `json:"schedule_configured,omitempty"`
 	AcceptingSubmissions bool   `json:"accepting_submissions"`
+	Warmup               *GameWarmupResult `json:"warmup,omitempty"`
+}
+
+type GameWarmupFailure struct {
+	TeamID        int    `json:"team_id"`
+	ChallengeID   int    `json:"challenge_id"`
+	ChallengeName string `json:"challenge_name,omitempty"`
+	Error         string `json:"error"`
+}
+
+type GameWarmupResult struct {
+	Status       string              `json:"status"`
+	StartedAt    string              `json:"started_at,omitempty"`
+	CompletedAt  string              `json:"completed_at,omitempty"`
+	TotalTargets int                 `json:"total_targets"`
+	PutSuccess   int                 `json:"put_success"`
+	PutFailed    int                 `json:"put_failed"`
+	SuccessRate  float64             `json:"success_rate"`
+	Failures     []GameWarmupFailure `json:"failures,omitempty"`
+	Message      string              `json:"message,omitempty"`
 }
 
 type GameStatus struct {

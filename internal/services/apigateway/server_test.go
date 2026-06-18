@@ -2124,6 +2124,77 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 	t.Fatal("expected service state for challenge 1")
 }
 
+func TestTeamServicesRedactsSensitiveSLADetails(t *testing.T) {
+	leakedMessage := `docker run --rm -e AD_FLAG=PLAYIT{payload.mac} -e AD_CHECKER_TOKEN=checker-secret --entrypoint /bin/sh checker-image failed: signal: killed`
+	mux := newTestMuxWithGameCore(testGameCoreClient{
+		runs: []GameCheckerRun{
+			{ID: 12, TickID: 7, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "check", Status: "failed", Message: leakedMessage, CheckedAt: "2026-03-10T10:07:03Z"},
+			{ID: 11, TickID: 7, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "get", Status: "success", CheckedAt: "2026-03-10T10:07:02Z"},
+			{ID: 10, TickID: 7, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "put", Status: "success", CheckedAt: "2026-03-10T10:07:01Z"},
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected services 200, got %d", response.Code)
+	}
+
+	var payload []serviceState
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode services response: %v", err)
+	}
+
+	for _, state := range payload {
+		if state.ChallengeID != 1 {
+			continue
+		}
+		if state.SLAMessage != "service functionality check failed" {
+			t.Fatalf("expected sanitized SLA message, got %q", state.SLAMessage)
+		}
+		if strings.Contains(state.SLAMessage, "AD_FLAG") || strings.Contains(state.SLAMessage, "AD_CHECKER_TOKEN") || strings.Contains(state.SLAMessage, "PLAYIT{") {
+			t.Fatalf("SLA message leaked sensitive checker detail: %q", state.SLAMessage)
+		}
+		return
+	}
+	t.Fatal("expected service state for challenge 1")
+}
+
+func TestTeamServicesRedactsSensitiveReportedStateMessage(t *testing.T) {
+	leakedMessage := `docker run --rm -e AD_FLAG=PLAYIT{payload.mac} -e AD_CHECKER_TOKEN=checker-secret checker-image failed`
+	mux := newTestMuxWithGameCore(testGameCoreClient{
+		runs: []GameCheckerRun{
+			{ID: 10, TickID: 7, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "check", Status: "failed", ServiceState: "faulty", StatePhase: "check", StateMessage: leakedMessage, CheckedAt: "2026-03-10T10:07:03Z"},
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected services 200, got %d", response.Code)
+	}
+
+	var payload []serviceState
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode services response: %v", err)
+	}
+
+	for _, state := range payload {
+		if state.ChallengeID != 1 {
+			continue
+		}
+		if state.SLAMessage != "service functionality check failed" {
+			t.Fatalf("expected sanitized SLA message, got %q", state.SLAMessage)
+		}
+		return
+	}
+	t.Fatal("expected service state for challenge 1")
+}
+
 func TestSummarizeSLARunsMapsFaustServiceStates(t *testing.T) {
 	testCases := []struct {
 		name    string

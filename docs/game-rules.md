@@ -13,6 +13,8 @@ This document defines the default game behavior that the architecture is designe
 - Flags are planted by checkers and stolen by opposing teams.
 - Teams patch their own service after unlocking direct access to that service container.
 - Team members reach the game network through individual WireGuard peers.
+- A required pre-match warmup can run checker `put` once for every
+  `team x service` before the match is allowed to start.
 
 Suggested defaults:
 
@@ -41,6 +43,20 @@ Each tick can be modeled as four logical phases:
    - scores are computed once the submission window for the tick closes
 
 The platform does not need to expose these as separate user-visible phases, but internal state should model them clearly.
+
+Before the first scoring tick, `game-core` can run a pre-match warmup. Warmup
+executes only the checker `put` phase for every target, using a real flag whose
+`issued_tick` and `expires_tick` are both `0`. That flag is planted into the
+service so the checker path matches a real tick, but the warmup does not persist
+`issued_flags`, checker runs, ticks, or scoreboard rows. With
+`GAME_CORE_WARMUP_REQUIRED=true` (default), match start is blocked unless the
+warmup reaches `GAME_CORE_WARMUP_MIN_SUCCESS_RATE`.
+
+When the match first transitions from `not_started` to `running`, `game-core`
+can immediately advance tick 1 (`GAME_CORE_AUTO_TICK_ON_MATCH_START=true` by
+default). This makes scoreable flags available at match start instead of waiting
+for the scheduler's first interval. Scheduled ticks continue from the next
+interval, so the startup tick is not repeated by pause/resume.
 
 ## 4. Default Scoring Formula
 
@@ -167,6 +183,9 @@ This gives a `1`-tick validity window:
 - issued at `N`
 - valid in `N`
 - expired starting at `N + 1`
+
+Warmup flags use the same signed flag format, but tick `0` flags are never
+persisted to `issued_flags`. They are therefore not scoreable submissions.
 
 ## 5.3 Submission
 

@@ -169,13 +169,19 @@ func (c explicitStateCheckerClient) Execute(_ context.Context, request apigatewa
 
 func newTestGameCoreMux(checker checkerClient) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(false).
+		RegisterRoutes(mux)
 	return mux
 }
 
 func newTestGameCoreMuxWithScheduler(checker checkerClient, scheduler gameScheduler) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15).RegisterRoutes(mux)
+	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(false).
+		RegisterRoutes(mux)
 	return mux
 }
 
@@ -296,6 +302,117 @@ func TestAdvanceTickPassesStructuredCheckerTargetMetadata(t *testing.T) {
 	}
 }
 
+func TestWarmupRunsPutPhaseOnlyAndSkipsDBPersistence(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	checker := &capturingCheckerClient{}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(true).
+		WithAutoTickOnMatchStart(false).
+		RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/warmup", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected warmup 200, got %d: %s", response.Code, response.Body.String())
+	}
+	payload := decodeResponse[apigateway.GameWarmupResult](t, response.Body.Bytes())
+	if payload.Status != "passed" || payload.TotalTargets != 12 || payload.PutSuccess != 12 || payload.PutFailed != 0 {
+		t.Fatalf("unexpected warmup payload %+v", payload)
+	}
+	if len(checker.requests) != 12 {
+		t.Fatalf("expected one put request per target, got %d", len(checker.requests))
+	}
+	for _, request := range checker.requests {
+		if request.Phase != "put" || request.TickID != 0 {
+			t.Fatalf("expected warmup put at tick 0, got %+v", request)
+		}
+		if request.Flag == "" || !strings.HasPrefix(request.Flag, "PLAYIT{") {
+			t.Fatalf("expected real warmup flag, got %+v", request)
+		}
+	}
+
+	store.mu.Lock()
+	flags := len(store.flags)
+	runs := len(store.runs)
+	ticks := len(store.ticks)
+	store.mu.Unlock()
+	if flags != 0 || runs != 0 || ticks != 0 {
+		t.Fatalf("warmup persisted state flags=%d runs=%d ticks=%d", flags, runs, ticks)
+	}
+}
+
+func TestWarmupRequiredBlocksMatchStart(t *testing.T) {
+	store := newMemoryGameStore()
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, testCheckerClient{failPhase: "put"}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(true).
+		WithAutoTickOnMatchStart(false).
+		RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/match/start", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected match start 409, got %d: %s", response.Code, response.Body.String())
+	}
+	payload := decodeResponse[apigateway.GameWarmupResult](t, response.Body.Bytes())
+	if payload.Status != "failed" || payload.PutFailed == 0 {
+		t.Fatalf("expected failed warmup payload, got %+v", payload)
+	}
+	status, err := store.MatchStatus(context.Background())
+	if err != nil {
+		t.Fatalf("match status: %v", err)
+	}
+	if status.State != "not_started" {
+		t.Fatalf("expected match to remain not_started, got %+v", status)
+	}
+}
+
+func TestAutoTickFiresOnMatchStart(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(true).
+		RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/match/start", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected match start 200, got %d: %s", response.Code, response.Body.String())
+	}
+	statusRequest := httptest.NewRequest(http.MethodGet, "/internal/v1/game/status", nil)
+	statusRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	statusResponse := httptest.NewRecorder()
+	mux.ServeHTTP(statusResponse, statusRequest)
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("expected game status 200, got %d: %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	statusPayload := decodeResponse[apigateway.GameStatus](t, statusResponse.Body.Bytes())
+	if statusPayload.CurrentTick == nil || statusPayload.CurrentTick.ID != 1 {
+		t.Fatalf("expected auto-created tick 1, got %+v", statusPayload)
+	}
+	if statusPayload.TotalCheckerRuns != 36 {
+		t.Fatalf("expected auto-tick checker runs, got %+v", statusPayload)
+	}
+
+	store.mu.Lock()
+	flags := len(store.flags)
+	store.mu.Unlock()
+	if flags != 12 {
+		t.Fatalf("expected one persisted flag per target, got %d", flags)
+	}
+}
+
 func TestAdvanceTickPersistsRunsAndStatus(t *testing.T) {
 	mux := newTestGameCoreMux(testCheckerClient{failPhase: "get"})
 	startTestMatch(t, mux)
@@ -381,7 +498,8 @@ func TestMetricsEndpointIncludesGameCoreMetrics(t *testing.T) {
 			LastTickID:      1,
 		},
 	}
-	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15).
+		WithAutoTickOnMatchStart(false)
 	httpapi.RegisterMetricsSource(info.Name, server)
 
 	mux := httpapi.NewBaseMux(info)

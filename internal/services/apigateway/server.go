@@ -522,6 +522,7 @@ func (s *Server) handleTeamServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	states = s.enrichServiceStatesWithSLADetails(r.Context(), teamID, states)
+	sanitizeParticipantServiceStates(states)
 	writeData(w, http.StatusOK, states)
 }
 
@@ -692,7 +693,7 @@ func applySLASummary(states []serviceState, challengeID int, summary GameService
 		states[i].SLAStatus = summary.Status
 		states[i].SLAPhase = summary.Phase
 		states[i].SLATickID = summary.TickID
-		states[i].SLAMessage = summary.Message
+		states[i].SLAMessage = sanitizeParticipantSLAMessage(summary)
 		return
 	}
 }
@@ -744,6 +745,66 @@ func fallbackSLAMessage(checker string) string {
 		return "awaiting first checker run"
 	}
 	return "checker passing; service state detail unavailable"
+}
+
+func sanitizeParticipantServiceStates(states []serviceState) {
+	for i := range states {
+		if !containsSensitiveCheckerDetail(states[i].SLAMessage) {
+			continue
+		}
+		states[i].SLAMessage = sanitizeParticipantSLAMessage(GameServiceStateSummary{
+			Status:  states[i].SLAStatus,
+			Phase:   states[i].SLAPhase,
+			TickID:  states[i].SLATickID,
+			Message: states[i].SLAMessage,
+		})
+	}
+}
+
+func sanitizeParticipantSLAMessage(summary GameServiceStateSummary) string {
+	message := strings.TrimSpace(summary.Message)
+	if message != "" && !containsSensitiveCheckerDetail(message) {
+		return message
+	}
+	switch strings.ToLower(strings.TrimSpace(summary.Phase)) {
+	case "put":
+		return "checker could not store the flag in the service"
+	case "get":
+		return "checker could not retrieve the stored flag"
+	case "check":
+		return "service functionality check failed"
+	}
+	switch strings.ToLower(strings.TrimSpace(summary.Status)) {
+	case "ok":
+		return "service passed storage, retrieval, and functionality checks"
+	case "recovering":
+		return "flag storage failed but retrieval and functionality still passed"
+	case "flag_not_found":
+		return "checker could not retrieve the stored flag"
+	case "faulty":
+		return "service functionality check failed"
+	case "down":
+		return "service did not complete the latest checker cycle"
+	}
+	return "service state detail unavailable"
+}
+
+func containsSensitiveCheckerDetail(message string) bool {
+	lowered := strings.ToLower(message)
+	for _, marker := range []string{
+		"ad_flag=",
+		"ad_checker_token=",
+		"ad_metadata=",
+		"docker run",
+		"playit{",
+		"--entrypoint",
+		"checker_token",
+	} {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchSubmissionState(match *GameMatchStatus) string {

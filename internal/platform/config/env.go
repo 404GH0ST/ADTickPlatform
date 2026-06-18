@@ -55,3 +55,17 @@ func Duration(key string, fallback time.Duration) time.Duration {
 
 	return parsed
 }
+
+func Float(key string, fallback float64) float64 {
+	value, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}

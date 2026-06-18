@@ -16,24 +16,31 @@ import (
 )
 
 type gameCoreServer struct {
-	adminToken         string
-	store              gameStore
-	checker            checkerClient
-	flags              flagCodec
-	flagsMu            sync.RWMutex
-	scheduler          gameScheduler
-	checkerPhases      []string
-	checkerTimeout     int
-	checkerParallelism int
-	scoringDebounce    time.Duration
-	scoringRetryDelay  time.Duration
-	scoringTimeout     time.Duration
-	scoringMu          sync.Mutex
-	scoringTimer       *time.Timer
-	scoringStatus      scoringRecomputeStatus
-	matchStartAt       *time.Time
-	matchEndAt         *time.Time
-	now                func() time.Time
+	adminToken           string
+	store                gameStore
+	checker              checkerClient
+	flags                flagCodec
+	flagsMu              sync.RWMutex
+	scheduler            gameScheduler
+	checkerPhases        []string
+	checkerTimeout       int
+	checkerParallelism   int
+	scoringDebounce      time.Duration
+	scoringRetryDelay    time.Duration
+	scoringTimeout       time.Duration
+	scoringMu            sync.Mutex
+	scoringTimer         *time.Timer
+	scoringStatus        scoringRecomputeStatus
+	matchStartAt         *time.Time
+	matchEndAt           *time.Time
+	warmupRequired       bool
+	warmupTimeout        time.Duration
+	warmupMinSuccess     float64
+	warmupMu             sync.RWMutex
+	warmupInFlight       bool
+	lastWarmup           apigateway.GameWarmupResult
+	autoTickOnMatchStart bool
+	now                  func() time.Time
 }
 
 type scoringRecomputeStatus struct {
@@ -50,18 +57,22 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		scheduler = noopGameScheduler{}
 	}
 	return &gameCoreServer{
-		adminToken:         strings.TrimSpace(adminToken),
-		store:              store,
-		checker:            checker,
-		flags:              flags,
-		scheduler:          scheduler,
-		checkerPhases:      checkerPhases,
-		checkerTimeout:     checkerTimeout,
-		checkerParallelism: 1,
-		scoringDebounce:    time.Second,
-		scoringRetryDelay:  5 * time.Second,
-		scoringTimeout:     30 * time.Second,
-		now:                time.Now,
+		adminToken:           strings.TrimSpace(adminToken),
+		store:                store,
+		checker:              checker,
+		flags:                flags,
+		scheduler:            scheduler,
+		checkerPhases:        checkerPhases,
+		checkerTimeout:       checkerTimeout,
+		checkerParallelism:   1,
+		scoringDebounce:      time.Second,
+		scoringRetryDelay:    5 * time.Second,
+		scoringTimeout:       30 * time.Second,
+		warmupRequired:       true,
+		warmupTimeout:        60 * time.Second,
+		warmupMinSuccess:     1.0,
+		autoTickOnMatchStart: true,
+		now:                  time.Now,
 	}
 }
 
@@ -120,12 +131,48 @@ func (s *gameCoreServer) WithScoringTimeout(value time.Duration) *gameCoreServer
 	return s
 }
 
+func (s *gameCoreServer) WithWarmupRequired(value bool) *gameCoreServer {
+	s.warmupRequired = value
+	return s
+}
+
+func (s *gameCoreServer) WithWarmupTimeout(value time.Duration) *gameCoreServer {
+	if value > 0 {
+		s.warmupTimeout = value
+	}
+	return s
+}
+
+func (s *gameCoreServer) WithWarmupMinSuccessRate(value float64) *gameCoreServer {
+	if value < 0 {
+		value = 0
+	}
+	if value > 1 {
+		value = 1
+	}
+	s.warmupMinSuccess = value
+	return s
+}
+
+func (s *gameCoreServer) WithAutoTickOnMatchStart(value bool) *gameCoreServer {
+	s.autoTickOnMatchStart = value
+	return s
+}
+
 func (s *gameCoreServer) matchStatus(ctx context.Context) (apigateway.GameMatchStatus, error) {
 	status, err := s.store.MatchStatus(ctx)
 	if err != nil {
 		return apigateway.GameMatchStatus{}, err
 	}
-	return s.applyMatchWindow(status), nil
+	status = s.applyMatchWindow(status)
+	s.warmupMu.RLock()
+	warmup := s.lastWarmup
+	s.warmupMu.RUnlock()
+	if warmup.Status != "" {
+		warmupCopy := warmup
+		status.Warmup = &warmupCopy
+	}
+	return status, nil
 }
 
 func (s *gameCoreServer) applyMatchWindow(status apigateway.GameMatchStatus) apigateway.GameMatchStatus {
@@ -217,6 +264,8 @@ func (s *gameCoreServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/v1/flags/submit", s.handleSubmitFlags)
 	mux.HandleFunc("GET /internal/v1/game/flag/format", s.handleGetFlagFormat)
 	mux.HandleFunc("POST /internal/v1/game/flag/format/refresh", s.handleRefreshFlagFormat)
+	mux.HandleFunc("POST /internal/v1/game/warmup", s.handleRunWarmup)
+	mux.HandleFunc("GET /internal/v1/game/warmup", s.handleGetWarmup)
 }
 
 func (s *gameCoreServer) handleGameStatus(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +321,33 @@ func (s *gameCoreServer) handleMatchStatus(w http.ResponseWriter, r *http.Reques
 	writeData(w, http.StatusOK, status)
 }
 
+func (s *gameCoreServer) handleRunWarmup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	result, err := s.runWarmup(r.Context())
+	statusCode := http.StatusOK
+	switch {
+	case err != nil && result.Status == "failed":
+		statusCode = http.StatusUnprocessableEntity
+	case err != nil:
+		statusCode = http.StatusInternalServerError
+	case result.Status != "passed":
+		statusCode = http.StatusUnprocessableEntity
+	}
+	writeData(w, statusCode, result)
+}
+
+func (s *gameCoreServer) handleGetWarmup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	s.warmupMu.RLock()
+	current := s.lastWarmup
+	s.warmupMu.RUnlock()
+	writeData(w, http.StatusOK, current)
+}
+
 func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -290,6 +366,18 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if s.warmupRequired {
+		warmup, warmupErr := s.runWarmup(r.Context())
+		if warmupErr != nil {
+			writeProblem(w, http.StatusInternalServerError, "Warmup failed", warmupErr.Error())
+			return
+		}
+		if warmup.Status != "passed" {
+			writeData(w, http.StatusConflict, warmup)
+			return
+		}
+	}
+
 	status, err := s.store.StartMatch(r.Context(), s.now())
 	if err != nil {
 		statusCode := http.StatusInternalServerError
@@ -300,6 +388,23 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		return
 	}
 	status = s.applyMatchWindow(status)
+
+	// Best-effort: fire the first tick immediately so a scoreable tick-1 flag
+	// is in every container by the time this response returns. The scheduler's
+	// 5-minute interval would otherwise leave a window of zero scoreable
+	// flags between match start and the first scheduled tick. We use a
+	// detached context so a client disconnect does not abort the tick, and
+	// we log-and-continue on failure: the match is already "running", and
+	// the scheduler (or a manual POST /ticks/advance) will produce tick 2
+	// on the configured cadence.
+	if s.autoTickOnMatchStart {
+		tickCtx, cancel := context.WithCancel(context.Background())
+		if _, tickErr := s.advanceTick(tickCtx); tickErr != nil {
+			log.Printf("game-core: auto-tick on match start failed: %v", tickErr)
+		}
+		cancel()
+	}
+
 	writeData(w, http.StatusOK, status)
 }
 
@@ -759,6 +864,200 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		return apigateway.GameTickStatus{}, err
 	}
 	return completed, nil
+}
+
+// runWarmup executes a pre-match warmup: it lists every checker target and runs
+// only the "put" phase of the checker against each, with the same parallelism
+// and per-call timeout as a real tick. Unlike advanceTick it does NOT call
+// StartNextTick / CompleteTick, does NOT persist the planted flag to
+// issued_flags, and does NOT recompute the scoreboard — the goal is purely to
+// verify that every (team, challenge) target can accept a flag put before the
+// match is allowed to start. The last result (pass/fail per target) is held
+// in memory on the server so a subsequent handleStartMatch can gate the
+// transition into "running" on a passing warmup.
+func (s *gameCoreServer) runWarmup(ctx context.Context) (apigateway.GameWarmupResult, error) {
+	s.warmupMu.Lock()
+	if s.warmupInFlight {
+		current := s.lastWarmup
+		s.warmupMu.Unlock()
+		return current, nil
+	}
+	s.warmupInFlight = true
+	s.warmupMu.Unlock()
+	defer func() {
+		s.warmupMu.Lock()
+		s.warmupInFlight = false
+		s.warmupMu.Unlock()
+	}()
+
+	startedAt := s.now().UTC()
+	result := apigateway.GameWarmupResult{
+		Status:    "running",
+		StartedAt: startedAt.Format(time.RFC3339),
+	}
+	s.warmupMu.Lock()
+	s.lastWarmup = result
+	s.warmupMu.Unlock()
+
+	runCtx := ctx
+	if s.warmupTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, s.warmupTimeout)
+		defer cancel()
+	}
+
+	targets, err := s.store.ListCheckerTargets(runCtx)
+	if err != nil {
+		failed := s.recordWarmupFailure(result, fmt.Errorf("failed to list checker targets: %w", err))
+		return failed, err
+	}
+
+	result.TotalTargets = len(targets)
+	if result.TotalTargets == 0 {
+		completedAt := s.now().UTC()
+		result.CompletedAt = completedAt.Format(time.RFC3339)
+		result.Status = "passed"
+		result.SuccessRate = 1.0
+		result.Message = "no checker targets configured; warmup passes vacuously"
+		s.warmupMu.Lock()
+		s.lastWarmup = result
+		s.warmupMu.Unlock()
+		return result, nil
+	}
+
+	parallelism := s.checkerParallelism
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > result.TotalTargets {
+		parallelism = result.TotalTargets
+	}
+
+	type warmupJob struct{ index int }
+	jobs := make(chan warmupJob)
+	var failures []apigateway.GameWarmupFailure
+	var failuresMu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < parallelism; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				if runCtx.Err() != nil {
+					continue
+				}
+				target := targets[j.index]
+				if putErr := s.runWarmupForTarget(runCtx, target); putErr != nil {
+					failuresMu.Lock()
+					failures = append(failures, apigateway.GameWarmupFailure{
+						TeamID:        target.TeamID,
+						ChallengeID:   target.ChallengeID,
+						ChallengeName: target.ChallengeName,
+						Error:         putErr.Error(),
+					})
+					failuresMu.Unlock()
+				}
+			}
+		}()
+	}
+
+producer:
+	for i := range targets {
+		select {
+		case <-runCtx.Done():
+			break producer
+		case jobs <- warmupJob{index: i}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	completedAt := s.now().UTC()
+	result.CompletedAt = completedAt.Format(time.RFC3339)
+	result.PutFailed = len(failures)
+	result.PutSuccess = result.TotalTargets - result.PutFailed
+	if result.TotalTargets > 0 {
+		result.SuccessRate = float64(result.PutSuccess) / float64(result.TotalTargets)
+	} else {
+		result.SuccessRate = 1.0
+	}
+	if runCtx.Err() != nil && len(failures) == 0 {
+		result.Failures = []apigateway.GameWarmupFailure{{
+			Error: fmt.Sprintf("warmup aborted before completion: %v", runCtx.Err()),
+		}}
+		result.PutFailed = result.TotalTargets
+		result.PutSuccess = 0
+		result.SuccessRate = 0
+	} else {
+		result.Failures = failures
+	}
+
+	if result.SuccessRate >= s.warmupMinSuccess {
+		result.Status = "passed"
+	} else {
+		result.Status = "failed"
+		if result.Message == "" && result.PutFailed > 0 {
+			result.Message = fmt.Sprintf("%d of %d targets failed put phase (required success rate: %.0f%%)",
+				result.PutFailed, result.TotalTargets, s.warmupMinSuccess*100)
+		}
+	}
+
+	s.warmupMu.Lock()
+	s.lastWarmup = result
+	s.warmupMu.Unlock()
+	return result, nil
+}
+
+func (s *gameCoreServer) runWarmupForTarget(ctx context.Context, target checkerTarget) error {
+	// Mint a real flag value with tickID=0 so the checker behaviour is identical
+	// to a real tick's put phase. The flag will not appear in issued_flags (we
+	// skip persistence), and tickID=0 will never satisfy the scorer check
+	// (currentTick > claims.ExpiresTick) so attackers cannot exploit the warmup
+	// flag for scoring.
+	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, 0, 0)
+
+	result, execErr := s.checker.Execute(ctx, apigateway.CheckerExecutionRequest{
+		ChallengeID:    target.ChallengeID,
+		TeamID:         target.TeamID,
+		TeamName:       target.TeamName,
+		ChallengeName:  target.ChallengeName,
+		CheckerImage:   target.CheckerImage,
+		Phase:          "put",
+		Target:         target.Target,
+		TargetHost:     target.TargetHost,
+		TargetIP:       target.TargetIP,
+		TargetPort:     target.TargetPort,
+		TickID:         0,
+		Flag:           flagValue,
+		CheckerToken:   target.CheckerToken,
+		TimeoutSeconds: s.checkerTimeout,
+	})
+	if execErr != nil {
+		return fmt.Errorf("checker execution failed: %w", execErr)
+	}
+
+	status := normalizedCheckerRunStatus(result.Status)
+	if status != "success" {
+		return fmt.Errorf("put phase did not succeed: status=%s message=%s",
+			status, strings.TrimSpace(result.Message))
+	}
+	return nil
+}
+
+func (s *gameCoreServer) recordWarmupFailure(base apigateway.GameWarmupResult, runErr error) apigateway.GameWarmupResult {
+	completedAt := s.now().UTC()
+	result := base
+	result.CompletedAt = completedAt.Format(time.RFC3339)
+	result.Status = "failed"
+	result.Message = strings.TrimSpace(runErr.Error())
+	if result.TotalTargets == 0 {
+		result.SuccessRate = 0
+	}
+	s.warmupMu.Lock()
+	s.lastWarmup = result
+	s.warmupMu.Unlock()
+	return result
 }
 
 type checkerTargetTickResult struct {
