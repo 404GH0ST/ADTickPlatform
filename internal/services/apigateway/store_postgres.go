@@ -1383,7 +1383,7 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 	rows.Close()
 
 	existingRows, err := tx.QueryContext(ctx, `
-		SELECT team_id, runtime_status
+		SELECT team_id
 		FROM service_instances
 		WHERE challenge_id = $1
 		FOR UPDATE
@@ -1391,40 +1391,24 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 	if err != nil {
 		return adminDeployment{}, err
 	}
-	existingStatuses := make(map[int]string)
 	for existingRows.Next() {
 		var teamID int
-		var runtimeStatus string
-		if err := existingRows.Scan(&teamID, &runtimeStatus); err != nil {
+		if err := existingRows.Scan(&teamID); err != nil {
 			existingRows.Close()
 			return adminDeployment{}, err
 		}
-		existingStatuses[teamID] = runtimeStatus
+	}
+	if err := existingRows.Err(); err != nil {
+		existingRows.Close()
+		return adminDeployment{}, err
 	}
 	existingRows.Close()
 
-	readyCount := 0
-	for _, runtimeStatus := range existingStatuses {
-		if runtimeStatus == "ready" {
-			readyCount++
-		}
-	}
-
 	jobID := 0
 	queuedCount := 0
+	readyCount := 0
 	createdAt := time.Now().UTC()
 	for _, teamID := range teamIDs {
-		if existingStatuses[teamID] == "ready" {
-			state := defaultServiceStateForConfig(challengeID, teamID, challengeName, servicePort, serviceSubnetOctet)
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO team_service_states (team_id, challenge_id, endpoint, status, checker, unlocked, ssh_hint, last_event, reset_cooldown)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				ON CONFLICT (team_id, challenge_id) DO NOTHING
-			`, teamID, challengeID, state.Endpoint, state.Status, state.Checker, state.Unlocked, state.SSHHint, state.LastEvent, state.ResetCooldown); err != nil {
-				return adminDeployment{}, err
-			}
-			continue
-		}
 		if jobID == 0 {
 			jobID, err = s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM deployment_jobs`)
 			if err != nil {

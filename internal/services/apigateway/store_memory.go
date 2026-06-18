@@ -918,7 +918,7 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 
 	jobID := 0
 	queuedCount := 0
-	readyCount := s.readyTeamsForChallengeLocked(challengeID)
+	readyCount := 0
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	for teamID := range s.teams {
 		if _, ok := s.teamStates[teamID]; !ok {
@@ -926,12 +926,6 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 		}
 		if _, ok := s.instances[teamID]; !ok {
 			s.instances[teamID] = make(map[int]*serviceInstanceRecord)
-		}
-		if instance, ok := s.instances[teamID][challengeID]; ok && instance.RuntimeStatus == "ready" {
-			if _, ok := s.teamStates[teamID][challengeID]; !ok {
-				s.teamStates[teamID][challengeID] = defaultServiceStateForConfig(challengeID, teamID, challenge.Name, challenge.ServicePort, challenge.ServiceSubnetOctet)
-			}
-			continue
 		}
 		if jobID == 0 {
 			jobID = s.nextDeploymentID

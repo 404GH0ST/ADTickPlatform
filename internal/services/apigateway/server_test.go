@@ -3057,6 +3057,82 @@ func TestAdminRedeploySupersedesOlderQueuedJob(t *testing.T) {
 	}
 }
 
+func TestAdminRedeployRequeuesReadyInstancesAfterImageUpdate(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+	adminAuth := "Bearer dev-admin-token"
+
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"redeploy-ready","baseline_image":"registry.local/redeploy-ready:v1","checker_image":"registry.local/redeploy-ready-checker:latest"}`))
+	challengeRequest.Header.Set("Authorization", adminAuth)
+	challengeResponse := httptest.NewRecorder()
+	mux.ServeHTTP(challengeResponse, challengeRequest)
+	if challengeResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
+	}
+	challengePayload := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
+
+	firstDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
+	firstDeployRequest.Header.Set("Authorization", adminAuth)
+	firstDeployResponse := httptest.NewRecorder()
+	mux.ServeHTTP(firstDeployResponse, firstDeployRequest)
+	if firstDeployResponse.Code != http.StatusOK {
+		t.Fatalf("expected first deploy 200, got %d: %s", firstDeployResponse.Code, firstDeployResponse.Body.String())
+	}
+
+	reconcileRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/deployments/reconcile", nil)
+	reconcileRequest.Header.Set("Authorization", adminAuth)
+	reconcileResponse := httptest.NewRecorder()
+	mux.ServeHTTP(reconcileResponse, reconcileRequest)
+	if reconcileResponse.Code != http.StatusOK {
+		t.Fatalf("expected reconcile 200, got %d: %s", reconcileResponse.Code, reconcileResponse.Body.String())
+	}
+
+	updateRequest := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v2/admin/challenges/%d", challengePayload.ID), bytes.NewBufferString(`{"name":"redeploy-ready","baseline_image":"registry.local/redeploy-ready:v2","checker_image":"registry.local/redeploy-ready-checker:latest","source_bundle_path":""}`))
+	updateRequest.Header.Set("Authorization", adminAuth)
+	updateResponse := httptest.NewRecorder()
+	mux.ServeHTTP(updateResponse, updateRequest)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge update 200, got %d: %s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	secondDeployRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengePayload.ID), nil)
+	secondDeployRequest.Header.Set("Authorization", adminAuth)
+	secondDeployResponse := httptest.NewRecorder()
+	mux.ServeHTTP(secondDeployResponse, secondDeployRequest)
+	if secondDeployResponse.Code != http.StatusOK {
+		t.Fatalf("expected second deploy 200, got %d: %s", secondDeployResponse.Code, secondDeployResponse.Body.String())
+	}
+	secondDeployPayload := decodeCompat[adminDeployment](t, secondDeployResponse.Body.Bytes())
+	if secondDeployPayload.Status != "queued" {
+		t.Fatalf("expected redeploy to queue a job, got %+v", secondDeployPayload)
+	}
+	if secondDeployPayload.QueuedTeamCount != secondDeployPayload.TotalTeamCount || secondDeployPayload.ReadyTeamCount != 0 {
+		t.Fatalf("expected redeploy to requeue every ready team, got %+v", secondDeployPayload)
+	}
+
+	tasks, err := store.ListControllerRuntimeTasks(context.Background())
+	if err != nil {
+		t.Fatalf("list runtime tasks: %v", err)
+	}
+	requeued := 0
+	for _, task := range tasks {
+		if task.ChallengeID != challengePayload.ID {
+			continue
+		}
+		requeued++
+		if task.DeploymentJobID != secondDeployPayload.JobID {
+			t.Fatalf("expected task to use redeploy job %d, got %+v", secondDeployPayload.JobID, task)
+		}
+		if task.BaselineImage != "registry.local/redeploy-ready:v2" {
+			t.Fatalf("expected updated baseline image on redeploy task, got %+v", task)
+		}
+	}
+	if requeued != secondDeployPayload.TotalTeamCount {
+		t.Fatalf("expected %d redeploy tasks, got %d", secondDeployPayload.TotalTeamCount, requeued)
+	}
+}
+
 func TestAdminCannotDeleteActiveDeploymentJob(t *testing.T) {
 	mux := newTestMux()
 	adminAuth := "Bearer dev-admin-token"
