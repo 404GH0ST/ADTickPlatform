@@ -26,6 +26,7 @@ RUN apt-get update \
         iptables \
         nftables \
         tzdata \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
