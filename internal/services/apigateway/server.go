@@ -101,6 +101,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
 	mux.HandleFunc("POST /api/v2/register", s.handleRegisterPlayer)
 	mux.HandleFunc("POST /api/v2/me/team", s.handleJoinExistingTeam)
+	mux.HandleFunc("PUT /api/v2/me/profile", s.handleUpdateParticipantProfile)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
 	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
@@ -317,13 +318,51 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{
-		"player_id":    player.PlayerID,
-		"team_id":      player.TeamID,
-		"team_name":    player.TeamName,
-		"display_name": player.DisplayName,
-		"email":        player.Email,
-		"role":         player.Role,
+		"player_id":          player.PlayerID,
+		"team_id":            player.TeamID,
+		"team_name":          player.TeamName,
+		"team_contact_email": player.TeamContactEmail,
+		"display_name":       player.DisplayName,
+		"email":              player.Email,
+		"role":               player.Role,
 	})
+}
+
+func (s *Server) handleUpdateParticipantProfile(w http.ResponseWriter, r *http.Request) {
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before profile update.")
+	if !ok {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate as a participant.")
+		return
+	}
+
+	var req participantUpdateProfileRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "profile update request is invalid.")
+		return
+	}
+
+	updatedPlayer, err := s.store.UpdateParticipantProfile(r.Context(), player.PlayerID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDuplicateResource):
+			writeProblem(w, http.StatusBadRequest, "Profile update failed", "display name, email, team name, team email, and unique names/emails are required.")
+		case errors.Is(err, ErrTeamNotFound):
+			writeProblem(w, http.StatusBadRequest, "Profile update failed", "team membership is required before editing team information.")
+		default:
+			writeStoreFailure(w, err)
+		}
+		return
+	}
+
+	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Profile update failed", "team authentication token could not be issued.")
+		return
+	}
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
 }
 
 func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {

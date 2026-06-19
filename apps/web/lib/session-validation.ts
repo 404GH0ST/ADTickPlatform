@@ -2,6 +2,7 @@ export type ValidatedParticipantSession = {
   player_id: number;
   team_id: number;
   team_name: string;
+  team_contact_email: string;
   display_name: string;
   email: string;
   role: string;
@@ -46,6 +47,10 @@ export async function validateParticipantSessionWithAPI(
       player_id: payload.player_id,
       team_id: payload.team_id,
       team_name: typeof payload.team_name === "string" ? payload.team_name : "",
+      team_contact_email:
+        typeof payload.team_contact_email === "string"
+          ? payload.team_contact_email
+          : "",
       display_name: typeof payload.display_name === "string" ? payload.display_name : "",
       email: typeof payload.email === "string" ? payload.email : "",
       role: payload.role,

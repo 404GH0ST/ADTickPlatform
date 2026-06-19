@@ -152,6 +152,7 @@ type ParticipantSession = {
   teamID?: number;
   playerID?: number;
   teamName?: string;
+  teamContactEmail?: string;
   displayName?: string;
   email?: string;
   role?: string;
@@ -184,7 +185,7 @@ function claimNumber(
 
 function claimString(
   claims: ParticipantSessionClaims | null,
-  key: "team_name" | "display_name" | "email" | "role",
+  key: "team_name" | "team_contact_email" | "display_name" | "email" | "role",
 ): string | undefined {
   const value = claims?.[key];
   return typeof value === "string" ? value : undefined;
@@ -201,6 +202,7 @@ function authenticatedSession(
     teamID: claimNumber(claims, "team_id"),
     playerID: claimNumber(claims, "player_id"),
     teamName: claimString(claims, "team_name"),
+    teamContactEmail: claimString(claims, "team_contact_email"),
     displayName: claimString(claims, "display_name"),
     email: claimString(claims, "email"),
     role: claimString(claims, "role"),
@@ -312,6 +314,35 @@ export async function joinCurrentParticipantTeam(teamKey: string) {
 
   if (!response.ok) {
     throw new Error(await parseApiError(response, "/api/v2/me/team"));
+  }
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
+}
+
+export async function updateCurrentParticipantProfile(input: {
+  displayName: string;
+  email: string;
+  teamName: string;
+  teamContactEmail: string;
+}) {
+  const token = await getParticipantToken();
+  const response = await fetch(`${apiBaseUrl()}/api/v2/me/profile`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      display_name: input.displayName,
+      email: input.email,
+      team_name: input.teamName,
+      team_contact_email: input.teamContactEmail,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, "/api/v2/me/profile"));
   }
   const payload = (await response.json()) as AuthenticateResponse;
   return payload.token;

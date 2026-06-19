@@ -1001,6 +1001,56 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
+func TestParticipantCanUpdateProfileAndTeam(t *testing.T) {
+	mux := newTestMux()
+	body := bytes.NewBufferString(`{"display_name":"Alpha Renamed","email":"alpha.renamed@example.com","team_name":"Team Alpha Prime","team_contact_email":"alpha-prime@example.com"}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v2/me/profile", body)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected profile update 200, got %d: %s", response.Code, response.Body.String())
+	}
+	payload := decodeCompat[authenticateResponse](t, response.Body.Bytes())
+	if payload.Token == "" {
+		t.Fatal("expected refreshed participant token")
+	}
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	sessionRequest.Header.Set("Authorization", "Bearer "+payload.Token)
+	sessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected session 200, got %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	session := decodeCompat[map[string]any](t, sessionResponse.Body.Bytes())
+	if session["display_name"] != "Alpha Renamed" {
+		t.Fatalf("expected updated display_name, got %#v", session["display_name"])
+	}
+	if session["email"] != "alpha.renamed@example.com" {
+		t.Fatalf("expected updated email, got %#v", session["email"])
+	}
+	if session["team_name"] != "Team Alpha Prime" {
+		t.Fatalf("expected updated team_name, got %#v", session["team_name"])
+	}
+	if session["team_contact_email"] != "alpha-prime@example.com" {
+		t.Fatalf("expected updated team_contact_email, got %#v", session["team_contact_email"])
+	}
+
+	scoreboardRequest := httptest.NewRequest(http.MethodGet, "/api/v2/scoreboard", nil)
+	scoreboardResponse := httptest.NewRecorder()
+	mux.ServeHTTP(scoreboardResponse, scoreboardRequest)
+	if scoreboardResponse.Code != http.StatusOK {
+		t.Fatalf("expected scoreboard 200, got %d: %s", scoreboardResponse.Code, scoreboardResponse.Body.String())
+	}
+	rows := decodeCompat[[]scoreRow](t, scoreboardResponse.Body.Bytes())
+	if len(rows) == 0 || rows[0].Team != "Team Alpha Prime" {
+		t.Fatalf("expected scoreboard team rename, got %#v", rows)
+	}
+}
+
 func TestDeletedPlayerTokenIsRejected(t *testing.T) {
 	store := NewMemoryStore(101)
 	player, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", "alpha-secret")

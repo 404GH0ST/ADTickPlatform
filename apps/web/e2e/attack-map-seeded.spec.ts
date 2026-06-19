@@ -297,46 +297,29 @@ test("seeded dense attack globe releases pointer capture after drag", async ({
   await page.mouse.move(box.x + box.width + 180, box.y + box.height + 120, { steps: 5 });
   await page.mouse.up();
 
-  await page.getByRole("button", { name: "Present" }).click();
-  await expect(page.getByTestId("attack-map-audience-dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Maximize" }).click();
+  await expect(page.getByTestId("attack-map-maximize-dialog")).toBeVisible();
 });
 
-test("seeded dense attack globe has audience mode for presentation screens", async ({
+test("seeded dense attack globe uses maximize without presentation mode", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1365, height: 768 });
   await page.goto("/attacks");
 
-  await page.getByRole("button", { name: "Present" }).click();
-  const dialog = page.getByTestId("attack-map-audience-dialog");
+  await expect(page.getByRole("button", { name: "Present" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Maximize" }).click();
+  const dialog = page.getByTestId("attack-map-maximize-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("24 attacks")).toBeVisible();
   const globe = dialog.getByTestId("cyber-attack-map");
   await expect(globe).toBeVisible();
   await expect(dialog.getByText("Focus team")).toHaveCount(0);
-  await expect(dialog.getByRole("button", { name: "Pause showcase" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Pause showcase" }).click();
-  await expect(dialog.getByRole("button", { name: "Resume showcase" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Resume showcase" }).click();
-  await expect(dialog.getByRole("button", { name: "Next featured route" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Next featured route" }).click();
-
-  await globe.evaluate((element) => {
-    element.dispatchEvent(
-      new CustomEvent("ad-platform:feature-attack", {
-        detail: {
-          animate: false,
-          attackId: "map-seed-01",
-          rotation: { lat: -2, lon: -24 },
-        },
-      }),
-    );
-  });
-  const inspector = dialog.getByTestId("attack-map-presentation-inspector");
+  const inspector = dialog.getByText("Map overview");
   await expect(inspector).toBeVisible();
 
   const viewport = page.viewportSize();
-  const box = await inspector.boundingBox();
+  const box = await dialog.boundingBox();
   expect(viewport).not.toBeNull();
   expect(box).not.toBeNull();
   if (viewport && box) {

@@ -176,16 +176,20 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 			record.PasswordHash = mustHashPassword(password)
 		}
 		teamName := teamNameForID(s.teamNames, record.Player.TeamID)
+		teamContactEmail := ""
 		if record.Player.TeamID == 0 && !strings.EqualFold(record.Player.Role, "organizer") {
 			teamName = ""
+		} else if team := s.teams[record.Player.TeamID]; team != nil {
+			teamContactEmail = team.ContactEmail
 		}
 		return authenticatedPlayer{
-			PlayerID:    record.Player.ID,
-			TeamID:      record.Player.TeamID,
-			TeamName:    teamName,
-			DisplayName: record.Player.DisplayName,
-			Email:       record.Player.Email,
-			Role:        record.Player.Role,
+			PlayerID:         record.Player.ID,
+			TeamID:           record.Player.TeamID,
+			TeamName:         teamName,
+			TeamContactEmail: teamContactEmail,
+			DisplayName:      record.Player.DisplayName,
+			Email:            record.Player.Email,
+			Role:             record.Player.Role,
 		}, nil
 	}
 
@@ -246,16 +250,102 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
+	teamContactEmail := ""
 	if record.Player.TeamID == 0 && !strings.EqualFold(record.Player.Role, "organizer") {
 		teamName = ""
+	} else if team := s.teams[record.Player.TeamID]; team != nil {
+		teamContactEmail = team.ContactEmail
 	}
 	return authenticatedPlayer{
-		PlayerID:    record.Player.ID,
-		TeamID:      record.Player.TeamID,
-		TeamName:    teamName,
-		DisplayName: record.Player.DisplayName,
-		Email:       record.Player.Email,
-		Role:        record.Player.Role,
+		PlayerID:         record.Player.ID,
+		TeamID:           record.Player.TeamID,
+		TeamName:         teamName,
+		TeamContactEmail: teamContactEmail,
+		DisplayName:      record.Player.DisplayName,
+		Email:            record.Player.Email,
+		Role:             record.Player.Role,
+	}, nil
+}
+
+func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.players[playerID]
+	if !ok {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if displayName == "" || email == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+	for id, candidate := range s.players {
+		if id != playerID && strings.EqualFold(candidate.Player.Email, email) {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+	}
+
+	teamName := ""
+	if record.Player.TeamID > 0 {
+		team := s.teams[record.Player.TeamID]
+		if team == nil {
+			return authenticatedPlayer{}, ErrTeamNotFound
+		}
+		oldTeamName := team.Name
+		teamName = strings.TrimSpace(input.TeamName)
+		teamContactEmail := strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
+		if teamName == "" || teamContactEmail == "" {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+		for id, candidate := range s.teams {
+			if id == record.Player.TeamID {
+				continue
+			}
+			if strings.EqualFold(candidate.Name, teamName) || strings.EqualFold(candidate.ContactEmail, teamContactEmail) {
+				return authenticatedPlayer{}, ErrDuplicateResource
+			}
+		}
+		team.Name = teamName
+		team.ContactEmail = teamContactEmail
+		s.teamNames[team.ID] = teamName
+		for index := range s.scoreboard {
+			if s.scoreboard[index].Team == oldTeamName {
+				s.scoreboard[index].Team = teamName
+			}
+		}
+	}
+
+	record.Player.DisplayName = displayName
+	record.Player.Email = email
+	if record.Player.TeamID > 0 {
+		record.Player.TeamName = teamNameForID(s.teamNames, record.Player.TeamID)
+		if record.WireGuard.WireGuardPeer != "" {
+			record.WireGuard.TeamName = record.Player.TeamName
+			record.WireGuard.DisplayName = displayName
+			record.WireGuard.Config = renderWireGuardConfig(record.WireGuard)
+		}
+	} else {
+		record.Player.TeamName = ""
+	}
+	s.players[playerID] = record
+	teamContactEmail := ""
+	if team := s.teams[record.Player.TeamID]; team != nil {
+		teamContactEmail = team.ContactEmail
+	}
+
+	return authenticatedPlayer{
+		PlayerID:         record.Player.ID,
+		TeamID:           record.Player.TeamID,
+		TeamName:         record.Player.TeamName,
+		TeamContactEmail: teamContactEmail,
+		DisplayName:      record.Player.DisplayName,
+		Email:            record.Player.Email,
+		Role:             record.Player.Role,
 	}, nil
 }
 
@@ -727,12 +817,13 @@ func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, te
 	record.WireGuard = wireGuardState
 
 	return authenticatedPlayer{
-		PlayerID:    playerID,
-		TeamID:      team.ID,
-		TeamName:    team.Name,
-		DisplayName: record.Player.DisplayName,
-		Email:       record.Player.Email,
-		Role:        record.Player.Role,
+		PlayerID:         playerID,
+		TeamID:           team.ID,
+		TeamName:         team.Name,
+		TeamContactEmail: team.ContactEmail,
+		DisplayName:      record.Player.DisplayName,
+		Email:            record.Player.Email,
+		Role:             record.Player.Role,
 	}, nil
 }
 

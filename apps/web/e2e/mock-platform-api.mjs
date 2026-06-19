@@ -475,6 +475,10 @@ AllowedIPs = 10.70.0.0/16
   };
 }
 
+function teamContactEmailForPlayer(player) {
+  return state.teams.find((team) => team.id === player.team_id)?.contact_email ?? "";
+}
+
 function encodeBase64Url(value) {
   return Buffer.from(value, "utf8")
     .toString("base64")
@@ -490,6 +494,7 @@ function buildParticipantToken(player) {
       team_id: player.team_id,
       player_id: player.id,
       team_name: player.team_name,
+      team_contact_email: teamContactEmailForPlayer(player),
       display_name: player.display_name,
       email: player.email,
       role: player.role,
@@ -1484,6 +1489,7 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
       player_id: player.id,
       team_id: player.team_id,
       team_name: player.team_name,
+      team_contact_email: teamContactEmailForPlayer(player),
       display_name: player.display_name,
       email: player.email,
       role: player.role,
@@ -1516,6 +1522,65 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
     state.nextPlayerID += 1;
     state.players.push(player);
     state.playerPasswords[email] = password;
+
+    return writeSuccess(res, {
+      token: buildParticipantToken(player),
+      token_type: "Bearer",
+    });
+  }
+
+  if (method === "PUT" && url.pathname === "/api/v2/me/profile") {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+    const claims = decodeParticipantToken(token);
+    const player = claims
+      ? state.players.find((item) => item.id === claims.player_id)
+      : null;
+    if (!claims || !player || player.team_id !== claims.team_id || player.role !== claims.role) {
+      return writeFailure(res, 403, "please authenticate before profile update.", "forbidden");
+    }
+    if (player.role === "organizer") {
+      return writeFailure(res, 403, "please authenticate as a participant.", "forbidden");
+    }
+
+    const body = await readJsonBody(req);
+    const displayName = body?.display_name?.trim();
+    const email = body?.email?.trim();
+    const teamName = body?.team_name?.trim();
+    const teamContactEmail = body?.team_contact_email?.trim();
+    if (!displayName || !email || state.players.some((item) => item.id !== player.id && item.email === email)) {
+      return writeFailure(res, 400, "display name, email, team name, team email, and unique names/emails are required.");
+    }
+
+    const team = state.teams.find((item) => item.id === player.team_id);
+    if (player.team_id > 0) {
+      if (!team || !teamName || !teamContactEmail) {
+        return writeFailure(res, 400, "display name, email, team name, team email, and unique names/emails are required.");
+      }
+      if (
+        state.teams.some(
+          (item) =>
+            item.id !== team.id &&
+            (item.name === teamName || item.contact_email === teamContactEmail),
+        )
+      ) {
+        return writeFailure(res, 400, "display name, email, team name, team email, and unique names/emails are required.");
+      }
+      const oldTeamName = team.name;
+      team.name = teamName;
+      team.contact_email = teamContactEmail;
+      state.players.forEach((item) => {
+        if (item.team_id === team.id) {
+          item.team_name = teamName;
+        }
+      });
+      state.scoreboard = state.scoreboard.map((row) =>
+        row.team === oldTeamName ? { ...row, team: teamName } : row,
+      );
+      player.team_name = teamName;
+    }
+    player.display_name = displayName;
+    player.email = email;
 
     return writeSuccess(res, {
       token: buildParticipantToken(player),

@@ -76,8 +76,9 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	var passwordHash string
 	var teamID sql.NullInt64
 	var teamName sql.NullString
+	var teamContactEmail sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.role, p.password_hash
+		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.password_hash
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE LOWER(p.email) = LOWER($1)
@@ -85,6 +86,7 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		&player.PlayerID,
 		&teamID,
 		&teamName,
+		&teamContactEmail,
 		&player.DisplayName,
 		&player.Email,
 		&player.Role,
@@ -102,6 +104,9 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		player.TeamName = teamName.String
 	} else if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
 		player.TeamName = "Organizer"
+	}
+	if teamContactEmail.Valid {
+		player.TeamContactEmail = teamContactEmail.String
 	}
 
 	if !passwordMatches(passwordHash, password) {
@@ -169,12 +174,13 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	var player authenticatedPlayer
 	var currentTeamID sql.NullInt64
 	var currentTeamName sql.NullString
+	var currentTeamContactEmail sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.role
+		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE p.id = $1
-	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &player.DisplayName, &player.Email, &player.Role); err != nil {
+	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &currentTeamContactEmail, &player.DisplayName, &player.Email, &player.Role); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
@@ -209,6 +215,107 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	if currentTeamName.Valid {
 		player.TeamName = currentTeamName.String
 	}
+	if currentTeamContactEmail.Valid {
+		player.TeamContactEmail = currentTeamContactEmail.String
+	}
+	return player, nil
+}
+
+func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error) {
+	displayName := strings.TrimSpace(input.DisplayName)
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if displayName == "" || email == "" {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	defer tx.Rollback()
+
+	var player authenticatedPlayer
+	var currentTeamID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id, team_id, display_name, email, role
+		FROM players
+		WHERE id = $1
+		FOR UPDATE
+	`, playerID).Scan(
+		&player.PlayerID,
+		&currentTeamID,
+		&player.DisplayName,
+		&player.Email,
+		&player.Role,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+		return authenticatedPlayer{}, err
+	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+
+	var duplicate bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1) AND id != $2)`, email, playerID).Scan(&duplicate); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if duplicate {
+		return authenticatedPlayer{}, ErrDuplicateResource
+	}
+
+	if currentTeamID.Valid && currentTeamID.Int64 > 0 {
+		teamID := int(currentTeamID.Int64)
+		teamName := strings.TrimSpace(input.TeamName)
+		teamContactEmail := strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
+		if teamName == "" || teamContactEmail == "" {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE (LOWER(name) = LOWER($1) OR LOWER(email) = LOWER($2)) AND id != $3)`, teamName, teamContactEmail, teamID).Scan(&duplicate); err != nil {
+			return authenticatedPlayer{}, err
+		}
+		if duplicate {
+			return authenticatedPlayer{}, ErrDuplicateResource
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET name = $2, email = $3 WHERE id = $1`, teamID, teamName, teamContactEmail); err != nil {
+			return authenticatedPlayer{}, fmt.Errorf("update participant team: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE scoreboard_entries SET team_name = $2 WHERE team_id = $1`, teamID, teamName); err != nil {
+			return authenticatedPlayer{}, fmt.Errorf("update participant scoreboard team name: %w", err)
+		}
+		player.TeamID = teamID
+		player.TeamName = teamName
+		player.TeamContactEmail = teamContactEmail
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE players SET display_name = $2, email = $3 WHERE id = $1`, playerID, displayName, email); err != nil {
+		return authenticatedPlayer{}, fmt.Errorf("update participant player: %w", err)
+	}
+	if player.TeamID > 0 {
+		identity := wireGuardProvisionIdentity{
+			PlayerID:      player.PlayerID,
+			TeamID:        player.TeamID,
+			TeamName:      player.TeamName,
+			DisplayName:   displayName,
+			Email:         email,
+			WireGuardPeer: wireguardPeerName(player.TeamID, player.PlayerID),
+		}
+		if state, ok, err := loadWireGuardPeerStateTx(ctx, tx, identity); err != nil {
+			return authenticatedPlayer{}, err
+		} else if ok {
+			state.Config = renderWireGuardConfig(state)
+			if err := updateWireGuardPeerServerConfigTx(ctx, tx, state, time.Now().UTC()); err != nil {
+				return authenticatedPlayer{}, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	player.DisplayName = displayName
+	player.Email = email
 	return player, nil
 }
 
@@ -894,11 +1001,12 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 
 	var teamID int
 	var teamName string
+	var teamContactEmail string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT id, name
+		SELECT id, name, email
 		FROM teams
 		WHERE join_key = $1
-	`, key).Scan(&teamID, &teamName); err != nil {
+	`, key).Scan(&teamID, &teamName, &teamContactEmail); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
@@ -934,6 +1042,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 
 	player.TeamID = teamID
 	player.TeamName = teamName
+	player.TeamContactEmail = teamContactEmail
 	return player, nil
 }
 

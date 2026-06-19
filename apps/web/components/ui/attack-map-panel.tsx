@@ -7,11 +7,9 @@ import {
   ChevronRight,
   Expand,
   Minimize2,
-  Monitor,
   Pause,
   Play,
   Search,
-  SkipForward,
   Volume2,
   VolumeX,
   Zap,
@@ -77,8 +75,6 @@ export function AttackMapPanel({
   title?: string;
   onVisibleRowsChange?: (rows: AttackMapEvent[]) => void;
 }): ReactElement {
-  const [audienceMode, setAudienceMode] = useState(false);
-  const [audienceShowcasePaused, setAudienceShowcasePaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [teamQuery, setTeamQuery] = useState('');
   const [replayAttackIDs, setReplayAttackIDs] = useState<string[]>([]);
@@ -309,10 +305,6 @@ export function AttackMapPanel({
 
   const handleFeaturedAttackChange = useCallback((attackId: string | null) => {
     setFeaturedAttackId(attackId);
-  }, []);
-
-  const dispatchAttackMapEvent = useCallback((eventName: string) => {
-    window.dispatchEvent(new CustomEvent(eventName));
   }, []);
 
   useEffect(() => {
@@ -603,10 +595,6 @@ export function AttackMapPanel({
                 <Expand className="h-4 w-4" />
                 Maximize
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setAudienceMode(true)}>
-                <Monitor className="h-4 w-4" />
-                Present
-              </Button>
             </>
           ) : null}
         </div>
@@ -785,160 +773,6 @@ export function AttackMapPanel({
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={audienceMode} onOpenChange={setAudienceMode}>
-        <DialogContent
-          data-testid="attack-map-audience-dialog"
-          className="!left-0 !top-0 !h-[100dvh] !w-[100dvw] !max-w-none !translate-x-0 !translate-y-0 overflow-hidden rounded-none border-border/70 bg-card p-0"
-          showCloseButton={false}
-        >
-          <DialogTitle className="sr-only">Attack map presentation mode</DialogTitle>
-          <DialogDescription className="sr-only">
-            Full-screen attack map for audience displays.
-          </DialogDescription>
-          <div className="relative h-full min-h-0">
-            <CyberAttackMap
-              attacks={visibleRows}
-              className="h-full min-h-0 rounded-none border-0"
-              focusedTeams={[]}
-              highlightedAttackIDs={activeHighlightIDs}
-              placementScopeTeams={allTeams}
-              presentation
-              selectedAttackId={selectedAttackId}
-              selectedTeamId={selectedTeamId}
-              teamLocations={teamLocations}
-              onFeaturedAttackChange={handleFeaturedAttackChange}
-              onSelectAttack={(attackId) => {
-                setSelectedAttackId(attackId);
-                if (attackId) {
-                  setSelectedTeamId(null);
-                }
-              }}
-              onSelectTeam={(teamId) => {
-                setSelectedTeamId(teamId);
-                if (teamId) {
-                  setSelectedAttackId(null);
-                }
-              }}
-            />
-            <div className="pointer-events-none absolute left-5 top-5 flex flex-wrap gap-2">
-              <Badge data-testid="attack-map-visible-attacks" variant="secondary">
-                {visibleRows.length} attacks
-              </Badge>
-              <Badge data-testid="attack-map-visible-teams" variant="secondary">
-                {visibleTeamCount} teams
-              </Badge>
-              <Badge data-testid="attack-map-visible-services" variant="secondary">
-                {visibleServiceCount} services
-              </Badge>
-              <Badge variant="secondary">{formatTickWindow(visibleTicks)}</Badge>
-            </div>
-            <div className="pointer-events-none absolute bottom-16 left-5 right-5 z-20 max-h-[calc(100dvh-7rem)] overflow-y-auto sm:bottom-5 sm:right-40">
-              {inspectedAttack ? (
-                <PresentationTransmissionRail
-                  data-testid="attack-map-presentation-inspector"
-                  eyebrow={selectedAttack ? 'Attack' : 'Featured transmission'}
-                  title={`${inspectedAttack.attacker} -> ${inspectedAttack.victim}`}
-                  lines={[
-                    { label: 'Tick', value: `#${inspectedAttack.tick}` },
-                    { label: 'Service', value: inspectedAttack.service },
-                    { label: 'Verdict', value: inspectedAttack.verdict },
-                  ]}
-                />
-              ) : null}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="absolute bottom-5 right-5"
-              onClick={() => setAudienceMode(false)}
-            >
-              <Minimize2 className="h-4 w-4" />
-              Back to page
-            </Button>
-            <div className="absolute bottom-5 right-36 flex flex-wrap gap-2">
-              <Button
-                aria-label={audienceShowcasePaused ? 'Resume showcase' : 'Pause showcase'}
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const nextPaused = !audienceShowcasePaused;
-                  setAudienceShowcasePaused(nextPaused);
-                  dispatchAttackMapEvent(
-                    nextPaused
-                      ? 'ad-platform:pause-featured-attacks'
-                      : 'ad-platform:resume-featured-attacks',
-                  );
-                }}
-              >
-                {audienceShowcasePaused ? (
-                  <Play className="h-4 w-4" />
-                ) : (
-                  <Pause className="h-4 w-4" />
-                )}
-                {audienceShowcasePaused ? 'Resume' : 'Pause'}
-              </Button>
-              <Button
-                aria-label="Next featured route"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setAudienceShowcasePaused(false);
-                  dispatchAttackMapEvent('ad-platform:feature-next-attack');
-                }}
-              >
-                <SkipForward className="h-4 w-4" />
-                Next Route
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function PresentationTransmissionRail({
-  className,
-  eyebrow,
-  lines,
-  title,
-  ...props
-}: {
-  className?: string;
-  eyebrow: string;
-  lines: Array<{ label: string; value: string }>;
-  title: string;
-} & React.HTMLAttributes<HTMLDivElement>): ReactElement {
-  return (
-    <div
-      className={cn(
-        "ml-1 w-full max-w-[58rem] border-y border-border/70 bg-card/88 px-5 py-3 shadow-[0_1px_0_var(--border)]",
-        className,
-      )}
-      {...props}
-    >
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-        <div className="min-w-0 space-y-1">
-          <p className="text-[11px] font-semibold uppercase text-muted-foreground">
-            {eyebrow}
-          </p>
-          <p className="min-w-0 break-words text-2xl font-semibold leading-7 text-foreground">
-            {title}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-5 text-sm">
-          {lines.map((line) => (
-            <div key={line.label} className="min-w-20">
-              <p className="text-[10px] font-semibold uppercase text-muted-foreground">
-                {line.label}
-              </p>
-              <p className="mt-1 break-words font-mono text-base text-foreground">
-                {line.value}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

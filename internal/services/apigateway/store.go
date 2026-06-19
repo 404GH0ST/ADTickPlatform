@@ -32,18 +32,20 @@ var (
 )
 
 type authenticatedPlayer struct {
-	PlayerID    int
-	TeamID      int
-	TeamName    string
-	DisplayName string
-	Email       string
-	Role        string
+	PlayerID         int
+	TeamID           int
+	TeamName         string
+	TeamContactEmail string
+	DisplayName      string
+	Email            string
+	Role             string
 }
 
 type Store interface {
 	AuthenticatePlayer(ctx context.Context, email, password string) (authenticatedPlayer, error)
 	RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error)
 	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error)
+	UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error)
 	ListChallenges(ctx context.Context) ([]challenge, error)
 	ListPublicServices(ctx context.Context) (map[string]map[string][]string, error)
 	ListScoreboard(ctx context.Context) ([]scoreRow, error)

@@ -62,7 +62,9 @@ export type PlatformOverview = {
   authenticated: boolean;
   teamID?: number;
   teamName?: string;
+  teamContactEmail?: string;
   displayName?: string;
+  email?: string;
   role?: string;
   challengeCount: number;
   ownServiceCount: number;

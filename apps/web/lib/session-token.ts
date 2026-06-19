@@ -2,6 +2,7 @@ export type ParticipantSessionClaims = Partial<{
   team_id: number;
   player_id: number;
   team_name: string;
+  team_contact_email: string;
   display_name: string;
   email: string;
   role: string;

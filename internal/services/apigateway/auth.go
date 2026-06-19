@@ -14,14 +14,15 @@ import (
 var ErrInvalidTeamToken = errors.New("invalid team token")
 
 type teamTokenClaims struct {
-	TeamID      int    `json:"team_id"`
-	PlayerID    int    `json:"player_id"`
-	TeamName    string `json:"team_name"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	Role        string `json:"role"`
-	IssuedAt    int64  `json:"iat"`
-	ExpiresAt   int64  `json:"exp"`
+	TeamID           int    `json:"team_id"`
+	PlayerID         int    `json:"player_id"`
+	TeamName         string `json:"team_name"`
+	TeamContactEmail string `json:"team_contact_email"`
+	DisplayName      string `json:"display_name"`
+	Email            string `json:"email"`
+	Role             string `json:"role"`
+	IssuedAt         int64  `json:"iat"`
+	ExpiresAt        int64  `json:"exp"`
 }
 
 func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (string, error) {
@@ -38,14 +39,15 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 	}
 
 	claimsJSON, err := json.Marshal(teamTokenClaims{
-		TeamID:      player.TeamID,
-		PlayerID:    player.PlayerID,
-		TeamName:    player.TeamName,
-		DisplayName: player.DisplayName,
-		Email:       player.Email,
-		Role:        player.Role,
-		IssuedAt:    now.UTC().Unix(),
-		ExpiresAt:   now.UTC().Add(24 * time.Hour).Unix(),
+		TeamID:           player.TeamID,
+		PlayerID:         player.PlayerID,
+		TeamName:         player.TeamName,
+		TeamContactEmail: player.TeamContactEmail,
+		DisplayName:      player.DisplayName,
+		Email:            player.Email,
+		Role:             player.Role,
+		IssuedAt:         now.UTC().Unix(),
+		ExpiresAt:        now.UTC().Add(24 * time.Hour).Unix(),
 	})
 	if err != nil {
 		return "", err

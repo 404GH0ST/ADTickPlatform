@@ -148,6 +148,43 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v2/me/profile:
+    put:
+      tags:
+        - Authentication
+      summary: Update current participant and team profile
+      description: >
+        Updates the authenticated participant display name/email and, when the
+        participant belongs to a team, the current team name/contact email.
+        Returns a refreshed participant JWT containing the updated claims.
+      operationId: updateCurrentParticipantProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantUpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile update succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticateResponse'
+        '400':
+          description: Invalid request or duplicate player/team value
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: Bearer token missing/invalid or organizer token used
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/session:
     get:
       tags:
@@ -173,6 +210,7 @@ paths:
                     player_id: 1
                     team_id: 101
                     team_name: Team Alpha
+                    team_contact_email: team-alpha@example.com
                     display_name: Alpha Captain
                     email: alpha.captain@example.com
                     role: captain
@@ -926,6 +964,27 @@ components:
           type: string
           minLength: 1
           description: Unique team join key issued by the organizer.
+    ParticipantUpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - email
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        team_name:
+          type: string
+          minLength: 1
+          description: Required when the participant has joined a team.
+        team_contact_email:
+          type: string
+          format: email
+          description: Required when the participant has joined a team.
     AuthenticateResponse:
       type: object
       additionalProperties: false
@@ -946,6 +1005,7 @@ components:
         - player_id
         - team_id
         - team_name
+        - team_contact_email
         - display_name
         - email
         - role
@@ -958,6 +1018,9 @@ components:
           description: Owning team id; organizer tokens report 0.
         team_name:
           type: string
+        team_contact_email:
+          type: string
+          format: email
         display_name:
           type: string
         email:

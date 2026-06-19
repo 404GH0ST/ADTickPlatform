@@ -40,6 +40,8 @@ import type {
   FormMode,
   FormEntity,
 } from "@/components/admin/use-organizer-dashboard";
+import { AttackMapPanel } from "@/components/ui/attack-map-panel";
+import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
 import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
 import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
 import { PlatformSettingsCard } from "@/components/admin/platform-settings-card";
@@ -4143,6 +4145,12 @@ export function GameAttacksCard({
           onReset={onResetFilters}
           resetLabel="Reset View"
           showLiveModeBadge={false}
+        />
+        <AttackSliceSummaryGrid rows={attackRows} />
+        <AttackMapPanel
+          attackRows={attackRows}
+          description="Accepted submissions rendered as directional team flow for the current organizer slice."
+          title="Attack flow"
         />
         <AttackFeedTable
           attackRows={attackRows}

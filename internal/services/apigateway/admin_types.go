@@ -76,6 +76,13 @@ type participantJoinExistingTeamRequest struct {
 	TeamKey string `json:"team_key"`
 }
 
+type participantUpdateProfileRequest struct {
+	DisplayName      string `json:"display_name"`
+	Email            string `json:"email"`
+	TeamName         string `json:"team_name"`
+	TeamContactEmail string `json:"team_contact_email"`
+}
+
 type adminWireGuardPeer struct {
 	PlayerID        int    `json:"player_id"`
 	TeamID          int    `json:"team_id"`

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Download } from 'lucide-react';
 
 import { AppShell } from '@/components/ui/app-shell';
+import { ParticipantAccountSettings } from '@/components/dashboard/participant-account-settings';
 import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join-team-form';
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
 import { Button } from '@/components/ui/button';
@@ -70,7 +71,12 @@ export function ParticipantShell({
             <Link href="/docs/participant">Manual</Link>
           </Button>
           {overview.authenticated ? (
-            <ParticipantLogoutButton />
+            <>
+              {overview.role !== "organizer" ? (
+                <ParticipantAccountSettings overview={overview} />
+              ) : null}
+              <ParticipantLogoutButton />
+            </>
           ) : (
             <Button asChild>
               <Link href="/login">Sign In</Link>
