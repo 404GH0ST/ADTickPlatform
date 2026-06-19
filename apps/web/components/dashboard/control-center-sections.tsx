@@ -196,14 +196,6 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
         </div>
       </CardHeader>
       <CardContent>
-        {isPaused && (
-          <div className="mb-4">
-            <StatusBanner
-              message="The game scheduler is currently paused. Tick progression and checker runs are temporarily suspended."
-              variant="warning"
-            />
-          </div>
-        )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
             <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
