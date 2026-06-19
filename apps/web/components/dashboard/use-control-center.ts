@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import type { AttackFeedPage, ScoreRow, ServiceRow } from '@/lib/dashboard-types';
 import type { SSHSessionData } from '@/components/dashboard/control-center-sections';
@@ -103,6 +104,16 @@ export function useControlCenter({
   useEffect(() => {
     setScoreRows(scores);
   }, [scores]);
+
+  const router = useRouter();
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [router]);
   const [attackPageState, setAttackPageState] = useState<AttackFeedPage>(attackPage);
   const [proof, setProof] = useState('unlock-proof-from-own-service');
   const [unlockTarget, setUnlockTarget] = useState<ServiceRow | null>(null);

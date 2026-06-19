@@ -184,6 +184,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     return () => clearInterval(interval);
   }, [timeLeft, overview.nextTickAt, router]);
 
+
   const isSchedulerRunning = overview.schedulerState?.toLowerCase() === "running";
   const isPaused = overview.matchState?.toLowerCase() === "paused" || overview.schedulerState?.toLowerCase() === "paused";
 
