@@ -21,6 +21,7 @@ export default async function AttackTablePage() {
         services={dashboard.services}
         initialTab="attacks"
         currentTeamName={dashboard.platform.teamName}
+        overview={dashboard.platform}
       />
     </ParticipantShell>
   );

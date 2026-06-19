@@ -71,6 +71,9 @@ export type PlatformOverview = {
   schedulerState?: string;
   currentTick?: number;
   acceptingSubmissions?: boolean;
+  nextTickAt?: string;
+  tickInterval?: number;
+  lastTickAt?: string;
   apiBaseUrl: string;
   realtimeBaseUrl: string;
 };

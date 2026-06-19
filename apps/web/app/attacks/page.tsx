@@ -24,6 +24,7 @@ export default async function AttacksPage() {
         scores={dashboard.scores}
         services={dashboard.services}
         initialTab="attacks"
+        overview={dashboard.platform}
       />
     </ParticipantShell>
   );

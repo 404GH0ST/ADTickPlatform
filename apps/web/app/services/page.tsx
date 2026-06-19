@@ -21,6 +21,7 @@ export default async function ServicesPage() {
         services={dashboard.services}
         initialTab="services"
         currentTeamName={dashboard.platform.teamName}
+        overview={dashboard.platform}
       />
     </ParticipantShell>
   );

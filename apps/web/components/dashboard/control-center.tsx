@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
+import type { PlatformOverview } from "@/lib/dashboard-types";
 
 import {
   AttacksPanel,
@@ -23,10 +24,12 @@ export function ControlCenter({
   attackFocusMode = "full",
   initialTab = "scoreboard",
   currentTeamName,
+  overview,
 }: ControlCenterOptions & {
   attackFocusMode?: "full" | "map";
   initialTab?: "scoreboard" | "services" | "attacks";
   currentTeamName?: string;
+  overview: PlatformOverview;
 }): ReactElement {
   const state = useControlCenter({
     attackPage,
@@ -48,6 +51,7 @@ export function ControlCenter({
         rows: state.rows,
         scoreRows: state.scoreRows,
         currentTeamName,
+        overview,
         onApplyAttackFilters: () => {
           void state.applyAttackFilters();
         },
@@ -132,6 +136,7 @@ function renderControlCenterPanel({
   onSetAttackTickTo,
   onSetAttackVictim,
   currentTeamName,
+  overview,
 }: {
   attackLiveMode: boolean;
   attackPage: ControlCenterOptions["attackPage"];
@@ -168,6 +173,7 @@ function renderControlCenterPanel({
   onSetAttackTickTo: (value: string) => void;
   onSetAttackVictim: (value: string) => void;
   currentTeamName?: string;
+  overview: PlatformOverview;
 }): ReactElement {
   if (initialTab === "scoreboard") {
     return (
@@ -183,6 +189,7 @@ function renderControlCenterPanel({
       <ServicesPanel
         rows={rows}
         pendingAction={pendingAction}
+        overview={overview}
         onSelectPrimaryAction={onSelectPrimaryAction}
         onRestart={onRequestRestart}
         onSelectReset={onSelectResetTarget}

@@ -244,6 +244,9 @@ function buildPlatformOverview(
     schedulerState: data.gameStatus?.scheduler?.state,
     currentTick: data.gameStatus?.current_tick?.id,
     acceptingSubmissions: data.gameStatus?.match?.accepting_submissions,
+    nextTickAt: data.gameStatus?.scheduler?.next_run_at,
+    tickInterval: data.gameStatus?.scheduler?.interval_seconds,
+    lastTickAt: data.gameStatus?.scheduler?.last_run_at,
     apiBaseUrl: participantApiBaseUrl(),
     realtimeBaseUrl: participantRealtimeBaseUrl(),
   };

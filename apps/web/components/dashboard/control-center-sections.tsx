@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useRef } from "react";
-import { Download, LoaderCircle, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Download, LoaderCircle, Wrench, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
 import type {
   AttackFeedPage,
+  PlatformOverview,
   ScoreRow,
   ServiceRow,
 } from "@/lib/dashboard-types";
@@ -62,6 +63,7 @@ type ScoreboardPanelProps = {
 type ServicesPanelProps = {
   rows: ServiceRow[];
   pendingAction: string | null;
+  overview: PlatformOverview;
   onSelectPrimaryAction: (service: ServiceRow) => void;
   onRestart: (service: ServiceRow) => void;
   onSelectReset: (service: ServiceRow) => void;
@@ -145,42 +147,127 @@ export function ScoreboardPanel({
   );
 }
 
+function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!overview.nextTickAt) {
+      setTimeLeft(null);
+      return;
+    }
+    const target = new Date(overview.nextTickAt).getTime();
+    
+    const update = () => {
+      const now = Date.now();
+      const diff = Math.max(0, Math.round((target - now) / 1000));
+      setTimeLeft(diff);
+    };
+
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [overview.nextTickAt]);
+
+  const isSchedulerRunning = overview.schedulerState?.toLowerCase() === "running";
+
+  return (
+    <Card className="border border-border/70 bg-card shadow-sm">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Timer className="h-5 w-5 text-primary" />
+          <CardTitle className="text-base font-semibold">Match Progress & Tick Scheduler</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
+            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Activity className="h-3.5 w-3.5" /> Current Tick
+            </dt>
+            <dd className="mt-1.5 text-2xl font-bold tracking-tight text-foreground">
+              {overview.currentTick !== undefined ? `#${overview.currentTick}` : "—"}
+            </dd>
+          </div>
+
+          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
+            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" /> Scheduler State
+            </dt>
+            <dd className="mt-1.5 text-lg font-semibold flex items-center gap-2">
+              <span className={`inline-block h-2 w-2 rounded-full ${isSchedulerRunning ? 'bg-positive animate-pulse' : 'bg-negative'}`} />
+              <span className={isSchedulerRunning ? 'text-positive' : 'text-negative'}>
+                {overview.schedulerState || "inactive"}
+              </span>
+            </dd>
+          </div>
+
+          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
+            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5" /> Next Tick Run
+            </dt>
+            <dd className="mt-1.5 text-sm font-semibold text-foreground">
+              {overview.nextTickAt ? new Date(overview.nextTickAt).toLocaleTimeString() : "—"}
+            </dd>
+          </div>
+
+          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
+            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Timer className="h-3.5 w-3.5" /> Next Tick Countdown
+            </dt>
+            <dd className="mt-1.5 text-2xl font-mono font-bold tracking-tight text-highlight">
+              {timeLeft !== null ? `${timeLeft}s` : "—"}
+              {overview.tickInterval && (
+                <span className="text-xs font-sans font-medium text-muted-foreground ml-1.5">
+                  (interval: {overview.tickInterval}s)
+                </span>
+              )}
+            </dd>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ServicesPanel({
   rows,
   pendingAction,
+  overview,
   onSelectPrimaryAction,
   onRestart,
   onSelectReset,
 }: ServicesPanelProps): ReactElement {
-  if (rows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Services</CardTitle>
-          <CardDescription>
-            Owned service controls for unlock, root access, restart, and
-            factory reset.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EmptyStateText message="No owned services are available for this team yet." />
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      {rows.map((service) => (
-        <ServiceCard
-          key={service.id}
-          pendingAction={pendingAction}
-          service={service}
-          onRestart={onRestart}
-          onSelectPrimaryAction={onSelectPrimaryAction}
-          onSelectReset={onSelectReset}
-        />
-      ))}
+    <div className="space-y-4">
+      <TickIntervalCard overview={overview} />
+      
+      {rows.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Services</CardTitle>
+            <CardDescription>
+              Owned service controls for unlock, root access, restart, and
+              factory reset.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EmptyStateText message="No owned services are available for this team yet." />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {rows.map((service) => (
+            <ServiceCard
+              key={service.id}
+              pendingAction={pendingAction}
+              service={service}
+              onRestart={onRestart}
+              onSelectPrimaryAction={onSelectPrimaryAction}
+              onSelectReset={onSelectReset}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -21,6 +21,7 @@ export default async function ScoreboardPage() {
         services={dashboard.services}
         initialTab="scoreboard"
         currentTeamName={dashboard.platform.teamName}
+        overview={dashboard.platform}
       />
     </ParticipantShell>
   );
