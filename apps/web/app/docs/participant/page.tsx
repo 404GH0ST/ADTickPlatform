@@ -33,20 +33,6 @@ const participantSteps = [
   },
 ] as const;
 
-const participantEndpoints = [
-  'POST /api/v2/authenticate',
-  'GET /api/v2/challenges',
-  'GET /api/v2/challenges/{challenge_id}/source',
-  'GET /api/v2/services',
-  'GET /api/v2/scoreboard',
-  'GET /api/v2/attacks',
-  'POST /api/v2/submit',
-  'POST /api/v2/services/{challenge_id}/unlock',
-  'POST /api/v2/services/{challenge_id}/ssh-session',
-  'POST /api/v2/services/{challenge_id}/reset/factory',
-  'POST /api/v2/services/{challenge_id}/reset/restart',
-] as const;
-
 export default async function ParticipantManualPage() {
   const { platform } = await loadDashboardData();
 
@@ -73,23 +59,7 @@ export default async function ParticipantManualPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Participant Endpoints</CardTitle>
-              <CardDescription>
-                The participant API surface most teams automate against.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="rounded-sm border p-0">
-              <ul className="divide-y">
-                {participantEndpoints.map((endpoint) => (
-                  <li key={endpoint} className="px-4 py-3 text-sm font-mono">
-                    {endpoint}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+
 
           <Card>
             <CardHeader>

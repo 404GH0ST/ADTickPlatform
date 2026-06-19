@@ -11,7 +11,6 @@ test("participant manual links to Swagger and raw OpenAPI YAML", async ({
     page.locator("h1", { hasText: "Participant Manual" }),
   ).toBeVisible();
   await expect(page.getByText("Participant Flow")).toBeVisible();
-  await expect(page.getByText("Participant Endpoints")).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Open Swagger" }),
   ).toHaveAttribute("href", "/docs/platform-api");
