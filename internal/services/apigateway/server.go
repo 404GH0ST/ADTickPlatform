@@ -694,6 +694,15 @@ func applySLASummary(states []serviceState, challengeID int, summary GameService
 		states[i].SLAPhase = summary.Phase
 		states[i].SLATickID = summary.TickID
 		states[i].SLAMessage = sanitizeParticipantSLAMessage(summary)
+
+		switch strings.ToLower(strings.TrimSpace(summary.Status)) {
+		case "ok", "recovering":
+			states[i].Status = "stable"
+			states[i].Checker = "passing"
+		case "down", "faulty", "flag_not_found":
+			states[i].Status = "degraded"
+			states[i].Checker = "warning"
+		}
 		return
 	}
 }

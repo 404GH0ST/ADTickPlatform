@@ -2081,6 +2081,57 @@ func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	}
 }
 
+func TestTeamServicesSuccessOverridesWarming(t *testing.T) {
+	// Initialize store and manually set a service to warming/warning state in memory store
+	store := NewMemoryStore(101).(*memoryStore)
+	store.teamStates[101][2].Status = "warming"
+	store.teamStates[101][2].Checker = "warning"
+
+	// Set up gameCore mock client with successful runs for challenge 2
+	gameCore := testGameCoreClient{
+		runs: []GameCheckerRun{
+			{ID: 41, TickID: 15, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 2, ChallengeName: "chat", Phase: "put", Status: "success", CheckedAt: "2026-03-10T10:15:01Z"},
+			{ID: 42, TickID: 15, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 2, ChallengeName: "chat", Phase: "get", Status: "success", CheckedAt: "2026-03-10T10:15:02Z"},
+			{ID: 43, TickID: 15, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 2, ChallengeName: "chat", Phase: "check", Status: "success", CheckedAt: "2026-03-10T10:15:03Z"},
+		},
+	}
+
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}, gameCore).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected services 200, got %d", response.Code)
+	}
+
+	var payload []serviceState
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode services response: %v", err)
+	}
+
+	var chatState *serviceState
+	for idx := range payload {
+		if payload[idx].ChallengeID == 2 {
+			chatState = &payload[idx]
+			break
+		}
+	}
+	if chatState == nil {
+		t.Fatal("expected chat service state")
+	}
+
+	if chatState.Status != "stable" {
+		directRuns, _ := gameCore.CheckerRuns(context.Background(), GameCheckerRunQuery{TeamID: 101})
+		t.Fatalf("expected status to override to stable, got %s. chatState: %+v, directRuns: %+v, payload: %+v", chatState.Status, chatState, directRuns, payload)
+	}
+	if chatState.Checker != "passing" {
+		t.Fatalf("expected checker to override to passing, got %s", chatState.Checker)
+	}
+}
+
 func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 	mux := newTestMuxWithGameCore(testGameCoreClient{
 		runs: []GameCheckerRun{
@@ -2118,6 +2169,12 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 		}
 		if state.SLAMessage != "flag retrieval failed from service endpoint" {
 			t.Fatalf("unexpected SLA message %q", state.SLAMessage)
+		}
+		if state.Status != "degraded" {
+			t.Fatalf("expected degraded status, got %q", state.Status)
+		}
+		if state.Checker != "warning" {
+			t.Fatalf("expected warning checker, got %q", state.Checker)
 		}
 		return
 	}

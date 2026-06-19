@@ -471,14 +471,33 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 	if err := e.ensureNetwork(ctx, plan); err != nil {
 		return err
 	}
-	_, err = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)...)
-	return err
+	var runErr error
+	for attempts := 0; attempts < 3; attempts++ {
+		_, runErr = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)...)
+		if runErr == nil {
+			return nil
+		}
+		if !strings.Contains(strings.ToLower(runErr.Error()), "conflict") {
+			return runErr
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for container name release: %w", runErr)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return runErr
 }
 
 func (e *dockerCLIExecutor) refreshServiceImage(ctx context.Context, image string) error {
 	image = strings.TrimSpace(image)
 	if image == "" {
 		return nil
+	}
+	if strings.HasPrefix(image, "local/") {
+		if _, inspectErr := e.execDocker(ctx, "image", "inspect", image); inspectErr == nil {
+			return nil
+		}
 	}
 	if _, err := e.execDocker(ctx, "pull", image); err == nil {
 		return nil
@@ -561,6 +580,7 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, secur
 	args := []string{
 		"run",
 		"-d",
+		"--init",
 		"--restart", "unless-stopped",
 	}
 	args = append(args, security.dockerArgs()...)

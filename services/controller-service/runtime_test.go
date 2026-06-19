@@ -74,7 +74,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		t.Fatalf("expected image %s, got %s", task.BaselineImage, args[len(args)-1])
 	}
 	assertArgSequence(t, args, []string{
-		"run", "-d", "--restart", "unless-stopped",
+		"run", "-d", "--init", "--restart", "unless-stopped",
 		"--cap-drop", "ALL",
 		"--cap-add", "CHOWN",
 		"--cap-add", "DAC_OVERRIDE",
@@ -172,7 +172,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"run -d --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
+		"run -d --init --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3),
 		"-e AD_CHECKER_TOKEN=checker-secret-101-3",
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
@@ -454,7 +454,7 @@ func TestDockerEnsureServiceFallsBackToLocalImageWhenPullFails(t *testing.T) {
 		TeamID:        101,
 		ChallengeID:   1,
 		ContainerName: "svc-banking-team-101",
-		BaselineImage: "local/banking:baseline",
+		BaselineImage: "registry.local/banking:baseline",
 		Endpoint:      "10.80.1.11:10001",
 		SSHHost:       "10.80.1.11",
 	}
@@ -477,8 +477,8 @@ func TestDockerEnsureServiceFallsBackToLocalImageWhenPullFails(t *testing.T) {
 	}
 	logOutput := string(logBytes)
 	for _, fragment := range []string{
-		"pull local/banking:baseline",
-		"image inspect local/banking:baseline",
+		"pull registry.local/banking:baseline",
+		"image inspect registry.local/banking:baseline",
 		"run -d",
 	} {
 		if !strings.Contains(logOutput, fragment) {
