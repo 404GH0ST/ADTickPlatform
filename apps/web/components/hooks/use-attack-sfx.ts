@@ -200,35 +200,41 @@ export function useAttackSfx() {
   }, [getAudioContext]);
 }
 
+let cachedAudioBuffer: AudioBuffer | null = null;
+
+async function getAttackAudioBuffer(context: BrowserAudioContext): Promise<AudioBuffer> {
+  if (cachedAudioBuffer) {
+    return cachedAudioBuffer;
+  }
+  const response = await fetch('/freesound_community-laser-gun-81720.mp3');
+  const arrayBuffer = await response.arrayBuffer();
+  cachedAudioBuffer = await context.decodeAudioData(arrayBuffer);
+  return cachedAudioBuffer;
+}
+
 function playAttackBlip(
   context: BrowserAudioContext,
   startTime: number,
   index: number,
   volume: number,
 ) {
-  try {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const baseFrequency = 540 + index * 92;
+  getAttackAudioBuffer(context)
+    .then((buffer) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      const gainNode = context.createGain();
 
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(baseFrequency, startTime);
-    oscillator.frequency.exponentialRampToValueAtTime(
-      baseFrequency * 1.9,
-      startTime + 0.045,
-    );
+      // Scale volume based on preferences and stagger index
+      const scaledVolume = volume * 0.5 * Math.pow(0.85, index);
+      gainNode.gain.setValueAtTime(scaledVolume, startTime);
 
-    gain.gain.setValueAtTime(0.0001, startTime);
-    gain.gain.exponentialRampToValueAtTime(0.06 * volume, startTime + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.11);
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(startTime);
-    oscillator.stop(startTime + 0.12);
-  } catch {
-    // Audio is decorative; never let an SFX failure affect live attack updates.
-  }
+      source.connect(gainNode);
+      gainNode.connect(context.destination);
+      source.start(startTime);
+    })
+    .catch(() => {
+      // Audio is decorative; never let an SFX failure affect live attack updates.
+    });
 }
 
 function getOrCreateAudioContext(
