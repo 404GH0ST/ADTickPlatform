@@ -62,7 +62,7 @@ services:
       docker-socket-proxy:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8083/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${CHECKER_RUNNER_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8083}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -100,7 +100,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8081/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${GAME_CORE_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8081}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -146,7 +146,7 @@ services:
       game-core:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8082/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${SUBMISSION_SERVICE_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8082}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -174,7 +174,7 @@ services:
       docker-socket-proxy:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8084/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${CONTROLLER_SERVICE_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8084}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -238,7 +238,7 @@ services:
       game-core:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8085/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${SCORING_WORKER_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8085}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -265,7 +265,7 @@ services:
       api-gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8086/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${REALTIME_GATEWAY_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8086}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -294,7 +294,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8087/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${WIREGUARD_GATEWAY_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8087}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -356,7 +356,7 @@ services:
       wireguard-gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      test: ["CMD-SHELL", "PORT=$${API_GATEWAY_ADDR##*:}; wget --no-verbose --tries=1 --spider http://localhost:$${PORT:-8080}/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
