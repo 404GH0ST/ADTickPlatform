@@ -340,3 +340,127 @@
 .swagger-shell .swagger-ui table thead tr th {
   border-color: var(--border);
 }
+
+/* Swagger Dialog / Modal overrides */
+.swagger-shell .swagger-ui .dialog-ux .backdrop-ux {
+  background: rgba(0, 0, 0, 0.65) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow-paper) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-header {
+  background: var(--card) !important;
+  border-bottom: 1px solid var(--border) !important;
+  padding: 16px 20px !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-header h3 {
+  color: var(--foreground) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-header .close-modal {
+  fill: var(--foreground) !important;
+  color: var(--foreground) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  padding: 20px !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content h4 {
+  color: var(--foreground) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content label {
+  color: var(--foreground) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content p {
+  color: var(--muted-foreground) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .warning {
+  color: var(--tone-danger-foreground) !important;
+  background: var(--tone-danger-background) !important;
+  border: 1px solid var(--tone-danger-border) !important;
+  border-radius: 4px !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content input[type="text"] {
+  background: var(--background) !important;
+  border: 1px solid var(--input) !important;
+  color: var(--foreground) !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+}
+
+/* Modal authorize / close buttons */
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .auth-btn-wrapper {
+  gap: 12px !important;
+  display: flex !important;
+  margin-top: 16px !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn {
+  border-radius: 6px !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  padding: 8px 16px !important;
+  box-shadow: none !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth {
+  background: var(--primary) !important;
+  border: 1px solid var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth:hover {
+  background: color-mix(in oklab, var(--primary) 90%, black 10%) !important;
+  border-color: color-mix(in oklab, var(--primary) 90%, black 10%) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:not(.auth) {
+  background: var(--secondary) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:not(.auth):hover {
+  background: color-mix(in oklab, var(--secondary) 90%, black 10%) !important;
+}
+
+/* Swagger main page Authorize button overrides */
+.swagger-shell .swagger-ui .btn.authorize {
+  border: 1px solid var(--primary) !important;
+  background: transparent !important;
+  color: var(--primary) !important;
+  border-radius: 6px !important;
+  padding: 6px 14px !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  transition: all 150ms ease !important;
+}
+
+.swagger-shell .swagger-ui .btn.authorize:hover {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+
+.swagger-shell .swagger-ui .btn.authorize svg {
+  fill: currentColor !important;
+}
+

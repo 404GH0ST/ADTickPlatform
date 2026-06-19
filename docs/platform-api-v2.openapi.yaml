@@ -8,8 +8,8 @@ info:
     discovery, whitebox source download, flag submission, service unlock, SSH
     access, and service recovery workflows.
 servers:
-  - url: https://api.example.com
-    description: Replace with the real participant API host
+  - url: https://10.0.2.3
+    description: Real participant API host
 tags:
   - name: Authentication
   - name: Discovery
