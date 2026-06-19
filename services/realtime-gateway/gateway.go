@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,7 +194,10 @@ func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, k
 		select {
 		case <-r.Context().Done():
 			return
-		case payload := <-updates:
+		case payload, ok := <-updates:
+			if !ok {
+				return
+			}
 			if err := writeSSE(w, payload); err != nil {
 				return
 			}
@@ -309,7 +313,7 @@ func (g *realtimeGateway) requireAdminAuth(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != g.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(g.adminToken)) != 1 {
 		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
 			Title:  "Forbidden",
 			Detail: "please authenticate before accessing admin realtime streams.",

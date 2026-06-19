@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -715,7 +716,7 @@ func (s *gameCoreServer) handleRefreshFlagFormat(w http.ResponseWriter, r *http.
 
 func (s *gameCoreServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing game-core endpoints.")
 		return false
 	}

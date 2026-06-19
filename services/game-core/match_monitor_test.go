@@ -51,6 +51,18 @@ func (s *monitorTestScheduler) StopWithSource(string, string) (apigateway.GameSc
 	return s.Stop()
 }
 
+func (s *monitorTestScheduler) Starts() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.starts
+}
+
+func (s *monitorTestScheduler) Stops() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stops
+}
+
 func (s *monitorTestScheduler) Update(interval time.Duration) (apigateway.GameSchedulerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,7 +104,7 @@ func TestMatchWindowMonitorStartsAndStopsScheduler(t *testing.T) {
 	now = start.Add(time.Millisecond)
 	mu.Unlock()
 	waitForCondition(t, 250*time.Millisecond, func() bool {
-		return scheduler.starts > 0 && scheduler.Status().State == "running"
+		return scheduler.Starts() > 0 && scheduler.Status().State == "running"
 	})
 	match, err := store.MatchStatus(context.Background())
 	if err != nil {
@@ -106,7 +118,7 @@ func TestMatchWindowMonitorStartsAndStopsScheduler(t *testing.T) {
 	now = end.Add(time.Millisecond)
 	mu.Unlock()
 	waitForCondition(t, 250*time.Millisecond, func() bool {
-		return scheduler.stops > 0 && scheduler.Status().State == "stopped"
+		return scheduler.Stops() > 0 && scheduler.Status().State == "stopped"
 	})
 	match, err = store.MatchStatus(context.Background())
 	if err != nil {

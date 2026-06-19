@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/gamenet"
@@ -167,7 +169,7 @@ func (s *checkerRunnerServer) handleExecuteChecker(w http.ResponseWriter, r *htt
 
 func (s *checkerRunnerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
 			Title:  "Forbidden",
 			Detail: "please authenticate before accessing checker-runner endpoints.",
@@ -286,6 +288,7 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	}
 	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, e.security, request)...)
 	trimmedOutput, serviceState, stateMessage := parseCheckerServiceStateOutput(output)
+	trimmedOutput = truncateOutput(trimmedOutput, 65536)
 	result := apigateway.CheckerExecutionResult{
 		ChallengeID:  request.ChallengeID,
 		TeamID:       request.TeamID,
@@ -304,6 +307,18 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	result.Status = "success"
 	result.Message = "checker phase completed successfully."
 	return result, nil
+}
+
+func truncateOutput(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	res := s[:limit]
+	// Avoid cutting in the middle of a multi-byte UTF-8 sequence.
+	for len(res) > 0 && !utf8.ValidString(res) {
+		res = res[:len(res)-1]
+	}
+	return res + "\n... [truncated]"
 }
 
 func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) ([]byte, int, error) {

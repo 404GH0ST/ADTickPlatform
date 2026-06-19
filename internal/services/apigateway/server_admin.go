@@ -54,6 +54,11 @@ func (s *Server) handleAdminDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	matchStatus, err := s.gameCore.MatchStatus(r.Context())
+	if err == nil && matchStatus.State == "running" {
+		writeProblem(w, http.StatusBadRequest, "Action forbidden", "cannot delete team while match is running.")
+		return
+	}
 	if err := s.store.DeleteAdminTeam(r.Context(), teamID); err != nil {
 		writeStoreFailure(w, err)
 		return

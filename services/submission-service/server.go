@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
@@ -107,7 +108,7 @@ func (s *submissionServiceServer) handleAttackFeed(w http.ResponseWriter, r *htt
 
 func (s *submissionServiceServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing submission-service endpoints.")
 		return false
 	}

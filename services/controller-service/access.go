@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 	"adplatform/internal/platform/config"
 	"adplatform/internal/services/apigateway"
 )
+
+func isValidIP(ip string) bool {
+	return net.ParseIP(strings.TrimSpace(ip)) != nil
+}
 
 type serviceAccessExecutor interface {
 	Status() apigateway.ControllerAccessStatus
@@ -281,6 +286,9 @@ func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, ipt
 		return err
 	}
 	for _, policy := range policies {
+		if !isValidIP(policy.ServiceIP) {
+			continue
+		}
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		if strings.TrimSpace(e.interfaceName) != "" {
 			if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
@@ -328,6 +336,9 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		return err
 	}
 	for _, policy := range policies {
+		if !isValidIP(policy.ServiceIP) {
+			continue
+		}
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		servicePort := fmt.Sprintf("%d", policy.ServicePort)
 		if !policy.EgressEnabled && strings.TrimSpace(e.internetInterface) != "" {
@@ -352,6 +363,9 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		}
 		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
 			for _, peer := range policy.AllowedPeerAddresses {
+				if !isValidIP(peer) {
+					continue
+				}
 				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "ACCEPT"); err != nil {
 					return err
 				}
@@ -460,6 +474,9 @@ func renderControllerAccessRules(tableName, interfaceName, internetInterface str
 	builder.WriteString("    policy accept;\n")
 	builder.WriteString("    ct state established,related accept\n")
 	for _, policy := range policies {
+		if !isValidIP(policy.ServiceIP) {
+			continue
+		}
 		ingressPrefix := ""
 		egressPrefix := ""
 		if strings.TrimSpace(interfaceName) != "" {
@@ -475,8 +492,16 @@ func renderControllerAccessRules(tableName, interfaceName, internetInterface str
 		builder.WriteString(fmt.Sprintf("    ip saddr %s tcp sport %d accept\n", policy.ServiceIP, policy.ServicePort))
 		builder.WriteString(fmt.Sprintf("    %sip saddr %s ct state established,related accept\n", egressPrefix, policy.ServiceIP))
 		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
-			builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(policy.AllowedPeerAddresses, ", ")))
-			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(policy.AllowedPeerAddresses, ", ")))
+			var validPeers []string
+			for _, peer := range policy.AllowedPeerAddresses {
+				if isValidIP(peer) {
+					validPeers = append(validPeers, peer)
+				}
+			}
+			if len(validPeers) > 0 {
+				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
+				builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
+			}
 		}
 		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
 		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))

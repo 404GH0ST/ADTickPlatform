@@ -59,8 +59,8 @@ type controllerServiceMetrics struct {
 	accessPoliciesAppliedTotal map[string]uint64
 }
 
-func newControllerServiceMetrics() controllerServiceMetrics {
-	metrics := controllerServiceMetrics{
+func newControllerServiceMetrics() *controllerServiceMetrics {
+	metrics := &controllerServiceMetrics{
 		operations:                 make(map[string]controllerOperationAggregate, len(controllerMetricOperations)),
 		accessPoliciesAppliedTotal: make(map[string]uint64, len(controllerAccessScopes)),
 	}

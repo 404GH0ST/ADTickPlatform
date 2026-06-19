@@ -51,12 +51,14 @@ func newIntervalGameScheduler(store gameStore, interval time.Duration, autoStart
 		}
 	}
 
+	scheduler.mu.Lock()
 	switch {
 	case scheduler.status.State == "running":
 		_, _ = scheduler.startLocked("restore", "scheduler state restored on process start")
 	case autoStart:
 		_, _ = scheduler.startLocked("config", "scheduler started from configuration")
 	}
+	scheduler.mu.Unlock()
 
 	return scheduler
 }
@@ -211,8 +213,17 @@ func (s *intervalGameScheduler) run(ctx context.Context) {
 		case <-timer.C:
 		}
 
-		tick, err := s.advance(context.Background())
+		tickStart := s.now().UTC()
+		tickCtx, tickCancel := context.WithCancel(ctx)
+		tick, err := s.advance(tickCtx)
+		tickCancel()
 		now := s.now().UTC()
+
+		elapsed := now.Sub(tickStart)
+		nextWait := s.interval - elapsed
+		if nextWait < 0 {
+			nextWait = 0
+		}
 
 		s.mu.Lock()
 		if ctx.Err() != nil || s.status.State != "running" {
@@ -220,7 +231,7 @@ func (s *intervalGameScheduler) run(ctx context.Context) {
 			return
 		}
 		s.status.LastRunAt = now.Format(time.RFC3339)
-		s.status.NextRunAt = now.Add(s.interval).Format(time.RFC3339)
+		s.status.NextRunAt = now.Add(nextWait).Format(time.RFC3339)
 		s.status.IntervalSeconds = int(s.interval / time.Second)
 		if err != nil {
 			s.status.LastError = strings.TrimSpace(err.Error())
@@ -245,7 +256,7 @@ func (s *intervalGameScheduler) run(ctx context.Context) {
 		}
 		s.mu.Unlock()
 
-		timer.Reset(s.interval)
+		timer.Reset(nextWait)
 	}
 }
 

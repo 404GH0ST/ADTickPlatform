@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -111,7 +112,7 @@ func (s *scoringWorkerServer) handleAudit(w http.ResponseWriter, r *http.Request
 
 func (s *scoringWorkerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		httpapi.WriteProblem(w, http.StatusForbidden, httpapi.ProblemDetails{
 			Title:  "Forbidden",
 			Detail: "please authenticate before accessing scoring-worker endpoints.",

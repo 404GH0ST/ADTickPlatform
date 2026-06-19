@@ -57,8 +57,8 @@ func TestRestoreWireGuardStateAppliesSnapshotOnStartup(t *testing.T) {
 
 	err := restoreWireGuardState(context.Background(), wireGuardStartupStoreStub{
 		peers: []apigateway.WireGuardGatewayPeer{
-			{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active"},
-			{WireGuardPeer: "team-102-player-2", Address: "10.70.12.21", Status: "revoked"},
+			{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+			{WireGuardPeer: "team-102-player-2", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
 		},
 	}, server)
 	if err != nil {

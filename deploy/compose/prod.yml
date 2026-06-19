@@ -61,6 +61,12 @@ services:
     depends_on:
       docker-socket-proxy:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8083/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       CHECKER_RUNNER_ADDR: :8083
       CHECKER_RUNNER_MODE: docker
@@ -93,6 +99,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8081/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       GAME_CORE_ADDR: :8081
       GAME_CORE_STATE_BACKEND: postgres
@@ -132,7 +144,13 @@ services:
     restart: unless-stopped
     depends_on:
       game-core:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8082/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       SUBMISSION_SERVICE_ADDR: :8082
       SUBMISSION_SERVICE_INTERNAL_TOKEN: ${SUBMISSION_SERVICE_INTERNAL_TOKEN}
@@ -155,6 +173,12 @@ services:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8084/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       CONTROLLER_SERVICE_ADDR: ${CONTROLLER_SERVICE_ADDR:-:8084}
       CONTROLLER_STATE_BACKEND: postgres
@@ -212,7 +236,13 @@ services:
     restart: unless-stopped
     depends_on:
       game-core:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8085/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       SCORING_WORKER_ADDR: :8085
       SCORING_WORKER_INTERNAL_TOKEN: ${SCORING_WORKER_INTERNAL_TOKEN}
@@ -233,7 +263,13 @@ services:
     restart: unless-stopped
     depends_on:
       api-gateway:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8086/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       REALTIME_GATEWAY_ADDR: :8086
       REALTIME_SOURCE_URL: http://api-gateway:8080
@@ -257,6 +293,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8087/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       WIREGUARD_GATEWAY_ADDR: ${WIREGUARD_GATEWAY_ADDR:-:8087}
       WIREGUARD_GATEWAY_STATE_BACKEND: postgres
@@ -304,15 +346,21 @@ services:
       redis:
         condition: service_healthy
       game-core:
-        condition: service_started
+        condition: service_healthy
       submission-service:
-        condition: service_started
+        condition: service_healthy
       scoring-worker:
-        condition: service_started
+        condition: service_healthy
       controller-service:
-        condition: service_started
+        condition: service_healthy
       wireguard-gateway:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     environment:
       API_GATEWAY_ADDR: :8080
       API_GATEWAY_STATE_BACKEND: postgres
@@ -360,9 +408,9 @@ services:
     restart: unless-stopped
     depends_on:
       api-gateway:
-        condition: service_started
+        condition: service_healthy
       realtime-gateway:
-        condition: service_started
+        condition: service_healthy
     environment:
       AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
       AD_PLATFORM_API_URL: http://api-gateway:8080
@@ -389,9 +437,9 @@ services:
       web:
         condition: service_started
       api-gateway:
-        condition: service_started
+        condition: service_healthy
       realtime-gateway:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${EDGE_HTTP_PUBLIC_PORT:-80}:80"
       - "${EDGE_HTTPS_PUBLIC_PORT:-443}:443"

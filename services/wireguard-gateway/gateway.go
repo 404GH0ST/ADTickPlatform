@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -182,7 +184,7 @@ func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.R
 
 func (s *wireGuardGatewayServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing wireguard gateway endpoints.")
 		return false
 	}
@@ -495,9 +497,34 @@ func activeWireGuardPeers(peers []apigateway.WireGuardGatewayPeer) []apigateway.
 		if strings.EqualFold(strings.TrimSpace(peer.Status), "revoked") {
 			continue
 		}
+		if !isValidWireGuardPublicKey(peer.ClientPublicKey) {
+			log.Printf("warning: skipping peer %s: invalid ClientPublicKey format", peer.WireGuardPeer)
+			continue
+		}
+		if peer.PresharedKey != "" && !isValidWireGuardPublicKey(peer.PresharedKey) {
+			log.Printf("warning: skipping peer %s: invalid PresharedKey format", peer.WireGuardPeer)
+			continue
+		}
+		if !isValidIP(peer.Address) {
+			log.Printf("warning: skipping peer %s: invalid Address format %q", peer.WireGuardPeer, peer.Address)
+			continue
+		}
 		active = append(active, peer)
 	}
 	return active
+}
+
+func isValidWireGuardPublicKey(key string) bool {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(key))
+	if err != nil {
+		return false
+	}
+	return len(decoded) == 32
+}
+
+func isValidIP(ip string) bool {
+	parsed := net.ParseIP(strings.TrimSpace(ip))
+	return parsed != nil && parsed.To4() != nil
 }
 
 func renderWireGuardGatewayConfig(settings wireGuardServerSettings, peers []apigateway.WireGuardGatewayPeer) string {

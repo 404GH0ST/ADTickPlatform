@@ -6,3 +6,4 @@ apps/web/node_modules
 deploy/compose/prod.env
 sample-docker-stack.log
 *.log
+**/.env*

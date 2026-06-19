@@ -16,7 +16,7 @@ fmt:
 
 test:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go test ./...
+	GOCACHE=$(GOCACHE) go test -race ./...
 
 build:
 	@mkdir -p $(GOCACHE)
@@ -35,7 +35,7 @@ build-linux-arm64:
 
 ci:
 	@mkdir -p $(GOCACHE)
-	GOCACHE=$(GOCACHE) go test ./...
+	GOCACHE=$(GOCACHE) go test -race ./...
 	./scripts/audit-checker-contracts.sh
 	bun run web:typecheck
 	bun run web:build

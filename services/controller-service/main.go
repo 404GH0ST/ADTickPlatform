@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"log"
 	"net/http"
@@ -20,7 +21,7 @@ type controllerServer struct {
 	executor   runtimeExecutor
 	access     serviceAccessExecutor
 	wireGuard  controllerWireGuardReconciler
-	metrics    controllerServiceMetrics
+	metrics    *controllerServiceMetrics
 	now        func() time.Time
 }
 
@@ -407,7 +408,7 @@ func (s *controllerServer) parseRuntimeTask(w http.ResponseWriter, r *http.Reque
 
 func (s *controllerServer) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Forbidden", "please authenticate before accessing controller endpoints.")
 		return false
 	}

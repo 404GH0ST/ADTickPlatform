@@ -111,7 +111,7 @@ func TestScoreboardStreamEmitsInitialAndUpdatedSnapshots(t *testing.T) {
 	defer cancel()
 
 	request := httptest.NewRequest("GET", "/public/v1/scoreboard/stream", nil).WithContext(ctx)
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -160,7 +160,7 @@ func TestAttackStreamEmitsInitialSnapshot(t *testing.T) {
 	defer cancel()
 
 	request := httptest.NewRequest("GET", "/public/v1/attacks/stream", nil).WithContext(ctx)
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -192,7 +192,7 @@ func TestPublicScoreboardStreamWorksThroughInstrumentedMux(t *testing.T) {
 	defer cancel()
 
 	request := httptest.NewRequest(http.MethodGet, "/public/v1/scoreboard/stream", nil).WithContext(ctx)
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -224,7 +224,7 @@ func TestAdminStreamsRequireAdminAuth(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.path+" unauthenticated", func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			response := httptest.NewRecorder()
+			response := newSafeRecorder()
 
 			mux.ServeHTTP(response, request)
 
@@ -236,7 +236,7 @@ func TestAdminStreamsRequireAdminAuth(t *testing.T) {
 		t.Run(tc.path+" wrong token", func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			request.Header.Set("Authorization", "Bearer wrong-token")
-			response := httptest.NewRecorder()
+			response := newSafeRecorder()
 
 			mux.ServeHTTP(response, request)
 
@@ -264,7 +264,7 @@ func TestAdminScoreboardStreamEmitsSnapshot(t *testing.T) {
 
 	request := httptest.NewRequest("GET", "/admin/v1/game/scoreboard/stream", nil).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -294,7 +294,7 @@ func TestAdminGameStatusStreamEmitsInitialAndUpdatedSnapshots(t *testing.T) {
 
 	request := httptest.NewRequest("GET", "/admin/v1/game/status/stream", nil).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -336,7 +336,7 @@ func TestAdminSchedulerEventsStreamEmitsSnapshot(t *testing.T) {
 
 	request := httptest.NewRequest("GET", "/admin/v1/game/scheduler/events/stream", nil).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -365,7 +365,7 @@ func TestAdminCheckerRunsStreamEmitsSnapshot(t *testing.T) {
 
 	request := httptest.NewRequest("GET", "/admin/v1/game/checker-runs/stream", nil).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -377,18 +377,18 @@ func TestAdminCheckerRunsStreamEmitsSnapshot(t *testing.T) {
 	<-done
 }
 
-func waitForBodyContains(t *testing.T, response *httptest.ResponseRecorder, want string) {
+func waitForBodyContains(t *testing.T, response *safeRecorder, want string) {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(response.Body.String(), want) {
+		if strings.Contains(response.BodyString(), want) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	t.Fatalf("timed out waiting for response body to contain %q; body=%q", want, response.Body.String())
+	t.Fatalf("timed out waiting for response body to contain %q; body=%q", want, response.BodyString())
 }
 
 func TestMetricsEndpointIncludesRealtimeGatewayMetrics(t *testing.T) {
@@ -421,7 +421,7 @@ func TestMetricsEndpointIncludesRealtimeGatewayMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request := httptest.NewRequest(http.MethodGet, "/public/v1/scoreboard/stream", nil).WithContext(ctx)
-	response := httptest.NewRecorder()
+	response := newSafeRecorder()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -446,4 +446,27 @@ func TestMetricsEndpointIncludesRealtimeGatewayMetrics(t *testing.T) {
 			t.Fatalf("expected metrics output to contain %q, got:\n%s", fragment, body)
 		}
 	}
+}
+
+type safeRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func newSafeRecorder() *safeRecorder {
+	return &safeRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+}
+
+func (r *safeRecorder) Write(b []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(b)
+}
+
+func (r *safeRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Body.String()
 }

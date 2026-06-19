@@ -31,13 +31,9 @@ func TestIntervalGameSchedulerRunsAndStops(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(250 * time.Millisecond)
-	for count.Load() == 0 && time.Now().Before(deadline) {
+	for scheduler.Status().LastTickID == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if count.Load() == 0 {
-		t.Fatal("expected scheduler to advance at least one tick")
-	}
-
 	status = scheduler.Status()
 	if status.LastTickID == 0 || status.LastRunAt == "" {
 		t.Fatalf("expected scheduler status to record runs, got %+v", status)

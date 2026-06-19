@@ -18,8 +18,8 @@ import (
 func TestRenderWireGuardGatewayConfigSkipsRevokedPeers(t *testing.T) {
 	settings := wireGuardServerSettings{PrivateKey: "server-private", Address: "10.70.0.1/24", ListenPort: 51820}
 	configBody := renderWireGuardGatewayConfig(settings, activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
-		{WireGuardPeer: "team-101-player-1", DisplayName: "Alpha", TeamName: "Team Alpha", Address: "10.70.11.20", Status: "active", ClientPublicKey: "pub-1", PresharedKey: "psk-1"},
-		{WireGuardPeer: "team-102-player-2", DisplayName: "Delta", TeamName: "Team Delta", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "pub-2", PresharedKey: "psk-2"},
+		{WireGuardPeer: "team-101-player-1", DisplayName: "Alpha", TeamName: "Team Alpha", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", PresharedKey: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
+		{WireGuardPeer: "team-102-player-2", DisplayName: "Delta", TeamName: "Team Delta", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", PresharedKey: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
 	}))
 
 	if !strings.Contains(configBody, "team-101-player-1") {
@@ -41,8 +41,8 @@ func TestRenderWireGuardGatewayConfigSkipsRevokedPeers(t *testing.T) {
 
 func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
 	rules := renderNftablesRules("adplatform_wireguard", "wg0", "10.70.0.1", activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
-		{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active"},
-		{WireGuardPeer: "team-102-player-2", Address: "10.70.12.21", Status: "revoked"},
+		{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+		{WireGuardPeer: "team-102-player-2", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
 	}))
 
 	if !strings.Contains(rules, `iifname "wg0" ip saddr != @active_peers drop`) {
@@ -173,8 +173,8 @@ func TestHostWireGuardApplierRunsWgAndNft(t *testing.T) {
 		Config:      "[Interface]\nPrivateKey = server-private\n",
 		ServerIP:    "10.70.0.1",
 		Peers: []apigateway.WireGuardGatewayPeer{
-			{WireGuardPeer: "team-101-player-1", DisplayName: "Alpha", TeamName: "Team Alpha", Address: "10.70.11.20", Status: "active", ClientPublicKey: "pub-1", PresharedKey: "psk-1"},
-			{WireGuardPeer: "team-102-player-2", DisplayName: "Delta", TeamName: "Team Delta", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "pub-2", PresharedKey: "psk-2"},
+			{WireGuardPeer: "team-101-player-1", DisplayName: "Alpha", TeamName: "Team Alpha", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", PresharedKey: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
+			{WireGuardPeer: "team-102-player-2", DisplayName: "Delta", TeamName: "Team Delta", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", PresharedKey: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
 		},
 		PeersTotal:   2,
 		PeersActive:  1,

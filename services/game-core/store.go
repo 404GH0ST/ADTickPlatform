@@ -817,6 +817,10 @@ func (s *postgresGameStore) StartNextTick(ctx context.Context, now time.Time) (a
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE game_ticks IN EXCLUSIVE MODE`); err != nil {
+		return apigateway.GameTickStatus{}, err
+	}
+
 	var lastStatus sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM game_ticks ORDER BY id DESC LIMIT 1`).Scan(&lastStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return apigateway.GameTickStatus{}, err
@@ -1653,7 +1657,7 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	defenseByTeam, err := s.sumFloatByTeam(ctx, `
 		SELECT
 			f.owner_team_id,
-			COALESCE(-SUM(POWER(COALESCE(captures.capture_count, 0)::double precision, 0.75)), 0.0)
+			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END), 0.0)
 		FROM issued_flags f
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count
@@ -1721,7 +1725,7 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		SELECT
 			f.owner_team_id,
 			f.challenge_id,
-			COALESCE(-SUM(POWER(COALESCE(captures.capture_count, 0)::double precision, 0.75)), 0.0)
+			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END), 0.0)
 		FROM issued_flags f
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count

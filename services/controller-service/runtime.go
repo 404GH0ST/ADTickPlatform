@@ -186,23 +186,27 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
-	defer cancel()
+	// Use an overall deadline (3x per-step timeout) so that slow image
+	// inspects or network creation don't starve later steps.
+	overallCtx, overallCancel := context.WithTimeout(ctx, e.timeout*3)
+	defer overallCancel()
 
-	exists, err := e.containerExists(runCtx, task.ContainerName)
+	exists, err := e.containerExists(overallCtx, task.ContainerName)
 	if err != nil {
 		return err
 	}
 	if exists {
-		if err := e.removeContainerIfExists(runCtx, task.ContainerName); err != nil {
+		if err := e.removeContainerIfExists(overallCtx, task.ContainerName); err != nil {
 			return err
 		}
 	}
 
-	if err := e.runFreshContainer(runCtx, task); err != nil {
+	if err := e.runFreshContainer(overallCtx, task); err != nil {
+		// Clean up any partially created container on failure.
+		_ = e.removeContainerIfExists(context.Background(), task.ContainerName)
 		return err
 	}
-	return e.verifySSHContract(runCtx, task)
+	return e.verifySSHContract(overallCtx, task)
 }
 
 func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
@@ -367,6 +371,7 @@ func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string) e
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var lastErr error
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -388,7 +393,9 @@ func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string) e
 		}
 
 		if _, err := e.execDocker(ctx, "rm", "-f", containerID); err != nil {
-			return err
+			log.Printf("failed to remove container %q: %v", containerID, err)
+			lastErr = err
+			continue
 		}
 		if stateVolume != "" {
 			if err := e.removeVolumeIfExists(ctx, stateVolume); err != nil {
@@ -398,7 +405,7 @@ func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string) e
 		}
 	}
 
-	return nil
+	return lastErr
 }
 
 func (e *dockerCLIExecutor) verifySSHContract(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
@@ -480,6 +487,9 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 		if !strings.Contains(strings.ToLower(runErr.Error()), "conflict") {
 			return runErr
 		}
+		// Explicitly remove the conflicting container before retrying,
+		// otherwise every retry will fail with the same naming conflict.
+		_ = e.removeContainerIfExists(ctx, task.ContainerName)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for container name release: %w", runErr)
@@ -505,7 +515,7 @@ func (e *dockerCLIExecutor) refreshServiceImage(ctx context.Context, image strin
 		log.Printf("warning: docker pull failed for %s; using existing local image: %v", image, err)
 		return nil
 	} else {
-		return err
+		return fmt.Errorf("docker pull failed: %w (local fallback inspect also failed: %v)", err, inspectErr)
 	}
 }
 

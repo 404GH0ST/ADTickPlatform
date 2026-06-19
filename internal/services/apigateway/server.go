@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"log"
 	"net/http"
@@ -1045,7 +1046,7 @@ func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, messa
 
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	token, ok := httpapi.BearerToken(r)
-	if !ok || token != s.adminToken {
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate as organizer.")
 		return false
 	}
