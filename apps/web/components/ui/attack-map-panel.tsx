@@ -68,12 +68,14 @@ export function AttackMapPanel({
   description = 'Directional attack flow across teams, services, and match ticks.',
   highlightedAttackIDs = [],
   title = 'Attack map',
+  onVisibleRowsChange,
 }: {
   attackRows: AttackMapEvent[];
   className?: string;
   description?: string;
   highlightedAttackIDs?: string[];
   title?: string;
+  onVisibleRowsChange?: (rows: AttackMapEvent[]) => void;
 }): ReactElement {
   const [audienceMode, setAudienceMode] = useState(false);
   const [audienceShowcasePaused, setAudienceShowcasePaused] = useState(false);
@@ -160,6 +162,10 @@ export function AttackMapPanel({
         return attackRows;
     }
   }, [attackRows, selectedTickValue, viewMode]);
+
+  useEffect(() => {
+    onVisibleRowsChange?.(visibleRows);
+  }, [visibleRows, onVisibleRowsChange]);
 
   const visibleTeamCount = useMemo(
     () =>

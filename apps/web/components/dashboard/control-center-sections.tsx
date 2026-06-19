@@ -7,6 +7,7 @@ import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
 import type {
+  AttackEvent,
   AttackFeedPage,
   PlatformOverview,
   ScoreRow,
@@ -314,6 +315,11 @@ export function AttacksPanel({
   onPage,
 }: AttacksPanelProps): ReactElement {
   const attackRows = attackPage.items;
+  const [visibleRows, setVisibleRows] = useState<AttackEvent[]>(attackRows);
+
+  useEffect(() => {
+    setVisibleRows(attackRows);
+  }, [attackRows]);
 
   return (
     <Card>
@@ -326,7 +332,7 @@ export function AttacksPanel({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
             <Field label="Attacker" htmlFor="attack-attacker">
               <Input
                 id="attack-attacker"
@@ -394,7 +400,7 @@ export function AttacksPanel({
           <div className="flex flex-wrap gap-2">
             <SliceCountBadge
               totalCount={attackPage.total_count}
-              visibleCount={attackRows.length}
+              visibleCount={visibleRows.length}
             />
             <LiveModeBadge
               filteredLabel="Filtered"
@@ -415,15 +421,16 @@ export function AttacksPanel({
           resetLabel="Reset View"
           showLiveModeBadge={false}
         />
-        <AttackSliceSummaryGrid rows={attackRows} />
+        <AttackSliceSummaryGrid rows={visibleRows} />
         <AttackMapPanel
           attackRows={attackRows}
           description="Accepted submissions rendered as directional team flow for the current paginated slice."
           highlightedAttackIDs={highlightedAttackIDs}
           title="Attack flow"
+          onVisibleRowsChange={(rows) => setVisibleRows(rows)}
         />
 
-        {attackRows.length === 0 ? (
+        {visibleRows.length === 0 ? (
           <EmptyStateText message="No accepted attack events are available for this slice." />
         ) : (
           <div className="space-y-3">
@@ -435,7 +442,7 @@ export function AttacksPanel({
                 Table and globe show the same filtered page.
               </p>
             </div>
-            <AttackFeedTable attackRows={attackRows} />
+            <AttackFeedTable attackRows={visibleRows} />
           </div>
         )}
       </CardContent>
