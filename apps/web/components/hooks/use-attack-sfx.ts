@@ -206,7 +206,7 @@ async function getAttackAudioBuffer(context: BrowserAudioContext): Promise<Audio
   if (cachedAudioBuffer) {
     return cachedAudioBuffer;
   }
-  const response = await fetch('/freesound_community-laser-gun-81720.mp3');
+  const response = await fetch('/laser-gun.mp3');
   const arrayBuffer = await response.arrayBuffer();
   cachedAudioBuffer = await context.decodeAudioData(arrayBuffer);
   return cachedAudioBuffer;
