@@ -130,15 +130,11 @@ function getParticipantGameAlertMessage(overview: PlatformOverview): string | nu
   }
 
   if (overview.matchState === 'stopped') {
-    const schedulerText =
-      overview.schedulerState === 'running'
-        ? ' The scheduler is still reporting as running and should be checked by the organizer.'
-        : '';
-    return `The match is currently stopped. Participant submissions are closed.${schedulerText}`;
+    return 'The match is currently stopped. Participant submissions are closed.';
   }
 
-  if (overview.matchState === 'paused' || overview.schedulerState === 'paused') {
-    return 'The game scheduler is currently paused. Tick progression and checker runs are temporarily suspended.';
+  if (overview.matchState === 'paused') {
+    return 'The match is currently paused. Tick progression and checker runs are temporarily suspended.';
   }
 
   return null;
