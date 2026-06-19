@@ -1143,7 +1143,6 @@ function AttackArcPath({
       {arc.featured && !dimmed ? (
         <FeaturedTransmissionEndpoints arc={arc} haloClassName={haloClassName} />
       ) : null}
-      {arc.count > 1 && !dimmed ? <RouteBundleBadge arc={arc} /> : null}
       <path
         d={arc.path}
         aria-label={`${arc.selected ? 'Clear' : 'Inspect'} attack route from ${arc.attacker} to ${arc.victim} on ${arc.service}, ${arc.count} transmission${arc.count === 1 ? '' : 's'}, tick ${arc.tick}`}
@@ -1217,37 +1216,6 @@ function FeaturedTransmissionEndpoints({
         strokeOpacity="0.72"
         strokeWidth="1.5"
       />
-    </g>
-  );
-}
-
-function RouteBundleBadge({ arc }: { arc: AttackArc }): ReactElement {
-  const x = (arc.startX + arc.endX) / 2;
-  const y = (arc.startY + arc.endY) / 2;
-
-  return (
-    <g pointerEvents="none">
-      <rect
-        x={x - 12}
-        y={y - 10}
-        width="24"
-        height="18"
-        rx="3"
-        fill="var(--attack-map-legend-background)"
-        stroke="var(--attack-map-legend-border)"
-        strokeOpacity="0.82"
-      />
-      <text
-        x={x}
-        y={y + 3}
-        textAnchor="middle"
-        fill="var(--attack-map-node-label)"
-        fontSize="9.5"
-        fontWeight="700"
-        className="select-none font-mono"
-      >
-        x{arc.count}
-      </text>
     </g>
   );
 }

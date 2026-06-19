@@ -27,6 +27,10 @@ func (s *Server) handleParticipantWireGuardConfig(w http.ResponseWriter, r *http
 		writeDomainFailure(w, err)
 		return
 	}
+	if err := s.reconcileWireGuardGateway(r.Context()); err != nil {
+		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway reconcile failed.")
+		return
+	}
 
 	config := strings.TrimSpace(peer.Config)
 	if config == "" {

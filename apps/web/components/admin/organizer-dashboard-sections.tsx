@@ -40,8 +40,6 @@ import type {
   FormMode,
   FormEntity,
 } from "@/components/admin/use-organizer-dashboard";
-import { AttackMapPanel } from "@/components/ui/attack-map-panel";
-import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
 import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
 import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
 import { PlatformSettingsCard } from "@/components/admin/platform-settings-card";
@@ -207,7 +205,6 @@ type GameTabProps = {
   accessStatus: AdminControllerAccessStatus | null;
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
-  highlightedAttackIDs: string[];
   checkerRunPage: AdminCheckerRunPage;
   checkerRunsLiveMode: boolean;
   deploymentRows: AdminDeploymentJob[];
@@ -1386,7 +1383,6 @@ export function GameTab({
   accessStatus,
   attackPage,
   attacksLiveMode,
-  highlightedAttackIDs,
   checkerRunPage,
   checkerRunsLiveMode,
   deploymentRows,
@@ -1403,13 +1399,16 @@ export function GameTab({
   wireGuardGatewayStatus,
   onAdvanceTick,
 
+  onApplyAttackFilters,
   onApplyCheckerRunFilters,
   onApplySchedulerEventFilters,
 
+  onAttackFilterChange,
   onCheckerRunFilterChange,
   onCopyRuntimeHealthSummary,
   onDownloadRuntimeHealthReport,
 
+  onPageAttacks,
   onPageCheckerRuns,
   onPageSchedulerEvents,
   onAuditScores,
@@ -1424,6 +1423,7 @@ export function GameTab({
   onRefreshServiceMetrics,
   onRefreshSchedulerEvents,
 
+  onResetAttackFilters,
   onResetCheckerRunFilters,
   onResetSchedulerEventFilters,
   onSchedulerEventFilterChange,
@@ -1446,9 +1446,13 @@ export function GameTab({
       <GameAttacksCard
         attackPage={attackPage}
         attacksLiveMode={attacksLiveMode}
-        highlightedAttackIDs={highlightedAttackIDs}
+        filters={filters.attack}
         pendingAction={pendingAction}
+        onApplyFilters={onApplyAttackFilters}
+        onFilterChange={onAttackFilterChange}
+        onPage={onPageAttacks}
         onRefresh={onRefreshAttacks}
+        onResetFilters={onResetAttackFilters}
       />
     );
   }
@@ -3989,27 +3993,35 @@ function ScoreboardSnapshotCard({
 export function GameAttacksCard({
   attackPage,
   attacksLiveMode,
-  highlightedAttackIDs,
+  filters,
   pendingAction,
+  onApplyFilters,
+  onFilterChange,
+  onPage,
   onRefresh,
+  onResetFilters,
 }: {
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
-  highlightedAttackIDs: string[];
+  filters: GameFilters["attack"];
   pendingAction: string | null;
+  onApplyFilters: () => void;
+  onFilterChange: (next: GameFilters["attack"]) => void;
+  onPage: (direction: "prev" | "next") => void;
   onRefresh: () => void;
+  onResetFilters: () => void;
 }): ReactElement {
   const attackRows = attackPage.items;
 
   return (
-    <Card id="attack-map">
+    <Card id="attack-feed">
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle>Accepted Attacks</CardTitle>
             <CardDescription>
-              Organizer view of the broad live attack feed. Hover or search to
-              reveal team labels without crowding the map.
+              Organizer feed with direct filters, pagination, and live accepted
+              attack updates.
             </CardDescription>
           </div>
           <Button
@@ -4028,25 +4040,110 @@ export function GameAttacksCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            <Field label="Attacker" htmlFor="admin-attack-attacker">
+              <Input
+                id="admin-attack-attacker"
+                value={filters.attacker}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, attacker: event.target.value })
+                }
+                placeholder="Team Alpha"
+              />
+            </Field>
+            <Field label="Victim" htmlFor="admin-attack-victim">
+              <Input
+                id="admin-attack-victim"
+                value={filters.victim}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, victim: event.target.value })
+                }
+                placeholder="Team Delta"
+              />
+            </Field>
+            <Field label="Service" htmlFor="admin-attack-service">
+              <Input
+                id="admin-attack-service"
+                value={filters.service}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, service: event.target.value })
+                }
+                placeholder="banking"
+              />
+            </Field>
+            <Field label="Tick From" htmlFor="admin-attack-tick-from">
+              <Input
+                id="admin-attack-tick-from"
+                type="number"
+                min="0"
+                value={filters.tickFrom}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, tickFrom: event.target.value })
+                }
+                placeholder="240"
+              />
+            </Field>
+            <Field label="Tick To" htmlFor="admin-attack-tick-to">
+              <Input
+                id="admin-attack-tick-to"
+                type="number"
+                min="0"
+                value={filters.tickTo}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, tickTo: event.target.value })
+                }
+                placeholder="248"
+              />
+            </Field>
+            <Field label="Limit" htmlFor="admin-attack-limit">
+              <Input
+                id="admin-attack-limit"
+                type="number"
+                min="1"
+                max="200"
+                value={filters.limit}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, limit: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Offset" htmlFor="admin-attack-offset">
+              <Input
+                id="admin-attack-offset"
+                type="number"
+                min="0"
+                value={filters.offset}
+                onChange={(event) =>
+                  onFilterChange({ ...filters, offset: event.target.value })
+                }
+              />
+            </Field>
+          </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">
-              Loaded {attackRows.length} of {attackPage.total_count} attack(s)
-            </Badge>
-            <Badge variant="outline">Broad feed</Badge>
-            {attacksLiveMode ? <Badge variant="outline">Live stream</Badge> : null}
+            <SliceCountBadge
+              totalCount={attackPage.total_count}
+              visibleCount={attackRows.length}
+            />
+            <LiveModeBadge
+              filteredLabel="Filtered"
+              liveLabel="Live"
+              liveMode={attacksLiveMode}
+            />
           </div>
         </div>
-
-        <AttackSliceSummaryGrid rows={attackRows} />
-
-        <AttackMapPanel
-          attackRows={attackRows}
-          description="Accepted submissions rendered as attacker-to-victim links for the broad organizer feed."
-          highlightedAttackIDs={highlightedAttackIDs}
-          title="Organizer attack map"
+        <PagedFilterActions
+          applyLabel="Apply Filters"
+          canPageNext={attackPage.has_next}
+          canPagePrev={attackPage.has_prev}
+          disabled={pendingAction !== null}
+          liveMode={attacksLiveMode}
+          onApply={onApplyFilters}
+          onPage={onPage}
+          onReset={onResetFilters}
+          resetLabel="Reset View"
+          showLiveModeBadge={false}
         />
-
         <AttackFeedTable
           attackRows={attackRows}
           emptyMessage="No accepted attacks match the current organizer slice."

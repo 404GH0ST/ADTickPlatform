@@ -266,6 +266,7 @@ func (s *Server) handleJoinExistingTeam(w http.ResponseWriter, r *http.Request) 
 		}
 		return
 	}
+	s.reconcileWireGuardGatewayBestEffort(r.Context(), "participant team join")
 
 	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
@@ -872,6 +873,14 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadGateway, "Unlock unavailable", "service unlock access reconcile failed.")
 		return
 	}
+	password := stableRootPassword(s.sshCredentialSecret, teamID, challengeID)
+	if err := s.controller.ApplySSHCredential(r.Context(), teamID, challengeID, ControllerSSHCredential{
+		Password: password,
+	}); err != nil {
+		_ = s.store.MarkSSHSessionApplyFailure(r.Context(), teamID, challengeID)
+		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "ssh credential runtime apply failed.")
+		return
+	}
 	s.recordTeamAudit(r.Context(), teamID, "service.unlock", "service", auditServiceTarget(teamID, challengeID), "unlocked service", map[string]any{
 		"challenge_id": challengeID,
 	})
@@ -1111,6 +1120,23 @@ func writeStoreFailure(w http.ResponseWriter, err error) {
 		log.Printf("store failure: %v", err)
 	}
 	writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", "internal platform state is unavailable.")
+}
+
+func (s *Server) reconcileWireGuardGateway(ctx context.Context) error {
+	if s.wireGuard == nil {
+		return nil
+	}
+	_, err := s.wireGuard.Reconcile(ctx)
+	if errors.Is(err, errWireGuardGatewayDisabled) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) reconcileWireGuardGatewayBestEffort(ctx context.Context, reason string) {
+	if err := s.reconcileWireGuardGateway(ctx); err != nil {
+		log.Printf("wireguard gateway reconcile after %s failed: %v", reason, err)
+	}
 }
 
 func (s *Server) handleRateLimitMetrics(w http.ResponseWriter, _ *http.Request) {

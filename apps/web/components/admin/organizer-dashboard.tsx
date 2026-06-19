@@ -68,7 +68,6 @@ export function OrganizerDashboard({
         attackFilters: state.attackFilters,
         attackPage: state.attackPageState,
         attacksLiveMode: state.attacksLiveMode,
-        highlightedAttackIDs: state.highlightedAttackIDs,
         challengeRows: state.challengeRows,
         checkerRunFilters: state.checkerRunFilters,
         checkerRunPage: state.checkerRunPageState,
@@ -260,7 +259,6 @@ function renderOrganizerPanel({
   attackFilters,
   attackPage,
   attacksLiveMode,
-  highlightedAttackIDs,
   challengeRows,
   checkerRunFilters,
   checkerRunPage,
@@ -341,7 +339,6 @@ function renderOrganizerPanel({
   attackFilters: OrganizerDashboardState["attackFilters"];
   attackPage: OrganizerDashboardState["attackPageState"];
   attacksLiveMode: boolean;
-  highlightedAttackIDs: OrganizerDashboardState["highlightedAttackIDs"];
   challengeRows: OrganizerDashboardOptions["challenges"];
   checkerRunFilters: OrganizerDashboardState["checkerRunFilters"];
   checkerRunPage: OrganizerDashboardState["checkerRunPageState"];
@@ -532,19 +529,22 @@ function renderOrganizerPanel({
       <GameAttacksCard
         attackPage={attackPage}
         attacksLiveMode={attacksLiveMode}
-        highlightedAttackIDs={highlightedAttackIDs}
+        filters={attackFilters}
         pendingAction={pendingAction}
+        onApplyFilters={onApplyAttackFilters}
+        onFilterChange={onSetAttackFilters}
+        onPage={onPageAttacks}
         onRefresh={onRefreshAttacks}
+        onResetFilters={onResetAttackFilters}
       />
     );
   }
 
   return (
-    <GameTab
-      attackPage={attackPage}
-      attacksLiveMode={attacksLiveMode}
-      highlightedAttackIDs={highlightedAttackIDs}
-      checkerRunPage={checkerRunPage}
+      <GameTab
+        attackPage={attackPage}
+        attacksLiveMode={attacksLiveMode}
+        checkerRunPage={checkerRunPage}
       checkerRunsLiveMode={checkerRunsLiveMode}
       filters={{
         attack: attackFilters,

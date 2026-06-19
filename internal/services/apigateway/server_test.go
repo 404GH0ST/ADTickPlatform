@@ -39,6 +39,21 @@ type testWireGuardClient struct {
 	err    error
 }
 
+type recordingWireGuardClient struct {
+	status         WireGuardGatewayStatus
+	err            error
+	reconcileCalls int
+}
+
+type recordingCredentialControllerClient struct {
+	storeBackedControllerClient
+	applyCalls  int
+	teamID      int
+	challengeID int
+	password    string
+	err         error
+}
+
 type testGameCoreClient struct {
 	status    GameStatus
 	tick      GameTickStatus
@@ -323,6 +338,33 @@ func (c testWireGuardClient) Reconcile(_ context.Context) (WireGuardGatewayStatu
 
 func (c testWireGuardClient) Teardown(_ context.Context) error {
 	return nil
+}
+
+func (c *recordingWireGuardClient) Status(_ context.Context) (WireGuardGatewayStatus, error) {
+	if c.err != nil {
+		return WireGuardGatewayStatus{}, c.err
+	}
+	if c.status != (WireGuardGatewayStatus{}) {
+		return c.status, nil
+	}
+	return WireGuardGatewayStatus{State: "applied", Mode: "host"}, nil
+}
+
+func (c *recordingWireGuardClient) Reconcile(_ context.Context) (WireGuardGatewayStatus, error) {
+	c.reconcileCalls++
+	return c.Status(context.Background())
+}
+
+func (c *recordingWireGuardClient) Teardown(_ context.Context) error {
+	return nil
+}
+
+func (c *recordingCredentialControllerClient) ApplySSHCredential(_ context.Context, teamID, challengeID int, credential ControllerSSHCredential) error {
+	c.applyCalls++
+	c.teamID = teamID
+	c.challengeID = challengeID
+	c.password = credential.Password
+	return c.err
 }
 
 func (c testGameCoreClient) Status(_ context.Context) (GameStatus, error) {
@@ -1288,6 +1330,78 @@ func TestRegisteredParticipantCanJoinExistingAccountToTeam(t *testing.T) {
 	}
 }
 
+func TestParticipantWireGuardDownloadReconcilesGateway(t *testing.T) {
+	store := NewMemoryStore(101)
+	wireGuard := &recordingWireGuardClient{}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, wireGuard).RegisterRoutes(mux)
+
+	body := `{"display_name":"Pending VPN","email":"pending.vpn@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+	vpnRequest := httptest.NewRequest(http.MethodGet, "/api/v2/me/wireguard", nil)
+	vpnRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	vpnResponse := httptest.NewRecorder()
+	mux.ServeHTTP(vpnResponse, vpnRequest)
+	if vpnResponse.Code != http.StatusOK {
+		t.Fatalf("expected vpn 200, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
+	}
+	if wireGuard.reconcileCalls != 2 {
+		t.Fatalf("expected wireguard reconcile after join and download, got %d", wireGuard.reconcileCalls)
+	}
+}
+
+func TestParticipantWireGuardDownloadFailsWhenGatewayReconcileFails(t *testing.T) {
+	store := NewMemoryStore(101)
+	wireGuard := &recordingWireGuardClient{err: errors.New("wg apply failed")}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, wireGuard).RegisterRoutes(mux)
+
+	body := `{"display_name":"Pending VPN Failure","email":"pending.vpn.failure@example.com","password":"pending-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200 despite best-effort gateway failure, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+	vpnRequest := httptest.NewRequest(http.MethodGet, "/api/v2/me/wireguard", nil)
+	vpnRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	vpnResponse := httptest.NewRecorder()
+	mux.ServeHTTP(vpnResponse, vpnRequest)
+	if vpnResponse.Code != http.StatusBadGateway {
+		t.Fatalf("expected vpn 502 when gateway reconcile fails, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
+	}
+	if wireGuard.reconcileCalls != 2 {
+		t.Fatalf("expected wireguard reconcile after join and download, got %d", wireGuard.reconcileCalls)
+	}
+}
+
 func TestRegisteredParticipantHasNoWireGuardBeforeJoin(t *testing.T) {
 	mux := newTestMux()
 
@@ -2031,6 +2145,32 @@ func TestUnlockRejectsInvalidProof(t *testing.T) {
 	}
 }
 
+func TestUnlockAppliesStableSSHCredential(t *testing.T) {
+	store := NewMemoryStore(101)
+	controller := &recordingCredentialControllerClient{
+		storeBackedControllerClient: storeBackedControllerClient{store: store},
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
+	setTestTeamAuthHeader(t, unlockRequest)
+	unlockResponse := httptest.NewRecorder()
+	mux.ServeHTTP(unlockResponse, unlockRequest)
+	if unlockResponse.Code != http.StatusOK {
+		t.Fatalf("expected unlock 200, got %d: %s", unlockResponse.Code, unlockResponse.Body.String())
+	}
+	if controller.applyCalls != 1 {
+		t.Fatalf("expected one ssh credential apply, got %d", controller.applyCalls)
+	}
+	if controller.teamID != 101 || controller.challengeID != 1 {
+		t.Fatalf("unexpected credential target team=%d challenge=%d", controller.teamID, controller.challengeID)
+	}
+	if want := stableRootPassword("dev-team-token", 101, 1); controller.password != want {
+		t.Fatalf("unexpected stable password %q, want %q", controller.password, want)
+	}
+}
+
 func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	mux := newTestMux()
 
@@ -2722,7 +2862,7 @@ func TestRestartWaitsForCheckerVerification(t *testing.T) {
 	}
 }
 
-func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
+func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	store := NewMemoryStore(101)
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{sshApplyErr: fmt.Errorf("runtime apply failed")}, noopWireGuardClient{}).RegisterRoutes(mux)
@@ -2731,16 +2871,8 @@ func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
 	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("expected unlock 200, got %d", unlockResponse.Code)
-	}
-
-	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
-	setTestTeamAuthHeader(t, sshRequest)
-	sshResponse := httptest.NewRecorder()
-	mux.ServeHTTP(sshResponse, sshRequest)
-	if sshResponse.Code != http.StatusBadGateway {
-		t.Fatalf("expected ssh session 502, got %d", sshResponse.Code)
+	if unlockResponse.Code != http.StatusBadGateway {
+		t.Fatalf("expected unlock 502, got %d", unlockResponse.Code)
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)

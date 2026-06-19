@@ -56,18 +56,17 @@ async function installMockAttackSfx(page: Page) {
   });
 }
 
-test("participant attacks table applies realtime attack updates to the live slice count", async ({
+test("participant attacks applies realtime attack updates to the live slice", async ({
   page,
   request,
 }) => {
   await page.goto("/attacks");
-  await expect(page.getByRole("link", { name: "Table View" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "#13" })).toHaveCount(0);
 
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "realtime-updates" },
   });
 
-  await page.getByRole("link", { name: "Table View" }).click();
   await expect(page.getByRole("cell", { name: "#13" })).toBeVisible();
 });
 

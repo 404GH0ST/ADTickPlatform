@@ -122,6 +122,9 @@ func (s *Server) handleAdminCreatePlayer(w http.ResponseWriter, r *http.Request)
 		writeDomainFailure(w, err)
 		return
 	}
+	if player.TeamID > 0 {
+		s.reconcileWireGuardGatewayBestEffort(r.Context(), "admin player create")
+	}
 	s.recordAdminAudit(r.Context(), "player.create", "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), "created player", map[string]any{
 		"player_id":   player.ID,
 		"team_id":     player.TeamID,
@@ -217,6 +220,10 @@ func (s *Server) handleAdminRotatePlayerWireGuard(w http.ResponseWriter, r *http
 		writeDomainFailure(w, err)
 		return
 	}
+	if err := s.reconcileWireGuardGateway(r.Context()); err != nil {
+		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway reconcile failed.")
+		return
+	}
 	s.recordAdminAudit(r.Context(), "wireguard.rotate", "player", fmt.Sprintf("player:%d %s", peer.PlayerID, peer.DisplayName), "rotated WireGuard peer", map[string]any{
 		"player_id": peer.PlayerID,
 		"team_id":   peer.TeamID,
@@ -237,6 +244,10 @@ func (s *Server) handleAdminRevokePlayerWireGuard(w http.ResponseWriter, r *http
 	peer, err := s.store.RevokeAdminPlayerWireGuardConfig(r.Context(), playerID, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
+		return
+	}
+	if err := s.reconcileWireGuardGateway(r.Context()); err != nil {
+		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway reconcile failed.")
 		return
 	}
 	s.recordAdminAudit(r.Context(), "wireguard.revoke", "player", fmt.Sprintf("player:%d %s", peer.PlayerID, peer.DisplayName), "revoked WireGuard peer", map[string]any{

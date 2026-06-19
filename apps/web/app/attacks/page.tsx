@@ -3,27 +3,24 @@ import { ParticipantShell } from "@/components/dashboard/participant-shell";
 import { loadDashboardData } from "@/lib/dashboard-data";
 
 export const dynamic = "force-dynamic";
-const MAP_ATTACK_LIMIT = 1000;
 
 export default async function AttacksPage() {
-  const dashboard = await loadDashboardData({
-    attackQuery: { limit: MAP_ATTACK_LIMIT },
-  });
+  const dashboard = await loadDashboardData();
 
   return (
     <ParticipantShell
       activePath="/attacks"
       overview={dashboard.platform}
-      title="Attack Map"
-      description="Dedicated live attack monitoring with the broad accepted-attack feed rendered as a map-first surface."
+      title="Attacks"
+      description="Accepted attack events with shared filters, globe context, pagination, and live updates."
     >
       <ControlCenter
-        attackFocusMode="map"
         attackPage={dashboard.attackPage}
         realtimeBaseUrl={dashboard.platform.realtimeBaseUrl}
         scores={dashboard.scores}
         services={dashboard.services}
         initialTab="attacks"
+        currentTeamName={dashboard.platform.teamName}
         overview={dashboard.platform}
       />
     </ParticipantShell>

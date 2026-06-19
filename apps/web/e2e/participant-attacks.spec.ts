@@ -15,24 +15,21 @@ test.beforeEach(async ({ request }) => {
   await resetMockApi(request);
 });
 
-test("participant attacks defaults to the map view and shows finished-match status", async ({
+test("participant attacks shows one paginated attack surface and finished-match status", async ({
   page,
 }) => {
   await page.goto("/attacks");
 
-  await expect(
-    page.locator("h1", { hasText: "Attack Map" }),
-  ).toBeVisible();
-  await expect(page.getByText("Participant attack map")).toBeVisible();
+  await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
+  await expect(page.getByText("Attack flow")).toBeVisible();
+  await expect(page.getByText("Current slice")).toBeVisible();
   await expect(
     page.getByText(
       "The match has finished at tick #12. Participant submissions are closed.",
     ),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Table View" })).toHaveAttribute(
-    "href",
-    "/attacks/table",
-  );
+  await expect(page.getByRole("link", { name: "Table View" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Map View" })).toHaveCount(0);
 });
 
 test("participant pages warn when the match is stopped but the scheduler still reports running", async ({
@@ -124,18 +121,13 @@ test("participant attack map maximize dialog expands beyond the inline panel and
   ).toBe("auto");
 });
 
-test("participant attack table route remains reachable from the map-first navigation", async ({
+test("participant attack table route redirects to the unified attacks page", async ({
   page,
 }) => {
-  await page.goto("/attacks");
-  await page.getByRole("link", { name: "Table View" }).click();
+  await page.goto("/attacks/table");
 
-  await expect(page).toHaveURL(/\/attacks\/table$/);
+  await expect(page).toHaveURL(/\/attacks$/);
   await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Map View" })).toHaveAttribute(
-    "href",
-    "/attacks",
-  );
   await expect(
     page.getByText("first valid submission accepted").first(),
   ).toBeVisible();
@@ -230,9 +222,6 @@ test("participant service actions update the service card through unlock, ssh, r
       "Participant patching happens directly inside the owned service container.",
     ),
   ).toBeVisible();
-  await expect(
-    sshDialog.getByRole("link", { name: "Download Source Bundle" }),
-  ).toHaveAttribute("href", "/api/platform/challenges/1/source");
   await expect(
     sshDialog.getByText("Use Restart after a live patch"),
   ).toBeVisible();

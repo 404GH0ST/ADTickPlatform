@@ -21,12 +21,10 @@ export function ControlCenter({
   services,
   attackPage,
   realtimeBaseUrl,
-  attackFocusMode = "full",
   initialTab = "scoreboard",
   currentTeamName,
   overview,
 }: ControlCenterOptions & {
-  attackFocusMode?: "full" | "map";
   initialTab?: "scoreboard" | "services" | "attacks";
   currentTeamName?: string;
   overview: PlatformOverview;
@@ -44,7 +42,6 @@ export function ControlCenter({
         attackLiveMode: state.attackLiveMode,
         attackPage: state.attackPageState,
         attackFilters: state.attackFilters,
-        attackFocusMode,
         highlightedAttackIDs: state.highlightedAttackIDs,
         initialTab,
         pendingAction: state.pendingAction,
@@ -92,7 +89,6 @@ export function ControlCenter({
         issuedSession={state.issuedSession}
         open={state.sessionTarget !== null}
         pendingAction={state.pendingAction}
-        target={state.sessionTarget}
         onClose={state.closeSSHSessionDialog}
         onConfirm={() => {
           void state.requestSSHSession();
@@ -116,7 +112,6 @@ function renderControlCenterPanel({
   attackLiveMode,
   attackPage,
   attackFilters,
-  attackFocusMode,
   highlightedAttackIDs,
   initialTab,
   pendingAction,
@@ -149,7 +144,6 @@ function renderControlCenterPanel({
     tickFrom: string;
     tickTo: string;
   };
-  attackFocusMode: "full" | "map";
   highlightedAttackIDs: string[];
   initialTab: "scoreboard" | "services" | "attacks";
   pendingAction: string | null;
@@ -203,7 +197,6 @@ function renderControlCenterPanel({
       highlightedAttackIDs={highlightedAttackIDs}
       attackPage={attackPage}
       attackLiveMode={attackLiveMode}
-      focusMode={attackFocusMode}
       pendingAction={pendingAction}
       onAttackerChange={onSetAttackAttacker}
       onLimitChange={onSetAttackLimit}

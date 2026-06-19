@@ -4,19 +4,15 @@ import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
 
 export const dynamic = 'force-dynamic';
 
-const MAP_ATTACK_LIMIT = 1000;
-
 export default async function AdminAttacksPage() {
-  const dashboard = await loadAdminDashboardData({
-    attackQuery: { limit: MAP_ATTACK_LIMIT },
-  });
+  const dashboard = await loadAdminDashboardData();
 
   return (
     <OrganizerShell
       activePath="/admin/attacks"
       overview={dashboard.overview}
       title="Attacks"
-      description="Dedicated live attack monitoring with the broad accepted-attack feed rendered as a map-first surface."
+      description="Accepted attack events with shared filters, pagination, and live updates."
     >
       <OrganizerDashboard
         attackPage={dashboard.attackPage}

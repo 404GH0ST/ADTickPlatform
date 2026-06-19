@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -75,7 +73,6 @@ type AttacksPanelProps = {
   highlightedAttackIDs: string[];
   attackPage: AttackFeedPage;
   attackLiveMode: boolean;
-  focusMode?: "full" | "map";
   pendingAction: string | null;
   onAttackerChange: (value: string) => void;
   onLimitChange: (value: string) => void;
@@ -105,7 +102,6 @@ type SSHSessionDialogProps = {
   issuedSession: SSHSessionData | null;
   open: boolean;
   pendingAction: string | null;
-  target: ServiceRow | null;
   onClose: () => void;
   onConfirm: () => void;
 };
@@ -305,7 +301,6 @@ export function AttacksPanel({
   highlightedAttackIDs,
   attackPage,
   attackLiveMode,
-  focusMode = "full",
   pendingAction,
   onAttackerChange,
   onLimitChange,
@@ -319,158 +314,127 @@ export function AttacksPanel({
   onPage,
 }: AttacksPanelProps): ReactElement {
   const attackRows = attackPage.items;
-  const isMapFocused = focusMode === "map";
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle>
-              {isMapFocused ? "Attack map" : "Accepted attacks"}
-            </CardTitle>
-            <CardDescription>
-              {isMapFocused
-                ? "Map-first monitoring for the broad live feed. Hover or search to reveal team labels."
-                : "Filter by team, service, and tick range before paging deeper. New live attacks pulse briefly on the map."}
-            </CardDescription>
-          </div>
-          <Button asChild size="sm" variant="outline">
-            <Link href={isMapFocused ? "/attacks/table" : "/attacks"}>
-              {isMapFocused ? "Table View" : "Map View"}
-            </Link>
-          </Button>
-        </div>
+        <CardTitle>Accepted attacks</CardTitle>
+        <CardDescription>
+          Filter by team, service, and tick range. The globe and table share the
+          same paginated attack slice.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isMapFocused ? (
-          <div className="flex flex-wrap gap-2 border-b pb-4">
-            <Badge variant="outline">
-              Loaded {attackRows.length} of {attackPage.total_count} attack(s)
-            </Badge>
-            <Badge variant="outline">Broad feed</Badge>
-            {attackLiveMode ? <Badge variant="outline">Live stream</Badge> : null}
+        <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+            <Field label="Attacker" htmlFor="attack-attacker">
+              <Input
+                id="attack-attacker"
+                value={attackFilters.attacker}
+                onChange={(event) => onAttackerChange(event.target.value)}
+                placeholder="Team Alpha"
+              />
+            </Field>
+            <Field label="Victim" htmlFor="attack-victim">
+              <Input
+                id="attack-victim"
+                value={attackFilters.victim}
+                onChange={(event) => onVictimChange(event.target.value)}
+                placeholder="Team Delta"
+              />
+            </Field>
+            <Field label="Service" htmlFor="attack-service">
+              <Input
+                id="attack-service"
+                value={attackFilters.service}
+                onChange={(event) => onServiceChange(event.target.value)}
+                placeholder="banking"
+              />
+            </Field>
+            <Field label="Tick From" htmlFor="attack-tick-from">
+              <Input
+                id="attack-tick-from"
+                type="number"
+                min="0"
+                value={attackFilters.tickFrom}
+                onChange={(event) => onTickFromChange(event.target.value)}
+                placeholder="240"
+              />
+            </Field>
+            <Field label="Tick To" htmlFor="attack-tick-to">
+              <Input
+                id="attack-tick-to"
+                type="number"
+                min="0"
+                value={attackFilters.tickTo}
+                onChange={(event) => onTickToChange(event.target.value)}
+                placeholder="248"
+              />
+            </Field>
+            <Field label="Limit" htmlFor="attack-limit">
+              <Input
+                id="attack-limit"
+                type="number"
+                min="1"
+                max="200"
+                value={attackFilters.limit}
+                onChange={(event) => onLimitChange(event.target.value)}
+              />
+            </Field>
+            <Field label="Offset" htmlFor="attack-offset">
+              <Input
+                id="attack-offset"
+                type="number"
+                min="0"
+                value={attackFilters.offset}
+                onChange={(event) => onOffsetChange(event.target.value)}
+              />
+            </Field>
           </div>
-        ) : (
-          <>
-            <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
-                <Field label="Attacker" htmlFor="attack-attacker">
-                  <Input
-                    id="attack-attacker"
-                    value={attackFilters.attacker}
-                    onChange={(event) => onAttackerChange(event.target.value)}
-                    placeholder="Team Alpha"
-                  />
-                </Field>
-                <Field label="Victim" htmlFor="attack-victim">
-                  <Input
-                    id="attack-victim"
-                    value={attackFilters.victim}
-                    onChange={(event) => onVictimChange(event.target.value)}
-                    placeholder="Team Delta"
-                  />
-                </Field>
-                <Field label="Service" htmlFor="attack-service">
-                  <Input
-                    id="attack-service"
-                    value={attackFilters.service}
-                    onChange={(event) => onServiceChange(event.target.value)}
-                    placeholder="banking"
-                  />
-                </Field>
-                <Field label="Tick From" htmlFor="attack-tick-from">
-                  <Input
-                    id="attack-tick-from"
-                    type="number"
-                    min="0"
-                    value={attackFilters.tickFrom}
-                    onChange={(event) => onTickFromChange(event.target.value)}
-                    placeholder="240"
-                  />
-                </Field>
-                <Field label="Tick To" htmlFor="attack-tick-to">
-                  <Input
-                    id="attack-tick-to"
-                    type="number"
-                    min="0"
-                    value={attackFilters.tickTo}
-                    onChange={(event) => onTickToChange(event.target.value)}
-                    placeholder="248"
-                  />
-                </Field>
-                <Field label="Limit" htmlFor="attack-limit">
-                  <Input
-                    id="attack-limit"
-                    type="number"
-                    min="1"
-                    max="200"
-                    value={attackFilters.limit}
-                    onChange={(event) => onLimitChange(event.target.value)}
-                  />
-                </Field>
-                <Field label="Offset" htmlFor="attack-offset">
-                  <Input
-                    id="attack-offset"
-                    type="number"
-                    min="0"
-                    value={attackFilters.offset}
-                    onChange={(event) => onOffsetChange(event.target.value)}
-                  />
-                </Field>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <SliceCountBadge
-                  totalCount={attackPage.total_count}
-                  visibleCount={attackRows.length}
-                />
-                <LiveModeBadge
-                  filteredLabel="Filtered"
-                  liveLabel="Live"
-                  liveMode={attackLiveMode}
-                />
-              </div>
-            </div>
-            <PagedFilterActions
-              applyLabel="Apply Filters"
-              canPageNext={attackPage.has_next}
-              canPagePrev={attackPage.has_prev}
-              disabled={pendingAction !== null}
-              liveMode={attackLiveMode}
-              onApply={onApplyFilters}
-              onPage={onPage}
-              onReset={onResetFilters}
-              resetLabel="Reset View"
-              showLiveModeBadge={false}
+          <div className="flex flex-wrap gap-2">
+            <SliceCountBadge
+              totalCount={attackPage.total_count}
+              visibleCount={attackRows.length}
             />
-          </>
-        )}
+            <LiveModeBadge
+              filteredLabel="Filtered"
+              liveLabel="Live"
+              liveMode={attackLiveMode}
+            />
+          </div>
+        </div>
+        <PagedFilterActions
+          applyLabel="Apply Filters"
+          canPageNext={attackPage.has_next}
+          canPagePrev={attackPage.has_prev}
+          disabled={pendingAction !== null}
+          liveMode={attackLiveMode}
+          onApply={onApplyFilters}
+          onPage={onPage}
+          onReset={onResetFilters}
+          resetLabel="Reset View"
+          showLiveModeBadge={false}
+        />
+        <AttackSliceSummaryGrid rows={attackRows} />
         <AttackMapPanel
           attackRows={attackRows}
-          description={
-            isMapFocused
-              ? "Accepted submissions rendered as directional team flow for the current participant slice."
-              : undefined
-          }
+          description="Accepted submissions rendered as directional team flow for the current paginated slice."
           highlightedAttackIDs={highlightedAttackIDs}
-          title={isMapFocused ? "Participant attack map" : undefined}
+          title="Attack flow"
         />
-        {isMapFocused ? <AttackSliceSummaryGrid rows={attackRows} /> : null}
 
         {attackRows.length === 0 ? (
           <EmptyStateText message="No accepted attack events are available for this slice." />
         ) : (
           <div className="space-y-3">
-            {isMapFocused ? (
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-foreground">
-                  Current feed
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Table stays aligned to the same broad live feed as the map.
-                </p>
-              </div>
-            ) : null}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-foreground">
+                Current slice
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Table and globe show the same filtered page.
+              </p>
+            </div>
             <AttackFeedTable attackRows={attackRows} />
           </div>
         )}
@@ -531,7 +495,6 @@ export function SSHSessionDialog({
   issuedSession,
   open,
   pendingAction,
-  target,
   onClose,
   onConfirm,
 }: SSHSessionDialogProps): ReactElement {
@@ -562,10 +525,7 @@ export function SSHSessionDialog({
             </div>
           ) : null}
           {issuedSession ? (
-            <IssuedRootCredentialBlock
-              issuedSession={issuedSession}
-              target={target}
-            />
+            <IssuedRootCredentialBlock issuedSession={issuedSession} />
           ) : null}
         </div>
       }
@@ -875,10 +835,8 @@ function ServiceTargetBlock({
 
 function IssuedRootCredentialBlock({
   issuedSession,
-  target,
 }: {
   issuedSession: SSHSessionData;
-  target: ServiceRow | null;
 }): ReactElement {
   return (
     <div className="space-y-4">
@@ -893,17 +851,15 @@ function IssuedRootCredentialBlock({
           valueClassName="font-mono"
         />
       </InfoPanel>
-      <PatchWorkflowBlock issuedSession={issuedSession} target={target} />
+      <PatchWorkflowBlock issuedSession={issuedSession} />
     </div>
   );
 }
 
 function PatchWorkflowBlock({
   issuedSession,
-  target,
 }: {
   issuedSession: SSHSessionData;
-  target: ServiceRow | null;
 }): ReactElement {
   return (
     <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-4">
@@ -915,22 +871,11 @@ function PatchWorkflowBlock({
         Participant patching happens directly inside the owned service
         container. There is no participant image redeploy path.
       </p>
-      {target?.hasSourceDownload ? (
-        <Button asChild size="sm" variant="outline">
-          <a
-            href={`/api/platform/challenges/${target.challengeId}/source`}
-            download
-          >
-            <Download className="h-4 w-4" />
-            Download Source Bundle
-          </a>
-        </Button>
-      ) : null}
       <ol className="space-y-2 text-sm text-muted-foreground">
         <li>
-          <span className="font-medium text-foreground">1.</span> Review the
-          whitebox source bundle and identify the file or config you need to
-          change.
+          <span className="font-medium text-foreground">1.</span> Use the
+          service card source download and identify the file or config you need
+          to change.
         </li>
         <li>
           <span className="font-medium text-foreground">2.</span> Connect with{" "}
