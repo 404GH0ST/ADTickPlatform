@@ -169,6 +169,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
   }, [overview.nextTickAt]);
 
   const isSchedulerRunning = overview.schedulerState?.toLowerCase() === "running";
+  const isPaused = overview.matchState?.toLowerCase() === "paused" || overview.schedulerState?.toLowerCase() === "paused";
 
   return (
     <Card className="border border-border/70 bg-card shadow-sm">
@@ -179,6 +180,14 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
         </div>
       </CardHeader>
       <CardContent>
+        {isPaused && (
+          <div className="mb-4">
+            <StatusBanner
+              message="The game scheduler is currently paused. Tick progression and checker runs are temporarily suspended."
+              variant="warning"
+            />
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
             <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -194,9 +203,9 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
               <RefreshCw className="h-3.5 w-3.5" /> Scheduler State
             </dt>
             <dd className="mt-1.5 text-lg font-semibold flex items-center gap-2">
-              <span className={`inline-block h-2 w-2 rounded-full ${isSchedulerRunning ? 'bg-positive animate-pulse' : 'bg-negative'}`} />
-              <span className={isSchedulerRunning ? 'text-positive' : 'text-negative'}>
-                {overview.schedulerState || "inactive"}
+              <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-highlight' : isSchedulerRunning ? 'bg-positive animate-pulse' : 'bg-negative'}`} />
+              <span className={isPaused ? 'text-highlight' : isSchedulerRunning ? 'text-positive' : 'text-negative'}>
+                {isPaused ? "paused" : (overview.schedulerState || "inactive")}
               </span>
             </dd>
           </div>
@@ -215,8 +224,14 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
               <Timer className="h-3.5 w-3.5" /> Next Tick Countdown
             </dt>
             <dd className="mt-1.5 text-2xl font-mono font-bold tracking-tight text-highlight">
-              {timeLeft !== null ? `${timeLeft}s` : "—"}
-              {overview.tickInterval && (
+              {isPaused ? (
+                <span className="text-sm font-sans font-semibold text-muted-foreground">Suspended (Paused)</span>
+              ) : timeLeft !== null ? (
+                `${timeLeft}s`
+              ) : (
+                "—"
+              )}
+              {!isPaused && overview.tickInterval && (
                 <span className="text-xs font-sans font-medium text-muted-foreground ml-1.5">
                   (interval: {overview.tickInterval}s)
                 </span>
