@@ -870,6 +870,8 @@ export function CyberAttackMap({
         .${haloClassName}-fresh {
           animation: ${haloClassName}-fresh 1.8s cubic-bezier(0.22, 1, 0.36, 1) 2;
         }
+        [data-attack-arc-hit]:focus,
+        [data-attack-team-hit]:focus,
         [data-attack-arc-hit]:focus-visible,
         [data-attack-team-hit]:focus-visible {
           outline: none;
