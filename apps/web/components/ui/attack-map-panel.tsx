@@ -351,6 +351,9 @@ export function AttackMapPanel({
     if (selectedTickValue === 0) {
       return;
     }
+    if (viewMode === 'all') {
+      setViewMode('current');
+    }
     replayTick(selectedTickValue);
   }
 
@@ -358,10 +361,23 @@ export function AttackMapPanel({
     if (selectedTickValue === 0) {
       return;
     }
+    if (viewMode === 'all') {
+      setViewMode('current');
+    }
     setSelectedTick((current) =>
       getAdjacentTick(tickValues, current ?? latestTick, direction),
     );
   }
+
+  const togglePlayback = useCallback(() => {
+    setPlaybackRunning((current) => {
+      const next = !current;
+      if (next && viewMode === 'all') {
+        setViewMode('current');
+      }
+      return next;
+    });
+  }, [viewMode]);
 
   function renderInspector(): ReactElement {
     if (inspectedAttack) {
@@ -674,7 +690,7 @@ export function AttackMapPanel({
                 size="touch"
                 variant="outline"
                 disabled={tickValues.length < 2}
-                onClick={() => setPlaybackRunning((current) => !current)}
+                onClick={togglePlayback}
               >
                 {playbackRunning ? (
                   <Pause className="h-4 w-4" />
