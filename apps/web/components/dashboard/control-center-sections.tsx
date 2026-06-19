@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Download, LoaderCircle, Wrench, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
@@ -149,6 +150,7 @@ export function ScoreboardPanel({
 
 function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     if (!overview.nextTickAt) {
@@ -167,6 +169,20 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, [overview.nextTickAt]);
+
+  useEffect(() => {
+    if (timeLeft !== 0 || !overview.nextTickAt) {
+      return;
+    }
+
+    router.refresh();
+
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [timeLeft, overview.nextTickAt, router]);
 
   const isSchedulerRunning = overview.schedulerState?.toLowerCase() === "running";
   const isPaused = overview.matchState?.toLowerCase() === "paused" || overview.schedulerState?.toLowerCase() === "paused";

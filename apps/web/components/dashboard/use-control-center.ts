@@ -95,6 +95,14 @@ export function useControlCenter({
   );
   const [rows, setRows] = useState<ServiceRow[]>(services);
   const [scoreRows, setScoreRows] = useState<ScoreRow[]>(scores);
+
+  useEffect(() => {
+    setRows(services);
+  }, [services]);
+
+  useEffect(() => {
+    setScoreRows(scores);
+  }, [scores]);
   const [attackPageState, setAttackPageState] = useState<AttackFeedPage>(attackPage);
   const [proof, setProof] = useState('unlock-proof-from-own-service');
   const [unlockTarget, setUnlockTarget] = useState<ServiceRow | null>(null);
