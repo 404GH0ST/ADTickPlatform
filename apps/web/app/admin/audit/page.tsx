@@ -73,8 +73,12 @@ function buildPageHref(
 }
 
 function toneForStatus(status: string) {
-  if (status === "success") {
+  const norm = status.trim().toLowerCase();
+  if (norm === "success") {
     return "tone-success";
+  }
+  if (norm === "fail" || norm === "failed" || norm === "error") {
+    return "tone-danger";
   }
   return "tone-neutral";
 }

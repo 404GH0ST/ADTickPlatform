@@ -572,10 +572,28 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
   return (
     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <DetailRow label="Challenge" value={`#${service.challengeId}`} />
-      <DetailRow label="Checker" value={service.checker} />
+      <DetailRow
+        label="Checker"
+        value={
+          service.checker === "passing" ? (
+            <span className="font-semibold text-positive">passing</span>
+          ) : (
+            <span className="font-semibold text-negative">warning (failing)</span>
+          )
+        }
+      />
       <DetailRow label="Service state" value={formatSLAState(service)} />
       <DetailRow label="Reset" value={service.resetCooldown} />
-      <DetailRow label="SSH" value={service.unlocked ? "unlocked" : "locked"} />
+      <DetailRow
+        label="SSH"
+        value={
+          service.unlocked ? (
+            <span className="font-semibold text-positive">unlocked</span>
+          ) : (
+            <span className="text-muted-foreground">locked</span>
+          )
+        }
+      />
       <DetailRow label="Last event" value={service.lastEvent} />
       <DetailRow label="SLA detail" value={service.slaMessage} wide />
       <DetailRow label="Access hint" value={service.sshHint} wide />
@@ -583,7 +601,7 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
   );
 }
 
-function formatSLAState(service: ServiceRow): string {
+function formatSLAState(service: ServiceRow): ReactNode {
   const status = service.slaStatus;
   const phase = formatSLAPhaseLabel(service.slaPhase);
   const tick = service.slaTickId;
@@ -592,32 +610,56 @@ function formatSLAState(service: ServiceRow): string {
 
   switch (status) {
     case "ok":
-      return `ok${tickSuffix}`;
+      return <span className="font-semibold text-positive">ok{tickSuffix}</span>;
     case "recovering":
       if (phase) {
-        return `recovering after ${phase}${tickSuffix}`;
+        return (
+          <span className="font-semibold text-highlight">
+            recovering after {phase}
+            {tickSuffix}
+          </span>
+        );
       }
-      return `recovering${tickSuffix}`;
+      return <span className="font-semibold text-highlight">recovering{tickSuffix}</span>;
     case "flag_not_found":
       if (phase) {
-        return `flag not found during ${phase}${tickSuffix}`;
+        return (
+          <span className="font-semibold text-negative">
+            flag not found during {phase}
+            {tickSuffix}
+          </span>
+        );
       }
-      return `flag not found${tickSuffix}`;
+      return <span className="font-semibold text-negative">flag not found{tickSuffix}</span>;
     case "faulty":
       if (phase) {
-        return `faulty during ${phase}${tickSuffix}`;
+        return (
+          <span className="font-semibold text-negative">
+            faulty during {phase}
+            {tickSuffix}
+          </span>
+        );
       }
-      return `faulty${tickSuffix}`;
+      return <span className="font-semibold text-negative">faulty{tickSuffix}</span>;
     case "down":
       if (phase) {
-        return `down during ${phase}${tickSuffix}`;
+        return (
+          <span className="font-semibold text-negative">
+            down during {phase}
+            {tickSuffix}
+          </span>
+        );
       }
-      return `down${tickSuffix}`;
+      return <span className="font-semibold text-negative">down{tickSuffix}</span>;
     default:
       if (tick) {
-        return `awaiting detail after tick #${tick}`;
+        return (
+          <span className="text-muted-foreground">
+            awaiting detail after tick #{tick}
+          </span>
+        );
       }
-      return "awaiting checker detail";
+      return <span className="text-muted-foreground">awaiting checker detail</span>;
   }
 }
 
@@ -813,7 +855,7 @@ function DetailRow({
   wide = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   wide?: boolean;
 }): ReactElement {
   return (

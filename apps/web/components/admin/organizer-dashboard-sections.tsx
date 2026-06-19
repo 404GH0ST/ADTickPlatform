@@ -4662,11 +4662,15 @@ function Field({
 function getChallengeRuntimeTone(
   status: AdminChallenge["runtime_status"],
 ): string {
-  if (status === "ready") {
+  const norm = (status ?? "").trim().toLowerCase();
+  if (norm === "ready") {
     return challengeTone.ready;
   }
-  if (status === "deploying") {
+  if (norm === "deploying") {
     return challengeTone.deploying;
+  }
+  if (norm === "failed" || norm === "error" || norm === "degraded") {
+    return "tone-danger";
   }
   return challengeTone.draft;
 }
@@ -4685,26 +4689,34 @@ function getValidationStatusTone(status: string): string {
 }
 
 function getGatewayTone(state: string | undefined): string {
-  if (state === "applied") {
+  const norm = (state ?? "").trim().toLowerCase();
+  if (norm === "applied" || norm === "success") {
     return gatewayTone.applied;
   }
-  if (state === "error") {
+  if (norm === "error" || norm === "failed" || norm === "degraded") {
     return gatewayTone.error;
   }
-  if (state === "disabled") {
+  if (norm === "disabled") {
     return gatewayTone.disabled;
   }
   return gatewayTone.idle;
 }
 
 function getTickStatusTone(status: string): string {
-  if (status === "completed") {
+  const norm = (status ?? "").trim().toLowerCase();
+  if (norm === "completed" || norm === "success") {
     return challengeTone.ready;
   }
-  if (status === "running") {
+  if (norm === "running" || norm === "deploying") {
     return challengeTone.deploying;
   }
-  return validationTone.invalid;
+  if (norm === "failed" || norm === "error" || norm === "degraded") {
+    return "tone-danger";
+  }
+  if (norm === "queued" || norm === "pending" || norm === "draft" || norm === "reconciling") {
+    return "tone-warning";
+  }
+  return "tone-neutral";
 }
 
 function getCheckerRunStatusTone(status: string): string {

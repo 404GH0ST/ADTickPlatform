@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { StatusBanner } from '@/components/ui/status-banner';
 import type {
@@ -20,7 +21,7 @@ function SummaryItem({
   testId,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
   testId?: string;
 }) {
@@ -102,9 +103,24 @@ export function OrganizerStatusSummary({ overview }: Props) {
           />
           <SummaryItem
             label="Pending Deployments"
-            value={String(overview.pendingDeploymentCount)}
+            value={
+              overview.pendingDeploymentCount > 0 ? (
+                <span className="text-highlight">{overview.pendingDeploymentCount}</span>
+              ) : (
+                String(overview.pendingDeploymentCount)
+              )
+            }
           />
-          <SummaryItem label="Ops Alerts" value={String(operationsAlertCount)} />
+          <SummaryItem
+            label="Ops Alerts"
+            value={
+              operationsAlertCount > 0 ? (
+                <span className="text-negative">{operationsAlertCount}</span>
+              ) : (
+                String(operationsAlertCount)
+              )
+            }
+          />
           <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
           <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
         </dl>

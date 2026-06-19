@@ -92,7 +92,16 @@ export function ParticipantShell({
                   : 'Not Signed In'
               }
             />
-            <SummaryItem label="API Status" value={overview.source === 'live' ? 'Live' : 'Degraded'} />
+            <SummaryItem
+              label="API Status"
+              value={
+                overview.source === "live" ? (
+                  <span className="text-positive">Live</span>
+                ) : (
+                  <span className="text-negative">Degraded</span>
+                )
+              }
+            />
             <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
             <SummaryItem label="Realtime" value={overview.realtimeBaseUrl} mono />
           </dl>
@@ -137,7 +146,7 @@ function SummaryItem({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }) {
   return (
