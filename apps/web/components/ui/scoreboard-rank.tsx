@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { ChevronDown, ChevronUp, Star } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 type Props = {
   rank: number;
@@ -25,14 +25,20 @@ export function ScoreboardRank({
       className="flex items-center gap-2"
       aria-label={`Rank ${rank}, ${describeDelta(delta)}${isCurrentTeam ? ", current team" : ""}`}
     >
-      <div className="flex w-6 items-center justify-center">
-        {isCurrentTeam ? (
-          <Star className="text-highlight h-4 w-4 fill-current" />
+      {/* Rank Medal or Number */}
+      <div className="flex w-8 items-center justify-center">
+        {rank === 1 ? (
+          <span className="text-xl" title="Gold Medal" role="img" aria-label="gold medal">🥇</span>
+        ) : rank === 2 ? (
+          <span className="text-xl" title="Silver Medal" role="img" aria-label="silver medal">🥈</span>
+        ) : rank === 3 ? (
+          <span className="text-xl" title="Bronze Medal" role="img" aria-label="bronze medal">🥉</span>
         ) : (
-          <Star className="h-4 w-4 text-muted-foreground/20" />
+          <span className="text-sm font-bold text-muted-foreground">{rank}</span>
         )}
       </div>
 
+      {/* Rank Delta */}
       <div className="flex w-12 items-center justify-center gap-0.5 font-mono text-xs font-bold">
         {isUp && (
           <>
@@ -52,10 +58,6 @@ export function ScoreboardRank({
             New
           </span>
         )}
-      </div>
-
-      <div className="flex w-8 justify-end pr-1">
-        <span className="text-base font-semibold">#{rank}</span>
       </div>
     </div>
   );

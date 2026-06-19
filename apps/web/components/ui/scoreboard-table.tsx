@@ -374,7 +374,7 @@ function MobileScoreboardCards({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-muted-foreground">
-                  #{score.rank}
+                  {score.rank === 1 ? "🥇" : score.rank === 2 ? "🥈" : score.rank === 3 ? "🥉" : `#${score.rank}`}
                 </p>
                 <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary")}>
                   {score.team}
