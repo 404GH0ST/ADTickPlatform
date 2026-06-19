@@ -570,7 +570,7 @@ export function AttackMapPanel({
                 </Button>
                 <input
                   aria-label="Attack sound volume"
-                  className="hidden h-7 w-20 accent-primary disabled:opacity-40 2xl:block"
+                  className="hidden h-7 w-20 accent-primary disabled:opacity-40 sm:block"
                   disabled={!attackSfx.enabled}
                   max="1"
                   min="0"
@@ -581,7 +581,7 @@ export function AttackMapPanel({
                 />
                 <Button
                   aria-label="Test attack sound"
-                  className="hidden h-7 px-2 text-xs 2xl:inline-flex"
+                  className="hidden h-7 px-2 text-xs sm:inline-flex"
                   disabled={!attackSfx.enabled}
                   size="sm"
                   title="Test attack sound"
