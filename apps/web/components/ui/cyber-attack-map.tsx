@@ -133,6 +133,7 @@ const MAX_ROTATION_LAT = 62;
 const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
 const FRESH_ATTACK_FLY_MS = 1_500;
+const FRESH_FRAME_DEBOUNCE_MS = 350;
 const DEFAULT_LABEL_LIMIT = 10;
 const DENSE_KEYBOARD_ITEM_LIMIT = 28;
 const PACKET_ANIMATION_ROUTE_LIMIT = 80;
@@ -207,6 +208,7 @@ export function CyberAttackMap({
   const featuredAttackPausedRef = useRef(false);
   const previousAttackIdsRef = useRef<Set<string> | null>(null);
   const freshAttackTimersRef = useRef<Map<string, number>>(new Map());
+  const freshFrameTimeoutRef = useRef<number | null>(null);
   const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
   const idleTimeoutRef = useRef<number | null>(null);
   const lastActivityRef = useRef(0);
@@ -392,6 +394,27 @@ export function CyberAttackMap({
       );
     });
 
+    const latestFreshId = freshIds[freshIds.length - 1];
+    if (freshFrameTimeoutRef.current !== null) {
+      window.clearTimeout(freshFrameTimeoutRef.current);
+    }
+    freshFrameTimeoutRef.current = window.setTimeout(() => {
+      freshFrameTimeoutRef.current = null;
+      if (featuredAttackIntervalRef.current === null || dragRef.current !== null) {
+        return;
+      }
+      const target = attacks.find((attack) => attack.id === latestFreshId);
+      if (!target) {
+        return;
+      }
+      featureAttack(target, true);
+      window.clearInterval(featuredAttackIntervalRef.current);
+      featuredAttackIntervalRef.current = window.setInterval(
+        featureNextAttack,
+        FEATURED_ATTACK_STEP_MS,
+      );
+    }, FRESH_FRAME_DEBOUNCE_MS);
+
     return undefined;
   }, [attacks]);
 
@@ -400,6 +423,10 @@ export function CyberAttackMap({
     return () => {
       timers.forEach((handle) => window.clearTimeout(handle));
       timers.clear();
+      if (freshFrameTimeoutRef.current !== null) {
+        window.clearTimeout(freshFrameTimeoutRef.current);
+        freshFrameTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -1768,6 +1795,8 @@ function getFeaturedAttackRotation(
     midpoint.lon,
     getMidLongitude(attacker.lon, midpoint.lon),
     getMidLongitude(midpoint.lon, victim.lon),
+    victim.lon,
+    attacker.lon,
   ];
   const lonCandidates = Array.from(new Set(
     lonAnchors.flatMap((lon) => [-42, -28, -16, 0, 16, 28, 42].map((offset) => (
