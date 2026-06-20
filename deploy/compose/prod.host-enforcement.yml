@@ -66,3 +66,7 @@ services:
       WIREGUARD_GATEWAY_NFT_BIN: ${WIREGUARD_GATEWAY_NFT_BIN:-nft}
       WIREGUARD_GATEWAY_FIREWALL_TABLE: ${WIREGUARD_GATEWAY_FIREWALL_TABLE:-adplatform_wireguard}
       WIREGUARD_GATEWAY_APPLY_TIMEOUT: ${WIREGUARD_GATEWAY_APPLY_TIMEOUT:-10s}
+
+  prometheus:
+    extra_hosts:
+      - host.docker.internal:host-gateway

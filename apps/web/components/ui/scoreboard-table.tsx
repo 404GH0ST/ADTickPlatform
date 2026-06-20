@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyTableRow } from "@/components/ui/empty-state";
-import { ScoreboardRank } from "@/components/ui/scoreboard-rank";
+import { ScoreboardRank, RankBadge } from "@/components/ui/scoreboard-rank";
 import { cn } from "@/lib/utils";
 
 export type ScoreboardServiceRow = {
@@ -127,73 +127,53 @@ function ServiceCell({
 }): ReactElement {
   if (!value) {
     return (
-      <div className="flex h-10 items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-[11px] text-muted-foreground/35 select-none">
+      <div className="flex h-16 items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-muted-foreground/35 select-none">
         —
       </div>
     );
   }
 
+  const totalTone = scoreTone(value.total);
   const isPositive = value.total > 0;
   const isNegative = value.total < 0;
 
   return (
-    <div className="group relative">
-      {/* Dense operational visual wrapper */}
-      <div
-        className={cn(
-          "flex h-10 flex-col justify-center rounded-sm border px-2.5 transition-colors cursor-help",
-          isPositive && "bg-positive/5 border-positive/30 hover:bg-positive/10",
-          isNegative && "bg-negative/5 border-negative/30 hover:bg-negative/10",
-          !isPositive && !isNegative && "bg-muted/15 border-border/30 hover:bg-muted/25"
-        )}
-        aria-label={`Service ${value.service}: total ${compactNumber(value.total)}, attack ${compactNumber(value.attack)}, defense ${compactNumber(value.defense)}, SLA ${compactNumber(value.sla)}%. Hover for details.`}
-      >
-        <div className="flex items-center justify-between gap-1.5 font-mono text-[11px]">
-          <span className={cn("font-semibold", scoreTone(value.total, "text-muted-foreground"))}>
-            {value.total > 0 ? "+" : ""}
-            {compactNumber(value.total)}
-          </span>
-          <span className="text-[10px] text-muted-foreground/60">
-            {value.sla.toFixed(0)}%
-          </span>
-        </div>
-      </div>
-
-      {/* Tooltip Overlay */}
-      <div className="absolute bottom-full left-1/2 z-50 mb-2 w-48 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition-all duration-150 rounded-sm border border-border/80 bg-card p-3 shadow-md">
-        <div className="space-y-2">
-          <p className="border-b border-border/60 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            {value.service} Metrics
-          </p>
-          <MetricLine
-            icon={<Flame className="h-3.5 w-3.5" />}
-            label="Attack"
-            shortLabel="A"
-            tone={scoreTone(value.attack)}
-            value={value.attack}
-          />
-          <MetricLine
-            icon={<Shield className="h-3.5 w-3.5" />}
-            label="Defense"
-            shortLabel="D"
-            tone={scoreTone(value.defense)}
-            value={value.defense}
-          />
-          <MetricLine
-            icon={<Gauge className="h-3.5 w-3.5" />}
-            label="SLA"
-            shortLabel="SLA"
-            tone={scoreTone(value.sla, "text-muted-foreground")}
-            value={value.sla}
-          />
-          <div className="border-t border-border/60 pt-1.5 flex justify-between text-[11px] font-mono font-bold">
-            <span className="text-muted-foreground">Total:</span>
-            <span className={scoreTone(value.total)}>
-              {value.total > 0 ? "+" : ""}
-              {compactNumber(value.total)}
-            </span>
-          </div>
-        </div>
+    <div
+      className={cn(
+        "flex flex-col gap-1 rounded-sm border p-2 transition-colors",
+        isPositive && "bg-positive/5 border-positive/30 hover:bg-positive/10",
+        isNegative && "bg-negative/5 border-negative/30 hover:bg-negative/10",
+        !isPositive && !isNegative && "bg-muted/15 border-border/30 hover:bg-muted/25"
+      )}
+      aria-label={`Service ${value.service}: total ${compactNumber(value.total)}, attack ${compactNumber(value.attack)}, defense ${compactNumber(value.defense)}, SLA ${compactNumber(value.sla)}%`}
+    >
+      <MetricLine
+        icon={<Flame className="h-3.5 w-3.5" />}
+        label="Attack"
+        shortLabel="A"
+        tone={scoreTone(value.attack)}
+        value={value.attack}
+      />
+      <MetricLine
+        icon={<Shield className="h-3.5 w-3.5" />}
+        label="Defense"
+        shortLabel="D"
+        tone={scoreTone(value.defense)}
+        value={value.defense}
+      />
+      <MetricLine
+        icon={<Gauge className="h-3.5 w-3.5" />}
+        label="SLA"
+        shortLabel="SLA"
+        tone={scoreTone(value.sla, "text-muted-foreground")}
+        value={value.sla}
+      />
+      <div className="border-t border-border/60 pt-1 flex justify-between text-[11px] font-mono font-bold">
+        <span className="text-muted-foreground">Total:</span>
+        <span className={totalTone}>
+          {value.total > 0 ? "+" : ""}
+          {compactNumber(value.total)}
+        </span>
       </div>
     </div>
   );
@@ -502,9 +482,9 @@ function MobileScoreboardCards({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-semibold text-muted-foreground">
-                  {score.rank === 1 ? "🥇" : score.rank === 2 ? "🥈" : score.rank === 3 ? "🥉" : `#${score.rank}`}
-                </p>
+                <div className="mb-1.5 flex items-center">
+                  <RankBadge rank={score.rank} />
+                </div>
                 <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary")}>
                   {score.team}
                 </p>

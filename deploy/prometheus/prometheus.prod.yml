@@ -34,12 +34,21 @@ scrape_configs:
           - game-core:8081
           - submission-service:8082
           - checker-runner:8083
-          - controller-service:8084
+          - host.docker.internal:18084
           - scoring-worker:8085
           - realtime-gateway:8086
-          - wireguard-gateway:8087
+          - host.docker.internal:18087
         labels:
           cluster: adplatform-prod
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'host\.docker\.internal:18084'
+        target_label: instance
+        replacement: 'controller-service:8084'
+      - source_labels: [__address__]
+        regex: 'host\.docker\.internal:18087'
+        target_label: instance
+        replacement: 'wireguard-gateway:8087'
 
   - job_name: adplatform-rate-limit
     metrics_path: /internal/v1/rate-limit/metrics

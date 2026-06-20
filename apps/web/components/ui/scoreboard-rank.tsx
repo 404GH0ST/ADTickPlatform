@@ -9,6 +9,42 @@ type Props = {
   isCurrentTeam?: boolean;
 };
 
+export function RankBadge({ rank }: { rank: number }): ReactElement {
+  if (rank === 1) {
+    return (
+      <div
+        className="flex h-5 w-5 items-center justify-center rounded-sm bg-amber-500/10 text-[10px] font-extrabold uppercase tracking-wider text-amber-500 border border-amber-500/30 select-none shadow-sm font-mono"
+        title="1st Place (Gold)"
+      >
+        1
+      </div>
+    );
+  }
+  if (rank === 2) {
+    return (
+      <div
+        className="flex h-5 w-5 items-center justify-center rounded-sm bg-slate-400/10 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 border border-slate-400/30 select-none shadow-sm font-mono"
+        title="2nd Place (Silver)"
+      >
+        2
+      </div>
+    );
+  }
+  if (rank === 3) {
+    return (
+      <div
+        className="flex h-5 w-5 items-center justify-center rounded-sm bg-orange-600/10 text-[10px] font-extrabold uppercase tracking-wider text-orange-600 border border-orange-600/30 select-none shadow-sm font-mono"
+        title="3rd Place (Bronze)"
+      >
+        3
+      </div>
+    );
+  }
+  return (
+    <span className="text-xs font-mono font-bold text-muted-foreground/80">#{rank}</span>
+  );
+}
+
 export function ScoreboardRank({
   rank,
   delta,
@@ -27,15 +63,7 @@ export function ScoreboardRank({
     >
       {/* Rank Medal or Number */}
       <div className="flex w-8 items-center justify-center">
-        {rank === 1 ? (
-          <span className="text-xl" title="Gold Medal" role="img" aria-label="gold medal">🥇</span>
-        ) : rank === 2 ? (
-          <span className="text-xl" title="Silver Medal" role="img" aria-label="silver medal">🥈</span>
-        ) : rank === 3 ? (
-          <span className="text-xl" title="Bronze Medal" role="img" aria-label="bronze medal">🥉</span>
-        ) : (
-          <span className="text-sm font-bold text-muted-foreground">{rank}</span>
-        )}
+        <RankBadge rank={rank} />
       </div>
 
       {/* Rank Delta */}
