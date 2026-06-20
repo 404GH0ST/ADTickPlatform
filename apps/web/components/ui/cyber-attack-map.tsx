@@ -132,6 +132,7 @@ const GLOBE_RADIUS = 256;
 const MAX_ROTATION_LAT = 62;
 const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
+const FRESH_ATTACK_FLY_MS = 1_500;
 const DEFAULT_LABEL_LIMIT = 10;
 const DENSE_KEYBOARD_ITEM_LIMIT = 28;
 const PACKET_ANIMATION_ROUTE_LIMIT = 80;
@@ -205,7 +206,7 @@ export function CyberAttackMap({
   const featuredAttackIdRef = useRef<string | null>(featuredAttackId);
   const featuredAttackPausedRef = useRef(false);
   const previousAttackIdsRef = useRef<Set<string> | null>(null);
-  const freshAttackTimeoutRef = useRef<number | null>(null);
+  const freshAttackTimersRef = useRef<Map<string, number>>(new Map());
   const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
   const idleTimeoutRef = useRef<number | null>(null);
   const lastActivityRef = useRef(0);
@@ -364,17 +365,43 @@ export function CyberAttackMap({
       return undefined;
     }
 
-    setFreshAttackIds(new Set(freshIds));
-    if (freshAttackTimeoutRef.current !== null) {
-      window.clearTimeout(freshAttackTimeoutRef.current);
-    }
-    freshAttackTimeoutRef.current = window.setTimeout(() => {
-      setFreshAttackIds(new Set());
-      freshAttackTimeoutRef.current = null;
-    }, 4_200);
+    const timers = freshAttackTimersRef.current;
+    setFreshAttackIds((current) => {
+      const next = new Set(current);
+      freshIds.forEach((id) => next.add(id));
+      return next;
+    });
+    freshIds.forEach((id) => {
+      const existing = timers.get(id);
+      if (existing !== undefined) {
+        window.clearTimeout(existing);
+      }
+      timers.set(
+        id,
+        window.setTimeout(() => {
+          timers.delete(id);
+          setFreshAttackIds((current) => {
+            if (!current.has(id)) {
+              return current;
+            }
+            const next = new Set(current);
+            next.delete(id);
+            return next;
+          });
+        }, FRESH_ATTACK_FLY_MS),
+      );
+    });
 
     return undefined;
   }, [attacks]);
+
+  useEffect(() => {
+    const timers = freshAttackTimersRef.current;
+    return () => {
+      timers.forEach((handle) => window.clearTimeout(handle));
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const root = mapRootRef.current;
@@ -452,10 +479,6 @@ export function CyberAttackMap({
     if (featuredAttackIntervalRef.current !== null) {
       window.clearInterval(featuredAttackIntervalRef.current);
       featuredAttackIntervalRef.current = null;
-    }
-    if (freshAttackTimeoutRef.current !== null) {
-      window.clearTimeout(freshAttackTimeoutRef.current);
-      freshAttackTimeoutRef.current = null;
     }
     if (clearFeatured && featuredAttackIdRef.current !== null) {
       featuredAttackIdRef.current = null;
@@ -862,16 +885,16 @@ export function CyberAttackMap({
           100% { opacity: 0; stroke-width: 1; }
         }
         @keyframes ${flyClassName}-bolt {
-          0% { stroke-dashoffset: 0.25; opacity: 0; }
+          0% { stroke-dashoffset: 0.22; opacity: 0; }
           12% { opacity: 1; }
           85% { opacity: 1; }
           100% { stroke-dashoffset: -1; opacity: 0; }
         }
         @keyframes ${flyClassName}-head {
-          0% { offset-distance: 0%; opacity: 0; }
-          10% { opacity: 1; }
-          88% { opacity: 1; }
-          100% { offset-distance: 100%; opacity: 0; }
+          0% { stroke-dashoffset: -0.03; opacity: 0; }
+          12% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { stroke-dashoffset: -1.25; opacity: 0; }
         }
         @keyframes ${flyClassName}-impact {
           0%, 70% { opacity: 0; transform: scale(0.2); }
@@ -882,11 +905,10 @@ export function CyberAttackMap({
           animation: ${beamClassName}-keyframes 4.8s linear infinite;
         }
         .${flyClassName}-bolt {
-          animation: ${flyClassName}-bolt 1.05s cubic-bezier(0.32, 0, 0.18, 1) 1 both;
+          animation: ${flyClassName}-bolt 1.05s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
         }
         .${flyClassName}-head {
-          offset-rotate: 0deg;
-          animation: ${flyClassName}-head 1.05s cubic-bezier(0.32, 0, 0.18, 1) 1 both;
+          animation: ${flyClassName}-head 1.05s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
         }
         .${flyClassName}-impact {
           transform-box: fill-box;
@@ -1087,10 +1109,21 @@ function AttackArcPath({
   const depthOpacity = clamp(0.36 + arc.visibility * 0.64, 0.24, 1);
   const bundleWeight = clamp(Math.log2(arc.count + 1) * 0.22, 0, 0.72);
   const trafficWeight = clamp(0.72 + arc.recency * 0.42 + bundleWeight, 0.72, 1.52);
+  const packetEnabled =
+    motionEnabled &&
+    !dimmed &&
+    !arc.partial &&
+    !arc.fresh &&
+    arc.visibility > 0.16 &&
+    (arc.featured || arc.selected || arc.highlighted || arc.recency > 0.86);
+  const flyEnabled =
+    motionEnabled && !dimmed && arc.fresh && arc.visible && arc.visibility > 0.05;
   const opacity = dimmed
     ? 0.035
     : arc.fresh
-      ? 0.96
+      ? flyEnabled
+        ? 0.24 * depthOpacity * trafficWeight
+        : 0.96
     : arc.partial
       ? arc.featured
         ? 0.92
@@ -1111,15 +1144,6 @@ function AttackArcPath({
         : emphasized
           ? String(2 + arc.recency * 0.95 + bundleWeight)
           : String(1 + arc.recency * 0.65 + bundleWeight);
-  const packetEnabled =
-    motionEnabled &&
-    !dimmed &&
-    !arc.partial &&
-    !arc.fresh &&
-    arc.visibility > 0.16 &&
-    (arc.featured || arc.selected || arc.highlighted || arc.recency > 0.86);
-  const flyEnabled =
-    motionEnabled && !dimmed && arc.fresh && arc.visible && arc.visibility > 0.05;
 
   return (
     <g>
@@ -1182,11 +1206,15 @@ function AttackArcPath({
             strokeDasharray="0.25 1"
             className={`${flyClassName}-bolt`}
           />
-          <circle
-            r="5.4"
-            fill="var(--attack-map-node-highlight)"
+          <path
+            d={arc.path}
+            fill="none"
+            stroke="var(--attack-map-node-highlight)"
+            strokeLinecap="round"
+            strokeWidth="6"
+            pathLength={1}
+            strokeDasharray="0.001 1"
             className={`${flyClassName}-head`}
-            style={{ offsetPath: `path("${arc.path}")` }}
           />
           <circle
             cx={arc.endX}
