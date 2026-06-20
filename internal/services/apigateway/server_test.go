@@ -2484,6 +2484,25 @@ func TestSummarizeSLARunsMapsFaustServiceStates(t *testing.T) {
 			message: "flag retrieval failed",
 		},
 		{
+			name: "partial tick still running after put",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "success"},
+			},
+			status:  "unknown",
+			phase:   "get",
+			message: "checker cycle is still running",
+		},
+		{
+			name: "partial tick still running after get",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "success"},
+				{Phase: "get", Status: "success"},
+			},
+			status:  "unknown",
+			phase:   "check",
+			message: "checker cycle is still running",
+		},
+		{
 			name: "faulty",
 			runs: []GameCheckerRun{
 				{Phase: "put", Status: "success"},

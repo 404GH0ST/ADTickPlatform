@@ -31,6 +31,10 @@ func SummarizeCheckerRunsForTick(runs []GameCheckerRun, tickID int) GameServiceS
 
 	summary := GameServiceStateSummary{TickID: tickID}
 	switch {
+	case checkerCycleStillRunning(phases):
+		summary.Status = "unknown"
+		summary.Phase = nextMissingCheckerPhase(phases)
+		summary.Message = "checker cycle is still running"
 	case putOK && getOK && checkOK:
 		summary.Status = "ok"
 		summary.Phase = "check"
@@ -102,6 +106,28 @@ func collectTickPhaseStates(runs []GameCheckerRun) map[string]tickPhaseState {
 		phases[phase] = state
 	}
 	return phases
+}
+
+func checkerCycleStillRunning(phases map[string]tickPhaseState) bool {
+	for _, phase := range []string{"put", "get", "check"} {
+		state := phases[phase]
+		if state.failed || (state.run != nil && !state.success) {
+			return false
+		}
+		if state.run == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func nextMissingCheckerPhase(phases map[string]tickPhaseState) string {
+	for _, phase := range []string{"put", "get", "check"} {
+		if phases[phase].run == nil {
+			return phase
+		}
+	}
+	return ""
 }
 
 func shouldReplacePhaseRun(current, candidate *GameCheckerRun) bool {
