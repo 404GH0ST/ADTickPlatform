@@ -1403,7 +1403,7 @@ function TeamNodeLabel({
         fontWeight="500"
         className="select-none font-sans"
       >
-        {node.landmark.name} / {node.outgoing} out
+        {node.outgoing} out
       </text>
     </g>
   );
@@ -1434,7 +1434,7 @@ function TeamNodeDot({
 
   return (
     <g
-      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.landmark.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
+      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
       className="cursor-pointer"
       data-attack-team-id={node.id}
       data-attack-team-hit="true"
@@ -1498,7 +1498,7 @@ function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
 
 function getTeamLabelWidth(node: TeamNode): number {
   const titleWidth = node.name.length * 6.5;
-  const metaWidth = `${node.landmark.name} / ${node.outgoing} out`.length * 5.2;
+  const metaWidth = `${node.outgoing} out`.length * 5.2;
   return clamp(Math.max(titleWidth, metaWidth) + 22, 82, 178);
 }
 
