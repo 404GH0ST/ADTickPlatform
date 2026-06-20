@@ -39,3 +39,26 @@ func TestHTTPWireGuardClientReconcileUsesExpectedRoute(t *testing.T) {
 		t.Fatalf("unexpected status %+v", status)
 	}
 }
+
+func TestHTTPWireGuardClientTeardownAcceptsNoContent(t *testing.T) {
+	var requestedPath string
+	client := NewHTTPWireGuardClient("http://wireguard.internal", "wireguard-token")
+	httpClient := client.(*httpWireGuardClient)
+	httpClient.client = &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			requestedPath = request.URL.Path
+			return &http.Response{
+				StatusCode: http.StatusNoContent,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}),
+	}
+
+	if err := client.Teardown(context.Background()); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if requestedPath != "/internal/v1/wireguard/teardown" {
+		t.Fatalf("unexpected path %s", requestedPath)
+	}
+}

@@ -87,6 +87,9 @@ func (c *httpWireGuardClient) request(ctx context.Context, method, path string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if resp.StatusCode == http.StatusNoContent {
+			return WireGuardGatewayStatus{}, nil
+		}
 		var payload WireGuardGatewayStatus
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			return WireGuardGatewayStatus{}, err
