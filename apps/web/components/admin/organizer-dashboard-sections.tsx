@@ -1639,7 +1639,7 @@ function CategoryLeaderCard({
       </CardHeader>
       <CardContent>
         {leaders.length === 0 ? (
-          <EmptyStateText message="Belum ada tim yang bermain." />
+          <EmptyStateText message="No teams have played yet." />
         ) : (
           <ol className="grid gap-2" aria-label={title}>
             {leaders.map((leader) => (
@@ -1673,30 +1673,29 @@ export function ScoreboardCategoryLeadersPanel({
   return (
     <Card data-testid="scoreboard-category-leaders-panel">
       <CardHeader>
-        <CardTitle>Kandidat Penghargaan Tim</CardTitle>
+        <CardTitle>Team Award Candidates</CardTitle>
         <CardDescription>
-          {topN} tim teratas dari setiap kategori skor kumulatif (attack,
-          defense, SLA). Sumber data untuk pemilihan gelar Best Attacker,
-          Best Defender, dan Best Availability — semuanya diberikan kepada
-          tim, bukan pemain individual.
+          Top {topN} teams in each cumulative score category (attack, defense,
+          SLA). Source data for Best Attacker, Best Defender, and Best
+          Availability awards—all awarded to teams, not individual players.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-3">
         <CategoryLeaderCard
-          title="Tim Penyerang Terbaik"
-          caption="Poin serangan kumulatif dari seluruh flag yang berhasil ditangkap."
+          title="Best Attacker"
+          caption="Cumulative attack points from all captured flags."
           leaders={summary.attacker}
           scoreFormatter={formatScore}
         />
         <CategoryLeaderCard
-          title="Tim Bertahan Terbaik"
-          caption="Poin bertahan kumulatif (penalitas paling kecil untuk flag yang dicuri)."
+          title="Best Defender"
+          caption="Cumulative defense points (fewest penalties from stolen flags)."
           leaders={summary.defender}
           scoreFormatter={formatScore}
         />
         <CategoryLeaderCard
-          title="Tim dengan Ketersediaan Terbaik"
-          caption="Poin SLA kumulatif dari uptime checker tiap service."
+          title="Best Availability"
+          caption="Cumulative SLA points from service uptime checks."
           leaders={summary.availability}
           scoreFormatter={formatScore}
         />
@@ -1713,10 +1712,6 @@ export function ScoreboardTab({
   onRefresh,
 }: ScoreboardTabProps): ReactElement {
   const [teamFilter, setTeamFilter] = useState("");
-  const [sortField, setSortField] = useState<
-    "rank" | "team" | "attack" | "defense" | "sla" | "total"
-  >("rank");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const normalizedFilter = teamFilter.trim().toLowerCase();
   const filteredRows =
     normalizedFilter === ""
@@ -1724,25 +1719,6 @@ export function ScoreboardTab({
       : scoreRows.filter((row) =>
           row.team.toLowerCase().includes(normalizedFilter),
         );
-  const sortedRows = [...filteredRows].sort((left, right) => {
-    const direction = sortDirection === "asc" ? 1 : -1;
-
-    switch (sortField) {
-      case "team":
-        return left.team.localeCompare(right.team) * direction;
-      case "attack":
-        return (left.attack - right.attack) * direction;
-      case "defense":
-        return (left.defense - right.defense) * direction;
-      case "sla":
-        return (left.sla - right.sla) * direction;
-      case "total":
-        return (left.total - right.total) * direction;
-      case "rank":
-      default:
-        return (left.rank - right.rank) * direction;
-    }
-  });
 
   return (
     <div className="grid gap-4">
@@ -1751,10 +1727,10 @@ export function ScoreboardTab({
         <CardHeader>
           <CardTitle>Scoreboard View</CardTitle>
           <CardDescription>
-            Filter and sort authoritative rankings without leaving this page.
+            Filter authoritative rankings without leaving this page. Click on headers to sort the table below.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_180px_auto] md:items-end">
+        <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px] md:items-end">
           <Field label="Team Filter" htmlFor="scoreboard-team-filter">
             <Input
               id="scoreboard-team-filter"
@@ -1763,47 +1739,9 @@ export function ScoreboardTab({
               onChange={(event) => setTeamFilter(event.target.value)}
             />
           </Field>
-          <Field label="Sort By" htmlFor="scoreboard-sort-field">
-            <select
-              id="scoreboard-sort-field"
-              className={selectClassName}
-              value={sortField}
-              onChange={(event) =>
-                setSortField(
-                  event.target.value as
-                    | "rank"
-                    | "team"
-                    | "attack"
-                    | "defense"
-                    | "sla"
-                    | "total",
-                )
-              }
-            >
-              <option value="rank">Rank</option>
-              <option value="team">Team</option>
-              <option value="attack">Attack</option>
-              <option value="defense">Defense</option>
-              <option value="sla">SLA</option>
-              <option value="total">Total</option>
-            </select>
-          </Field>
-          <Field label="Direction" htmlFor="scoreboard-sort-direction">
-            <select
-              id="scoreboard-sort-direction"
-              className={selectClassName}
-              value={sortDirection}
-              onChange={(event) =>
-                setSortDirection(event.target.value as "asc" | "desc")
-              }
-            >
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-          </Field>
           <InfoPanel className="h-fit">
             <p className="text-sm text-muted-foreground">
-              Showing {sortedRows.length} of {scoreRows.length} teams.
+              Showing {filteredRows.length} of {scoreRows.length} teams.
             </p>
           </InfoPanel>
         </CardContent>
@@ -1815,7 +1753,7 @@ export function ScoreboardTab({
       />
       <GameScoreboardCard
         pendingAction={pendingAction}
-        scoreRows={sortedRows}
+        scoreRows={filteredRows}
         onRefresh={onRefresh}
       />
     </div>

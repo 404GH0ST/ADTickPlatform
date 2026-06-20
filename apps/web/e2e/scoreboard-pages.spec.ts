@@ -24,7 +24,7 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
     "Neutral cell background",
   );
   await expect(page.locator('[aria-label*="current team"]')).toHaveCount(1);
-  await expect(scoreboardTable.getByText("Floppcraft")).toBeVisible();
+  await expect(scoreboardTable.getByText("Floppcraft", { exact: true }).first()).toBeVisible();
   await expect(scoreboardTable.getByText("College Alpha")).toBeVisible();
   await expect(scoreboardTable.getByText("440.00")).toBeVisible();
 });
@@ -60,8 +60,8 @@ test("organizer scoreboard page filters and sorts authoritative rankings", async
   await expect(scoreboardTable.getByText("College Alpha")).toHaveCount(0);
 
   await page.getByLabel("Team Filter").fill("");
-  await page.getByLabel("Sort By").selectOption("total");
-  await page.getByLabel("Direction").selectOption("asc");
+  // Click on the column header button "Total" to sort by total score ascending
+  await page.getByRole("button", { name: "Total", exact: true }).click();
 
   scoreboardTable = page.locator("table").filter({
     has: page.getByText("College Alpha"),

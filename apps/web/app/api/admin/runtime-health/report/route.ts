@@ -131,7 +131,7 @@ export async function GET() {
   const timestamp = report.generated_at.replace(/[:.]/g, "-");
   return NextResponse.json(report, {
     headers: {
-      "Content-Disposition": `attachment; filename=\"runtime-health-${timestamp}.json\"`,
+      "Content-Disposition": `attachment; filename="runtime-health-${timestamp}.json"`,
     },
   });
 }

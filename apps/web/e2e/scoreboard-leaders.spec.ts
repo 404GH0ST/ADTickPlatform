@@ -13,12 +13,12 @@ test("organizer scoreboard page surfaces cumulative attack, defense, and SLA per
 
   const panel = page.getByTestId("scoreboard-category-leaders-panel");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Kandidat Penghargaan Tim")).toBeVisible();
+  await expect(panel.getByText("Team Award Candidates")).toBeVisible();
 
-  const attackerCard = panel.locator('[aria-label="Tim Penyerang Terbaik"]');
-  const defenderCard = panel.locator('[aria-label="Tim Bertahan Terbaik"]');
+  const attackerCard = panel.locator('[aria-label="Best Attacker"]');
+  const defenderCard = panel.locator('[aria-label="Best Defender"]');
   const availabilityCard = panel.locator(
-    '[aria-label="Tim dengan Ketersediaan Terbaik"]',
+    '[aria-label="Best Availability"]',
   );
 
   for (const card of [attackerCard, defenderCard, availabilityCard]) {
@@ -45,6 +45,6 @@ test("organizer scoreboard category leaders panel renders the explicit empty sta
 
   const panel = page.getByTestId("scoreboard-category-leaders-panel");
   await expect(panel).toBeVisible();
-  const empty = panel.getByText("Belum ada tim yang bermain.");
+  const empty = panel.getByText("No teams have played yet.");
   await expect(empty).toHaveCount(3);
 });
