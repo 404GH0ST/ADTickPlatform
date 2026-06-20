@@ -215,6 +215,7 @@ export function CyberAttackMap({
   const markerId = `${mapId}-arrow`;
   const beamClassName = `globe-beam-${mapId}`;
   const haloClassName = `globe-halo-${mapId}`;
+  const flyClassName = `globe-fly-${mapId}`;
   const focusedTeamSet = useMemo(() => new Set(focusedTeams), [focusedTeams]);
   const hasFocus =
     selectedAttackId !== null ||
@@ -686,6 +687,7 @@ export function CyberAttackMap({
               arc={arc}
               beamClassName={beamClassName}
               dimmed={hasFocus && !arc.active}
+              flyClassName={flyClassName}
               haloClassName={haloClassName}
               markerId={markerId}
               motionEnabled={motionEnabled}
@@ -859,8 +861,37 @@ export function CyberAttackMap({
           16% { opacity: 0.9; stroke-width: 5; }
           100% { opacity: 0; stroke-width: 1; }
         }
+        @keyframes ${flyClassName}-bolt {
+          0% { stroke-dashoffset: 0.25; opacity: 0; }
+          12% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { stroke-dashoffset: -1; opacity: 0; }
+        }
+        @keyframes ${flyClassName}-head {
+          0% { offset-distance: 0%; opacity: 0; }
+          10% { opacity: 1; }
+          88% { opacity: 1; }
+          100% { offset-distance: 100%; opacity: 0; }
+        }
+        @keyframes ${flyClassName}-impact {
+          0%, 70% { opacity: 0; transform: scale(0.2); }
+          78% { opacity: 0.95; }
+          100% { opacity: 0; transform: scale(2.6); }
+        }
         .${beamClassName} {
           animation: ${beamClassName}-keyframes 4.8s linear infinite;
+        }
+        .${flyClassName}-bolt {
+          animation: ${flyClassName}-bolt 1.05s cubic-bezier(0.32, 0, 0.18, 1) 1 both;
+        }
+        .${flyClassName}-head {
+          offset-rotate: 0deg;
+          animation: ${flyClassName}-head 1.05s cubic-bezier(0.32, 0, 0.18, 1) 1 both;
+        }
+        .${flyClassName}-impact {
+          transform-box: fill-box;
+          transform-origin: center;
+          animation: ${flyClassName}-impact 1.4s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
         }
         .${haloClassName} {
           transform-box: fill-box;
@@ -891,7 +922,10 @@ export function CyberAttackMap({
         @media (prefers-reduced-motion: reduce) {
           .${beamClassName},
           .${haloClassName},
-          .${haloClassName}-fresh {
+          .${haloClassName}-fresh,
+          .${flyClassName}-bolt,
+          .${flyClassName}-head,
+          .${flyClassName}-impact {
             animation: none !important;
           }
         }
@@ -1028,6 +1062,7 @@ function AttackArcPath({
   arc,
   beamClassName,
   dimmed,
+  flyClassName,
   haloClassName,
   markerId,
   motionEnabled,
@@ -1037,6 +1072,7 @@ function AttackArcPath({
   arc: AttackArc;
   beamClassName: string;
   dimmed: boolean;
+  flyClassName: string;
   haloClassName: string;
   markerId: string;
   motionEnabled: boolean;
@@ -1079,8 +1115,11 @@ function AttackArcPath({
     motionEnabled &&
     !dimmed &&
     !arc.partial &&
+    !arc.fresh &&
     arc.visibility > 0.16 &&
-    (arc.featured || arc.fresh || arc.selected || arc.highlighted || arc.recency > 0.86);
+    (arc.featured || arc.selected || arc.highlighted || arc.recency > 0.86);
+  const flyEnabled =
+    motionEnabled && !dimmed && arc.fresh && arc.visible && arc.visibility > 0.05;
 
   return (
     <g>
@@ -1112,7 +1151,7 @@ function AttackArcPath({
         strokeOpacity={opacity}
         strokeWidth={strokeWidth}
       />
-      {arc.fresh && !dimmed ? (
+      {arc.fresh && !dimmed && !flyEnabled ? (
         <path
           d={arc.path}
           fill="none"
@@ -1122,6 +1161,43 @@ function AttackArcPath({
           strokeWidth="7"
           className={`${haloClassName}-fresh`}
         />
+      ) : null}
+      {flyEnabled ? (
+        <>
+          <path
+            d={arc.path}
+            fill="none"
+            stroke="var(--attack-map-node-highlight)"
+            strokeLinecap="round"
+            strokeOpacity="0.22"
+            strokeWidth="1.5"
+          />
+          <path
+            d={arc.path}
+            fill="none"
+            stroke="var(--attack-map-node-highlight)"
+            strokeLinecap="round"
+            strokeWidth="3.6"
+            pathLength={1}
+            strokeDasharray="0.25 1"
+            className={`${flyClassName}-bolt`}
+          />
+          <circle
+            r="5.4"
+            fill="var(--attack-map-node-highlight)"
+            className={`${flyClassName}-head`}
+            style={{ offsetPath: `path("${arc.path}")` }}
+          />
+          <circle
+            cx={arc.endX}
+            cy={arc.endY}
+            r="6"
+            fill="none"
+            stroke="var(--attack-map-node-highlight)"
+            strokeWidth="2.4"
+            className={`${flyClassName}-impact`}
+          />
+        </>
       ) : null}
       {packetEnabled ? (
         <>
