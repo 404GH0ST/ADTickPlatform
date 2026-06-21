@@ -14,7 +14,7 @@
     "web:e2e": "cd apps/web && bun run e2e"
   },
   "devDependencies": {
-    "conventional-changelog-angular": "^8.3.0",
+    "conventional-changelog-angular": "^8.3.1",
     "conventional-changelog-cli": "^5.0.0"
   }
 }
