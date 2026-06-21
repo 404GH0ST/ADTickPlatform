@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/httpapi"
@@ -527,6 +528,24 @@ func isValidIP(ip string) bool {
 	return parsed != nil && parsed.To4() != nil
 }
 
+// sanitizeConfigComment strips control characters (notably CR/LF) from values
+// rendered into wg0.conf comment lines. Without this, a newline in an
+// attacker-controlled display name or team name could break out of the comment
+// and inject [Peer]/AllowedIPs directives that wg syncconf would apply.
+func sanitizeConfigComment(value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	cleaned = strings.TrimSpace(cleaned)
+	if len(cleaned) > 96 {
+		cleaned = cleaned[:96]
+	}
+	return cleaned
+}
+
 func renderWireGuardGatewayConfig(settings wireGuardServerSettings, peers []apigateway.WireGuardGatewayPeer) string {
 	var builder strings.Builder
 	builder.WriteString("# AD Platform WireGuard gateway\n")
@@ -539,7 +558,7 @@ func renderWireGuardGatewayConfig(settings wireGuardServerSettings, peers []apig
 	builder.WriteString(fmt.Sprintf("ListenPort = %d\n", settings.ListenPort))
 	for _, peer := range peers {
 		builder.WriteString("\n[Peer]\n")
-		builder.WriteString(fmt.Sprintf("# %s | %s | %s\n", peer.WireGuardPeer, peer.DisplayName, peer.TeamName))
+		builder.WriteString(fmt.Sprintf("# %s | %s | %s\n", sanitizeConfigComment(peer.WireGuardPeer), sanitizeConfigComment(peer.DisplayName), sanitizeConfigComment(peer.TeamName)))
 		builder.WriteString(fmt.Sprintf("PublicKey = %s\n", peer.ClientPublicKey))
 		builder.WriteString(fmt.Sprintf("PresharedKey = %s\n", peer.PresharedKey))
 		builder.WriteString(fmt.Sprintf("AllowedIPs = %s/32\n", peer.Address))
