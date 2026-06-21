@@ -31,6 +31,8 @@ export function ThemeToggle() {
     try {
       window.localStorage.setItem(storageKey, nextTheme);
     } catch {}
+    // Cookie lets the server render data-theme so it survives router.refresh.
+    document.cookie = `${storageKey}=${nextTheme}; path=/; max-age=31536000; samesite=lax`;
   }
 
   return (
