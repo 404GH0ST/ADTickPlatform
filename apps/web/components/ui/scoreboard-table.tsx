@@ -348,7 +348,9 @@ export function ScoreboardTable({
             const isCurrentTeam =
               currentTeamName !== undefined && score.team === currentTeamName;
             const services = serviceLookup(score);
-            const stickyCellClassName = isCurrentTeam ? "bg-primary/10" : "bg-card";
+            const stickyCellClassName = isCurrentTeam
+              ? "bg-[color-mix(in_oklab,var(--card)_88%,var(--primary))]"
+              : "bg-card";
 
             return (
               <TableRow
