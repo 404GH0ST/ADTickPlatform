@@ -96,12 +96,12 @@ curl_json() {
 wait_for_operator_surface() {
   local base_url="$1"
 
-  if wait_for_http "${base_url}/healthz" 60 "edge healthz"; then
-    wait_for_http "${base_url}/api/v2/challenges" 60 "public challenges"
+  if wait_for_http "${base_url}/healthz" 60 "edge healthz" ${CURL_TLS_ARGS[@]+"${CURL_TLS_ARGS[@]}"}; then
+    wait_for_http "${base_url}/api/v2/challenges" 60 "public challenges" ${CURL_TLS_ARGS[@]+"${CURL_TLS_ARGS[@]}"}
     return 0
   fi
 
-  wait_for_http "${base_url}/api/v2/challenges" 60 "public challenges"
+  wait_for_http "${base_url}/api/v2/challenges" 60 "public challenges" ${CURL_TLS_ARGS[@]+"${CURL_TLS_ARGS[@]}"}
 }
 
 wait_for_operator_surface "${API_URL}"

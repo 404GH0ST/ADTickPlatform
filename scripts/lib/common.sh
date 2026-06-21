@@ -306,6 +306,11 @@ wait_for_http() {
   local url="$1"
   local attempts="${2:-40}"
   local name="${3:-}"
+  shift $(( $# < 3 ? $# : 3 ))
+  # Any remaining arguments are extra curl args (e.g. --cacert for a self-signed
+  # edge); without them an https readiness probe fails TLS verification even when
+  # the rest of the caller can reach the endpoint.
+  local extra_curl_args=("$@")
   local i
 
   if ! command -v curl >/dev/null 2>&1; then
@@ -321,7 +326,7 @@ wait_for_http() {
   fi
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl "${curl_tls_args[@]}" -fsS "${url}" >/dev/null 2>&1; then
+    if curl "${curl_tls_args[@]}" ${extra_curl_args[@]+"${extra_curl_args[@]}"} -fsS "${url}" >/dev/null 2>&1; then
       if [[ -n "${name}" ]]; then
         echo "${name} ready at ${url}"
       fi
