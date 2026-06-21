@@ -37,6 +37,8 @@ type gameCoreServer struct {
 	warmupRequired       bool
 	warmupTimeout        time.Duration
 	warmupMinSuccess     float64
+	warmupPutRetries     int
+	warmupPutRetryDelay  time.Duration
 	warmupMu             sync.RWMutex
 	warmupInFlight       bool
 	lastWarmup           apigateway.GameWarmupResult
@@ -72,6 +74,8 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		warmupRequired:       true,
 		warmupTimeout:        60 * time.Second,
 		warmupMinSuccess:     1.0,
+		warmupPutRetries:     2,
+		warmupPutRetryDelay:  2 * time.Second,
 		autoTickOnMatchStart: true,
 		now:                  time.Now,
 	}
@@ -152,6 +156,23 @@ func (s *gameCoreServer) WithWarmupMinSuccessRate(value float64) *gameCoreServer
 		value = 1
 	}
 	s.warmupMinSuccess = value
+	return s
+}
+
+// WithWarmupPutRetries sets how many extra times a failed warmup put is retried
+// before it counts as a failure. 0 disables retries (single attempt).
+func (s *gameCoreServer) WithWarmupPutRetries(value int) *gameCoreServer {
+	if value >= 0 {
+		s.warmupPutRetries = value
+	}
+	return s
+}
+
+// WithWarmupPutRetryDelay sets the backoff slept between warmup put attempts.
+func (s *gameCoreServer) WithWarmupPutRetryDelay(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.warmupPutRetryDelay = value
+	}
 	return s
 }
 
@@ -1018,6 +1039,31 @@ func (s *gameCoreServer) runWarmupForTarget(ctx context.Context, target checkerT
 	// flag for scoring.
 	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, 0, 0)
 
+	// At match start a slow service may not have bound its checker gate yet, so
+	// retry the put a few times with backoff before counting it as a failure.
+	// Each attempt is a real checker execution against the target; only an
+	// exhausted retry budget fails the target.
+	attempts := s.warmupPutRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(s.warmupPutRetryDelay):
+			}
+		}
+		if lastErr = s.attemptWarmupPut(ctx, target, flagValue); lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+func (s *gameCoreServer) attemptWarmupPut(ctx context.Context, target checkerTarget, flagValue string) error {
 	result, execErr := s.checker.Execute(ctx, apigateway.CheckerExecutionRequest{
 		ChallengeID:    target.ChallengeID,
 		TeamID:         target.TeamID,
