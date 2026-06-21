@@ -126,7 +126,7 @@ for manifest_ref in "${manifests[@]}"; do
   service_image="$(jq -r '.service_image' "${manifest_path}")"
   checker_image="$(jq -r '.checker_image' "${manifest_path}")"
   source_bundle_path="$(jq -r '(.source_bundle_path // .slug)' "${manifest_path}")"
-  service_port="$(jq -r '(.service_port // 0)' "${manifest_path}")"
+  service_port="$(jq -r '(.service_port // .ports[0] // 0)' "${manifest_path}")"
   service_subnet_octet="$(jq -r '(.service_subnet_octet // 0)' "${manifest_path}")"
 
   existing_challenge="$(
