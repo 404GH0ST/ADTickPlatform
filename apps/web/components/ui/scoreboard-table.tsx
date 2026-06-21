@@ -262,6 +262,7 @@ export function ScoreboardTable({
 
   const serviceColumns = collectServiceColumns(scoreRows);
   const columnCount = 6 + serviceColumns.length;
+  const desktopTableMinWidthRem = 7 + 14 + serviceColumns.length * 8 + 28;
 
   return (
     <>
@@ -274,7 +275,10 @@ export function ScoreboardTable({
         onSortFieldChange={setSortField}
         onSortDirectionChange={setSortDirection}
       />
-      <Table className="hidden min-w-[980px] border-separate border-spacing-0 text-xs md:table">
+      <Table
+        className="hidden border-separate border-spacing-0 text-xs md:table"
+        style={{ minWidth: `${desktopTableMinWidthRem}rem` }}
+      >
       <caption className="caption-bottom px-2 py-3 text-left">
         <span className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           <span><span className="font-semibold text-foreground">A</span> Attack</span>
@@ -285,18 +289,29 @@ export function ScoreboardTable({
           <span>Neutral cell background</span>
         </span>
       </caption>
+      <colgroup>
+        <col className="w-28" />
+        <col className="w-56" />
+        {serviceColumns.map((service) => (
+          <col key={service.key} className="w-32" />
+        ))}
+        <col className="w-28" />
+        <col className="w-28" />
+        <col className="w-28" />
+        <col className="w-28" />
+      </colgroup>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="sticky left-0 z-30 h-auto min-w-28 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="sticky left-0 z-30 h-auto w-28 min-w-28 max-w-28 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("rank", "Rank")}
           </TableHead>
-          <TableHead className="sticky left-24 z-30 h-auto min-w-56 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="sticky left-28 z-30 h-auto w-56 min-w-56 max-w-56 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("team", "Team")}
           </TableHead>
           {serviceColumns.map((service) => (
             <TableHead
               key={service.key}
-              className="h-auto min-w-32 bg-card px-2 py-3 align-top text-xs font-semibold text-foreground"
+              className="h-auto w-32 min-w-32 max-w-32 bg-card px-2 py-3 align-top text-xs font-semibold text-foreground"
               scope="col"
             >
               <div className="space-y-1">
@@ -307,16 +322,16 @@ export function ScoreboardTable({
               </div>
             </TableHead>
           ))}
-          <TableHead className="h-auto min-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("attack", "Total Offense", <Flame className="h-3.5 w-3.5" />)}
           </TableHead>
-          <TableHead className="h-auto min-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("defense", "Total Defense", <Shield className="h-3.5 w-3.5" />)}
           </TableHead>
-          <TableHead className="h-auto min-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("sla", "Total SLA", <Gauge className="h-3.5 w-3.5" />)}
           </TableHead>
-          <TableHead className="sticky right-0 z-30 h-auto min-w-28 border-l border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
+          <TableHead className="sticky right-0 z-30 h-auto w-28 min-w-28 max-w-28 border-l border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
             {renderSortHeader("total", "Total")}
           </TableHead>
         </TableRow>
@@ -341,7 +356,7 @@ export function ScoreboardTable({
               >
                 <TableCell
                   className={cn(
-                    "sticky left-0 z-20 border-r border-border/70 px-3 py-3",
+                    "sticky left-0 z-20 w-28 min-w-28 max-w-28 border-r border-border/70 px-3 py-3",
                     stickyCellClassName,
                   )}
                 >
@@ -353,30 +368,32 @@ export function ScoreboardTable({
                 </TableCell>
                 <TableCell
                   className={cn(
-                    "sticky left-24 z-20 border-r border-border/70 px-3 py-3 font-semibold",
+                    "sticky left-28 z-20 w-56 min-w-56 max-w-56 overflow-hidden border-r border-border/70 px-3 py-3 font-semibold",
                     stickyCellClassName,
                     isCurrentTeam && "text-primary",
                   )}
                 >
-                  <div className="min-w-40 text-sm">{score.team}</div>
+                  <div className="block truncate text-sm" title={score.team}>
+                    {score.team}
+                  </div>
                 </TableCell>
                 {serviceColumns.map((service) => (
-                  <TableCell key={service.key} className="px-2 py-3">
+                  <TableCell key={service.key} className="w-32 min-w-32 max-w-32 px-2 py-3">
                     <ServiceCell value={services.get(service.key)} />
                   </TableCell>
                 ))}
-                <TableCell className="px-3 py-3 font-mono text-sm">
+                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
                   {compactNumber(score.attack)}
                 </TableCell>
-                <TableCell className="px-3 py-3 font-mono text-sm">
+                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
                   {compactNumber(score.defense)}
                 </TableCell>
-                <TableCell className="px-3 py-3 font-mono text-sm">
+                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
                   {compactNumber(score.sla)}
                 </TableCell>
                 <TableCell
                   className={cn(
-                    "sticky right-0 z-20 border-l border-border/70 px-3 py-3 font-mono text-sm font-semibold",
+                    "sticky right-0 z-20 w-28 min-w-28 max-w-28 border-l border-border/70 px-3 py-3 font-mono text-sm font-semibold",
                     stickyCellClassName,
                   )}
                 >
