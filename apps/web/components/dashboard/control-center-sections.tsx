@@ -147,28 +147,43 @@ export function ScoreboardPanel({
 
 function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [overdue, setOverdue] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     if (!overview.nextTickAt) {
       setTimeLeft(null);
+      setOverdue(false);
       return;
     }
     const target = new Date(overview.nextTickAt).getTime();
-    
+    const intervalMs = (overview.tickInterval ?? 0) * 1000;
+
     const update = () => {
       const now = Date.now();
-      const diff = Math.max(0, Math.round((target - now) / 1000));
+      // The boundary has passed but the backend hasn't published the next
+      // nextTickAt yet — drive the recovery refresh below.
+      setOverdue(now >= target);
+      // Project forward by whole intervals so the counter rolls straight over
+      // to the next interval instead of freezing at 0s while we wait for the
+      // refresh to land the real nextTickAt.
+      let projected = target;
+      if (intervalMs > 0) {
+        while (projected <= now) {
+          projected += intervalMs;
+        }
+      }
+      const diff = Math.max(0, Math.round((projected - now) / 1000));
       setTimeLeft(diff);
     };
 
     update();
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [overview.nextTickAt]);
+  }, [overview.nextTickAt, overview.tickInterval]);
 
   useEffect(() => {
-    if (timeLeft !== 0 || !overview.nextTickAt) {
+    if (!overdue || !overview.nextTickAt) {
       return;
     }
 
@@ -179,7 +194,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     }, 3500);
 
     return () => clearInterval(interval);
-  }, [timeLeft, overview.nextTickAt, router]);
+  }, [overdue, overview.nextTickAt, router]);
 
 
   const matchState = overview.matchState?.toLowerCase();
