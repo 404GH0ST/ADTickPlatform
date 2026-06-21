@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -139,6 +140,10 @@ func (c testCheckerClient) Execute(_ context.Context, request apigateway.Checker
 	return result, nil
 }
 
+func (c testCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
 func (c *capturingCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
 	c.requests = append(c.requests, request)
 	return apigateway.CheckerExecutionResult{
@@ -151,6 +156,14 @@ func (c *capturingCheckerClient) Execute(_ context.Context, request apigateway.C
 		Output:      request.Phase + "-output",
 		Message:     "captured",
 	}, nil
+}
+
+func (c *capturingCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
+func (c explicitStateCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
 }
 
 func (c explicitStateCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
@@ -371,6 +384,108 @@ func TestWarmupRequiredBlocksMatchStart(t *testing.T) {
 	}
 	if status.State != "not_started" {
 		t.Fatalf("expected match to remain not_started, got %+v", status)
+	}
+}
+
+// flakyPutCheckerClient fails the put phase for the first failUntil attempts of
+// each distinct target, then succeeds — emulating a checker gate that is slow to
+// bind at match start.
+type flakyPutCheckerClient struct {
+	mu        sync.Mutex
+	attempts  map[string]int
+	failUntil int
+}
+
+func (c *flakyPutCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	c.mu.Lock()
+	if c.attempts == nil {
+		c.attempts = make(map[string]int)
+	}
+	key := fmt.Sprintf("%d:%d", request.TeamID, request.ChallengeID)
+	c.attempts[key]++
+	n := c.attempts[key]
+	c.mu.Unlock()
+
+	result := apigateway.CheckerExecutionResult{
+		ChallengeID: request.ChallengeID,
+		TeamID:      request.TeamID,
+		Phase:       request.Phase,
+		CheckedAt:   "2026-03-10T10:01:00Z",
+		Output:      request.Phase + "-output",
+	}
+	if request.Phase == "put" && n <= c.failUntil {
+		result.Status = "failed"
+		result.ExitCode = 1
+		result.Message = "put: gate not ready"
+		return result, nil
+	}
+	result.Status = "success"
+	result.ExitCode = 0
+	result.Message = "ok"
+	return result, nil
+}
+
+func (c *flakyPutCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
+func TestWarmupRetriesFailedPutBeforeFailing(t *testing.T) {
+	store := newMemoryGameStore()
+	checker := &flakyPutCheckerClient{failUntil: 1}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(true).
+		WithAutoTickOnMatchStart(false).
+		WithWarmupPutRetries(2).
+		WithWarmupPutRetryDelay(time.Millisecond).
+		RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/warmup", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected warmup 200, got %d: %s", response.Code, response.Body.String())
+	}
+	payload := decodeResponse[apigateway.GameWarmupResult](t, response.Body.Bytes())
+	// First attempt fails for every target, retry succeeds -> 100% pass.
+	if payload.Status != "passed" || payload.PutFailed != 0 || payload.PutSuccess != payload.TotalTargets {
+		t.Fatalf("expected retried warmup to pass, got %+v", payload)
+	}
+	for key, n := range checker.attempts {
+		if n != 2 {
+			t.Fatalf("expected 2 put attempts for %s (1 fail + 1 retry), got %d", key, n)
+		}
+	}
+}
+
+func TestWarmupFailsAfterExhaustingPutRetries(t *testing.T) {
+	store := newMemoryGameStore()
+	// failUntil large enough that every attempt fails.
+	checker := &flakyPutCheckerClient{failUntil: 99}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(true).
+		WithAutoTickOnMatchStart(false).
+		WithWarmupPutRetries(2).
+		WithWarmupPutRetryDelay(time.Millisecond).
+		RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/warmup", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	payload := decodeResponse[apigateway.GameWarmupResult](t, response.Body.Bytes())
+	if payload.Status != "failed" || payload.PutFailed != payload.TotalTargets {
+		t.Fatalf("expected warmup to fail after retries exhausted, got %+v", payload)
+	}
+	// Each target attempted the full budget: 1 + 2 retries = 3.
+	for key, n := range checker.attempts {
+		if n != 3 {
+			t.Fatalf("expected 3 put attempts for %s (1 + 2 retries), got %d", key, n)
+		}
 	}
 }
 

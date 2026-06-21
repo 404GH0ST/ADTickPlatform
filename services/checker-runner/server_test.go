@@ -27,6 +27,7 @@ func TestCheckerRunnerRoutesRequireAdminAuth(t *testing.T) {
 	}{
 		{http.MethodPost, "/internal/v1/checkers/validate", `{}`},
 		{http.MethodPost, "/internal/v1/checkers/execute", `{}`},
+		{http.MethodPost, "/internal/v1/checkers/execute-batch", `{}`},
 	}
 
 	for _, tc := range cases {
@@ -332,6 +333,159 @@ func TestCheckerRunnerExecuteEndpointRejectsInvalidPhase(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"challenge_id":7,"team_id":101,"checker_image":"registry.local/proxy-checker:latest","phase":"boom","target":"10.80.7.11:10007","tick_id":19}`)
 	request := httptest.NewRequest(http.MethodPost, "/internal/v1/checkers/execute", body)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.Code)
+	}
+}
+
+func TestParseCheckerBatchFrames(t *testing.T) {
+	output := strings.Join([]string{
+		"__ADP_PHASE_BEGIN__ put",
+		"put done",
+		"__ADP_PHASE_EXIT__ put 0",
+		"__ADP_PHASE_BEGIN__ get",
+		`ADPLATFORM_SERVICE_STATE={"status":"ok"}`,
+		"get failed",
+		"__ADP_PHASE_EXIT__ get 1",
+	}, "\n")
+
+	frames := parseCheckerBatchFrames(output)
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames, got %d: %v", len(frames), frames)
+	}
+	if frames["put"].exitCode != 0 || frames["put"].output != "put done" {
+		t.Fatalf("unexpected put frame %+v", frames["put"])
+	}
+	if frames["get"].exitCode != 1 {
+		t.Fatalf("expected get exit 1, got %+v", frames["get"])
+	}
+	if !strings.Contains(frames["get"].output, "get failed") {
+		t.Fatalf("expected get output retained, got %q", frames["get"].output)
+	}
+}
+
+func TestDockerCheckerExecutorExecuteBatchRunsPhasesInOneContainer(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	// Fake docker emulates the framed multi-phase output the batch entrypoint emits.
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"printf '__ADP_PHASE_BEGIN__ put\\nput done\\n__ADP_PHASE_EXIT__ put 0\\n'\n" +
+		"printf '__ADP_PHASE_BEGIN__ get\\nADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"healthy\"}\\nget done\\n__ADP_PHASE_EXIT__ get 0\\n'\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCheckerExecutor{
+		binary:        binPath,
+		network:       "adplatform_game",
+		networkLayout: "per-service",
+		timeout:       5 * time.Second,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	result, err := executor.ExecuteCheckerBatch(context.Background(), apigateway.CheckerBatchExecutionRequest{
+		ChallengeID:  7,
+		TeamID:       101,
+		CheckerImage: "registry.local/proxy-checker:latest",
+		Phases:       []string{"put", "get", "check"},
+		Target:       "10.80.7.11:10007",
+		TickID:       19,
+	})
+	if err != nil {
+		t.Fatalf("execute batch failed: %v", err)
+	}
+	if len(result.Phases) != 2 {
+		t.Fatalf("expected put+get phases, got %d: %+v", len(result.Phases), result.Phases)
+	}
+	if result.Phases[0].Phase != "put" || result.Phases[0].Status != "success" {
+		t.Fatalf("unexpected put phase %+v", result.Phases[0])
+	}
+	if result.Phases[1].Phase != "get" || result.Phases[1].ServiceState != "ok" || result.Phases[1].Output != "get done" {
+		t.Fatalf("unexpected get phase %+v", result.Phases[1])
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker log: %v", err)
+	}
+	logOutput := string(logBytes)
+	// One container invocation only, carrying every phase via AD_PHASES.
+	if strings.Count(logOutput, "--network") != 1 {
+		t.Fatalf("expected exactly one docker run, got log %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "AD_PHASES=put get check") {
+		t.Fatalf("expected AD_PHASES env, got %q", logOutput)
+	}
+}
+
+func TestDockerCheckerExecutorExecuteBatchHaltsOnFailure(t *testing.T) {
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf '__ADP_PHASE_BEGIN__ put\\nboom\\n__ADP_PHASE_EXIT__ put 1\\n'\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCheckerExecutor{
+		binary:        binPath,
+		network:       "adplatform_game",
+		networkLayout: "per-service",
+		timeout:       5 * time.Second,
+	}
+
+	result, err := executor.ExecuteCheckerBatch(context.Background(), apigateway.CheckerBatchExecutionRequest{
+		ChallengeID:  7,
+		TeamID:       101,
+		CheckerImage: "registry.local/proxy-checker:latest",
+		Phases:       []string{"put", "get", "check"},
+		Target:       "10.80.7.11:10007",
+		TickID:       19,
+	})
+	if err != nil {
+		t.Fatalf("execute batch failed: %v", err)
+	}
+	// Only the failed put is reported; get/check are absent so the caller marks
+	// them skipped.
+	if len(result.Phases) != 1 || result.Phases[0].Phase != "put" || result.Phases[0].Status != "failed" {
+		t.Fatalf("expected single failed put phase, got %+v", result.Phases)
+	}
+}
+
+func TestCheckerRunnerExecuteBatchEndpoint(t *testing.T) {
+	server := newCheckerRunnerServer("dev-admin-token", dryRunCheckerExecutor{})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "checker-runner", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+
+	body := bytes.NewBufferString(`{"challenge_id":7,"team_id":101,"checker_image":"registry.local/proxy-checker:latest","phases":["put","get","check"],"target":"10.80.7.11:10007","tick_id":19}`)
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/checkers/execute-batch", body)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload apigateway.CheckerBatchExecutionResult
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if len(payload.Phases) != 3 {
+		t.Fatalf("expected 3 phases, got %+v", payload.Phases)
+	}
+}
+
+func TestCheckerRunnerExecuteBatchEndpointRejectsInvalidPhase(t *testing.T) {
+	server := newCheckerRunnerServer("dev-admin-token", dryRunCheckerExecutor{})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "checker-runner", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+
+	body := bytes.NewBufferString(`{"challenge_id":7,"team_id":101,"checker_image":"registry.local/proxy-checker:latest","phases":["put","boom"],"target":"10.80.7.11:10007","tick_id":19}`)
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/checkers/execute-batch", body)
 	request.Header.Set("Authorization", "Bearer dev-admin-token")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
