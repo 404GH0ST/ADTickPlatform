@@ -315,8 +315,13 @@ wait_for_http() {
     return 0
   fi
 
+  local curl_tls_args=()
+  if [[ "${url}" == https://* && "${ADMIN_CURL_INSECURE:-false}" == "true" ]]; then
+    curl_tls_args=(-k)
+  fi
+
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "${url}" >/dev/null 2>&1; then
+    if curl "${curl_tls_args[@]}" -fsS "${url}" >/dev/null 2>&1; then
       if [[ -n "${name}" ]]; then
         echo "${name} ready at ${url}"
       fi

@@ -24,6 +24,22 @@ if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
   API_URL="${PUBLIC_URL}"
 fi
 
+CURL_TLS_ARGS=()
+if [[ "${API_URL}" == https://* ]]; then
+  custom_admin_ca_cert="${ADMIN_CA_CERT:-}"
+  default_admin_ca_cert="${ROOT_DIR}/deploy/caddy/certs/adplatform-selfsigned.crt"
+  if [[ "${ADMIN_CURL_INSECURE:-false}" == "true" ]]; then
+    CURL_TLS_ARGS=(-k)
+    echo "warning: ADMIN_CURL_INSECURE=true; skipping TLS certificate verification for ${API_URL}" >&2
+  elif [[ -n "${custom_admin_ca_cert}" && -f "${custom_admin_ca_cert}" ]]; then
+    CURL_TLS_ARGS=(--cacert "${custom_admin_ca_cert}")
+    echo "using TLS CA certificate: ${custom_admin_ca_cert}"
+  elif [[ "${EDGE_TLS_DIRECTIVE:-}" == *"adplatform-selfsigned.crt"* && -f "${default_admin_ca_cert}" ]]; then
+    CURL_TLS_ARGS=(--cacert "${default_admin_ca_cert}")
+    echo "using TLS CA certificate: ${default_admin_ca_cert}"
+  fi
+fi
+
 usage() {
   cat <<'EOF'
 Usage: scripts/import-local-challenges.sh
@@ -65,7 +81,7 @@ curl_json() {
   response_file="$(mktemp)"
 
   local status
-  status="$(curl -sS -o "${response_file}" -w '%{http_code}' "$@")"
+  status="$(curl "${CURL_TLS_ARGS[@]}" -sS -o "${response_file}" -w '%{http_code}' "$@")"
   if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
     echo "${label} failed (status=${status}):" >&2
     cat "${response_file}" >&2
@@ -128,13 +144,14 @@ for manifest_ref in "${manifests[@]}"; do
       --arg source_bundle_path "${source_bundle_path}" \
       --argjson service_port "${service_port}" \
       --argjson service_subnet_octet "${service_subnet_octet}" \
-      '{
+      '({
         name: $name,
         baseline_image: $baseline_image,
         checker_image: $checker_image,
-        source_bundle_path: $source_bundle_path,
+        source_bundle_path: $source_bundle_path
+      }
       + (if $service_port > 0 then {service_port: $service_port} else {} end)
-      + (if $service_subnet_octet > 0 then {service_subnet_octet: $service_subnet_octet} else {} end)'
+      + (if $service_subnet_octet > 0 then {service_subnet_octet: $service_subnet_octet} else {} end))'
   )"
 
   if [[ -n "${existing_challenge}" ]]; then

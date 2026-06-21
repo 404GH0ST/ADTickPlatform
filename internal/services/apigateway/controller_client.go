@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/httpapi"
 )
 
@@ -119,7 +120,7 @@ func NewHTTPControllerClient(baseURL, token string) controllerClient {
 		baseURL: normalizedBaseURL,
 		token:   strings.TrimSpace(token),
 		client: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: config.Duration("CONTROLLER_CLIENT_TIMEOUT", 180*time.Second),
 		},
 	}
 }
