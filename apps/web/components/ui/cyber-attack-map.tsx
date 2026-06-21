@@ -129,6 +129,9 @@ const MAP_HEIGHT = 560;
 const CENTER_X = MAP_WIDTH / 2 - 22;
 const CENTER_Y = MAP_HEIGHT / 2 + 2;
 const GLOBE_RADIUS = 256;
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 2.6;
+const ZOOM_STEP = 0.35;
 const MAX_ROTATION_LAT = 62;
 const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
@@ -198,6 +201,7 @@ export function CyberAttackMap({
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
   const mapRootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -664,6 +668,18 @@ export function CyberAttackMap({
     }
   }
 
+  function zoomBy(delta: number): void {
+    setZoom((current) =>
+      Math.round(clamp(current + delta, ZOOM_MIN, ZOOM_MAX) * 100) / 100,
+    );
+  }
+
+  // Zoom by shrinking the SVG viewBox around the globe centre. Purely visual,
+  // so projection/rotation math is untouched; HTML chrome stays unscaled.
+  const viewWidth = MAP_WIDTH / zoom;
+  const viewHeight = MAP_HEIGHT / zoom;
+  const viewBox = `${CENTER_X - viewWidth / 2} ${CENTER_Y - viewHeight / 2} ${viewWidth} ${viewHeight}`;
+
   return (
     <div
       ref={mapRootRef}
@@ -702,7 +718,7 @@ export function CyberAttackMap({
         Space on a focused team or route to inspect it.
       </p>
       <svg
-        viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+        viewBox={viewBox}
         preserveAspectRatio="xMidYMid meet"
         className="absolute inset-0 h-full w-full"
         xmlns="http://www.w3.org/2000/svg"
@@ -832,6 +848,34 @@ export function CyberAttackMap({
           ))}
         </div>
       )}
+
+      <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
+        {[
+          { label: '+', delta: ZOOM_STEP, aria: 'Zoom in', disabled: zoom >= ZOOM_MAX },
+          { label: '−', delta: -ZOOM_STEP, aria: 'Zoom out', disabled: zoom <= ZOOM_MIN },
+        ].map((control) => (
+          <button
+            key={control.aria}
+            type="button"
+            aria-label={control.aria}
+            title={control.aria}
+            disabled={control.disabled}
+            className="flex h-9 w-9 items-center justify-center rounded-sm border text-base font-semibold leading-none disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={(event) => {
+              event.stopPropagation();
+              zoomBy(control.delta);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--attack-map-legend-background)',
+              borderColor: 'var(--attack-map-legend-border)',
+              color: 'var(--attack-map-node-label)',
+            }}
+          >
+            {control.label}
+          </button>
+        ))}
+      </div>
 
       {presentation || !denseKeyboardMode ? null : (
         <div
