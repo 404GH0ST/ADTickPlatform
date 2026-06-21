@@ -1064,6 +1064,12 @@ func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool
 	if limit <= 0 {
 		return false, nil
 	}
+	// Lock the team row so concurrent joins to the same team serialize.
+	// Without this, two transactions can each read the same pre-join count
+	// under READ COMMITTED and both pass the check, overshooting the limit.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM teams WHERE id = $1 FOR UPDATE`, teamID); err != nil {
+		return false, err
+	}
 	var count int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1863,7 +1869,7 @@ func (s *postgresStore) GetPlatformSettings(ctx context.Context) (adminPlatformS
 		&settings.UpdatedBy,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 0, UpdatedBy: "system"}, nil
+			return adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 3, UpdatedBy: "system"}, nil
 		}
 		return adminPlatformSettings{}, err
 	}

@@ -92,7 +92,7 @@ func NewMemoryStore(teamID int) Store {
 			{Rank: 4, Team: "Team Orchid", Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "0"},
 		},
 		attackFeed:       []attackEvent{},
-		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 0, UpdatedBy: "system"},
+		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 3, UpdatedBy: "system"},
 		nextTeamID:       105,
 		nextPlayerID:     5,
 		nextChallengeID:  4,

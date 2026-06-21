@@ -65,7 +65,7 @@ func main() {
 	server.matchEndAt = matchEndAt
 	scheduler := newIntervalGameScheduler(
 		store,
-		config.Duration("GAME_CORE_SCHEDULER_INTERVAL", 60*time.Second),
+		config.Duration("GAME_CORE_SCHEDULER_INTERVAL", 300*time.Second),
 		config.Bool("GAME_CORE_SCHEDULER_ENABLED", false),
 		server.advanceTick,
 		server.matchStatus,
