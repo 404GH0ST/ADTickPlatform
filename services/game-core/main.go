@@ -39,6 +39,7 @@ func main() {
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
 	).
 		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 32)).
+		WithTickTimeout(config.Duration("GAME_CORE_TICK_TIMEOUT", 180*time.Second)).
 		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
 		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second)).
 		WithScoringTimeout(config.Duration("GAME_CORE_SCORING_TIMEOUT", 30*time.Second)).

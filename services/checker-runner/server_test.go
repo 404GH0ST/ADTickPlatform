@@ -83,7 +83,7 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 }
 
 func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
-	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", defaultCheckerSecurity(), apigateway.CheckerExecutionRequest{
+	args := buildDockerCheckerExecuteArgs("adplatform_game_svc_007", "adchk-19-7-101-1", defaultCheckerSecurity(), apigateway.CheckerExecutionRequest{
 		ChallengeID:   7,
 		TeamID:        101,
 		TeamName:      "Team Alpha",
@@ -103,6 +103,8 @@ func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
 	expected := []string{
 		"run",
 		"--rm",
+		"--name",
+		"adchk-19-7-101-1",
 		"--network",
 		"adplatform_game_svc_007",
 		"-e",
@@ -453,6 +455,49 @@ func TestDockerCheckerExecutorExecuteBatchHaltsOnFailure(t *testing.T) {
 	// them skipped.
 	if len(result.Phases) != 1 || result.Phases[0].Phase != "put" || result.Phases[0].Status != "failed" {
 		t.Fatalf("expected single failed put phase, got %+v", result.Phases)
+	}
+}
+
+func TestDockerCheckerExecutorForceRemovesTimedOutContainer(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "docker.log")
+	binPath := filepath.Join(t.TempDir(), "docker")
+	// `run` hangs so the per-call context times out; `rm` returns immediately.
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
+		"case \"$1\" in run) sleep 5 ;; *) exit 0 ;; esac\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCheckerExecutor{
+		binary:        binPath,
+		network:       "adplatform_game",
+		networkLayout: "per-service",
+		timeout:       100 * time.Millisecond,
+	}
+	t.Setenv("DOCKER_LOG", logPath)
+
+	result, err := executor.ExecuteCheckerBatch(context.Background(), apigateway.CheckerBatchExecutionRequest{
+		ChallengeID:  7,
+		TeamID:       101,
+		CheckerImage: "registry.local/proxy-checker:latest",
+		Phases:       []string{"put", "get", "check"},
+		Target:       "10.80.7.11:10007",
+		TickID:       19,
+	})
+	if err != nil {
+		t.Fatalf("execute batch failed: %v", err)
+	}
+	if len(result.Phases) != 1 || result.Phases[0].Status != "failed" {
+		t.Fatalf("expected timed-out batch to report a failed phase, got %+v", result.Phases)
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "rm -f adchkb-19-7-101-") {
+		t.Fatalf("expected force-remove of leaked container, got log %q", string(logBytes))
 	}
 }
 

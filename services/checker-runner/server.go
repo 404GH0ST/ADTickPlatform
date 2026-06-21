@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -335,7 +336,11 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	if err != nil {
 		return apigateway.CheckerExecutionResult{}, err
 	}
-	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, e.security, request)...)
+	name := dockerRunName("adchk", request.ChallengeID, request.TeamID, request.TickID)
+	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	if runCtx.Err() != nil {
+		e.forceRemove(name)
+	}
 	trimmedOutput, serviceState, stateMessage := parseCheckerServiceStateOutput(output)
 	trimmedOutput = truncateOutput(trimmedOutput, 65536)
 	result := apigateway.CheckerExecutionResult{
@@ -379,7 +384,11 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 		return result, err
 	}
 
-	output, _, execErr := e.execDocker(runCtx, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, e.security, request)...)
+	name := dockerRunName("adchkb", request.ChallengeID, request.TeamID, request.TickID)
+	output, _, execErr := e.execDocker(runCtx, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	if runCtx.Err() != nil {
+		e.forceRemove(name)
+	}
 	checkedAt := time.Now().UTC().Format(time.RFC3339)
 	frames := parseCheckerBatchFrames(string(output))
 
@@ -443,6 +452,26 @@ func truncateOutput(s string, limit int) string {
 	return res + "\n... [truncated]"
 }
 
+var dockerRunSeq atomic.Uint64
+
+// dockerRunName builds a unique, docker-valid container name so a run killed by
+// context cancellation can be force-removed afterwards (a killed `docker run`
+// CLI never fires its own --rm, leaking the container otherwise).
+func dockerRunName(prefix string, challengeID, teamID, tickID int) string {
+	return fmt.Sprintf("%s-%d-%d-%d-%d", prefix, tickID, challengeID, teamID, dockerRunSeq.Add(1))
+}
+
+// forceRemove best-effort deletes a container by name with a fresh short-lived
+// context, since the run's own context is already cancelled when this is called.
+func (e *dockerCheckerExecutor) forceRemove(name string) {
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	rmCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(rmCtx, e.binary, "rm", "-f", name).Run() // #nosec G204 -- docker binary and generated name are operator-controlled.
+}
+
 func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
@@ -474,13 +503,16 @@ func buildDockerCheckerValidationArgs(security checkerDockerSecurity, request ap
 	return args
 }
 
-func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurity, request apigateway.CheckerExecutionRequest) []string {
+func buildDockerCheckerExecuteArgs(network, name string, security checkerDockerSecurity, request apigateway.CheckerExecutionRequest) []string {
 	args := []string{
 		"run",
 		"--rm",
 		// Checker images are built locally on the runner host; never reach out to a
 		// registry on the hot per-tick path.
 		"--pull=never",
+	}
+	if strings.TrimSpace(name) != "" {
+		args = append(args, "--name", name)
 	}
 	args = append(args, security.dockerArgs()...)
 	if strings.TrimSpace(network) != "" {
@@ -509,13 +541,16 @@ func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurit
 	return args
 }
 
-func buildDockerCheckerBatchExecuteArgs(network string, security checkerDockerSecurity, request apigateway.CheckerBatchExecutionRequest) []string {
+func buildDockerCheckerBatchExecuteArgs(network, name string, security checkerDockerSecurity, request apigateway.CheckerBatchExecutionRequest) []string {
 	args := []string{
 		"run",
 		"--rm",
 		// Checker images are built locally on the runner host; never reach out to a
 		// registry on the hot per-tick path.
 		"--pull=never",
+	}
+	if strings.TrimSpace(name) != "" {
+		args = append(args, "--name", name)
 	}
 	args = append(args, security.dockerArgs()...)
 	if strings.TrimSpace(network) != "" {

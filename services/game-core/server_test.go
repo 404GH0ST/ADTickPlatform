@@ -489,6 +489,54 @@ func TestWarmupFailsAfterExhaustingPutRetries(t *testing.T) {
 	}
 }
 
+// blockingCheckerClient blocks every execution until the context is cancelled,
+// emulating a checker-runner that never responds (saturated host / hung docker).
+type blockingCheckerClient struct{}
+
+func (blockingCheckerClient) Execute(ctx context.Context, _ apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	<-ctx.Done()
+	return apigateway.CheckerExecutionResult{}, ctx.Err()
+}
+
+func (c blockingCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
+func TestTickTimeoutBoundsStuckTick(t *testing.T) {
+	store := newMemoryGameStore()
+	srv := newGameCoreServer("dev-admin-token", store, blockingCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(false).
+		WithTickTimeout(50 * time.Millisecond)
+
+	if _, err := store.StartMatch(context.Background(), time.Now().UTC()); err != nil {
+		t.Fatalf("start match: %v", err)
+	}
+
+	done := make(chan struct{})
+	var tick apigateway.GameTickStatus
+	var advErr error
+	go func() {
+		tick, advErr = srv.advanceTick(context.Background())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("advanceTick hung despite tick timeout")
+	}
+
+	// Tick completes (bounded) rather than stalling; the cancelled checker calls
+	// surface as failed runs.
+	if advErr != nil {
+		t.Fatalf("expected bounded tick to complete, got error %v", advErr)
+	}
+	if tick.Status != "completed" || tick.FailedCheckerRuns == 0 {
+		t.Fatalf("expected completed tick with failed runs, got %+v", tick)
+	}
+}
+
 func TestAutoTickFiresOnMatchStart(t *testing.T) {
 	store := newMemoryGameStore().(*memoryGameStore)
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})

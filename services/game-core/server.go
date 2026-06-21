@@ -26,6 +26,7 @@ type gameCoreServer struct {
 	checkerPhases        []string
 	checkerTimeout       int
 	checkerParallelism   int
+	tickTimeout          time.Duration
 	scoringDebounce      time.Duration
 	scoringRetryDelay    time.Duration
 	scoringTimeout       time.Duration
@@ -68,6 +69,7 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		checkerPhases:        checkerPhases,
 		checkerTimeout:       checkerTimeout,
 		checkerParallelism:   1,
+		tickTimeout:          180 * time.Second,
 		scoringDebounce:      time.Second,
 		scoringRetryDelay:    5 * time.Second,
 		scoringTimeout:       30 * time.Second,
@@ -111,6 +113,18 @@ func (s *gameCoreServer) parseFlag(value string) (flagClaims, bool) {
 func (s *gameCoreServer) WithCheckerParallelism(value int) *gameCoreServer {
 	if value > 0 {
 		s.checkerParallelism = value
+	}
+	return s
+}
+
+// WithTickTimeout bounds the wall time of a single tick's checker run. If
+// exceeded, the in-flight checker calls are cancelled and the tick is marked
+// failed, so a saturated host can't drag a tick indefinitely or overlap the next
+// one. Must exceed the worst-case tick: ceil(targets/parallelism) * checkerTimeout
+// * len(phases). 0 disables the bound.
+func (s *gameCoreServer) WithTickTimeout(value time.Duration) *gameCoreServer {
+	if value >= 0 {
+		s.tickTimeout = value
 	}
 	return s
 }
@@ -856,7 +870,13 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		return apigateway.GameTickStatus{}, err
 	}
 
-	results, err := s.runCheckerTargets(ctx, tick.ID, targets)
+	runCtx := ctx
+	if s.tickTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, s.tickTimeout)
+		defer cancel()
+	}
+	results, err := s.runCheckerTargets(runCtx, tick.ID, targets)
 	if err != nil {
 		tick.Status = "failed"
 		tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
