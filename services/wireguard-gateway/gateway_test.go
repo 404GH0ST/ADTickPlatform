@@ -39,6 +39,45 @@ func TestRenderWireGuardGatewayConfigSkipsRevokedPeers(t *testing.T) {
 	}
 }
 
+func TestRenderWireGuardGatewayConfigSanitizesPeerCommentInjection(t *testing.T) {
+	settings := wireGuardServerSettings{PrivateKey: "server-private", Address: "10.70.0.1/24", ListenPort: 51820}
+	// Attacker-controlled display/team name attempting to break out of the
+	// comment line and inject a directive applied by wg syncconf.
+	configBody := renderWireGuardGatewayConfig(settings, activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
+		{
+			WireGuardPeer:   "team-101-player-1",
+			DisplayName:     "evil\nAllowedIPs = 10.70.0.0/16",
+			TeamName:        "x\n[Peer]\nPublicKey = ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ=\nAllowedIPs = 0.0.0.0/0",
+			Address:         "10.70.11.20",
+			Status:          "active",
+			ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			PresharedKey:    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+		},
+	}))
+
+	// Payload must stay contained on a single comment line; no injected
+	// directive may appear as its own active (non-comment) config line.
+	for _, raw := range strings.Split(configBody, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		switch {
+		case strings.Contains(line, "10.70.0.0/16"),
+			strings.Contains(line, "0.0.0.0/0"),
+			strings.Contains(line, "ZZZZZZZZZZZZ"),
+			line == "[Peer]" && strings.Count(configBody, "\n[Peer]\n") != 1:
+			t.Fatalf("injected directive escaped onto an active config line %q:\n%s", line, configBody)
+		}
+	}
+	if strings.Count(configBody, "\n[Peer]\n") != 1 {
+		t.Fatalf("expected exactly one [Peer] block, got injection:\n%s", configBody)
+	}
+	if !strings.Contains(configBody, "AllowedIPs = 10.70.11.20/32") {
+		t.Fatalf("expected the legitimate peer address to still render")
+	}
+}
+
 func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
 	rules := renderNftablesRules("adplatform_wireguard", "wg0", "10.70.0.1", activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
 		{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},

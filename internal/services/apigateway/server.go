@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/platform/unlockproof"
@@ -204,10 +205,32 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
 }
 
+// validParticipantName rejects display/team names that contain control
+// characters (notably CR/LF) or exceed the rendered length budget. These values
+// flow into WireGuard peer config comments; an unfiltered newline could inject
+// rogue [Peer]/AllowedIPs directives applied by wg syncconf.
+func validParticipantName(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(trimmed) > 96 {
+		return false
+	}
+	for _, r := range trimmed {
+		if r == '\n' || r == '\r' || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 	var req participantRegisterRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "player registration request is invalid.")
+		return
+	}
+
+	if !validParticipantName(req.DisplayName) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "display name must be 1-96 characters with no control characters.")
 		return
 	}
 
@@ -341,6 +364,11 @@ func (s *Server) handleUpdateParticipantProfile(w http.ResponseWriter, r *http.R
 	var req participantUpdateProfileRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "profile update request is invalid.")
+		return
+	}
+
+	if !validParticipantName(req.DisplayName) || (strings.TrimSpace(req.TeamName) != "" && !validParticipantName(req.TeamName)) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "display name and team name must be 1-96 characters with no control characters.")
 		return
 	}
 
