@@ -262,7 +262,7 @@ export function ScoreboardTable({
 
   const serviceColumns = collectServiceColumns(scoreRows);
   const columnCount = 6 + serviceColumns.length;
-  const desktopTableMinWidthRem = 7 + 14 + serviceColumns.length * 8 + 28;
+  const desktopTableWidthRem = 7 + 14 + serviceColumns.length * 8 + 28;
 
   return (
     <>
@@ -277,7 +277,11 @@ export function ScoreboardTable({
       />
       <Table
         className="hidden border-separate border-spacing-0 text-xs md:table"
-        style={{ minWidth: `${desktopTableMinWidthRem}rem` }}
+        style={{
+          width: `${desktopTableWidthRem}rem`,
+          minWidth: `${desktopTableWidthRem}rem`,
+          tableLayout: "fixed",
+        }}
       >
       <caption className="caption-bottom px-2 py-3 text-left">
         <span className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">

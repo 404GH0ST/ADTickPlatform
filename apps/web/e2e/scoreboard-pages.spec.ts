@@ -7,6 +7,7 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
   request,
 }) => {
   await resetMockApi(request);
+  await page.setViewportSize({ width: 2048, height: 1152 });
 
   await page.goto("/scoreboard");
 
@@ -27,6 +28,19 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
   await expect(scoreboardTable.getByText("Floppcraft", { exact: true }).first()).toBeVisible();
   await expect(scoreboardTable.getByText("College Alpha")).toBeVisible();
   await expect(scoreboardTable.getByText("440.00")).toBeVisible();
+
+  const currentTeamRow = scoreboardTable.locator("tbody tr", {
+    has: page.locator('[aria-label*="current team"]'),
+  });
+  const currentTeamCell = currentTeamRow.locator("td").nth(1);
+  const firstServiceCell = currentTeamRow.locator("td").nth(2);
+  const [teamBox, serviceBox] = await Promise.all([
+    currentTeamCell.boundingBox(),
+    firstServiceCell.boundingBox(),
+  ]);
+  expect(teamBox).not.toBeNull();
+  expect(serviceBox).not.toBeNull();
+  expect(teamBox!.x + teamBox!.width).toBeLessThanOrEqual(serviceBox!.x + 1);
 });
 
 test("participant scoreboard page shows an explicit empty state when no scores exist", async ({
