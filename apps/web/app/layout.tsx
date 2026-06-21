@@ -19,10 +19,18 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   try {
     stored = window.localStorage.getItem(storageKey);
   } catch {}
-  const theme = stored === "dark" || stored === "light"
+  const hasStored = stored === "dark" || stored === "light";
+  const theme = hasStored
     ? stored
     : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   root.dataset.theme = theme;
+  // Pin the resolved theme on first visit so later reloads don't follow a
+  // changing OS prefers-color-scheme and flip the theme on their own.
+  if (!hasStored) {
+    try {
+      window.localStorage.setItem(storageKey, theme);
+    } catch {}
+  }
 })();`,
           }}
         />
