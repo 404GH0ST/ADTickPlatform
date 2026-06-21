@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +27,7 @@ type checkerRunnerServer struct {
 type checkerExecutor interface {
 	ValidateChecker(ctx context.Context, request apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error)
 	ExecuteChecker(ctx context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error)
+	ExecuteCheckerBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error)
 }
 
 type dryRunCheckerExecutor struct{}
@@ -119,6 +121,7 @@ func newCheckerRunnerServer(adminToken string, executor checkerExecutor) *checke
 func (s *checkerRunnerServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/v1/checkers/validate", s.handleValidateChecker)
 	mux.HandleFunc("POST /internal/v1/checkers/execute", s.handleExecuteChecker)
+	mux.HandleFunc("POST /internal/v1/checkers/execute-batch", s.handleExecuteCheckerBatch)
 }
 
 func (s *checkerRunnerServer) handleValidateChecker(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +160,29 @@ func (s *checkerRunnerServer) handleExecuteChecker(w http.ResponseWriter, r *htt
 		return
 	}
 	result, err := s.executor.ExecuteChecker(r.Context(), request)
+	if err != nil {
+		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
+			Title:  "Checker execution failed",
+			Detail: err.Error(),
+		})
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+func (s *checkerRunnerServer) handleExecuteCheckerBatch(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	var request apigateway.CheckerBatchExecutionRequest
+	if err := httpapi.DecodeJSON(r, &request); err != nil || request.TeamID <= 0 || request.ChallengeID <= 0 || strings.TrimSpace(request.CheckerImage) == "" || len(request.Phases) == 0 || strings.TrimSpace(request.Target) == "" || !allValidCheckerPhases(request.Phases) {
+		httpapi.WriteProblem(w, http.StatusBadRequest, httpapi.ProblemDetails{
+			Title:  "Invalid request",
+			Detail: "checker batch execution request is invalid.",
+		})
+		return
+	}
+	result, err := s.executor.ExecuteCheckerBatch(r.Context(), request)
 	if err != nil {
 		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
 			Title:  "Checker execution failed",
@@ -236,6 +262,29 @@ func (dryRunCheckerExecutor) ExecuteChecker(_ context.Context, request apigatewa
 	return result, nil
 }
 
+func (dryRunCheckerExecutor) ExecuteCheckerBatch(_ context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	result := apigateway.CheckerBatchExecutionResult{
+		ChallengeID: request.ChallengeID,
+		TeamID:      request.TeamID,
+	}
+	for _, phase := range request.Phases {
+		pr := apigateway.CheckerPhaseResult{
+			Phase:     phase,
+			Status:    "success",
+			ExitCode:  0,
+			CheckedAt: time.Now().UTC().Format(time.RFC3339),
+			Message:   "checker execution assumed in dry-run mode.",
+			Output:    "dry-run checker execution",
+		}
+		if strings.EqualFold(phase, "check") {
+			pr.ServiceState = "ok"
+			pr.StateMessage = "dry-run checker reported the service healthy."
+		}
+		result.Phases = append(result.Phases, pr)
+	}
+	return result, nil
+}
+
 func (e *dockerCheckerExecutor) ValidateChecker(ctx context.Context, request apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
 	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
@@ -309,6 +358,79 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	return result, nil
 }
 
+func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	result := apigateway.CheckerBatchExecutionResult{
+		ChallengeID: request.ChallengeID,
+		TeamID:      request.TeamID,
+	}
+
+	perPhase := e.timeout
+	if request.TimeoutSeconds > 0 {
+		perPhase = time.Duration(request.TimeoutSeconds) * time.Second
+	}
+	// One container runs every phase sequentially, so the deadline scales with
+	// the number of phases.
+	runCtx, cancel := context.WithTimeout(ctx, perPhase*time.Duration(len(request.Phases)))
+	defer cancel()
+
+	targetHost, _ := apigateway.ParseEndpoint(request.Target)
+	networkPlan, err := gamenet.PlanDockerNetwork(e.network, e.networkLayout, firstNonEmpty(request.TargetIP, request.TargetHost, targetHost))
+	if err != nil {
+		return result, err
+	}
+
+	output, _, execErr := e.execDocker(runCtx, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, e.security, request)...)
+	checkedAt := time.Now().UTC().Format(time.RFC3339)
+	frames := parseCheckerBatchFrames(string(output))
+
+	for _, phase := range request.Phases {
+		frame, ok := frames[phase]
+		if !ok {
+			// Phase never ran: either a prior phase failed and the script halted, or
+			// the container died (timeout / infra error) before reaching it. Only the
+			// latter is a hard error we surface; halted phases are simply absent and
+			// the caller marks them skipped.
+			break
+		}
+		filtered, serviceState, stateMessage := parseCheckerServiceStateOutput([]byte(frame.output))
+		pr := apigateway.CheckerPhaseResult{
+			Phase:        phase,
+			ExitCode:     frame.exitCode,
+			CheckedAt:    checkedAt,
+			Output:       truncateOutput(filtered, 65536),
+			ServiceState: serviceState,
+			StateMessage: stateMessage,
+		}
+		if frame.exitCode == 0 {
+			pr.Status = "success"
+			pr.Message = "checker phase completed successfully."
+		} else {
+			pr.Status = "failed"
+			pr.Message = commandFailureMessage(fmt.Errorf("checker phase %s failed", phase), []byte(filtered), frame.exitCode)
+		}
+		result.Phases = append(result.Phases, pr)
+		if frame.exitCode != 0 {
+			break
+		}
+	}
+
+	// Container error with no usable frames means docker itself failed (timeout,
+	// missing image, daemon error). Report a single failed phase so the caller can
+	// fail the target rather than silently passing.
+	if len(result.Phases) == 0 && execErr != nil {
+		phase := request.Phases[0]
+		result.Phases = append(result.Phases, apigateway.CheckerPhaseResult{
+			Phase:     phase,
+			Status:    "failed",
+			ExitCode:  -1,
+			CheckedAt: checkedAt,
+			Message:   commandFailureMessage(execErr, output, -1),
+		})
+	}
+
+	return result, nil
+}
+
 func truncateOutput(s string, limit int) string {
 	if len(s) <= limit {
 		return s
@@ -356,6 +478,9 @@ func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurit
 	args := []string{
 		"run",
 		"--rm",
+		// Checker images are built locally on the runner host; never reach out to a
+		// registry on the hot per-tick path.
+		"--pull=never",
 	}
 	args = append(args, security.dockerArgs()...)
 	if strings.TrimSpace(network) != "" {
@@ -382,6 +507,143 @@ func buildDockerCheckerExecuteArgs(network string, security checkerDockerSecurit
 		checkerEntrypointExecuteScript(),
 	)
 	return args
+}
+
+func buildDockerCheckerBatchExecuteArgs(network string, security checkerDockerSecurity, request apigateway.CheckerBatchExecutionRequest) []string {
+	args := []string{
+		"run",
+		"--rm",
+		// Checker images are built locally on the runner host; never reach out to a
+		// registry on the hot per-tick path.
+		"--pull=never",
+	}
+	args = append(args, security.dockerArgs()...)
+	if strings.TrimSpace(network) != "" {
+		args = append(args, "--network", network)
+	}
+	args = append(args,
+		"-e", fmt.Sprintf("AD_PHASES=%s", strings.Join(request.Phases, " ")),
+		"-e", fmt.Sprintf("AD_TEAM_ID=%d", request.TeamID),
+		"-e", fmt.Sprintf("AD_TEAM_NAME=%s", request.TeamName),
+		"-e", fmt.Sprintf("AD_CHALLENGE_ID=%d", request.ChallengeID),
+		"-e", fmt.Sprintf("AD_CHALLENGE_NAME=%s", request.ChallengeName),
+		"-e", fmt.Sprintf("AD_TARGET=%s", request.Target),
+		"-e", fmt.Sprintf("AD_TARGET_HOST=%s", request.TargetHost),
+		"-e", fmt.Sprintf("AD_TARGET_IP=%s", request.TargetIP),
+		"-e", fmt.Sprintf("AD_TARGET_PORT=%d", request.TargetPort),
+		"-e", fmt.Sprintf("AD_TICK_ID=%d", request.TickID),
+		"-e", fmt.Sprintf("AD_FLAG=%s", request.Flag),
+		"-e", fmt.Sprintf("AD_METADATA=%s", request.Metadata),
+		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", request.CheckerToken),
+		"--entrypoint",
+		"/bin/sh",
+		request.CheckerImage,
+		"-lc",
+		checkerEntrypointBatchExecuteScript(),
+	)
+	return args
+}
+
+// checkerBatchFrame is one phase's captured block from a batch container run.
+type checkerBatchFrame struct {
+	output   string
+	exitCode int
+}
+
+const (
+	checkerBatchPhaseBeginPrefix = "__ADP_PHASE_BEGIN__ "
+	checkerBatchPhaseExitPrefix  = "__ADP_PHASE_EXIT__ "
+)
+
+// parseCheckerBatchFrames splits combined container output framed by the batch
+// entrypoint into per-phase blocks. Each phase is delimited by a BEGIN marker and
+// an EXIT marker that carries the phase's exit code.
+func parseCheckerBatchFrames(output string) map[string]checkerBatchFrame {
+	frames := make(map[string]checkerBatchFrame)
+	lines := strings.Split(output, "\n")
+	currentPhase := ""
+	var buf []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, checkerBatchPhaseBeginPrefix):
+			currentPhase = strings.TrimSpace(strings.TrimPrefix(trimmed, checkerBatchPhaseBeginPrefix))
+			buf = buf[:0]
+		case strings.HasPrefix(trimmed, checkerBatchPhaseExitPrefix):
+			fields := strings.Fields(strings.TrimPrefix(trimmed, checkerBatchPhaseExitPrefix))
+			if len(fields) < 2 || currentPhase == "" || fields[0] != currentPhase {
+				currentPhase = ""
+				continue
+			}
+			exitCode, convErr := strconv.Atoi(fields[1])
+			if convErr != nil {
+				exitCode = -1
+			}
+			frames[currentPhase] = checkerBatchFrame{
+				output:   strings.Join(buf, "\n"),
+				exitCode: exitCode,
+			}
+			currentPhase = ""
+		default:
+			if currentPhase != "" {
+				buf = append(buf, line)
+			}
+		}
+	}
+	return frames
+}
+
+// checkerEntrypointBatchExecuteScript resolves the checker entrypoint once and
+// runs every phase in AD_PHASES sequentially inside the single container,
+// chaining each successful phase's output into the next as AD_METADATA and
+// halting on the first failure. Per-phase output is framed with BEGIN/EXIT
+// markers so the runner can split results.
+func checkerEntrypointBatchExecuteScript() string {
+	return `set -u
+checker_exec=""
+checker_arg0=""
+if command -v checker >/dev/null 2>&1; then
+  checker_exec="checker"
+elif [ -x /checker ]; then
+  checker_exec="/checker"
+elif [ -x /app/checker ]; then
+  checker_exec="/app/checker"
+elif [ -x /checker.sh ]; then
+  checker_exec="/checker.sh"
+elif [ -f /checker.sh ]; then
+  checker_exec="/bin/sh"
+  checker_arg0="/checker.sh"
+else
+  echo 'missing standard checker entrypoint inside image' >&2
+  exit 1
+fi
+run_phase() {
+  if [ -n "$checker_arg0" ]; then
+    "$checker_exec" "$checker_arg0" "$1"
+  else
+    "$checker_exec" "$1"
+  fi
+}
+meta="${AD_METADATA:-}"
+for phase in $AD_PHASES; do
+  case "$phase" in
+    put|get|check) ;;
+    *)
+      echo "unsupported checker phase: $phase" >&2
+      exit 2
+      ;;
+  esac
+  echo "__ADP_PHASE_BEGIN__ $phase"
+  out=$(AD_PHASE="$phase" AD_METADATA="$meta" run_phase "$phase" 2>&1)
+  code=$?
+  printf '%s\n' "$out"
+  echo "__ADP_PHASE_EXIT__ $phase $code"
+  if [ "$code" -ne 0 ]; then
+    exit 0
+  fi
+  meta=$(printf '%s\n' "$out" | grep -v '^ADPLATFORM_SERVICE_STATE=' || true)
+done
+exit 0`
 }
 
 func checkerEntrypointValidationScript() string {
@@ -461,6 +723,15 @@ func isValidCheckerPhase(value string) bool {
 	default:
 		return false
 	}
+}
+
+func allValidCheckerPhases(phases []string) bool {
+	for _, phase := range phases {
+		if !isValidCheckerPhase(phase) {
+			return false
+		}
+	}
+	return true
 }
 
 func commandFailureMessage(err error, output []byte, exitCode int) string {

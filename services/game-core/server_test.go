@@ -139,6 +139,10 @@ func (c testCheckerClient) Execute(_ context.Context, request apigateway.Checker
 	return result, nil
 }
 
+func (c testCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
 func (c *capturingCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
 	c.requests = append(c.requests, request)
 	return apigateway.CheckerExecutionResult{
@@ -151,6 +155,14 @@ func (c *capturingCheckerClient) Execute(_ context.Context, request apigateway.C
 		Output:      request.Phase + "-output",
 		Message:     "captured",
 	}, nil
+}
+
+func (c *capturingCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
+func (c explicitStateCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
 }
 
 func (c explicitStateCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {

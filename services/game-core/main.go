@@ -38,7 +38,7 @@ func main() {
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
 	).
-		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 8)).
+		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 32)).
 		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
 		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second)).
 		WithScoringTimeout(config.Duration("GAME_CORE_SCORING_TIMEOUT", 30*time.Second)).

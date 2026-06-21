@@ -1126,9 +1126,33 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
 	var counts checkerTargetTickResult
 	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, tickID, tickID)
-	metadata := ""
-	halted := false
 
+	// All phases for this target run inside a single checker container, which
+	// chains each successful phase's output into the next and halts on the first
+	// failure. This collapses the per-phase container cold-starts of a tick.
+	batch, execErr := s.checker.ExecuteBatch(ctx, apigateway.CheckerBatchExecutionRequest{
+		ChallengeID:    target.ChallengeID,
+		TeamID:         target.TeamID,
+		TeamName:       target.TeamName,
+		ChallengeName:  target.ChallengeName,
+		CheckerImage:   target.CheckerImage,
+		Phases:         s.checkerPhases,
+		Target:         target.Target,
+		TargetHost:     target.TargetHost,
+		TargetIP:       target.TargetIP,
+		TargetPort:     target.TargetPort,
+		TickID:         tickID,
+		Flag:           flagValue,
+		CheckerToken:   target.CheckerToken,
+		TimeoutSeconds: s.checkerTimeout,
+	})
+
+	phaseResults := make(map[string]apigateway.CheckerPhaseResult, len(batch.Phases))
+	for _, pr := range batch.Phases {
+		phaseResults[pr.Phase] = pr
+	}
+
+	halted := false
 	for _, phase := range s.checkerPhases {
 		runTime := s.now().UTC()
 		run := checkerRunRecord{
@@ -1144,44 +1168,33 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 			ExitCode:      -1,
 		}
 
-		if halted {
+		switch {
+		case halted:
 			run.Status = "skipped"
 			run.Message = "phase skipped after previous checker failure"
-		} else {
-			result, execErr := s.checker.Execute(ctx, apigateway.CheckerExecutionRequest{
-				ChallengeID:    target.ChallengeID,
-				TeamID:         target.TeamID,
-				TeamName:       target.TeamName,
-				ChallengeName:  target.ChallengeName,
-				CheckerImage:   target.CheckerImage,
-				Phase:          phase,
-				Target:         target.Target,
-				TargetHost:     target.TargetHost,
-				TargetIP:       target.TargetIP,
-				TargetPort:     target.TargetPort,
-				TickID:         tickID,
-				Flag:           flagValue,
-				Metadata:       metadata,
-				CheckerToken:   target.CheckerToken,
-				TimeoutSeconds: s.checkerTimeout,
-			})
-			if execErr != nil {
-				run.Status = "failed"
-				run.Message = execErr.Error()
-			} else {
-				run.Status = normalizedCheckerRunStatus(result.Status)
-				run.ExitCode = result.ExitCode
-				run.Message = strings.TrimSpace(result.Message)
-				run.Output = strings.TrimSpace(result.Output)
-				run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
-				run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
-				if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
-					run.CheckedAt = parsed.UTC()
-				}
+		case execErr != nil:
+			// Batch transport/infra failure (docker, network, timeout): no phase
+			// ran. Attribute the failure to the first phase and skip the rest.
+			run.Status = "failed"
+			run.Message = execErr.Error()
+			halted = true
+		default:
+			result, ok := phaseResults[phase]
+			if !ok {
+				// Phase absent: a prior phase failed and the batch halted before it.
+				run.Status = "skipped"
+				run.Message = "phase skipped after previous checker failure"
+				halted = true
+				break
 			}
-
-			if run.Status == "success" && run.Output != "" {
-				metadata = run.Output
+			run.Status = normalizedCheckerRunStatus(result.Status)
+			run.ExitCode = result.ExitCode
+			run.Message = strings.TrimSpace(result.Message)
+			run.Output = strings.TrimSpace(result.Output)
+			run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
+			run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
+			if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
+				run.CheckedAt = parsed.UTC()
 			}
 			if run.Status == "failed" {
 				halted = true
