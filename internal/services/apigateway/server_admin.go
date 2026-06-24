@@ -101,6 +101,62 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, team)
 }
 
+// handleAdminDeactivateTeam removes a team from play mid-match: it is dropped
+// from the leaderboard and checker targets (via teams.active), its instances are
+// torn down, and the auth gate refuses all of its players. Unlike team deletion
+// this is reversible and is allowed while the match is running.
+func (s *Server) handleAdminDeactivateTeam(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	teamID, ok := parseTeamID(w, r)
+	if !ok {
+		return
+	}
+	team, err := s.store.SetTeamActive(r.Context(), teamID, false, s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	// Tear down the team's running instances and refresh firewall rules.
+	// Ignore controller errors if the controller is disabled.
+	_ = s.controller.RemoveTeamServices(r.Context(), teamID)
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+
+	s.recordAdminAudit(r.Context(), "team.deactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "deactivated team", map[string]any{
+		"team_id": teamID,
+	})
+	writeData(w, http.StatusOK, team)
+}
+
+// handleAdminReactivateTeam restores a deactivated team and re-queues its
+// instances so the controller reconcile loop boots them back to ready. The team
+// reappears on the leaderboard on the next scoreboard recompute.
+func (s *Server) handleAdminReactivateTeam(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	teamID, ok := parseTeamID(w, r)
+	if !ok {
+		return
+	}
+	team, err := s.store.SetTeamActive(r.Context(), teamID, true, s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	if err := s.store.RequeueTeamServices(r.Context(), teamID); err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+
+	s.recordAdminAudit(r.Context(), "team.reactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "reactivated team", map[string]any{
+		"team_id": teamID,
+	})
+	writeData(w, http.StatusOK, team)
+}
+
 func (s *Server) handleAdminListPlayers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -188,6 +244,43 @@ func (s *Server) handleAdminUpdatePlayer(w http.ResponseWriter, r *http.Request)
 		"role":         player.Role,
 	})
 	writeData(w, http.StatusOK, player)
+}
+
+// handleAdminSetPlayerActive backs both the deactivate and reactivate routes. A
+// deactivated player is refused at the auth gate (ValidatePlayerSession) on the
+// next request, revoking in-flight sessions as well as new logins. Teammates and
+// instances are unaffected (deactivation side effects are team-scoped).
+func (s *Server) handleAdminSetPlayerActive(w http.ResponseWriter, r *http.Request, active bool) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	playerID, ok := parsePlayerID(w, r)
+	if !ok {
+		return
+	}
+	player, err := s.store.SetPlayerActive(r.Context(), playerID, active, s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	action := "player.deactivate"
+	message := "deactivated player"
+	if active {
+		action = "player.reactivate"
+		message = "reactivated player"
+	}
+	s.recordAdminAudit(r.Context(), action, "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), message, map[string]any{
+		"player_id": playerID,
+	})
+	writeData(w, http.StatusOK, player)
+}
+
+func (s *Server) handleAdminDeactivatePlayer(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminSetPlayerActive(w, r, false)
+}
+
+func (s *Server) handleAdminReactivatePlayer(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminSetPlayerActive(w, r, true)
 }
 
 func (s *Server) handleAdminGetPlayerWireGuard(w http.ResponseWriter, r *http.Request) {
@@ -848,6 +941,70 @@ func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeData(w, http.StatusOK, rows)
+}
+
+func (s *Server) handleAdminScoreboardFreezeStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	freeze, err := s.store.GetScoreboardFreeze(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, scoreboardFreezeStatusFrom(freeze, s.now()))
+}
+
+func (s *Server) handleAdminSetScoreboardFreeze(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	var req scoreboardFreezeRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "freeze request is invalid.")
+		return
+	}
+	freezeAt, ok := parseRFC3339UTC(req.FreezeAt)
+	if !ok {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "freeze_at must be an RFC3339 timestamp.")
+		return
+	}
+	var unfreezeAt *time.Time
+	if strings.TrimSpace(req.UnfreezeAt) != "" {
+		parsed, ok := parseRFC3339UTC(req.UnfreezeAt)
+		if !ok {
+			writeProblem(w, http.StatusBadRequest, "Invalid request", "unfreeze_at must be an RFC3339 timestamp.")
+			return
+		}
+		if !parsed.After(freezeAt) {
+			writeProblem(w, http.StatusBadRequest, "Invalid request", "unfreeze_at must be later than freeze_at.")
+			return
+		}
+		unfreezeAt = &parsed
+	}
+	window, err := s.store.SetScoreboardFreezeWindow(r.Context(), &freezeAt, unfreezeAt, s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(r.Context(), "scoreboard.freeze", "scoreboard", "public-scoreboard", "set scoreboard freeze window", map[string]any{
+		"freeze_at":   req.FreezeAt,
+		"unfreeze_at": req.UnfreezeAt,
+	})
+	writeData(w, http.StatusOK, scoreboardFreezeStatusFrom(window, s.now()))
+}
+
+func (s *Server) handleAdminClearScoreboardFreeze(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	window, err := s.store.ClearScoreboardFreeze(r.Context(), s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(r.Context(), "scoreboard.unfreeze", "scoreboard", "public-scoreboard", "cleared scoreboard freeze window", nil)
+	writeData(w, http.StatusOK, scoreboardFreezeStatusFrom(window, s.now()))
 }
 
 func (s *Server) handleAdminRecomputeScoring(w http.ResponseWriter, r *http.Request) {

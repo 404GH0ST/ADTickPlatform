@@ -165,6 +165,56 @@ func TestMemoryStorePersistsCheckerServiceState(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreReapRunningTicks(t *testing.T) {
+	store, ok := newMemoryGameStore().(*memoryGameStore)
+	if !ok {
+		t.Fatal("expected concrete memory game store")
+	}
+	ctx := context.Background()
+
+	first, err := store.StartNextTick(ctx, time.Now())
+	if err != nil {
+		t.Fatalf("StartNextTick: %v", err)
+	}
+	first.Status = "completed"
+	first.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	if _, err := store.CompleteTick(ctx, first); err != nil {
+		t.Fatalf("CompleteTick: %v", err)
+	}
+
+	// Second tick is left "running" to simulate a crash mid-tick.
+	if _, err := store.StartNextTick(ctx, time.Now()); err != nil {
+		t.Fatalf("StartNextTick (stuck): %v", err)
+	}
+
+	// A new tick must be refused while the stuck one is still running.
+	if _, err := store.StartNextTick(ctx, time.Now()); !errors.Is(err, errTickInProgress) {
+		t.Fatalf("expected errTickInProgress before reap, got %v", err)
+	}
+
+	reaped, err := store.ReapRunningTicks(ctx)
+	if err != nil {
+		t.Fatalf("ReapRunningTicks: %v", err)
+	}
+	if reaped != 1 {
+		t.Fatalf("expected to reap 1 tick, got %d", reaped)
+	}
+	if store.ticks[1].Status != "failed" || store.ticks[1].Message != reapedTickMessage {
+		t.Fatalf("expected stuck tick reaped to failed, got %+v", store.ticks[1])
+	}
+	if store.ticks[0].Status != "completed" {
+		t.Fatalf("expected completed tick untouched, got %+v", store.ticks[0])
+	}
+
+	// Reaping again is a no-op, and a fresh tick is now allowed.
+	if reaped, err := store.ReapRunningTicks(ctx); err != nil || reaped != 0 {
+		t.Fatalf("expected idempotent reap, got reaped=%d err=%v", reaped, err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now()); err != nil {
+		t.Fatalf("expected tick allowed after reap, got %v", err)
+	}
+}
+
 func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 	store, ok := newMemoryGameStore().(*memoryGameStore)
 	if !ok {

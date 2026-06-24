@@ -6,10 +6,12 @@ import type {
 } from "@/lib/dashboard-types";
 import {
   type GameStatus,
+  type PublicScoreboardFreeze,
   type ServicesResponseData,
   type TeamServiceState,
   getParticipantSession,
   getGameStatus,
+  getScoreboardFreezeStatus,
   listAttackFeed,
   listChallenges,
   listScoreboard,
@@ -48,6 +50,7 @@ type DashboardResultSet = {
   gameStatusResult: PromiseSettledResult<GameStatus>;
   scoresResult: PromiseSettledResult<ScoreList>;
   attackPageResult: PromiseSettledResult<AttackFeedPage>;
+  freezeResult: PromiseSettledResult<PublicScoreboardFreeze>;
 };
 
 type DashboardLiveData = {
@@ -57,6 +60,7 @@ type DashboardLiveData = {
   gameStatus: GameStatus | null;
   scores: ScoreList;
   attackPage: AttackFeedPage;
+  freeze: PublicScoreboardFreeze;
 };
 
 import { fulfilledValue } from "./promise-utils";
@@ -104,6 +108,7 @@ async function fetchDashboardResults(
     gameStatusResult,
     scoresResult,
     attackPageResult,
+    freezeResult,
   ] = await Promise.allSettled([
     listChallenges(),
     authenticated ? listServices() : Promise.resolve(emptyServiceMap),
@@ -111,6 +116,7 @@ async function fetchDashboardResults(
     getGameStatus(),
     listScoreboard(),
     listAttackFeed(options.attackQuery ?? { limit: 12 }),
+    getScoreboardFreezeStatus(),
   ]);
 
   return {
@@ -120,6 +126,7 @@ async function fetchDashboardResults(
     gameStatusResult,
     scoresResult,
     attackPageResult,
+    freezeResult,
   };
 }
 
@@ -137,6 +144,10 @@ function readDashboardResults(
       results.attackPageResult,
       emptyAttackPage(options.attackQuery?.limit ?? 12),
     ),
+    freeze: fulfilledValue<PublicScoreboardFreeze>(results.freezeResult, {
+      frozen: false,
+      configured: false,
+    }),
   };
 }
 
@@ -251,6 +262,9 @@ function buildPlatformOverview(
     lastTickAt: data.gameStatus?.scheduler?.last_run_at,
     apiBaseUrl: participantApiBaseUrl(),
     realtimeBaseUrl: participantRealtimeBaseUrl(),
+    scoreboardFrozen: data.freeze.frozen,
+    scoreboardFreezeAt: data.freeze.freeze_at,
+    scoreboardUnfreezeAt: data.freeze.unfreeze_at,
   };
 }
 
@@ -259,7 +273,11 @@ function dashboardMessage(
   source: PlatformOverview["source"],
 ): string | undefined {
   const messageParts: string[] = [];
-  if (!session.authenticated) {
+  if (session.reason === "deactivated") {
+    messageParts.push(
+      "Your account or team has been deactivated by the organizers. You are signed out and removed from play. Contact the organizers if you believe this is a mistake.",
+    );
+  } else if (!session.authenticated) {
     messageParts.push(
       "Participant login is required for owned services, unlock, SSH, and reset actions.",
     );

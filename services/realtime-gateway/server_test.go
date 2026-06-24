@@ -14,17 +14,27 @@ import (
 )
 
 type testSnapshotClient struct {
-	mu         sync.Mutex
-	scoreboard []apigateway.ScoreRowAlias
-	attacks    []apigateway.AttackEventAlias
-	status     apigateway.GameStatus
-	events     []apigateway.GameSchedulerEvent
-	runs       []apigateway.GameCheckerRun
+	mu             sync.Mutex
+	scoreboard     []apigateway.ScoreRowAlias
+	scoreboardLive []apigateway.ScoreRowAlias
+	attacks        []apigateway.AttackEventAlias
+	status         apigateway.GameStatus
+	events         []apigateway.GameSchedulerEvent
+	runs           []apigateway.GameCheckerRun
 }
 
 func (c *testSnapshotClient) Scoreboard(context.Context) ([]apigateway.ScoreRowAlias, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return append([]apigateway.ScoreRowAlias(nil), c.scoreboard...), nil
+}
+
+func (c *testSnapshotClient) ScoreboardLive(context.Context) ([]apigateway.ScoreRowAlias, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.scoreboardLive != nil {
+		return append([]apigateway.ScoreRowAlias(nil), c.scoreboardLive...), nil
+	}
 	return append([]apigateway.ScoreRowAlias(nil), c.scoreboard...), nil
 }
 

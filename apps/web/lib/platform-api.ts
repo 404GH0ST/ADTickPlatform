@@ -157,6 +157,7 @@ type ParticipantSession = {
   email?: string;
   role?: string;
   source: "cookie" | "env" | "none";
+  reason?: "deactivated";
 };
 
 type AuthenticatedSessionSource = Exclude<ParticipantSession["source"], "none">;
@@ -220,6 +221,9 @@ export const getParticipantSession = cache(
     const directToken = process.env.AD_PLATFORM_TEAM_JWT?.trim();
     if (directToken) {
       const validated = await validateParticipantSessionWithAPI(directToken);
+      if (validated === "deactivated") {
+        return { authenticated: false, source: "none", reason: "deactivated" };
+      }
       return validated
         ? authenticatedSession(directToken, "env", validated)
         : { authenticated: false, source: "none" };
@@ -236,6 +240,9 @@ export const getParticipantSession = cache(
       return { authenticated: false, source: "none" };
     }
     const validated = await validateParticipantSessionWithAPI(cookieToken);
+    if (validated === "deactivated") {
+      return { authenticated: false, source: "none", reason: "deactivated" };
+    }
     return validated
       ? authenticatedSession(cookieToken, "cookie", validated)
       : { authenticated: false, source: "none" };
@@ -389,6 +396,18 @@ export async function listServices() {
 
 export async function listScoreboard() {
   return publicFetch<ScoreRow[]>("/api/v2/scoreboard");
+}
+
+export type PublicScoreboardFreeze = {
+  frozen: boolean;
+  configured: boolean;
+  freeze_at?: string;
+  unfreeze_at?: string;
+  snapshot_taken_at?: string;
+};
+
+export async function getScoreboardFreezeStatus() {
+  return publicFetch<PublicScoreboardFreeze>("/api/v2/scoreboard/freeze");
 }
 
 export async function getGameStatus() {

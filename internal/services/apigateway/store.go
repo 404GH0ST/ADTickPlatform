@@ -26,6 +26,7 @@ var (
 	ErrPlayerNotFound        = errors.New("player not found")
 	ErrDuplicateResource     = errors.New("duplicate resource")
 	ErrInvalidCredentials    = errors.New("invalid credentials")
+	ErrAccountDeactivated    = errors.New("account deactivated")
 	ErrInvalidRuntimeConfig  = errors.New("invalid runtime config")
 	ErrSubmissionUnavailable = errors.New("authoritative submission backend unavailable")
 	ErrTeamMemberLimit       = errors.New("team member limit reached")
@@ -49,6 +50,10 @@ type Store interface {
 	ListChallenges(ctx context.Context) ([]challenge, error)
 	ListPublicServices(ctx context.Context) (map[string]map[string][]string, error)
 	ListScoreboard(ctx context.Context) ([]scoreRow, error)
+	GetScoreboardFreeze(ctx context.Context) (scoreboardFreezeWindow, error)
+	SetScoreboardFreezeWindow(ctx context.Context, freezeAt, unfreezeAt *time.Time, now time.Time) (scoreboardFreezeWindow, error)
+	ClearScoreboardFreeze(ctx context.Context, now time.Time) (scoreboardFreezeWindow, error)
+	SaveFrozenScoreboardSnapshot(ctx context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error)
 	ListAttackFeed(ctx context.Context) ([]attackEvent, error)
 	ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error)
 	SubmitFlags(ctx context.Context, teamID int, flags []string) ([]submissionVerdict, error)
@@ -64,10 +69,13 @@ type Store interface {
 	CreateAdminTeam(ctx context.Context, input adminCreateTeamRequest) (adminTeam, error)
 	UpdateAdminTeam(ctx context.Context, teamID int, input adminUpdateTeamRequest) (adminTeam, error)
 	DeleteAdminTeam(ctx context.Context, teamID int) error
+	SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error)
+	RequeueTeamServices(ctx context.Context, teamID int) error
 	ListAdminPlayers(ctx context.Context) ([]adminPlayer, error)
 	CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error)
 	UpdateAdminPlayer(ctx context.Context, playerID int, input adminUpdatePlayerRequest) (adminPlayer, error)
 	DeleteAdminPlayer(ctx context.Context, playerID int) error
+	SetPlayerActive(ctx context.Context, playerID int, active bool, now time.Time) (adminPlayer, error)
 	GetAdminPlayerWireGuardConfig(ctx context.Context, playerID int) (adminWireGuardPeer, error)
 	RotateAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error)
 	RevokeAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error)

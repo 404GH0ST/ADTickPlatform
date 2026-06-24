@@ -26,6 +26,7 @@ import type {
   AdminGameTickStatus,
   AdminPlayer,
   AdminReconcileResult,
+  AdminScoreboardFreeze,
   AdminTeam,
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
@@ -443,6 +444,18 @@ export async function updateAdminTeam(teamID: number, input: UpdateTeamInput) {
   });
 }
 
+export async function deactivateAdminTeam(teamID: number) {
+  return adminFetch<AdminTeam>(`/api/v2/admin/teams/${teamID}/deactivate`, {
+    method: "POST",
+  });
+}
+
+export async function reactivateAdminTeam(teamID: number) {
+  return adminFetch<AdminTeam>(`/api/v2/admin/teams/${teamID}/reactivate`, {
+    method: "POST",
+  });
+}
+
 export async function listAdminPlayers() {
   return adminFetch<AdminPlayer[]>("/api/v2/admin/players");
 }
@@ -471,6 +484,24 @@ export async function updateAdminPlayer(
     method: "PUT",
     body: JSON.stringify(input),
   });
+}
+
+export async function deactivateAdminPlayer(playerID: number) {
+  return adminFetch<AdminPlayer>(
+    `/api/v2/admin/players/${playerID}/deactivate`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function reactivateAdminPlayer(playerID: number) {
+  return adminFetch<AdminPlayer>(
+    `/api/v2/admin/players/${playerID}/reactivate`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function getAdminPlayerWireGuard(playerID: number) {
@@ -723,6 +754,34 @@ export async function updateAdminGameScheduler(intervalSeconds: number) {
 
 export async function listAdminGameScoreboard() {
   return adminFetch<AdminGameScoreRow[]>("/api/v2/admin/game/scoreboard");
+}
+
+export async function getAdminScoreboardFreeze() {
+  return adminFetch<AdminScoreboardFreeze>(
+    "/api/v2/admin/game/scoreboard/freeze",
+  );
+}
+
+export async function setAdminScoreboardFreeze(input: {
+  freeze_at: string;
+  unfreeze_at?: string;
+}) {
+  return adminFetch<AdminScoreboardFreeze>(
+    "/api/v2/admin/game/scoreboard/freeze",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function clearAdminScoreboardFreeze() {
+  return adminFetch<AdminScoreboardFreeze>(
+    "/api/v2/admin/game/scoreboard/unfreeze",
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function recomputeAdminGameScoring() {

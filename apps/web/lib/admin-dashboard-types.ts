@@ -5,6 +5,8 @@ export type AdminTeam = {
   join_key: string;
   player_count: number;
   deployed_challenges: number;
+  active: boolean;
+  deactivated_at?: string;
 };
 
 export type AdminPlayer = {
@@ -20,6 +22,16 @@ export type AdminPlayer = {
   wireguard_issued_at: string;
   wireguard_revoked_at?: string;
   created_at: string;
+  active: boolean;
+  deactivated_at?: string;
+};
+
+export type AdminScoreboardFreeze = {
+  frozen: boolean;
+  configured: boolean;
+  freeze_at?: string;
+  unfreeze_at?: string;
+  snapshot_taken_at?: string;
 };
 
 export type AdminWireGuardPeer = {

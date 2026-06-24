@@ -91,6 +91,29 @@ type ScoreRowAlias struct {
 	Services []ServiceScoreBreakdownAlias `json:"services,omitempty"`
 }
 
+// scoreboardFreezeWindow is the stored freeze state: the optional window bounds
+// plus the snapshot captured when the window first became active. A nil FreezeAt
+// means there is no freeze configured and the board is live.
+type scoreboardFreezeWindow struct {
+	FreezeAt        *time.Time
+	UnfreezeAt      *time.Time
+	Snapshot        []ScoreRowAlias
+	SnapshotTakenAt *time.Time
+}
+
+// activeAt reports whether the freeze is in effect at the given time: the window
+// has started (now >= FreezeAt) and has not ended (UnfreezeAt unset or in the
+// future).
+func (w scoreboardFreezeWindow) activeAt(now time.Time) bool {
+	if w.FreezeAt == nil || now.Before(*w.FreezeAt) {
+		return false
+	}
+	if w.UnfreezeAt != nil && !now.Before(*w.UnfreezeAt) {
+		return false
+	}
+	return true
+}
+
 type ServiceScoreBreakdownAlias struct {
 	ChallengeID int     `json:"challenge_id"`
 	Service     string  `json:"service"`

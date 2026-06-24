@@ -25,6 +25,11 @@ var (
 	errContestOver       = errors.New("contest is over.")
 )
 
+// reapedTickMessage marks ticks that were left in the "running" state by a
+// crash mid-tick and recovered on the next startup. Without this recovery,
+// StartNextTick would refuse every future tick with errTickInProgress.
+const reapedTickMessage = "reaped: incomplete tick recovered on startup"
+
 const faustRecoveringValue = 0.5
 
 type checkerTarget struct {
@@ -113,6 +118,7 @@ type gameStore interface {
 	StopMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	UpdateMatchSchedule(ctx context.Context, startAt, endAt *time.Time) (apigateway.GameMatchStatus, error)
 	CompleteTick(ctx context.Context, tick apigateway.GameTickStatus) (apigateway.GameTickStatus, error)
+	ReapRunningTicks(ctx context.Context) (int, error)
 	GameStatus(ctx context.Context) (apigateway.GameStatus, error)
 	ListCheckerRuns(ctx context.Context, query apigateway.GameCheckerRunQuery) (apigateway.GameCheckerRunPage, error)
 	LoadSchedulerState(ctx context.Context, intervalSeconds int) (apigateway.GameSchedulerStatus, error)
@@ -603,6 +609,23 @@ func (s *memoryGameStore) CompleteTick(_ context.Context, tick apigateway.GameTi
 	return apigateway.GameTickStatus{}, fmt.Errorf("tick %d was not found", tick.ID)
 }
 
+func (s *memoryGameStore) ReapRunningTicks(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reaped := 0
+	for index := range s.ticks {
+		if s.ticks[index].Status != "running" {
+			continue
+		}
+		s.ticks[index].Status = "failed"
+		s.ticks[index].CompletedAt = time.Now().UTC().Format(time.RFC3339)
+		s.ticks[index].Message = reapedTickMessage
+		reaped++
+	}
+	return reaped, nil
+}
+
 func (s *memoryGameStore) GameStatus(_ context.Context) (apigateway.GameStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -780,6 +803,7 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 		JOIN challenges c ON c.id = tss.challenge_id
 		LEFT JOIN service_instances si ON si.team_id = t.id AND si.challenge_id = c.id
 		WHERE c.published = TRUE
+		  AND t.active = TRUE
 		  AND (si.runtime_status IS NULL OR si.runtime_status = 'ready')
 		ORDER BY t.id, c.id
 	`)
@@ -973,6 +997,24 @@ func (s *postgresGameStore) CompleteTick(ctx context.Context, tick apigateway.Ga
 		return apigateway.GameTickStatus{}, err
 	}
 	return tick, nil
+}
+
+func (s *postgresGameStore) ReapRunningTicks(ctx context.Context) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE game_ticks
+		SET status = 'failed',
+		    completed_at = NOW(),
+		    message = $1
+		WHERE status = 'running'
+	`, reapedTickMessage)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
 }
 
 func (s *postgresGameStore) GameStatus(ctx context.Context) (apigateway.GameStatus, error) {
@@ -1598,7 +1640,10 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	}
 
 	teams := make([]teamRecord, 0)
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM teams ORDER BY id`)
+	// Deactivated teams are excluded from the leaderboard. Their historical
+	// rows (flags, captures, checker runs) are left intact so reactivation
+	// restores them cleanly; they simply do not surface while inactive.
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM teams WHERE active = TRUE ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

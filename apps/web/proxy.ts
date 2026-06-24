@@ -76,7 +76,10 @@ async function organizerSession(request: NextRequest) {
   if (!claims) {
     return null;
   }
-  return validateParticipantSessionWithAPI(token);
+  const validated = await validateParticipantSessionWithAPI(token);
+  // A deactivated organizer has no usable session; treat it as unauthenticated
+  // so admin routes redirect to login rather than leaking a partial session.
+  return validated === "deactivated" ? null : validated;
 }
 
 export async function proxy(request: NextRequest) {

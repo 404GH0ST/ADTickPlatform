@@ -22,6 +22,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	// Recover from a crash that left a tick stuck in the "running" state.
+	// StartNextTick refuses every future tick while the last one is "running",
+	// so without this the scheduler would deadlock after any mid-tick blackout.
+	if reaped, err := store.ReapRunningTicks(ctx); err != nil {
+		log.Fatal(err)
+	} else if reaped > 0 {
+		log.Printf("game-core: reaped %d incomplete tick(s) left running by a previous crash", reaped)
+	}
 	if err := recomputeScoreboardOnStartup(ctx, store); err != nil {
 		log.Fatal(err)
 	}
@@ -38,7 +46,7 @@ func main() {
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
 	).
-		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 32)).
+		WithCheckerParallelism(config.Int("GAME_CORE_CHECKER_PARALLELISM", 16)).
 		WithTickTimeout(config.Duration("GAME_CORE_TICK_TIMEOUT", 180*time.Second)).
 		WithScoringDebounce(config.Duration("GAME_CORE_SCORING_DEBOUNCE", time.Second)).
 		WithScoringRetryDelay(config.Duration("GAME_CORE_SCORING_RETRY_DELAY", 5*time.Second)).

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactElement, ReactNode } from "react";
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import {
   Copy,
   Download,
@@ -12,6 +12,8 @@ import {
   Pause,
   Pencil,
   Play,
+  Power,
+  PowerOff,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -29,6 +31,7 @@ import type {
   AdminOperationsStatus,
   AdminServiceMetricSnapshot,
   AdminPlayer,
+  AdminScoreboardFreeze,
   AdminSchedulerEventPage,
   AdminScoringAudit,
   AdminTeam,
@@ -115,6 +118,7 @@ type TeamsTabProps = {
   onOpenCreateDialog: () => void;
   onOpenEditDialog: (id: number) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onSetTeamActiveState: (team: AdminTeam, active: boolean) => void;
 };
 
 type PlayersTabProps = {
@@ -141,6 +145,7 @@ type PlayersTabProps = {
   onTeardownAccess: () => void;
   onTeardownWireGuardGateway: () => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onSetPlayerActiveState: (player: AdminPlayer, active: boolean) => void;
 };
 
 type ChallengesTabProps = {
@@ -378,6 +383,7 @@ export function TeamsTab({
   onOpenCreateDialog,
   onOpenEditDialog,
   onSelectDeleteTarget,
+  onSetTeamActiveState,
 }: TeamsTabProps): ReactElement {
   return (
     <>
@@ -396,13 +402,14 @@ export function TeamsTab({
                 <TableHead>Join key</TableHead>
                 <TableHead>Players</TableHead>
                 <TableHead>Deployed</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {teamRows.length === 0 && (
                 <EmptyTableRow
-                  colSpan={7}
+                  colSpan={8}
                   message="No teams yet. Click Create Team to add one."
                 />
               )}
@@ -414,7 +421,31 @@ export function TeamsTab({
                   <TableCell className="font-mono text-xs">{team.join_key}</TableCell>
                   <TableCell>{team.player_count}</TableCell>
                   <TableCell>{team.deployed_challenges}</TableCell>
+                  <TableCell>
+                    <Badge
+                      className={team.active ? "tone-success" : "tone-danger"}
+                      data-testid={`team-status-${team.id}`}
+                    >
+                      {team.active ? "Active" : "Inactive"}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={team.active ? "button-danger-subtle" : undefined}
+                      data-testid={`toggle-team-active-${team.id}`}
+                      title={team.active ? "Deactivate team" : "Reactivate team"}
+                      aria-label={team.active ? "Deactivate team" : "Reactivate team"}
+                      disabled={pendingAction !== null}
+                      onClick={() => onSetTeamActiveState(team, !team.active)}
+                    >
+                      {team.active ? (
+                        <PowerOff className="h-4 w-4" />
+                      ) : (
+                        <Power className="h-4 w-4" />
+                      )}
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -482,6 +513,7 @@ export function PlayersTab({
   onRotateWireGuard,
   onTeardownAccess,
   onTeardownWireGuardGateway,
+  onSetPlayerActiveState,
 }: PlayersTabProps): ReactElement {
   return (
     <>
@@ -513,6 +545,7 @@ export function PlayersTab({
           onRevokeWireGuard={onRevokeWireGuard}
           onRotateWireGuard={onRotateWireGuard}
           onSelectDeleteTarget={onSelectDeleteTarget}
+          onSetPlayerActiveState={onSetPlayerActiveState}
         />
       </div>
 
@@ -867,6 +900,7 @@ function PlayerRegistryCard({
   onRevokeWireGuard,
   onRotateWireGuard,
   onSelectDeleteTarget,
+  onSetPlayerActiveState,
 }: {
   pendingAction: string | null;
   playerRows: AdminPlayer[];
@@ -876,6 +910,7 @@ function PlayerRegistryCard({
   onRevokeWireGuard: (player: AdminPlayer) => void;
   onRotateWireGuard: (player: AdminPlayer) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onSetPlayerActiveState: (player: AdminPlayer, active: boolean) => void;
 }): ReactElement {
   return (
     <AdminRegistryCard
@@ -893,6 +928,7 @@ function PlayerRegistryCard({
             { label: "Peer" },
             { label: "Address" },
             { label: "Status" },
+            { label: "Active" },
             { label: "Action" },
           ]} />
           <TableBody>
@@ -937,7 +973,31 @@ function PlayerRegistryCard({
                     )}
                   </TableCell>
                   <TableCell>
+                    <Badge
+                      className={player.active ? "tone-success" : "tone-danger"}
+                      data-testid={`player-status-${player.id}`}
+                    >
+                      {player.active ? "Active" : "Inactive"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        disabled={pendingAction !== null}
+                        size="sm"
+                        variant="ghost"
+                        className={player.active ? "button-danger-subtle" : undefined}
+                        data-testid={`toggle-player-active-${player.id}`}
+                        title={player.active ? "Deactivate player" : "Reactivate player"}
+                        aria-label={player.active ? "Deactivate player" : "Reactivate player"}
+                        onClick={() => onSetPlayerActiveState(player, !player.active)}
+                      >
+                        {player.active ? (
+                          <PowerOff className="h-4 w-4" />
+                        ) : (
+                          <Power className="h-4 w-4" />
+                        )}
+                      </Button>
                       <Button
                         disabled={pendingAction !== null}
                         size="sm"
@@ -1704,6 +1764,183 @@ export function ScoreboardCategoryLeadersPanel({
   );
 }
 
+function freezeStateLabel(status: AdminScoreboardFreeze | null): {
+  label: string;
+  tone: string;
+} {
+  if (!status || !status.configured) {
+    return { label: "Live", tone: "tone-success" };
+  }
+  if (status.frozen) {
+    return { label: "Frozen", tone: "tone-warning" };
+  }
+  return { label: "Scheduled", tone: "tone-info" };
+}
+
+// ScoreboardFreezeControl is self-contained: it reads and writes the freeze
+// window directly through the admin proxy routes rather than threading state
+// through the organizer dashboard hook. The participant board freezes; this
+// organizer view (and the admin SSE stream) stay live.
+function ScoreboardFreezeControl(): ReactElement {
+  const [status, setStatus] = useState<AdminScoreboardFreeze | null>(null);
+  const [freezeAt, setFreezeAt] = useState("");
+  const [unfreezeAt, setUnfreezeAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/game/scoreboard/freeze", {
+        cache: "no-store",
+      });
+      if (res.ok) {
+        setStatus((await res.json()) as AdminScoreboardFreeze);
+      }
+    } catch {
+      // leave previous status in place on transient failure
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function applyFreeze(): Promise<void> {
+    if (!freezeAt) {
+      setError("Pick a freeze start time.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const body: { freeze_at: string; unfreeze_at?: string } = {
+        freeze_at: new Date(freezeAt).toISOString(),
+      };
+      if (unfreezeAt) {
+        body.unfreeze_at = new Date(unfreezeAt).toISOString();
+      }
+      const res = await fetch("/api/admin/game/scoreboard/freeze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const problem = (await res.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(problem?.detail ?? "freeze update failed");
+      }
+      setStatus((await res.json()) as AdminScoreboardFreeze);
+      setNote("Freeze window saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "freeze update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearFreeze(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/game/scoreboard/unfreeze", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const problem = (await res.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(problem?.detail ?? "freeze clear failed");
+      }
+      setStatus((await res.json()) as AdminScoreboardFreeze);
+      setFreezeAt("");
+      setUnfreezeAt("");
+      setNote("Freeze cleared. Participant board is live.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "freeze clear failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const state = freezeStateLabel(status);
+
+  return (
+    <Card data-testid="scoreboard-freeze-card">
+      <CardHeader>
+        <CardTitle>Scoreboard Freeze</CardTitle>
+        <CardDescription>
+          Freeze the participant scoreboard for a window. Organizers keep seeing
+          the live board.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Participant board:</span>
+          <Badge className={state.tone} data-testid="scoreboard-freeze-state">
+            {state.label}
+          </Badge>
+          {status?.freeze_at && (
+            <span className="text-xs text-muted-foreground">
+              from {new Date(status.freeze_at).toLocaleString()}
+              {status.unfreeze_at
+                ? ` to ${new Date(status.unfreeze_at).toLocaleString()}`
+                : ""}
+            </span>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+          <Field label="Freeze at" htmlFor="scoreboard-freeze-at">
+            <Input
+              id="scoreboard-freeze-at"
+              data-testid="scoreboard-freeze-at"
+              type="datetime-local"
+              value={freezeAt}
+              onChange={(event) => setFreezeAt(event.target.value)}
+            />
+          </Field>
+          <Field label="Unfreeze at (optional)" htmlFor="scoreboard-unfreeze-at">
+            <Input
+              id="scoreboard-unfreeze-at"
+              data-testid="scoreboard-unfreeze-at"
+              type="datetime-local"
+              value={unfreezeAt}
+              onChange={(event) => setUnfreezeAt(event.target.value)}
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              disabled={busy}
+              data-testid="scoreboard-freeze-apply"
+              onClick={() => void applyFreeze()}
+            >
+              Set Freeze
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="button-danger-subtle"
+              disabled={busy || !status?.configured}
+              data-testid="scoreboard-freeze-clear"
+              onClick={() => void clearFreeze()}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+        {note && <p className="text-sm tone-success rounded-md border px-3 py-2">{note}</p>}
+        {error && (
+          <p className="text-sm tone-danger rounded-md border px-3 py-2">{error}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ScoreboardTab({
   pendingAction,
   scoringAudit,
@@ -1722,6 +1959,7 @@ export function ScoreboardTab({
 
   return (
     <div className="grid gap-4">
+      <ScoreboardFreezeControl />
       <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
       <Card>
         <CardHeader>

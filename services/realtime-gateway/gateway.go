@@ -19,6 +19,7 @@ type streamKind string
 
 const (
 	streamScoreboard      streamKind = "scoreboard"
+	streamAdminScoreboard streamKind = "admin_scoreboard"
 	streamAttacks         streamKind = "attacks"
 	streamGameStatus      streamKind = "game_status"
 	streamSchedulerEvents streamKind = "scheduler_events"
@@ -33,6 +34,8 @@ type realtimeGateway struct {
 	mu                 sync.RWMutex
 	scoreboard         []byte
 	scoreHash          [32]byte
+	adminScoreboard    []byte
+	adminScoreHash     [32]byte
 	attacks            []byte
 	attackHash         [32]byte
 	gameStatus         []byte
@@ -55,6 +58,7 @@ func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration,
 		adminToken:   strings.TrimSpace(adminToken),
 		subscribers: map[streamKind]map[int]chan []byte{
 			streamScoreboard:      make(map[int]chan []byte),
+			streamAdminScoreboard: make(map[int]chan []byte),
 			streamAttacks:         make(map[int]chan []byte),
 			streamGameStatus:      make(map[int]chan []byte),
 			streamSchedulerEvents: make(map[int]chan []byte),
@@ -98,6 +102,9 @@ func (g *realtimeGateway) syncOnce(ctx context.Context) error {
 		errs = append(errs, "attack sync failed: "+err.Error())
 	}
 	if g.adminToken != "" {
+		if err := g.syncKind(ctx, streamAdminScoreboard); err != nil {
+			errs = append(errs, "admin scoreboard sync failed: "+err.Error())
+		}
 		if err := g.syncKind(ctx, streamGameStatus); err != nil {
 			errs = append(errs, "game status sync failed: "+err.Error())
 		}
@@ -136,7 +143,9 @@ func (g *realtimeGateway) handleAdminScoreboardStream(w http.ResponseWriter, r *
 	if !g.requireAdminAuth(w, r) {
 		return
 	}
-	g.handleStream(w, r, streamScoreboard)
+	// Organizers get the live board, which ignores the freeze window, so their
+	// stream keeps updating while participants see the frozen snapshot.
+	g.handleStream(w, r, streamAdminScoreboard)
 }
 
 func (g *realtimeGateway) handleAdminGameStatusStream(w http.ResponseWriter, r *http.Request) {
@@ -229,6 +238,12 @@ func (g *realtimeGateway) publishIfChanged(kind streamKind, payload []byte) {
 		}
 		g.scoreHash = hash
 		g.scoreboard = append([]byte(nil), payload...)
+	case streamAdminScoreboard:
+		if hash == g.adminScoreHash {
+			return
+		}
+		g.adminScoreHash = hash
+		g.adminScoreboard = append([]byte(nil), payload...)
 	case streamAttacks:
 		if hash == g.attackHash {
 			return
@@ -272,6 +287,8 @@ func (g *realtimeGateway) current(kind streamKind) []byte {
 	switch kind {
 	case streamScoreboard:
 		return append([]byte(nil), g.scoreboard...)
+	case streamAdminScoreboard:
+		return append([]byte(nil), g.adminScoreboard...)
 	case streamAttacks:
 		return append([]byte(nil), g.attacks...)
 	case streamGameStatus:
@@ -327,6 +344,16 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 	switch kind {
 	case streamScoreboard:
 		rows, err := g.client.Scoreboard(ctx)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(rows)
+		if err != nil {
+			return err
+		}
+		g.publishIfChanged(kind, payload)
+	case streamAdminScoreboard:
+		rows, err := g.client.ScoreboardLive(ctx)
 		if err != nil {
 			return err
 		}

@@ -203,6 +203,7 @@ const teams = [
     join_key: "TEAM-ALPHA-JOIN",
     player_count: 2,
     deployed_challenges: 1,
+    active: true,
   },
   {
     id: 102,
@@ -211,6 +212,7 @@ const teams = [
     join_key: "TEAM-BETA-JOIN",
     player_count: 2,
     deployed_challenges: 1,
+    active: true,
   },
   {
     id: 103,
@@ -219,6 +221,7 @@ const teams = [
     join_key: "TEAM-GAMMA-JOIN",
     player_count: 1,
     deployed_challenges: 1,
+    active: true,
   },
 ];
 
@@ -233,6 +236,7 @@ const players = [
     wireguard_peer: "wg-organizer",
     wireguard_address: "10.70.11.19/32",
     wireguard_status: "active",
+    active: true,
     wireguard_issued_at: "2026-03-20T08:55:00Z",
     created_at: "2026-03-20T07:55:00Z",
   },
@@ -246,6 +250,7 @@ const players = [
     wireguard_peer: "wg-alpha",
     wireguard_address: "10.70.11.20/32",
     wireguard_status: "active",
+    active: true,
     wireguard_issued_at: "2026-03-20T09:00:00Z",
     created_at: "2026-03-20T08:00:00Z",
   },
@@ -259,6 +264,7 @@ const players = [
     wireguard_peer: "wg-beta",
     wireguard_address: "10.70.11.21/32",
     wireguard_status: "active",
+    active: true,
     wireguard_issued_at: "2026-03-20T09:05:00Z",
     created_at: "2026-03-20T08:05:00Z",
   },
@@ -699,6 +705,21 @@ function createInitialState() {
     nextDeploymentJobID: 89,
     nextSchedulerEventID: 4,
     deploymentReconcileProblem: null,
+    scoreboardFreeze: { freeze_at: null, unfreeze_at: null },
+  };
+}
+
+function scoreboardFreezeStatus() {
+  const freeze = state.scoreboardFreeze ?? { freeze_at: null, unfreeze_at: null };
+  const now = Date.now();
+  const start = freeze.freeze_at ? Date.parse(freeze.freeze_at) : null;
+  const end = freeze.unfreeze_at ? Date.parse(freeze.unfreeze_at) : null;
+  const frozen = start !== null && now >= start && (end === null || now < end);
+  return {
+    frozen,
+    configured: start !== null,
+    freeze_at: freeze.freeze_at ?? undefined,
+    unfreeze_at: freeze.unfreeze_at ?? undefined,
   };
 }
 
@@ -1485,6 +1506,22 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
     ) {
       return writeFailure(res, 403, "please authenticate before access.", "forbidden");
     }
+    const sessionTeam = state.teams.find((item) => item.id === player.team_id);
+    const teamGated =
+      player.role !== "organizer" && sessionTeam && sessionTeam.active === false;
+    if (player.active === false || teamGated) {
+      writeJson(
+        res,
+        403,
+        JSON.stringify({
+          title: "Access deactivated",
+          status: 403,
+          detail:
+            "Your account or team has been deactivated by the organizers.",
+        }),
+      );
+      return true;
+    }
     return writeSuccess(res, {
       player_id: player.id,
       team_id: player.team_id,
@@ -1659,6 +1696,7 @@ async function handleParticipantRoutes(ctx) {
   const handled = writeGetRoute(res, method, url.pathname, {
     "/api/v2/challenges": () => challenges,
     "/api/v2/scoreboard": () => state.scoreboard,
+    "/api/v2/scoreboard/freeze": () => scoreboardFreezeStatus(),
     "/api/v2/game/status": () => state.gameStatus,
     "/api/v2/services": () => state.serviceMap,
     "/api/v2/team/services": () => state.teamServiceStates,
@@ -1817,10 +1855,31 @@ async function handleAdminTeamRoutes({ req, res, url, method }) {
       join_key: `TEAM-${state.nextTeamID}-JOIN`,
       player_count: 0,
       deployed_challenges: publishedChallenges,
+      active: true,
     };
     state.nextTeamID += 1;
     state.teams.push(team);
 
+    return writeSuccess(res, team);
+  }
+
+  const deactivateTeamID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/teams\/(\d+)\/deactivate$/,
+  );
+  const reactivateTeamID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/teams\/(\d+)\/reactivate$/,
+  );
+  if (method === "POST" && (deactivateTeamID !== null || reactivateTeamID !== null)) {
+    const active = reactivateTeamID !== null;
+    const targetID = active ? reactivateTeamID : deactivateTeamID;
+    const team = state.teams.find((item) => item.id === targetID);
+    if (!team) {
+      return writeFailure(res, 404, "team not found.");
+    }
+    team.active = active;
+    team.deactivated_at = active ? undefined : nowIso();
     return writeSuccess(res, team);
   }
 
@@ -1902,6 +1961,7 @@ async function handlePlayerCollectionRoutes({ req, res, url, method }) {
     wireguard_peer: `wg-${playerID}`,
     wireguard_address: `10.70.12.${playerID - 980}/32`,
     wireguard_status: "active",
+    active: true,
     wireguard_issued_at: nowIso(),
     created_at: nowIso(),
   };
@@ -1912,6 +1972,29 @@ async function handlePlayerCollectionRoutes({ req, res, url, method }) {
 }
 
 async function handlePlayerItemRoutes({ req, res, url, method }) {
+  const deactivatePlayerID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/players\/(\d+)\/deactivate$/,
+  );
+  const reactivatePlayerID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/players\/(\d+)\/reactivate$/,
+  );
+  if (
+    method === "POST" &&
+    (deactivatePlayerID !== null || reactivatePlayerID !== null)
+  ) {
+    const active = reactivatePlayerID !== null;
+    const targetID = active ? reactivatePlayerID : deactivatePlayerID;
+    const player = state.players.find((item) => item.id === targetID);
+    if (!player) {
+      return writeFailure(res, 404, "player not found.");
+    }
+    player.active = active;
+    player.deactivated_at = active ? undefined : nowIso();
+    return writeSuccess(res, player);
+  }
+
   const playerID = routeID(url.pathname, /^\/api\/v2\/admin\/players\/(\d+)$/);
   if (playerID === null) {
     return false;
@@ -2283,10 +2366,33 @@ async function handleAdminGameRoutes(ctx) {
   const handled = writeGetRoute(res, method, url.pathname, {
     "/api/v2/admin/game/status": () => state.gameStatus,
     "/api/v2/admin/game/scoreboard": () => state.scoreboard,
+    "/api/v2/admin/game/scoreboard/freeze": () => scoreboardFreezeStatus(),
     "/api/v2/admin/game/scoring/audit": () => state.scoringAudit,
   });
   if (handled) {
     return true;
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/scoreboard/freeze") {
+    const body = await readJsonBody(ctx.req);
+    const freezeAt = typeof body?.freeze_at === "string" ? body.freeze_at.trim() : "";
+    if (!freezeAt || Number.isNaN(Date.parse(freezeAt))) {
+      return writeFailure(res, 400, "freeze_at must be an RFC3339 timestamp.");
+    }
+    let unfreezeAt = null;
+    if (typeof body?.unfreeze_at === "string" && body.unfreeze_at.trim() !== "") {
+      if (Number.isNaN(Date.parse(body.unfreeze_at))) {
+        return writeFailure(res, 400, "unfreeze_at must be an RFC3339 timestamp.");
+      }
+      unfreezeAt = body.unfreeze_at;
+    }
+    state.scoreboardFreeze = { freeze_at: freezeAt, unfreeze_at: unfreezeAt };
+    return writeSuccess(res, scoreboardFreezeStatus());
+  }
+
+  if (method === "POST" && url.pathname === "/api/v2/admin/game/scoreboard/unfreeze") {
+    state.scoreboardFreeze = { freeze_at: null, unfreeze_at: null };
+    return writeSuccess(res, scoreboardFreezeStatus());
   }
 
   if (method === "GET" && url.pathname === "/api/v2/admin/game/attacks") {

@@ -115,6 +115,12 @@ export function OrganizerDashboard({
         onOpenCreateDialog: state.openCreateDialog,
         onOpenEditDialog: state.openEditDialog,
         onSelectDeleteTarget: state.selectDeleteTarget,
+        onSetTeamActiveState: (team, active) => {
+          void state.setTeamActiveState(team, active);
+        },
+        onSetPlayerActiveState: (player, active) => {
+          void state.setPlayerActiveState(player, active);
+        },
         deleteTarget: state.deleteTarget,
         onDeployChallenge: (challenge) => {
           void state.deployChallenge(challenge);
@@ -292,6 +298,8 @@ function renderOrganizerPanel({
   onOpenCreateDialog,
   onOpenEditDialog,
   onSelectDeleteTarget,
+  onSetTeamActiveState,
+  onSetPlayerActiveState,
   deleteTarget,
   onDeployChallenge,
   onDownloadWireGuardConfig,
@@ -382,6 +390,14 @@ function renderOrganizerPanel({
     id: number,
   ) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onSetTeamActiveState: (
+    team: OrganizerDashboardOptions["teams"][number],
+    active: boolean,
+  ) => void;
+  onSetPlayerActiveState: (
+    player: OrganizerDashboardOptions["players"][number],
+    active: boolean,
+  ) => void;
   deleteTarget: DeleteTarget | null;
   onDeployChallenge: (
     challenge: OrganizerDashboardOptions["challenges"][number],
@@ -446,6 +462,7 @@ function renderOrganizerPanel({
         onOpenCreateDialog={() => onOpenCreateDialog("team")}
         onOpenEditDialog={(id) => onOpenEditDialog("team", id)}
         onSelectDeleteTarget={onSelectDeleteTarget}
+        onSetTeamActiveState={onSetTeamActiveState}
       />
     );
   }
@@ -476,6 +493,7 @@ function renderOrganizerPanel({
         onRotateWireGuard={onRotateWireGuard}
         onTeardownAccess={onTeardownAccess}
         onTeardownWireGuardGateway={onTeardownWireGuardGateway}
+        onSetPlayerActiveState={onSetPlayerActiveState}
       />
     );
   }

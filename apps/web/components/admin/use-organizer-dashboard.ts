@@ -189,6 +189,8 @@ export type OrganizerDashboardState = {
   openCreateDialog: (entity: "team" | "player" | "challenge") => void;
   openEditDialog: (entity: "team" | "player" | "challenge", id: number) => void;
   selectDeleteTarget: (target: DeleteTarget) => void;
+  setTeamActiveState: (team: AdminTeam, active: boolean) => Promise<void>;
+  setPlayerActiveState: (player: AdminPlayer, active: boolean) => Promise<void>;
   submitForm: () => Promise<void>;
   deploymentRows: AdminDeploymentJob[];
   deployChallenge: (challenge: AdminChallenge) => Promise<void>;
@@ -1162,6 +1164,65 @@ export function useOrganizerDashboard({
         );
       },
       successNote: `Player "${player.display_name}" deleted.`,
+    });
+  }
+
+  async function postRowAction<T>(opts: {
+    actionKey: string;
+    url: string;
+    errorLabel: string;
+    successNote: string;
+    apply: (data: T) => void;
+  }): Promise<void> {
+    setPendingAction(opts.actionKey);
+    setActionError(null);
+    setActionNote(null);
+
+    try {
+      const response = await fetch(opts.url, { method: "POST" });
+      const data = await processApiResponse<T>(response, opts.url);
+      opts.apply(data);
+      setActionNote(opts.successNote);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : opts.errorLabel);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function setTeamActiveState(
+    team: AdminTeam,
+    active: boolean,
+  ): Promise<void> {
+    return postRowAction<AdminTeam>({
+      actionKey: `team:active:${team.id}`,
+      url: `/api/admin/teams/${team.id}/${active ? "reactivate" : "deactivate"}`,
+      errorLabel: active ? "team reactivate failed" : "team deactivate failed",
+      successNote: `Team "${team.name}" ${active ? "reactivated" : "deactivated"}.`,
+      apply: (data) => {
+        setTeamRows((current) =>
+          current.map((item) => (item.id === team.id ? data : item)),
+        );
+      },
+    });
+  }
+
+  async function setPlayerActiveState(
+    player: AdminPlayer,
+    active: boolean,
+  ): Promise<void> {
+    return postRowAction<AdminPlayer>({
+      actionKey: `player:active:${player.id}`,
+      url: `/api/admin/players/${player.id}/${active ? "reactivate" : "deactivate"}`,
+      errorLabel: active
+        ? "player reactivate failed"
+        : "player deactivate failed",
+      successNote: `Player "${player.display_name}" ${active ? "reactivated" : "deactivated"}.`,
+      apply: (data) => {
+        setPlayerRows((current) =>
+          current.map((item) => (item.id === player.id ? data : item)),
+        );
+      },
     });
   }
 
@@ -2396,6 +2457,8 @@ export function useOrganizerDashboard({
     openCreateDialog,
     openEditDialog,
     selectDeleteTarget,
+    setTeamActiveState,
+    setPlayerActiveState,
     submitForm,
     deploymentRows,
     deployChallenge,

@@ -16,6 +16,7 @@ import (
 
 type publicSnapshotClient interface {
 	Scoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
+	ScoreboardLive(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
 	Attacks(ctx context.Context) (apigateway.AttackFeedPage, error)
 	GameStatus(ctx context.Context) (apigateway.GameStatus, error)
 	SchedulerEvents(ctx context.Context, limit int) (apigateway.GameSchedulerEventPage, error)
@@ -44,6 +45,12 @@ func newHTTPPublicSnapshotClient(baseURL, adminToken string) publicSnapshotClien
 
 func (c *httpPublicSnapshotClient) Scoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
 	return fetchSnapshot[[]apigateway.ScoreRowAlias](ctx, c.client, c.baseURL+"/api/v2/scoreboard")
+}
+
+// ScoreboardLive reads the organizer board, which ignores the freeze window, so
+// admin subscribers keep seeing live standings while the public board is frozen.
+func (c *httpPublicSnapshotClient) ScoreboardLive(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
+	return fetchSnapshotWithToken[[]apigateway.ScoreRowAlias](ctx, c.client, c.baseURL+"/api/v2/admin/game/scoreboard", c.adminToken)
 }
 
 func (c *httpPublicSnapshotClient) Attacks(ctx context.Context) (apigateway.AttackFeedPage, error) {

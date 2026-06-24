@@ -1,5 +1,7 @@
 package apigateway
 
+import "time"
+
 type adminCreateTeamRequest struct {
 	Name         string `json:"name"`
 	ContactEmail string `json:"contact_email"`
@@ -49,6 +51,8 @@ type adminTeam struct {
 	JoinKey            string `json:"join_key"`
 	PlayerCount        int    `json:"player_count"`
 	DeployedChallenges int    `json:"deployed_challenges"`
+	Active             bool   `json:"active"`
+	DeactivatedAt      string `json:"deactivated_at,omitempty"`
 }
 
 type adminPlayer struct {
@@ -64,6 +68,8 @@ type adminPlayer struct {
 	WireGuardIssuedAt  string `json:"wireguard_issued_at"`
 	WireGuardRevokedAt string `json:"wireguard_revoked_at,omitempty"`
 	CreatedAt          string `json:"created_at"`
+	Active             bool   `json:"active"`
+	DeactivatedAt      string `json:"deactivated_at,omitempty"`
 }
 
 type participantRegisterRequest struct {
@@ -257,4 +263,34 @@ type adminPlatformSettings struct {
 type adminUpdatePlatformSettingsRequest struct {
 	FlagFormatPrefix string `json:"flag_format_prefix"`
 	MaxTeamMembers   *int   `json:"max_team_members,omitempty"`
+}
+
+type scoreboardFreezeStatus struct {
+	Frozen          bool   `json:"frozen"`
+	Configured      bool   `json:"configured"`
+	FreezeAt        string `json:"freeze_at,omitempty"`
+	UnfreezeAt      string `json:"unfreeze_at,omitempty"`
+	SnapshotTakenAt string `json:"snapshot_taken_at,omitempty"`
+}
+
+type scoreboardFreezeRequest struct {
+	FreezeAt   string `json:"freeze_at"`
+	UnfreezeAt string `json:"unfreeze_at,omitempty"`
+}
+
+func scoreboardFreezeStatusFrom(window scoreboardFreezeWindow, now time.Time) scoreboardFreezeStatus {
+	status := scoreboardFreezeStatus{
+		Frozen:     window.activeAt(now),
+		Configured: window.FreezeAt != nil,
+	}
+	if window.FreezeAt != nil {
+		status.FreezeAt = window.FreezeAt.UTC().Format(time.RFC3339)
+	}
+	if window.UnfreezeAt != nil {
+		status.UnfreezeAt = window.UnfreezeAt.UTC().Format(time.RFC3339)
+	}
+	if window.SnapshotTakenAt != nil {
+		status.SnapshotTakenAt = window.SnapshotTakenAt.UTC().Format(time.RFC3339)
+	}
+	return status
 }

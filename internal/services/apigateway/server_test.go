@@ -889,6 +889,86 @@ func newTestMuxWithWorkers(game gameCoreClient, submission submissionClient, sco
 	return mux
 }
 
+func participantScoreboardFirstTotal(t *testing.T, mux http.Handler) float64 {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/scoreboard", nil)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("scoreboard status = %d, body %s", res.Code, res.Body.String())
+	}
+	var rows []scoreRow
+	if err := json.NewDecoder(res.Body).Decode(&rows); err != nil {
+		t.Fatalf("decode scoreboard: %v", err)
+	}
+	if len(rows) == 0 {
+		return -1
+	}
+	return rows[0].Total
+}
+
+func TestScoreboardFreezeServesSnapshotToParticipantsButLiveToOrganizers(t *testing.T) {
+	store, ok := NewMemoryStore(101).(*memoryStore)
+	if !ok {
+		t.Fatal("expected concrete memory store")
+	}
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 10}}
+
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute).UTC()
+	if _, err := store.SetScoreboardFreezeWindow(ctx, &past, nil, time.Now()); err != nil {
+		t.Fatalf("SetScoreboardFreezeWindow: %v", err)
+	}
+
+	// First participant read captures the snapshot from the live board (10).
+	if got := participantScoreboardFirstTotal(t, mux); got != 10 {
+		t.Fatalf("expected snapshot total 10 on first read, got %v", got)
+	}
+
+	// The live board moves on.
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 99}}
+
+	// Participants keep seeing the frozen snapshot (10).
+	if got := participantScoreboardFirstTotal(t, mux); got != 10 {
+		t.Fatalf("expected frozen total 10, got %v", got)
+	}
+
+	// The organizer / live source sees the real board (99).
+	live, err := store.ListScoreboard(ctx)
+	if err != nil {
+		t.Fatalf("ListScoreboard: %v", err)
+	}
+	if len(live) == 0 || live[0].Total != 99 {
+		t.Fatalf("expected live total 99, got %+v", live)
+	}
+
+	// Public freeze status reports the freeze.
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/scoreboard/freeze", nil)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("freeze status code = %d", res.Code)
+	}
+	var status scoreboardFreezeStatus
+	if err := json.NewDecoder(res.Body).Decode(&status); err != nil {
+		t.Fatalf("decode freeze status: %v", err)
+	}
+	if !status.Frozen {
+		t.Fatalf("expected frozen=true, got %+v", status)
+	}
+
+	// Clearing the window thaws participants back to live.
+	if _, err := store.ClearScoreboardFreeze(ctx, time.Now()); err != nil {
+		t.Fatalf("ClearScoreboardFreeze: %v", err)
+	}
+	if got := participantScoreboardFirstTotal(t, mux); got != 99 {
+		t.Fatalf("expected live total 99 after clear, got %v", got)
+	}
+}
+
 func newTestMuxWithLimiter(limiter rateLimiter) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	server := NewWithDeps("dev-team-token", "dev-admin-token", 101, NewMemoryStore(101), testControllerClient{}, noopWireGuardClient{})

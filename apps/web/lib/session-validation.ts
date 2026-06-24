@@ -18,9 +18,14 @@ function apiBaseUrl() {
   );
 }
 
+export type ParticipantSessionValidation =
+  | ValidatedParticipantSession
+  | "deactivated"
+  | null;
+
 export async function validateParticipantSessionWithAPI(
   token: string,
-): Promise<ValidatedParticipantSession | null> {
+): Promise<ParticipantSessionValidation> {
   if (!token.trim()) {
     return null;
   }
@@ -33,6 +38,19 @@ export async function validateParticipantSessionWithAPI(
       cache: "no-store",
     });
     if (!response.ok) {
+      // A deactivated player/team is reported by the gateway as a 403 with the
+      // "Access deactivated" problem title; surface it so the UI can explain why
+      // access stopped instead of showing a generic "please log in" prompt.
+      if (response.status === 403) {
+        try {
+          const problem = (await response.json()) as { title?: string };
+          if (problem?.title === "Access deactivated") {
+            return "deactivated";
+          }
+        } catch {
+          // fall through to the generic null result below
+        }
+      }
       return null;
     }
     const payload = (await response.json()) as Partial<ValidatedParticipantSession>;

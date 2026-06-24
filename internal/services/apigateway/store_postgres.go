@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -175,16 +176,26 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	var currentTeamID sql.NullInt64
 	var currentTeamName sql.NullString
 	var currentTeamContactEmail sql.NullString
+	var playerActive bool
+	var teamActive bool
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role
+		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.active, COALESCE(t.active, TRUE)
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE p.id = $1
-	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &currentTeamContactEmail, &player.DisplayName, &player.Email, &player.Role); err != nil {
+	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &currentTeamContactEmail, &player.DisplayName, &player.Email, &player.Role, &playerActive, &teamActive); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
 		return authenticatedPlayer{}, err
+	}
+	// A deactivated player is always rejected here. Because requirePlayerAuth
+	// re-validates the session on every request, this revokes in-flight sessions
+	// as well as new logins. The team-active check is applied per role below: it
+	// gates team members (the whole-team cascade) but must NOT lock out
+	// organizers, who run the platform and may sit on a team that gets disabled.
+	if !playerActive {
+		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
@@ -210,6 +221,9 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	}
 	if int(currentTeamID.Int64) != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if !teamActive {
+		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	player.TeamID = teamID
 	if currentTeamName.Valid {
@@ -387,6 +401,95 @@ func (s *postgresStore) ListScoreboard(ctx context.Context) ([]scoreRow, error) 
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+func (s *postgresStore) GetScoreboardFreeze(ctx context.Context) (scoreboardFreezeWindow, error) {
+	var freezeAt sql.NullTime
+	var unfreezeAt sql.NullTime
+	var snapshotRaw []byte
+	var snapshotTakenAt sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT freeze_at, unfreeze_at, snapshot, snapshot_taken_at
+		FROM scoreboard_freeze
+		WHERE id = 1
+	`).Scan(&freezeAt, &unfreezeAt, &snapshotRaw, &snapshotTakenAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return scoreboardFreezeWindow{}, nil
+	}
+	if err != nil {
+		return scoreboardFreezeWindow{}, err
+	}
+	return decodeScoreboardFreeze(freezeAt, unfreezeAt, snapshotRaw, snapshotTakenAt)
+}
+
+func (s *postgresStore) SetScoreboardFreezeWindow(ctx context.Context, freezeAt, unfreezeAt *time.Time, now time.Time) (scoreboardFreezeWindow, error) {
+	// Reset the snapshot whenever the window changes so the next read after the
+	// (new) freeze_at re-captures the live board at that moment.
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO scoreboard_freeze (id, freeze_at, unfreeze_at, snapshot, snapshot_taken_at, updated_at)
+		VALUES (1, $1, $2, NULL, NULL, $3)
+		ON CONFLICT (id) DO UPDATE SET
+			freeze_at = EXCLUDED.freeze_at,
+			unfreeze_at = EXCLUDED.unfreeze_at,
+			snapshot = NULL,
+			snapshot_taken_at = NULL,
+			updated_at = EXCLUDED.updated_at
+	`, freezeAt, unfreezeAt, now.UTC()); err != nil {
+		return scoreboardFreezeWindow{}, err
+	}
+	return s.GetScoreboardFreeze(ctx)
+}
+
+func (s *postgresStore) ClearScoreboardFreeze(ctx context.Context, now time.Time) (scoreboardFreezeWindow, error) {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE scoreboard_freeze
+		SET freeze_at = NULL, unfreeze_at = NULL, snapshot = NULL, snapshot_taken_at = NULL, updated_at = $1
+		WHERE id = 1
+	`, now.UTC()); err != nil {
+		return scoreboardFreezeWindow{}, err
+	}
+	return s.GetScoreboardFreeze(ctx)
+}
+
+func (s *postgresStore) SaveFrozenScoreboardSnapshot(ctx context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error) {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return scoreboardFreezeWindow{}, err
+	}
+	// Capture only once per window: the guard `snapshot IS NULL` makes concurrent
+	// first-reads after freeze_at converge on a single snapshot.
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE scoreboard_freeze
+		SET snapshot = $1, snapshot_taken_at = $2
+		WHERE id = 1 AND snapshot IS NULL
+	`, payload, takenAt.UTC()); err != nil {
+		return scoreboardFreezeWindow{}, err
+	}
+	return s.GetScoreboardFreeze(ctx)
+}
+
+func decodeScoreboardFreeze(freezeAt, unfreezeAt sql.NullTime, snapshotRaw []byte, snapshotTakenAt sql.NullTime) (scoreboardFreezeWindow, error) {
+	window := scoreboardFreezeWindow{}
+	if freezeAt.Valid {
+		t := freezeAt.Time.UTC()
+		window.FreezeAt = &t
+	}
+	if unfreezeAt.Valid {
+		t := unfreezeAt.Time.UTC()
+		window.UnfreezeAt = &t
+	}
+	if snapshotTakenAt.Valid {
+		t := snapshotTakenAt.Time.UTC()
+		window.SnapshotTakenAt = &t
+	}
+	if len(snapshotRaw) > 0 {
+		var rows []scoreRow
+		if err := json.Unmarshal(snapshotRaw, &rows); err != nil {
+			return scoreboardFreezeWindow{}, err
+		}
+		window.Snapshot = rows
+	}
+	return window, nil
 }
 
 func (s *postgresStore) ListAttackFeed(ctx context.Context) ([]attackEvent, error) {
@@ -665,11 +768,11 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 
 func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges
+		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at
 		FROM teams t
 		LEFT JOIN players p ON p.team_id = t.id
 		LEFT JOIN team_service_states tss ON tss.team_id = t.id
-		GROUP BY t.id, t.name, t.email, t.join_key
+		GROUP BY t.id, t.name, t.email, t.join_key, t.active, t.deactivated_at
 		ORDER BY t.id
 	`)
 	if err != nil {
@@ -680,8 +783,12 @@ func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 	result := make([]adminTeam, 0)
 	for rows.Next() {
 		var team adminTeam
-		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); err != nil {
+		var deactivatedAt sql.NullTime
+		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt); err != nil {
 			return nil, err
+		}
+		if deactivatedAt.Valid {
+			team.DeactivatedAt = deactivatedAt.Time.UTC().Format(time.RFC3339)
 		}
 		result = append(result, team)
 	}
@@ -813,7 +920,7 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id, p.team_id, t.name, p.display_name, p.email, p.role, p.wireguard_peer, p.created_at,
-		       wp.address, wp.status, wp.issued_at, wp.revoked_at
+		       wp.address, wp.status, wp.issued_at, wp.revoked_at, p.active, p.deactivated_at
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		LEFT JOIN wireguard_peers wp ON wp.player_id = p.id AND (p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer')
@@ -834,6 +941,7 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 		var createdAt time.Time
 		var issuedAt sql.NullTime
 		var revokedAt sql.NullTime
+		var deactivatedAt sql.NullTime
 		if err := rows.Scan(
 			&player.ID,
 			&teamID,
@@ -847,8 +955,13 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 			&wgStatus,
 			&issuedAt,
 			&revokedAt,
+			&player.Active,
+			&deactivatedAt,
 		); err != nil {
 			return nil, err
+		}
+		if deactivatedAt.Valid {
+			player.DeactivatedAt = deactivatedAt.Time.UTC().Format(time.RFC3339)
 		}
 		if teamID.Valid {
 			player.TeamID = int(teamID.Int64)
@@ -1391,6 +1504,79 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 	return team, nil
 }
 
+func (s *postgresStore) SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return adminTeam{}, err
+	}
+	defer tx.Rollback()
+
+	if active {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET active = TRUE, deactivated_at = NULL WHERE id = $1`, teamID); err != nil {
+			return adminTeam{}, fmt.Errorf("reactivate team: %w", err)
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE teams SET active = FALSE, deactivated_at = $2 WHERE id = $1`, teamID, now.UTC()); err != nil {
+			return adminTeam{}, fmt.Errorf("deactivate team: %w", err)
+		}
+		// Drop the team off the leaderboard immediately. buildScoreboard upserts
+		// only active teams, so without this its stale row would linger until the
+		// next recompute. Historical rows (flags, captures, checker runs) are kept
+		// so reactivation restores the team cleanly.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id = $1`, teamID); err != nil {
+			return adminTeam{}, fmt.Errorf("remove team from scoreboard: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return adminTeam{}, err
+	}
+
+	teams, err := s.ListAdminTeams(ctx)
+	if err != nil {
+		return adminTeam{}, err
+	}
+	for _, t := range teams {
+		if t.ID == teamID {
+			return t, nil
+		}
+	}
+	return adminTeam{}, ErrTeamNotFound
+}
+
+func (s *postgresStore) RequeueTeamServices(ctx context.Context, teamID int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Re-queue the team's existing instances as job-less 'queued' rows, mirroring
+	// the new-team-join path. The controller reconcile loop picks up job-less
+	// queued instances (see ListControllerRuntimeTasks / ReconcileAdminDeployments)
+	// and brings them back to 'ready'. RemoveTeamServices only docker-removed the
+	// containers, so these rows still carry the full config (images, volumes,
+	// endpoints, checker tokens) needed to recreate them.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE service_instances
+		SET runtime_status = 'queued', deployment_job_id = NULL, updated_at = NOW()
+		WHERE team_id = $1
+	`, teamID); err != nil {
+		return fmt.Errorf("requeue team service instances: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET status = 'provisioning',
+		    checker = 'pending',
+		    unlocked = FALSE,
+		    last_event = 'redeploy queued by organizer reactivation',
+		    reset_cooldown = 'deploying'
+		WHERE team_id = $1
+	`, teamID); err != nil {
+		return fmt.Errorf("reset team service states: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (s *postgresStore) UpdateAdminPlayer(ctx context.Context, playerID int, input adminUpdatePlayerRequest) (adminPlayer, error) {
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
@@ -1407,6 +1593,28 @@ func (s *postgresStore) UpdateAdminPlayer(ctx context.Context, playerID int, inp
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE players SET display_name = $2, email = $3, role = $4 WHERE id = $1`, playerID, displayName, email, role); err != nil {
 		return adminPlayer{}, fmt.Errorf("update player: %w", err)
+	}
+	players, err := s.ListAdminPlayers(ctx)
+	if err != nil {
+		return adminPlayer{}, err
+	}
+	for _, p := range players {
+		if p.ID == playerID {
+			return p, nil
+		}
+	}
+	return adminPlayer{}, ErrPlayerNotFound
+}
+
+func (s *postgresStore) SetPlayerActive(ctx context.Context, playerID int, active bool, now time.Time) (adminPlayer, error) {
+	if active {
+		if _, err := s.db.ExecContext(ctx, `UPDATE players SET active = TRUE, deactivated_at = NULL WHERE id = $1`, playerID); err != nil {
+			return adminPlayer{}, fmt.Errorf("reactivate player: %w", err)
+		}
+	} else {
+		if _, err := s.db.ExecContext(ctx, `UPDATE players SET active = FALSE, deactivated_at = $2 WHERE id = $1`, playerID, now.UTC()); err != nil {
+			return adminPlayer{}, fmt.Errorf("deactivate player: %w", err)
+		}
 	}
 	players, err := s.ListAdminPlayers(ctx)
 	if err != nil {

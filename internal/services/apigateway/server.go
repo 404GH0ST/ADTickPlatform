@@ -109,6 +109,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/challenges/{challenge_id}/source", s.handleChallengeSourceDownload)
 	mux.HandleFunc("GET /api/v2/services", s.handleServices)
 	mux.HandleFunc("GET /api/v2/scoreboard", s.handleScoreboard)
+	mux.HandleFunc("GET /api/v2/scoreboard/freeze", s.handleScoreboardFreezeStatus)
 	mux.HandleFunc("GET /api/v2/game/status", s.handleGameStatus)
 	mux.HandleFunc("GET /api/v2/attacks", s.handleAttacks)
 	mux.HandleFunc("GET /api/v2/team/services", s.handleTeamServices)
@@ -121,10 +122,14 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/admin/teams", s.handleAdminCreateTeam)
 	mux.HandleFunc("PUT /api/v2/admin/teams/{team_id}", s.handleAdminUpdateTeam)
 	mux.HandleFunc("DELETE /api/v2/admin/teams/{team_id}", s.handleAdminDeleteTeam)
+	mux.HandleFunc("POST /api/v2/admin/teams/{team_id}/deactivate", s.handleAdminDeactivateTeam)
+	mux.HandleFunc("POST /api/v2/admin/teams/{team_id}/reactivate", s.handleAdminReactivateTeam)
 	mux.HandleFunc("GET /api/v2/admin/players", s.handleAdminListPlayers)
 	mux.HandleFunc("POST /api/v2/admin/players", s.handleAdminCreatePlayer)
 	mux.HandleFunc("PUT /api/v2/admin/players/{player_id}", s.handleAdminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v2/admin/players/{player_id}", s.handleAdminDeletePlayer)
+	mux.HandleFunc("POST /api/v2/admin/players/{player_id}/deactivate", s.handleAdminDeactivatePlayer)
+	mux.HandleFunc("POST /api/v2/admin/players/{player_id}/reactivate", s.handleAdminReactivatePlayer)
 	mux.HandleFunc("GET /api/v2/admin/players/{player_id}/wireguard", s.handleAdminGetPlayerWireGuard)
 	mux.HandleFunc("POST /api/v2/admin/players/{player_id}/wireguard/rotate", s.handleAdminRotatePlayerWireGuard)
 	mux.HandleFunc("POST /api/v2/admin/players/{player_id}/wireguard/revoke", s.handleAdminRevokePlayerWireGuard)
@@ -160,6 +165,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/admin/game/scheduler/stop", s.handleAdminStopGameScheduler)
 	mux.HandleFunc("PUT /api/v2/admin/game/scheduler/interval", s.handleAdminUpdateGameScheduler)
 	mux.HandleFunc("GET /api/v2/admin/game/scoreboard", s.handleAdminGameScoreboard)
+	mux.HandleFunc("GET /api/v2/admin/game/scoreboard/freeze", s.handleAdminScoreboardFreezeStatus)
+	mux.HandleFunc("POST /api/v2/admin/game/scoreboard/freeze", s.handleAdminSetScoreboardFreeze)
+	mux.HandleFunc("POST /api/v2/admin/game/scoreboard/unfreeze", s.handleAdminClearScoreboardFreeze)
 	mux.HandleFunc("POST /api/v2/admin/game/scoring/recompute", s.handleAdminRecomputeScoring)
 	mux.HandleFunc("GET /api/v2/admin/game/scoring/audit", s.handleAdminAuditScoring)
 	mux.HandleFunc("GET /internal/v1/rate-limit/metrics", s.handleRateLimitMetrics)
@@ -400,30 +408,72 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// During a freeze the participant-facing board serves the snapshot captured
+	// when the window first became active. Organizers keep hitting the live board
+	// via the admin endpoint, which never consults the freeze window.
+	now := s.now()
+	freeze, freezeErr := s.store.GetScoreboardFreeze(r.Context())
+	frozen := freezeErr == nil && freeze.activeAt(now)
+	if frozen && freeze.Snapshot != nil {
+		writeData(w, http.StatusOK, freeze.Snapshot)
+		return
+	}
+
+	rows, ok := s.fetchLiveScoreboard(w, r)
+	if !ok {
+		return
+	}
+	if frozen {
+		// First read after freeze_at: capture the live board as the snapshot.
+		// SaveFrozenScoreboardSnapshot only writes when none exists yet, so
+		// concurrent first-reads converge on one snapshot.
+		if saved, err := s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, now); err == nil && saved.Snapshot != nil {
+			rows = saved.Snapshot
+		}
+	}
+	writeData(w, http.StatusOK, rows)
+}
+
+// fetchLiveScoreboard returns the current live board, preferring scoring-worker,
+// then game-core, then the local store. On a hard upstream failure it writes the
+// problem response and returns ok=false.
+func (s *Server) fetchLiveScoreboard(w http.ResponseWriter, r *http.Request) ([]scoreRow, bool) {
 	if s.scoring != nil {
 		if rows, err := s.scoring.Scoreboard(r.Context()); err == nil {
-			writeData(w, http.StatusOK, rows)
-			return
+			return rows, true
 		} else if !errors.Is(err, errScoringWorkerDisabled) {
 			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "scoring-worker scoreboard failed.")
-			return
+			return nil, false
 		}
 	}
 	if s.gameCore != nil {
 		if rows, err := s.gameCore.Scoreboard(r.Context()); err == nil {
-			writeData(w, http.StatusOK, rows)
-			return
+			return rows, true
 		} else if !errors.Is(err, errGameCoreDisabled) {
 			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "game-core scoreboard failed.")
-			return
+			return nil, false
 		}
 	}
 	rows, err := s.store.ListScoreboard(r.Context())
 	if err != nil {
 		writeStoreFailure(w, err)
+		return nil, false
+	}
+	return rows, true
+}
+
+func (s *Server) handleScoreboardFreezeStatus(w http.ResponseWriter, r *http.Request) {
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitClientKey("scoreboard", clientRateLimitKey(r)), scoreboardRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
-	writeData(w, http.StatusOK, rows)
+	freeze, err := s.store.GetScoreboardFreeze(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, scoreboardFreezeStatusFrom(freeze, s.now()))
 }
 
 func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
@@ -1105,6 +1155,10 @@ func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, messa
 	}
 	player, err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role)
 	if err != nil {
+		if errors.Is(err, ErrAccountDeactivated) {
+			writeProblem(w, http.StatusForbidden, "Access deactivated", "Your account or team has been deactivated by the organizers. Contact them if you believe this is a mistake.")
+			return authenticatedPlayer{}, false
+		}
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return authenticatedPlayer{}, false
 	}

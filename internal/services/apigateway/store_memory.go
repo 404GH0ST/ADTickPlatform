@@ -34,24 +34,29 @@ type serviceInstanceRecord struct {
 }
 
 type memoryStore struct {
-	mu               sync.Mutex
-	submitted        map[string]struct{}
-	teamNames        map[int]string
-	teams            map[int]*adminTeam
-	players          map[int]*adminPlayerRecord
-	challenges       map[int]*adminChallenge
-	teamStates       map[int]map[int]*serviceState
-	instances        map[int]map[int]*serviceInstanceRecord
-	deployments      map[int]*adminDeploymentJob
-	auditLogs        []adminAuditLog
-	scoreboard       []scoreRow
-	attackFeed       []attackEvent
-	platformSettings adminPlatformSettings
-	nextTeamID       int
-	nextPlayerID     int
-	nextChallengeID  int
-	nextDeploymentID int
-	nextAuditLogID   int
+	mu        sync.Mutex
+	submitted map[string]struct{}
+	teamNames map[int]string
+	teams     map[int]*adminTeam
+	players   map[int]*adminPlayerRecord
+	// Teams/players are active unless present in these sets. Tracked separately
+	// so every existing construction site stays active-by-default without edits.
+	deactivatedTeams   map[int]bool
+	deactivatedPlayers map[int]bool
+	freeze             scoreboardFreezeWindow
+	challenges         map[int]*adminChallenge
+	teamStates         map[int]map[int]*serviceState
+	instances          map[int]map[int]*serviceInstanceRecord
+	deployments        map[int]*adminDeploymentJob
+	auditLogs          []adminAuditLog
+	scoreboard         []scoreRow
+	attackFeed         []attackEvent
+	platformSettings   adminPlatformSettings
+	nextTeamID         int
+	nextPlayerID       int
+	nextChallengeID    int
+	nextDeploymentID   int
+	nextAuditLogID     int
 }
 
 func NewMemoryStore(teamID int) Store {
@@ -243,11 +248,22 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 	if !ok {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
+	// A deactivated player is always refused so that deactivation revokes
+	// in-flight sessions (re-validated per request) as well as new logins. The
+	// team cascade gates team members but never organizers, who run the platform
+	// and may sit on a team that gets disabled.
+	if s.deactivatedPlayers[playerID] {
+		return authenticatedPlayer{}, ErrAccountDeactivated
+	}
 	if record.Player.TeamID != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	if strings.TrimSpace(record.Player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") &&
+		s.deactivatedTeams[record.Player.TeamID] {
+		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
 	teamContactEmail := ""
@@ -392,6 +408,54 @@ func (s *memoryStore) ListScoreboard(_ context.Context) ([]scoreRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]scoreRow(nil), s.scoreboard...), nil
+}
+
+func (s *memoryStore) GetScoreboardFreeze(_ context.Context) (scoreboardFreezeWindow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cloneFreezeLocked(), nil
+}
+
+func (s *memoryStore) SetScoreboardFreezeWindow(_ context.Context, freezeAt, unfreezeAt *time.Time, _ time.Time) (scoreboardFreezeWindow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.freeze = scoreboardFreezeWindow{FreezeAt: cloneTime(freezeAt), UnfreezeAt: cloneTime(unfreezeAt)}
+	return s.cloneFreezeLocked(), nil
+}
+
+func (s *memoryStore) ClearScoreboardFreeze(_ context.Context, _ time.Time) (scoreboardFreezeWindow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.freeze = scoreboardFreezeWindow{}
+	return s.cloneFreezeLocked(), nil
+}
+
+func (s *memoryStore) SaveFrozenScoreboardSnapshot(_ context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.freeze.Snapshot == nil {
+		s.freeze.Snapshot = append([]scoreRow(nil), rows...)
+		t := takenAt.UTC()
+		s.freeze.SnapshotTakenAt = &t
+	}
+	return s.cloneFreezeLocked(), nil
+}
+
+func (s *memoryStore) cloneFreezeLocked() scoreboardFreezeWindow {
+	return scoreboardFreezeWindow{
+		FreezeAt:        cloneTime(s.freeze.FreezeAt),
+		UnfreezeAt:      cloneTime(s.freeze.UnfreezeAt),
+		SnapshotTakenAt: cloneTime(s.freeze.SnapshotTakenAt),
+		Snapshot:        append([]scoreRow(nil), s.freeze.Snapshot...),
+	}
+}
+
+func cloneTime(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	clone := t.UTC()
+	return &clone
 }
 
 func (s *memoryStore) ListAttackFeed(_ context.Context) ([]attackEvent, error) {
@@ -621,6 +685,7 @@ func (s *memoryStore) ListAdminTeams(_ context.Context) ([]adminTeam, error) {
 		clone := *team
 		clone.PlayerCount = s.playerCountForTeamLocked(team.ID)
 		clone.DeployedChallenges = len(s.teamStates[team.ID])
+		clone.Active = !s.deactivatedTeams[team.ID]
 		teams = append(teams, clone)
 	}
 	slices.SortFunc(teams, func(a, b adminTeam) int { return a.ID - b.ID })
@@ -712,6 +777,7 @@ func (s *memoryStore) ListAdminPlayers(_ context.Context) ([]adminPlayer, error)
 		} else {
 			player.WireGuardPeer = ""
 		}
+		player.Active = !s.deactivatedPlayers[record.Player.ID]
 		players = append(players, player)
 	}
 	slices.SortFunc(players, func(a, b adminPlayer) int { return a.ID - b.ID })
@@ -1605,6 +1671,55 @@ func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input admin
 	return *team, nil
 }
 
+func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, _ time.Time) (adminTeam, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return adminTeam{}, ErrTeamNotFound
+	}
+	if s.deactivatedTeams == nil {
+		s.deactivatedTeams = make(map[int]bool)
+	}
+	clone := *team
+	if active {
+		delete(s.deactivatedTeams, teamID)
+		clone.Active = true
+		clone.DeactivatedAt = ""
+	} else {
+		s.deactivatedTeams[teamID] = true
+		clone.Active = false
+		// Drop the team off the in-memory leaderboard immediately.
+		filtered := s.scoreboard[:0]
+		for _, row := range s.scoreboard {
+			if row.Team != team.Name {
+				filtered = append(filtered, row)
+			}
+		}
+		s.scoreboard = filtered
+	}
+	clone.PlayerCount = s.playerCountForTeamLocked(teamID)
+	clone.DeployedChallenges = len(s.teamStates[teamID])
+	return clone, nil
+}
+
+func (s *memoryStore) RequeueTeamServices(_ context.Context, teamID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, instance := range s.instances[teamID] {
+		instance.RuntimeStatus = "queued"
+		instance.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	for _, state := range s.teamStates[teamID] {
+		state.Status = "provisioning"
+		state.Checker = "pending"
+		state.Unlocked = false
+		state.LastEvent = "redeploy queued by organizer reactivation"
+		state.ResetCooldown = "deploying"
+	}
+	return nil
+}
+
 func (s *memoryStore) UpdateAdminPlayer(_ context.Context, playerID int, input adminUpdatePlayerRequest) (adminPlayer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1621,6 +1736,28 @@ func (s *memoryStore) UpdateAdminPlayer(_ context.Context, playerID int, input a
 	record.Player.Role = normalizedRole(input.Role)
 	s.players[playerID] = record
 	return record.Player, nil
+}
+
+func (s *memoryStore) SetPlayerActive(_ context.Context, playerID int, active bool, _ time.Time) (adminPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.players[playerID]
+	if !ok {
+		return adminPlayer{}, ErrPlayerNotFound
+	}
+	if s.deactivatedPlayers == nil {
+		s.deactivatedPlayers = make(map[int]bool)
+	}
+	clone := record.Player
+	if active {
+		delete(s.deactivatedPlayers, playerID)
+		clone.Active = true
+		clone.DeactivatedAt = ""
+	} else {
+		s.deactivatedPlayers[playerID] = true
+		clone.Active = false
+	}
+	return clone, nil
 }
 
 func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error) {

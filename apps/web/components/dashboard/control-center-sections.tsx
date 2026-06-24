@@ -58,6 +58,9 @@ type AttackFilters = {
 type ScoreboardPanelProps = {
   scoreRows: ScoreRow[];
   currentTeamName?: string;
+  frozen?: boolean;
+  freezeAt?: string;
+  unfreezeAt?: string;
 };
 
 type ServicesPanelProps = {
@@ -125,6 +128,9 @@ const serviceStatusTone: Record<ServiceRow["status"], string> = {
 export function ScoreboardPanel({
   scoreRows,
   currentTeamName,
+  frozen,
+  freezeAt,
+  unfreezeAt,
 }: ScoreboardPanelProps): ReactElement {
   return (
     <Card data-testid="participant-scoreboard-card">
@@ -134,7 +140,22 @@ export function ScoreboardPanel({
           Team ranking with per-service attack, defense, SLA, and total scores.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="grid gap-3">
+        {frozen && (
+          <div
+            role="status"
+            data-testid="scoreboard-frozen-banner"
+            className="tone-warning rounded-md border px-3 py-2 text-sm"
+          >
+            <span className="font-semibold">Scoreboard frozen.</span> Standings
+            are paused
+            {freezeAt ? ` as of ${formatFreezeTimestamp(freezeAt)}` : ""}
+            {unfreezeAt
+              ? ` and resume at ${formatFreezeTimestamp(unfreezeAt)}`
+              : " until the organizers lift the freeze"}
+            .
+          </div>
+        )}
         <ScoreboardTable
           scoreRows={scoreRows}
           emptyMessage="No score rows are available yet."
@@ -143,6 +164,14 @@ export function ScoreboardPanel({
       </CardContent>
     </Card>
   );
+}
+
+function formatFreezeTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
 }
 
 function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {

@@ -78,4 +78,7 @@ export type PlatformOverview = {
   lastTickAt?: string;
   apiBaseUrl: string;
   realtimeBaseUrl: string;
+  scoreboardFrozen?: boolean;
+  scoreboardFreezeAt?: string;
+  scoreboardUnfreezeAt?: string;
 };

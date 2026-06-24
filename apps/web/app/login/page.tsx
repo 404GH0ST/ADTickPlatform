@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { ParticipantLoginForm } from '@/components/dashboard/participant-login-form';
@@ -14,6 +13,8 @@ export default async function ParticipantLoginPage() {
     redirect('/services');
   }
 
+  const deactivated = session.reason === 'deactivated';
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-8">
@@ -21,6 +22,16 @@ export default async function ParticipantLoginPage() {
           <div className="flex justify-end">
             <ThemeToggle />
           </div>
+          {deactivated && (
+            <div
+              role="alert"
+              data-testid="deactivated-notice"
+              className="tone-danger rounded-md border px-3 py-2 text-sm"
+            >
+              Your account or team has been deactivated by the organizers. Contact
+              them if you believe this is a mistake.
+            </div>
+          )}
           <Card className="w-full">
             <CardHeader>
               <CardTitle>Sign In</CardTitle>

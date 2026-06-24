@@ -174,6 +174,9 @@ function renderControlCenterPanel({
       <ScoreboardPanel
         scoreRows={scoreRows}
         currentTeamName={currentTeamName}
+        frozen={overview.scoreboardFrozen}
+        freezeAt={overview.scoreboardFreezeAt}
+        unfreezeAt={overview.scoreboardUnfreezeAt}
       />
     );
   }
