@@ -231,6 +231,11 @@ test("seeded dense attack globe supports pointer route inspection", async ({
 
   const panel = page.getByTestId("attack-map-panel");
   const globe = page.getByTestId("cyber-attack-map");
+  await expect(globe).toBeVisible();
+  await globe.scrollIntoViewIfNeeded();
+  await expect
+    .poll(async () => globe.locator("[data-attack-arc-hit]").count())
+    .toBeGreaterThan(0);
   const clickPoint = await getAttackRouteClickPoint(globe);
 
   expect(clickPoint).not.toBeNull();

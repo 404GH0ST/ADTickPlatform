@@ -9,7 +9,7 @@ test("organizer attacks page renders the paginated accepted-attack feed", async 
 
   await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
   await expect(page.getByText("Accepted Attacks")).toBeVisible();
-  await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
   await expect(page.getByText("College Alpha").first()).toBeVisible();
   await expect(page.getByText("College Beta").first()).toBeVisible();
   await expect(page.getByText("first valid submission accepted").first()).toBeVisible();

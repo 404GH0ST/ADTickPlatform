@@ -4,8 +4,14 @@ import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
 
 export const dynamic = 'force-dynamic';
 
+// The attacks surface renders a map-first view of the full accepted-attack feed,
+// so load the broad slice instead of the default paginated page.
+const MAP_ATTACK_LIMIT = 1000;
+
 export default async function AdminAttacksPage() {
-  const dashboard = await loadAdminDashboardData();
+  const dashboard = await loadAdminDashboardData({
+    attackQuery: { limit: MAP_ATTACK_LIMIT },
+  });
 
   return (
     <OrganizerShell

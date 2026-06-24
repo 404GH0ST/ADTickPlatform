@@ -85,7 +85,7 @@ async function loginAsParticipant(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill("alpha.captain@college.local");
   await page.getByLabel("Password").fill("alpha-password");
-  await page.getByRole("button", { name: "Sign In" }).click();
+  await page.locator('form button[type="submit"]').click();
   await expect(page).toHaveURL(/\/services$/);
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
 }
@@ -108,7 +108,7 @@ test("participant login shows an error for invalid credentials", async ({
 
   await page.getByLabel("Email").fill("alpha.captain@college.local");
   await page.getByLabel("Password").fill("wrong-password");
-  await page.getByRole("button", { name: "Sign In" }).click();
+  await page.locator('form button[type="submit"]').click();
 
   await expect(
     page.getByText("email or password is wrong."),
@@ -134,7 +134,7 @@ test("registered participant can join a team with a team key", async ({ page }) 
   await page.getByLabel("Display name").fill("Joined Member");
   await page.getByLabel("Email").fill("joined.member@college.local");
   await page.getByLabel("Password").fill("joined-password");
-  await page.locator("form").getByRole("button", { name: "Register" }).click();
+  await page.locator('form button[type="submit"]').click();
 
   await expect(page).toHaveURL(/\/services$/);
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();

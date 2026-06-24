@@ -1250,6 +1250,7 @@ function AttackArcPath({
         <path
           d={arc.path}
           fill="none"
+          pointerEvents="none"
           stroke="var(--attack-map-node-highlight)"
           strokeLinecap="round"
           strokeOpacity="0.78"
@@ -1262,6 +1263,7 @@ function AttackArcPath({
           <path
             d={arc.path}
             fill="none"
+            pointerEvents="none"
             stroke="var(--attack-map-node-highlight)"
             strokeLinecap="round"
             strokeOpacity="0.22"
@@ -1270,6 +1272,7 @@ function AttackArcPath({
           <path
             d={arc.path}
             fill="none"
+            pointerEvents="none"
             stroke="var(--attack-map-node-highlight)"
             strokeLinecap="round"
             strokeWidth="3.6"
@@ -1280,6 +1283,7 @@ function AttackArcPath({
           <path
             d={arc.path}
             fill="none"
+            pointerEvents="none"
             stroke="var(--attack-map-node-highlight)"
             strokeLinecap="round"
             strokeWidth="6"
@@ -1292,6 +1296,7 @@ function AttackArcPath({
             cy={arc.endY}
             r="6"
             fill="none"
+            pointerEvents="none"
             stroke="var(--attack-map-node-highlight)"
             strokeWidth="2.4"
             className={`${flyClassName}-impact`}
@@ -1303,6 +1308,7 @@ function AttackArcPath({
           <path
             d={arc.path}
             fill="none"
+            pointerEvents="none"
             stroke={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color}
             strokeDasharray={arc.featured ? '54 706' : emphasized ? serviceStyle.activeDash : serviceStyle.idleDash}
             strokeLinecap="round"
@@ -1310,7 +1316,7 @@ function AttackArcPath({
             strokeWidth={arc.featured ? '5.1' : emphasized ? serviceStyle.activeWidth : serviceStyle.idleWidth}
             className={beamClassName}
           />
-          <circle r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
+          <circle pointerEvents="none" r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
             <animateMotion dur={arc.featured ? serviceStyle.featuredDuration : emphasized ? serviceStyle.activeDuration : `${serviceStyle.idleDuration - arc.recency * 0.55}s`} begin={arc.delay} repeatCount="indefinite">
               <mpath href={`#${arc.domId}`} />
             </animateMotion>

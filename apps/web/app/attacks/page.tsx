@@ -4,8 +4,14 @@ import { loadDashboardData } from "@/lib/dashboard-data";
 
 export const dynamic = "force-dynamic";
 
+// The attacks surface renders a map-first view of the full accepted-attack feed,
+// so load the broad slice instead of the default paginated page.
+const MAP_ATTACK_LIMIT = 1000;
+
 export default async function AttacksPage() {
-  const dashboard = await loadDashboardData();
+  const dashboard = await loadDashboardData({
+    attackQuery: { limit: MAP_ATTACK_LIMIT },
+  });
 
   return (
     <ParticipantShell

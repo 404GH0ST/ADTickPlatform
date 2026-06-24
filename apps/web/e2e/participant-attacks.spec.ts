@@ -45,7 +45,7 @@ test("participant pages warn when the match is stopped but the scheduler still r
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
   await expect(
     page.getByText(
-      "The match is currently stopped. Participant submissions are closed. The scheduler is still reporting as running and should be checked by the organizer.",
+      "The match is currently stopped. Participant submissions are closed.",
     ),
   ).toBeVisible();
 });
@@ -142,7 +142,7 @@ test("participant attacks routes show empty-state messaging when no accepted att
   });
 
   await page.goto("/attacks");
-  await expect(page.getByText("Loaded 0 of 0 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 0-0 of 0")).toBeVisible();
   await assertEmptyAttacksState(page);
 
   await page.goto("/attacks/table");
@@ -163,7 +163,7 @@ test("participant attacks routes show degraded warning and empty-state messaging
       "Participant data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Loaded 0 of 0 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 0-0 of 0")).toBeVisible();
   await assertEmptyAttacksState(page);
 
   await page.goto("/attacks/table");

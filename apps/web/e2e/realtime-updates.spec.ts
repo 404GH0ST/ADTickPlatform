@@ -27,6 +27,15 @@ async function installMockAttackSfx(page: Page) {
       stop() {}
     }
 
+    class MockBufferSource {
+      buffer: unknown = null;
+      connect() {}
+      start(time: number) {
+        testWindow.__attackSfxStarts?.push(time);
+      }
+      stop() {}
+    }
+
     class MockGain {
       gain = new MockAudioParam();
       connect() {}
@@ -38,6 +47,12 @@ async function installMockAttackSfx(page: Page) {
       state: AudioContextState = "running";
       createOscillator() {
         return new MockOscillator();
+      }
+      createBufferSource() {
+        return new MockBufferSource();
+      }
+      decodeAudioData() {
+        return Promise.resolve({} as AudioBuffer);
       }
       createGain() {
         return new MockGain();
@@ -75,7 +90,7 @@ test("participant attack map route applies realtime updates to the loaded attack
 }) => {
   await page.goto("/attacks");
 
-  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
 });
 
 test("participant attack map plays SFX for new realtime attacks after user activation", async ({
@@ -90,14 +105,14 @@ test("participant attack map plays SFX for new realtime attacks after user activ
   });
   await installMockAttackSfx(page);
   await page.goto("/attacks");
-  await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
   await page.mouse.click(24, 24);
 
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "realtime-updates" },
   });
 
-  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -119,7 +134,7 @@ test("participant attack map respects muted attack SFX preference", async ({
   });
   await installMockAttackSfx(page);
   await page.goto("/attacks");
-  await expect(page.getByText("Loaded 12 of 12 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
   await expect(page.getByRole("button", { name: "Enable attack sound" })).toBeVisible();
   await page.mouse.click(24, 24);
 
@@ -127,7 +142,7 @@ test("participant attack map respects muted attack SFX preference", async ({
     data: { scenario: "realtime-updates" },
   });
 
-  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -154,5 +169,5 @@ test("organizer attacks route applies realtime updates to the loaded attack coun
 }) => {
   await page.goto("/admin/attacks");
 
-  await expect(page.getByText("Loaded 13 of 13 attack(s)")).toBeVisible();
+  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
 });

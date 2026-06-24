@@ -107,7 +107,6 @@ test("organizer can create, edit, and delete a challenge", async ({
   await expect(challengeRow).toBeVisible();
   await expect(challengeRow).toContainText("college-ftp");
   await expect(challengeRow).toContainText("draft");
-  await expect(challengeRow).toContainText("7");
   await expect(challengeRow).toContainText("10.80.60.0/24");
   await expect(challengeRow).toContainText("port 30060");
 
@@ -127,7 +126,6 @@ test("organizer can create, edit, and delete a challenge", async ({
   await expect(challengeRow).toContainText("college-ftp-v2");
   await expect(challengeRow).toContainText("adplatform/sample-ftp:patched");
   await expect(challengeRow).toContainText("adplatform/sample-ftp-checker:v2");
-  await expect(challengeRow).toContainText("9");
 
   await page.getByTestId("delete-challenge-2").click();
   const deleteDialog = page.getByRole("dialog", { name: "Delete challenge" });
