@@ -33,6 +33,8 @@ export type ServiceRow = {
   lastEvent: string;
   resetCooldown: string;
   maintenance: boolean;
+  /** Why actions are locked: maintenance | match_paused | match_not_started | deferred */
+  lockReason?: string;
   slaStatus: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
   slaPhase: string;
   slaTickId: number | null;

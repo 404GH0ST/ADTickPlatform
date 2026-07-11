@@ -140,9 +140,7 @@ export function readThemePreferenceFromDom(): ThemePreference {
   if (match && isThemePreference(match[1])) {
     return match[1];
   }
-  const theme = document.documentElement.dataset.theme;
-  if (theme === "dark" || theme === "light") {
-    return theme;
-  }
+  // Do not infer preference from resolved data-theme (light|dark): that would
+  // collapse System into a locked mode after OS resolution.
   return DEFAULT_THEME_PREFERENCE;
 }

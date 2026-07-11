@@ -425,12 +425,25 @@ export function TeamsTab({
                   <TableCell>{team.player_count}</TableCell>
                   <TableCell>{team.deployed_challenges}</TableCell>
                   <TableCell>
-                    <Badge
-                      className={team.active ? "tone-success" : "tone-danger"}
-                      data-testid={`team-status-${team.id}`}
-                    >
-                      {team.active ? "Active" : "Inactive"}
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        className={team.active ? "tone-success" : "tone-danger"}
+                        data-testid={`team-status-${team.id}`}
+                      >
+                        {team.active ? "Active" : "Inactive"}
+                      </Badge>
+                      {team.active &&
+                      team.play_from_tick &&
+                      team.play_from_tick > 0 ? (
+                        <Badge
+                          className="tone-warning"
+                          variant="outline"
+                          data-testid={`team-play-from-tick-${team.id}`}
+                        >
+                          From tick #{team.play_from_tick}
+                        </Badge>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

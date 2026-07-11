@@ -71,6 +71,68 @@ test("system theme follows OS color scheme", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme-preference", "system");
 });
 
+test("first visit defaults to system without locking a resolved mode", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.localStorage.removeItem("ad-platform-theme");
+    document.cookie =
+      "ad-platform-theme=; path=/; max-age=0; samesite=lax";
+  });
+  await page.reload();
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme-preference",
+    "system",
+  );
+  // FOUC must not write light/dark; absence or "system" both keep OS following.
+  const stored = await page.evaluate(() =>
+    window.localStorage.getItem("ad-platform-theme"),
+  );
+  expect(stored === null || stored === "system").toBe(true);
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect
+    .poll(() => page.locator("html").getAttribute("data-theme"))
+    .toBe("light");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme-preference",
+    "system",
+  );
+});
+
+test("explicit system selection persists and keeps following OS", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.localStorage.setItem("ad-platform-theme", "dark");
+    document.cookie =
+      "ad-platform-theme=dark; path=/; max-age=31536000; samesite=lax";
+  });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await selectExpandedOption(page, ".mode-picker", '[data-mode-option="system"]');
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme-preference",
+    "system",
+  );
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("ad-platform-theme")))
+    .toBe("system");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect
+    .poll(() => page.locator("html").getAttribute("data-theme"))
+    .toBe("dark");
+});
+
 test("color scheme picker persists and keeps independent mode", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
 

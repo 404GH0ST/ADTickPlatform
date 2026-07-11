@@ -152,11 +152,11 @@ function getParticipantGameAlertMessage(overview: PlatformOverview): string | nu
   }
 
   if (overview.matchState === 'paused') {
-    return 'The match is currently paused. Tick progression and checker runs are temporarily suspended. Submissions are blocked until organizers resume. VPN and SSH to unlocked services remain available.';
+    return 'The match is currently paused. Tick progression and checker runs are temporarily suspended. Submissions, service access, and SSH are blocked until organizers resume.';
   }
 
   if (overview.scoreboardFrozen) {
-    return 'The public scoreboard is frozen. Attack submissions and service controls still follow match state, but standings will not move until organizers unfreeze.';
+    return 'The public scoreboard is frozen. Attack submissions and service controls still follow match state.';
   }
 
   return null;

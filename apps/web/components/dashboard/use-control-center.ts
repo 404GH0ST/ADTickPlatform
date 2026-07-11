@@ -213,6 +213,7 @@ export function useControlCenter({
       lastEvent: state.last_event,
       resetCooldown: state.reset_cooldown,
       maintenance: state.maintenance ?? row.maintenance,
+      lockReason: state.lock_reason ?? row.lockReason,
       slaStatus: state.sla_status ?? row.slaStatus,
       slaPhase: state.sla_phase ?? row.slaPhase,
       slaTickId: state.sla_tick_id ?? row.slaTickId,

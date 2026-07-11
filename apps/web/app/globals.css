@@ -23,6 +23,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* Semantic signals — usable as text-* / bg-* / border-* with opacity */
+  --color-positive: var(--signal-positive);
+  --color-negative: var(--signal-negative);
+  --color-highlight: var(--signal-highlight);
+  --color-info: var(--signal-info);
 }
 
 /*
@@ -62,32 +67,34 @@
   --shadow-paper: 0 1px 0 oklch(0.86 0.004 260), 0 10px 28px oklch(0.28 0.012 260 / 0.06);
   --tone-success-background: oklch(0.96 0.02 150);
   --tone-success-border: oklch(0.86 0.035 150);
-  --tone-success-foreground: oklch(0.36 0.07 145);
+  --tone-success-foreground: oklch(0.36 0.08 145);
   --tone-warning-background: oklch(0.97 0.025 85);
   --tone-warning-border: oklch(0.88 0.04 85);
-  --tone-warning-foreground: oklch(0.4 0.08 75);
+  --tone-warning-foreground: oklch(0.4 0.09 75);
   --tone-danger-background: oklch(0.97 0.018 25);
   --tone-danger-border: oklch(0.88 0.03 25);
-  --tone-danger-foreground: oklch(0.4 0.09 25);
+  --tone-danger-foreground: oklch(0.38 0.1 25);
   --tone-info-background: oklch(0.96 0.02 250);
   --tone-info-border: oklch(0.86 0.04 250);
-  --tone-info-foreground: oklch(0.38 0.07 250);
+  --tone-info-foreground: oklch(0.36 0.08 250);
   --tone-neutral-background: oklch(0.94 0.004 260);
   --tone-neutral-border: oklch(0.82 0.006 260);
-  --tone-neutral-foreground: oklch(0.38 0.01 260);
-  --signal-positive: oklch(0.38 0.07 145);
-  --signal-negative: oklch(0.4 0.09 25);
-  --signal-info: oklch(0.38 0.07 250);
-  --signal-highlight: oklch(0.4 0.02 260);
-  --medal-gold-background: oklch(0.95 0.03 85);
-  --medal-gold-border: oklch(0.8 0.07 80);
-  --medal-gold-foreground: oklch(0.48 0.12 80);
-  --medal-silver-background: oklch(0.95 0.006 260);
-  --medal-silver-border: oklch(0.8 0.01 260);
-  --medal-silver-foreground: oklch(0.42 0.012 260);
-  --medal-bronze-background: oklch(0.96 0.025 50);
-  --medal-bronze-border: oklch(0.82 0.05 48);
-  --medal-bronze-foreground: oklch(0.45 0.1 48);
+  --tone-neutral-foreground: oklch(0.36 0.01 260);
+  /* Text signals: L≤0.4 on light surfaces for ≥4.5:1 body/UI text */
+  --signal-positive: oklch(0.36 0.08 145);
+  --signal-negative: oklch(0.38 0.1 25);
+  --signal-info: oklch(0.36 0.08 250);
+  --signal-highlight: oklch(0.36 0.025 260);
+  /* Medals: readable number on chip (fg≥4.5:1 on medal bg); border ≥3:1 on card */
+  --medal-gold-background: oklch(0.94 0.04 80);
+  --medal-gold-border: oklch(0.52 0.11 75);
+  --medal-gold-foreground: oklch(0.4 0.12 75);
+  --medal-silver-background: oklch(0.94 0.008 260);
+  --medal-silver-border: oklch(0.52 0.015 260);
+  --medal-silver-foreground: oklch(0.38 0.015 260);
+  --medal-bronze-background: oklch(0.95 0.03 50);
+  --medal-bronze-border: oklch(0.52 0.09 48);
+  --medal-bronze-foreground: oklch(0.4 0.1 48);
   --attack-map-background: oklch(0.97 0.004 260);
   --attack-map-border: oklch(0.84 0.006 260);
   --attack-map-grid: oklch(0.78 0.006 260);
@@ -149,19 +156,19 @@
   --tone-neutral-background: oklch(0.22 0.006 260);
   --tone-neutral-border: oklch(0.4 0.008 260);
   --tone-neutral-foreground: oklch(0.84 0.008 260);
-  --signal-positive: oklch(0.82 0.055 150);
-  --signal-negative: oklch(0.84 0.05 25);
-  --signal-info: oklch(0.84 0.05 250);
-  --signal-highlight: oklch(0.88 0.015 260);
-  --medal-gold-background: oklch(0.26 0.035 85);
-  --medal-gold-border: oklch(0.48 0.07 80);
-  --medal-gold-foreground: oklch(0.88 0.09 85);
-  --medal-silver-background: oklch(0.24 0.006 260);
-  --medal-silver-border: oklch(0.48 0.01 260);
-  --medal-silver-foreground: oklch(0.86 0.01 260);
-  --medal-bronze-background: oklch(0.26 0.03 50);
-  --medal-bronze-border: oklch(0.48 0.055 48);
-  --medal-bronze-foreground: oklch(0.86 0.07 55);
+  --signal-positive: oklch(0.84 0.06 150);
+  --signal-negative: oklch(0.86 0.055 25);
+  --signal-info: oklch(0.86 0.055 250);
+  --signal-highlight: oklch(0.9 0.02 260);
+  --medal-gold-background: oklch(0.28 0.04 85);
+  --medal-gold-border: oklch(0.62 0.09 80);
+  --medal-gold-foreground: oklch(0.9 0.1 85);
+  --medal-silver-background: oklch(0.26 0.008 260);
+  --medal-silver-border: oklch(0.62 0.012 260);
+  --medal-silver-foreground: oklch(0.9 0.012 260);
+  --medal-bronze-background: oklch(0.28 0.035 50);
+  --medal-bronze-border: oklch(0.62 0.07 48);
+  --medal-bronze-foreground: oklch(0.9 0.08 55);
   --attack-map-background: oklch(0.17 0.005 260);
   --attack-map-border: oklch(0.32 0.008 260);
   --attack-map-grid: oklch(0.4 0.008 260);
@@ -208,8 +215,8 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 32%, var(--card));
   --reticle-dot: var(--foreground);
   --shadow-paper: 0 1px 0 oklch(0.82 0.012 250), 0 8px 20px oklch(0.25 0.03 250 / 0.07);
-  /* Semantic tones inherit shared Graphite light values (success/warn/danger/info). */
-  --signal-highlight: oklch(0.4 0.09 250);
+  /* Semantic tones inherit Graphite light; highlight tints to ink blue. */
+  --signal-highlight: oklch(0.36 0.1 250);
   --attack-map-background: oklch(0.97 0.01 250);
   --attack-map-border: oklch(0.84 0.015 250);
   --attack-map-grid: oklch(0.76 0.02 250);
@@ -252,7 +259,7 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 48%, transparent);
   --reticle-dot: oklch(0.96 0.008 250);
   --shadow-paper: 0 1px 0 oklch(0.34 0.016 250), 0 12px 24px oklch(0.08 0.01 250 / 0.42);
-  --signal-highlight: oklch(0.82 0.07 250);
+  --signal-highlight: oklch(0.86 0.08 250);
   --attack-map-background: oklch(0.17 0.014 250);
   --attack-map-border: oklch(0.34 0.02 250);
   --attack-map-grid: oklch(0.42 0.025 250);
@@ -296,7 +303,17 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 30%, var(--card));
   --reticle-dot: var(--foreground);
   --shadow-paper: 0 1px 0 oklch(0.77 0.013 74), 0 10px 22px oklch(0.36 0.022 60 / 0.08);
-  --signal-highlight: oklch(0.5 0.13 72);
+  /* Brass highlight as text (was L≈0.5 — tight on paper; darken for AA margin) */
+  --signal-highlight: oklch(0.42 0.11 68);
+  --medal-gold-background: oklch(0.94 0.045 78);
+  --medal-gold-border: oklch(0.5 0.12 70);
+  --medal-gold-foreground: oklch(0.4 0.12 68);
+  --medal-silver-background: oklch(0.94 0.012 70);
+  --medal-silver-border: oklch(0.52 0.02 65);
+  --medal-silver-foreground: oklch(0.4 0.02 60);
+  --medal-bronze-background: oklch(0.95 0.035 48);
+  --medal-bronze-border: oklch(0.5 0.1 45);
+  --medal-bronze-foreground: oklch(0.4 0.11 45);
   --attack-map-background: oklch(0.948 0.014 78);
   --attack-map-border: oklch(0.8 0.014 74);
   --attack-map-grid: oklch(0.73 0.012 74);
@@ -342,7 +359,16 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 45%, transparent);
   --reticle-dot: oklch(0.95 0.01 78);
   --shadow-paper: 0 1px 0 oklch(0.39 0.012 62), 0 12px 24px oklch(0.09 0.006 62 / 0.36);
-  --signal-highlight: oklch(0.82 0.12 80);
+  --signal-highlight: oklch(0.86 0.12 78);
+  --medal-gold-background: oklch(0.3 0.05 75);
+  --medal-gold-border: oklch(0.64 0.1 70);
+  --medal-gold-foreground: oklch(0.9 0.1 80);
+  --medal-silver-background: oklch(0.28 0.015 60);
+  --medal-silver-border: oklch(0.62 0.02 60);
+  --medal-silver-foreground: oklch(0.9 0.015 70);
+  --medal-bronze-background: oklch(0.3 0.04 48);
+  --medal-bronze-border: oklch(0.64 0.08 48);
+  --medal-bronze-foreground: oklch(0.9 0.08 55);
   --attack-map-background: oklch(0.215 0.014 62);
   --attack-map-border: oklch(0.35 0.014 62);
   --attack-map-grid: oklch(0.43 0.014 68);
@@ -389,8 +415,8 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 32%, var(--card));
   --reticle-dot: var(--foreground);
   --shadow-paper: 0 1px 0 oklch(0.8 0.015 145), 0 8px 20px oklch(0.25 0.02 150 / 0.07);
-  /* Semantic tones inherit shared values — scheme only changes brand + highlight. */
-  --signal-highlight: oklch(0.4 0.07 150);
+  /* Semantic tones inherit Graphite light; highlight tints to sage. */
+  --signal-highlight: oklch(0.36 0.08 150);
   --attack-map-background: oklch(0.97 0.012 145);
   --attack-map-border: oklch(0.84 0.015 145);
   --attack-map-grid: oklch(0.76 0.02 145);
@@ -433,7 +459,7 @@
   --reticle-line: color-mix(in oklab, var(--foreground) 48%, transparent);
   --reticle-dot: oklch(0.95 0.01 145);
   --shadow-paper: 0 1px 0 oklch(0.34 0.016 150), 0 12px 24px oklch(0.08 0.01 150 / 0.42);
-  --signal-highlight: oklch(0.82 0.06 150);
+  --signal-highlight: oklch(0.86 0.07 150);
   --attack-map-background: oklch(0.17 0.016 150);
   --attack-map-border: oklch(0.34 0.02 150);
   --attack-map-grid: oklch(0.42 0.025 150);
@@ -462,11 +488,7 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     line-height: 1.5;
-    /* Quiet field grid — structure without noise */
-    background-image:
-      linear-gradient(var(--canvas-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--canvas-line) 1px, transparent 1px);
-    background-size: 32px 32px;
+    /* Solid field — no permanent notebook grid under dense tables */
   }
 
   ::selection {
@@ -606,9 +628,10 @@
 
   .focus-ring:focus-visible {
     border-color: var(--ring);
+    /* Dual ring: solid offset + brand outline (UI ≥3:1 on surfaces) */
     box-shadow:
       0 0 0 2px var(--background),
-      0 0 0 4px color-mix(in oklab, var(--ring) 88%, transparent);
+      0 0 0 4px var(--ring);
   }
 
   /*
@@ -746,7 +769,7 @@
 
   /*
    * Product workspace layout (ops dashboard):
-   * - Canvas: quiet outer field (body grid) with inset padding
+   * - Canvas: solid outer field (Paper: soft grid in gutter only)
    * - Frame: solid card panel + 1px border + corner reticles on the panel only
    * - Body: consistent shell padding + vertical rhythm
    * Avoid full-viewport rails, transparent floating content, ruler ticks.
@@ -759,6 +782,18 @@
     min-height: 100dvh;
     box-sizing: border-box;
     padding: var(--workspace-pad);
+  }
+
+  /*
+   * Paper scheme only: soft grid on the outer canvas gutter (outside the
+   * solid work panel). Other schemes stay solid so dense tables stay calm.
+   */
+  :root[data-scheme="paper"] .workspace-canvas {
+    background-color: var(--background);
+    background-image:
+      linear-gradient(var(--surface-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--surface-grid) 1px, transparent 1px);
+    background-size: 28px 28px;
   }
 
   @media (min-width: 640px) {

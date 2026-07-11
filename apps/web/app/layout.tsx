@@ -25,21 +25,22 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const preference =
     storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
       ? storedTheme
-      : undefined;
+      : 'system';
   const scheme =
     storedScheme === 'graphite' ||
     storedScheme === 'ink' ||
     storedScheme === 'paper' ||
     storedScheme === 'moss'
       ? storedScheme
-      : undefined;
+      : 'graphite';
+  // Only bake an explicit light/dark into SSR; system resolves in FOUC script.
   const theme = preference === 'dark' || preference === 'light' ? preference : undefined;
 
   return (
     <html
       lang="en"
       className={ibmPlexSans.variable}
-      data-scheme={scheme ?? 'graphite'}
+      data-scheme={scheme}
       data-theme={theme}
       data-theme-preference={preference}
       suppressHydrationWarning
@@ -80,10 +81,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   root.dataset.theme = resolved;
   root.dataset.themePreference = preference;
 
-  if (!hasTheme) {
-    try { window.localStorage.setItem(themeKey, preference); } catch {}
-    document.cookie = themeKey + "=" + preference + "; path=/; max-age=31536000; samesite=lax";
-  }
+  /*
+   * First visit: do not persist theme. Absence means System and keeps
+   * following OS day/night. Only explicit Light/Dark/System clicks write
+   * storage (see AppearanceControls). Scheme still defaults to Graphite
+   * without locking mode.
+   */
   if (!hasScheme) {
     try { window.localStorage.setItem(schemeKey, scheme); } catch {}
     document.cookie = schemeKey + "=" + scheme + "; path=/; max-age=31536000; samesite=lax";

@@ -109,6 +109,7 @@ export type TeamServiceState = {
   last_event: string;
   reset_cooldown: string;
   maintenance?: boolean;
+  lock_reason?: string;
   sla_status?: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
   sla_phase?: string;
   sla_tick_id?: number;

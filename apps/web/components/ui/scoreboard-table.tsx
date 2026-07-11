@@ -108,13 +108,16 @@ function MetricLine({
   return (
     <div
       aria-label={`${label}: ${compactNumber(value)}`}
-      className={cn("flex min-w-0 items-center gap-1.5 font-mono text-[11px]", tone)}
+      className={cn(
+        "grid grid-cols-[auto_auto_1fr] items-center gap-x-1.5 font-mono text-[11px] tabular-nums",
+        tone,
+      )}
     >
       <span className="shrink-0">{icon}</span>
-      <span className="w-6 shrink-0 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
+      <span className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
         {shortLabel}
       </span>
-      <span className="truncate">{compactNumber(value)}</span>
+      <span className="min-w-0 text-right">{compactNumber(value)}</span>
     </div>
   );
 }
@@ -126,7 +129,7 @@ function ServiceCell({
 }): ReactElement {
   if (!value) {
     return (
-      <div className="flex h-16 items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-muted-foreground/35 select-none">
+      <div className="flex h-16 w-full items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-muted-foreground/35 select-none">
         —
       </div>
     );
@@ -139,10 +142,10 @@ function ServiceCell({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 rounded-sm border p-2 transition-colors",
+        "flex w-full flex-col gap-1 rounded-sm border px-2 py-1.5 transition-colors",
         isPositive && "bg-positive/5 border-positive/30 hover:bg-positive/10",
         isNegative && "bg-negative/5 border-negative/30 hover:bg-negative/10",
-        !isPositive && !isNegative && "bg-muted/15 border-border/30 hover:bg-muted/25"
+        !isPositive && !isNegative && "bg-muted/15 border-border/30 hover:bg-muted/25",
       )}
       aria-label={`Service ${value.service}: total ${compactNumber(value.total)}, attack ${compactNumber(value.attack)}, defense ${compactNumber(value.defense)}, SLA ${compactNumber(value.sla)}%`}
     >
@@ -167,8 +170,8 @@ function ServiceCell({
         tone={scoreTone(value.sla, "text-muted-foreground")}
         value={value.sla}
       />
-      <div className="border-t border-border/60 pt-1 flex justify-between text-[11px] font-mono font-bold">
-        <span className="text-muted-foreground">Total:</span>
+      <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1 font-mono text-[11px] font-bold tabular-nums">
+        <span className="text-muted-foreground">Total</span>
         <span className={totalTone}>
           {value.total > 0 ? "+" : ""}
           {compactNumber(value.total)}
@@ -265,7 +268,7 @@ export function ScoreboardTable({
   // Wide boards scroll; sparse / empty boards fill the card width.
   const useHorizontalScroll = !isEmpty && serviceColumns.length >= 3;
   const contentWidthRem =
-    5.5 + 11 + serviceColumns.length * 9.5 + 4 * 5.5;
+    5.5 + 11 + serviceColumns.length * 8.5 + 4 * 5.5;
 
   if (isEmpty) {
     return (
@@ -368,7 +371,7 @@ export function ScoreboardTable({
               {serviceColumns.map((service) => (
                 <TableHead
                   key={service.key}
-                  className="h-auto min-w-[9.5rem] bg-card px-2 py-2 align-bottom text-xs font-semibold text-foreground"
+                  className="h-auto min-w-[8.5rem] w-[8.5rem] bg-card px-2 py-2 align-bottom text-xs font-semibold text-foreground"
                   scope="col"
                 >
                   <div className="space-y-0.5">
@@ -442,7 +445,10 @@ export function ScoreboardTable({
                     </div>
                   </TableCell>
                   {serviceColumns.map((service) => (
-                    <TableCell key={service.key} className="min-w-[9.5rem] px-2 py-3">
+                    <TableCell
+                      key={service.key}
+                      className="min-w-[8.5rem] w-[8.5rem] px-2 py-3"
+                    >
                       <ServiceCell value={services.get(service.key)} />
                     </TableCell>
                   ))}

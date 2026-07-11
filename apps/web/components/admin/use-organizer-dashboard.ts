@@ -1198,17 +1198,37 @@ export function useOrganizerDashboard({
     team: AdminTeam,
     active: boolean,
   ): Promise<void> {
-    return postRowAction<AdminTeam>({
-      actionKey: `team:active:${team.id}`,
-      url: `/api/admin/teams/${team.id}/${active ? "reactivate" : "deactivate"}`,
-      errorLabel: active ? "team reactivate failed" : "team deactivate failed",
-      successNote: `Team "${team.name}" ${active ? "reactivated" : "deactivated"}.`,
-      apply: (data) => {
-        setTeamRows((current) =>
-          current.map((item) => (item.id === team.id ? data : item)),
+    const actionKey = `team:active:${team.id}`;
+    const url = `/api/admin/teams/${team.id}/${active ? "reactivate" : "deactivate"}`;
+    setPendingAction(actionKey);
+    setActionError(null);
+    setActionNote(null);
+    try {
+      const response = await fetch(url, { method: "POST" });
+      const data = await processApiResponse<AdminTeam>(response, url);
+      setTeamRows((current) =>
+        current.map((item) => (item.id === team.id ? data : item)),
+      );
+      if (active && data.play_from_tick && data.play_from_tick > 0) {
+        setActionNote(
+          `Team "${team.name}" reactivated. It rejoins network and checker on tick #${data.play_from_tick}. Reconcile now so instances are ready by then.`,
         );
-      },
-    });
+      } else {
+        setActionNote(
+          `Team "${team.name}" ${active ? "reactivated" : "deactivated"}.`,
+        );
+      }
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : active
+            ? "team reactivate failed"
+            : "team deactivate failed",
+      );
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function setPlayerActiveState(

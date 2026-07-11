@@ -1,8 +1,7 @@
 "use client";
 
 import {
-  useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactElement,
@@ -10,29 +9,9 @@ import {
 import { CheckCircle2, ChevronDown, Circle, ListChecks } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { processApiResponse } from "@/lib/api-utils";
-import type { PlatformOverview, ServiceRow } from "@/lib/dashboard-types";
+import type { PlatformOverview } from "@/lib/dashboard-types";
 import { cn } from "@/lib/utils";
 import { VPN_DOWNLOADED_STORAGE_KEY } from "@/components/dashboard/onboarding-checklist";
-
-/** Minimal team-service payload used client-side (avoid importing server platform-api). */
-type TeamServiceState = {
-  challenge_id: number;
-  team_id: number;
-  name: string;
-  endpoint: string;
-  status: ServiceRow["status"];
-  checker: ServiceRow["checker"];
-  unlocked: boolean;
-  ssh_hint: string;
-  last_event: string;
-  reset_cooldown: string;
-  maintenance?: boolean;
-  sla_status?: ServiceRow["slaStatus"];
-  sla_phase?: string;
-  sla_tick_id?: number;
-  sla_message?: string;
-};
 
 type ChecklistItem = {
   id: string;
@@ -41,13 +20,25 @@ type ChecklistItem = {
   done: boolean;
 };
 
+function readVpnDownloaded(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(VPN_DOWNLOADED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function buildItems(
   overview: PlatformOverview,
-  services: ServiceRow[],
   vpnDownloaded: boolean,
 ): ChecklistItem[] {
-  const hasServices = services.length > 0;
   const hasTeam = (overview.teamID ?? 0) > 0;
+  // Prefer overview count (available immediately on navigation) over a
+  // services fetch that would flash "incomplete" while empty.
+  const hasServices = (overview.ownServiceCount ?? 0) > 0;
   return [
     {
       id: "team",
@@ -70,29 +61,6 @@ function buildItems(
   ];
 }
 
-function teamStatesToServiceRows(states: TeamServiceState[]): ServiceRow[] {
-  return states.map((state) => ({
-    id: `svc-${state.challenge_id}`,
-    challengeId: state.challenge_id,
-    teamId: state.team_id,
-    name: state.name,
-    endpoint: state.endpoint,
-    port: Number(state.endpoint.split(":").at(-1) ?? 0),
-    status: state.status,
-    checker: state.checker,
-    hasSourceDownload: false,
-    unlocked: state.unlocked,
-    sshHint: state.ssh_hint,
-    lastEvent: state.last_event,
-    resetCooldown: state.reset_cooldown,
-    maintenance: state.maintenance ?? false,
-    slaStatus: state.sla_status ?? "unknown",
-    slaPhase: state.sla_phase ?? "",
-    slaTickId: state.sla_tick_id ?? null,
-    slaMessage: state.sla_message ?? "",
-  }));
-}
-
 export function useMatchReadiness(overview: PlatformOverview): {
   visible: boolean;
   remaining: number;
@@ -102,67 +70,32 @@ export function useMatchReadiness(overview: PlatformOverview): {
   toggle: () => void;
 } {
   const [open, setOpen] = useState(false);
+  // Wait for client hydrate before showing: SSR/localStorage gap would flash
+  // the nav chip when readiness is already finished.
+  const [clientReady, setClientReady] = useState(false);
   const [vpnDownloaded, setVpnDownloaded] = useState(false);
-  const [services, setServices] = useState<ServiceRow[]>([]);
 
-  const loadServices = useCallback(async () => {
-    if (!overview.authenticated || overview.role === "organizer") {
-      setServices([]);
-      return;
-    }
-    if ((overview.teamID ?? 0) <= 0) {
-      setServices([]);
-      return;
-    }
-    try {
-      const response = await fetch("/api/platform/team/services", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        return;
-      }
-      const states = await processApiResponse<TeamServiceState[]>(
-        response,
-        "/api/platform/team/services",
-      );
-      setServices(teamStatesToServiceRows(states));
-    } catch {
-      // keep last known services
-    }
-  }, [overview.authenticated, overview.role, overview.teamID]);
+  useLayoutEffect(() => {
+    setVpnDownloaded(readVpnDownloaded());
+    setClientReady(true);
 
-  useEffect(() => {
-    try {
-      setVpnDownloaded(
-        window.localStorage.getItem(VPN_DOWNLOADED_STORAGE_KEY) === "1",
-      );
-    } catch {
-      setVpnDownloaded(false);
-    }
     const onVpn = () => setVpnDownloaded(true);
     window.addEventListener("adplatform:vpn-downloaded", onVpn);
     return () => window.removeEventListener("adplatform:vpn-downloaded", onVpn);
   }, []);
 
-  useEffect(() => {
-    void loadServices();
-    const timer = window.setInterval(() => {
-      void loadServices();
-    }, 15000);
-    return () => window.clearInterval(timer);
-  }, [loadServices]);
-
   const items = useMemo(
-    () => buildItems(overview, services, vpnDownloaded),
-    [overview, services, vpnDownloaded],
+    () => buildItems(overview, vpnDownloaded),
+    [overview, vpnDownloaded],
   );
   const remaining = items.filter((item) => !item.done).length;
   const visible =
+    clientReady &&
     overview.authenticated &&
     overview.role !== "organizer" &&
     remaining > 0;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!visible && open) {
       setOpen(false);
     }
@@ -263,4 +196,3 @@ export function MatchReadinessPanel({
     </section>
   );
 }
-

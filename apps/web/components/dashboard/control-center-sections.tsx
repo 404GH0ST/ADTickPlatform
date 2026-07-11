@@ -131,7 +131,6 @@ export function ScoreboardPanel({
   currentTeamName,
   frozen,
   freezeAt,
-  unfreezeAt,
 }: ScoreboardPanelProps): ReactElement {
   return (
     <Card data-testid="participant-scoreboard-card">
@@ -148,13 +147,8 @@ export function ScoreboardPanel({
             data-testid="scoreboard-frozen-banner"
             className="tone-warning rounded-md border px-3 py-2 text-sm"
           >
-            <span className="font-semibold">Scoreboard frozen.</span> Standings
-            are paused
-            {freezeAt ? ` as of ${formatFreezeTimestamp(freezeAt)}` : ""}
-            {unfreezeAt
-              ? ` and resume at ${formatFreezeTimestamp(unfreezeAt)}`
-              : " until the organizers lift the freeze"}
-            .
+            <span className="font-semibold">Scoreboard frozen.</span>
+            {freezeAt ? ` Snapshot as of ${formatFreezeTimestamp(freezeAt)}.` : ""}
           </div>
         )}
         <ScoreboardTable
@@ -265,9 +259,9 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
       ? "text-positive"
       : "text-muted-foreground";
   const stateDot = isPaused
-    ? "bg-[var(--signal-highlight)]"
+    ? "bg-highlight"
     : isRunning
-      ? "bg-[var(--signal-positive)] animate-pulse"
+      ? "bg-positive animate-pulse"
       : "bg-muted-foreground/50";
 
   const countdown = (() => {
@@ -405,6 +399,7 @@ export function ServicesPanel({
           {rows.map((service) => (
             <ServiceCard
               key={service.id}
+              matchState={overview.matchState}
               pendingAction={pendingAction}
               service={service}
               onRestart={onRestart}
@@ -728,13 +723,90 @@ function ErrorBanner({ message }: { message: string }): ReactElement {
   return <StatusBanner message={message} variant="error" />;
 }
 
+/** Resolve lock badge from API lock_reason, match state, or service text fields. */
+function resolveServiceLockReason(
+  service: ServiceRow,
+  matchState?: string | null,
+): "match_paused" | "match_not_started" | "deferred" | "maintenance" {
+  const explicit = (service.lockReason || "").trim();
+  if (
+    explicit === "match_paused" ||
+    explicit === "match_not_started" ||
+    explicit === "deferred" ||
+    explicit === "maintenance"
+  ) {
+    return explicit;
+  }
+
+  const match = (matchState || "").toLowerCase();
+  const last = (service.lastEvent || "").toLowerCase();
+  const reset = (service.resetCooldown || "").toLowerCase();
+  const hint = (service.sshHint || "").toLowerCase();
+
+  // Prefer concrete service text (always set by api-gateway on pause) so a
+  // stale lock_reason or missing overview state cannot mislabel the card.
+  if (
+    match === "paused" ||
+    reset.includes("paused") ||
+    last.includes("paused") ||
+    hint.includes("paused")
+  ) {
+    return "match_paused";
+  }
+  if (
+    match === "not_started" ||
+    reset.includes("not started") ||
+    last.includes("waiting for match start")
+  ) {
+    return "match_not_started";
+  }
+  if (explicit === "deferred" || last.includes("next tick") || reset.includes("next tick")) {
+    return "deferred";
+  }
+  return "maintenance";
+}
+
+function serviceLockBadgeLabel(
+  service: ServiceRow,
+  matchState?: string | null,
+): string {
+  switch (resolveServiceLockReason(service, matchState)) {
+    case "match_paused":
+      return "Match paused";
+    case "match_not_started":
+      return "Match not started";
+    case "deferred":
+      return "Opens next tick";
+    default:
+      return "Under maintenance";
+  }
+}
+
+function serviceLockHelpText(
+  service: ServiceRow,
+  matchState?: string | null,
+): string {
+  switch (resolveServiceLockReason(service, matchState)) {
+    case "match_paused":
+      return "Actions and network access are suspended while the match is paused.";
+    case "match_not_started":
+      return "Service is locked until the organizer starts the match. Network access stays closed.";
+    case "deferred":
+      return "Challenge is warm-redeployed and will reopen on the next tick.";
+    default:
+      return "Actions unavailable while this challenge is under maintenance.";
+  }
+}
+
 function ServiceCard({
+  matchState,
   pendingAction,
   service,
   onRestart,
   onSelectPrimaryAction,
   onSelectReset,
 }: {
+  matchState?: string | null;
   pendingAction: string | null;
   service: ServiceRow;
   onRestart: (service: ServiceRow) => void;
@@ -756,7 +828,7 @@ function ServiceCard({
                 data-testid={`service-maintenance-badge-${service.challengeId}`}
                 variant="outline"
               >
-                Under maintenance
+                {serviceLockBadgeLabel(service, matchState)}
               </Badge>
             ) : (
               <Badge
@@ -772,6 +844,7 @@ function ServiceCard({
       <CardContent className="space-y-4">
         <ServiceDetails service={service} />
         <ServiceActionBar
+          matchState={matchState}
           pendingAction={pendingAction}
           service={service}
           onRestart={onRestart}
@@ -821,12 +894,14 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
 }
 
 function ServiceActionBar({
+  matchState,
   pendingAction,
   service,
   onRestart,
   onSelectPrimaryAction,
   onSelectReset,
 }: {
+  matchState?: string | null;
   pendingAction: string | null;
   service: ServiceRow;
   onRestart: (service: ServiceRow) => void;
@@ -886,7 +961,7 @@ function ServiceActionBar({
       </div>
       {service.maintenance ? (
         <p className="text-sm text-muted-foreground">
-          Actions unavailable while this challenge is under maintenance.
+          {serviceLockHelpText(service, matchState)}
         </p>
       ) : null}
     </div>

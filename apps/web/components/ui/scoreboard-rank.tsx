@@ -77,7 +77,11 @@ export function ScoreboardRank({
             <span className="text-negative">{Math.abs(deltaValue)}</span>
           </>
         )}
-        {isStatic && <span className="text-muted-foreground/30">—</span>}
+        {isStatic && (
+          <span className="text-muted-foreground" aria-hidden>
+            —
+          </span>
+        )}
         {isNew && (
           <span className="text-info text-[10px] font-semibold uppercase">
             New
