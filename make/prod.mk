@@ -60,7 +60,18 @@ prod-runtime-cleanup:
 compose-config:
 	docker compose -f deploy/compose/dev.yml config >/dev/null
 
+# Optional overrides (env or make vars):
+#   CHALLENGE_SOURCE_HOST_PATH=/path/to/sources
+#   ADMIN_EMAIL=organizer@ctf.local
+#   ADMIN_DISPLAY_NAME=Organizer
+#   ADMIN_PASSWORD=...   # if unset, a random password is generated
+#   FORCE=true           # overwrite existing prod.env
 generate-prod-env:
+	CHALLENGE_SOURCE_HOST_PATH="$(CHALLENGE_SOURCE_HOST_PATH)" \
+	ADMIN_EMAIL="$(ADMIN_EMAIL)" \
+	ADMIN_DISPLAY_NAME="$(ADMIN_DISPLAY_NAME)" \
+	ADMIN_PASSWORD="$(ADMIN_PASSWORD)" \
+	FORCE="$(FORCE)" \
 	./scripts/generate-prod-env.sh $(PROD_ENV)
 
 setup-prod-env:

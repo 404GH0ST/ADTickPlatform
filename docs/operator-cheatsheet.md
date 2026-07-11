@@ -2,6 +2,21 @@
 
 Use this on event day after the host stack and config are already frozen.
 
+## Challenge maintenance
+
+Broken service mid-match without pausing the contest:
+
+```bash
+# Or UI: Admin → Challenges → Maintain / Resume
+curl -sS -X POST -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+  "${AD_PLATFORM_API_URL}/api/v2/admin/challenges/<id>/maintenance"
+
+curl -sS -X POST -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
+  "${AD_PLATFORM_API_URL}/api/v2/admin/challenges/<id>/resume"
+```
+
+Tears down that challenge’s containers, blocks participant actions and new scoring for it. Historical points remain. Resume requeues instances.
+
 ## Preflight
 
 Known-good validation:

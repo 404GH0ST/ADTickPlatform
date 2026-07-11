@@ -24,6 +24,11 @@ random_hex() {
   openssl rand -hex "${1:-32}"
 }
 
+# URL-safe password without ambiguous punctuation for easy copy/paste into login forms.
+random_password() {
+  openssl rand -base64 "${1:-24}" | tr -d '/+=' | head -c 32
+}
+
 wireguard_private_key() {
   if command -v wg >/dev/null 2>&1; then
     wg genkey
@@ -47,6 +52,14 @@ ssh_secret="$(random_hex 32)"
 flag_secret="$(random_hex 32)"
 grafana_admin_password="$(random_hex 24)"
 wg_private_key="$(wireguard_private_key)"
+
+# Organizer account for make create-admin (override via env when generating).
+admin_display_name="${ADMIN_DISPLAY_NAME:-Organizer}"
+admin_email="${ADMIN_EMAIL:-organizer@example.com}"
+admin_password="${ADMIN_PASSWORD:-$(random_password 24)}"
+
+# Optional host path override for challenge source bundles.
+challenge_source_host_path="${CHALLENGE_SOURCE_HOST_PATH:-}"
 
 postgres_dsn="postgres://adplatform:${postgres_password}@postgres:5432/adplatform?sslmode=disable"
 postgres_host_dsn="postgres://adplatform:${postgres_password}@127.0.0.1:15432/adplatform?sslmode=disable"
@@ -83,6 +96,17 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
     GAME_CORE_FLAG_SECRET) value="${flag_secret}" ;;
     GRAFANA_ADMIN_PASSWORD) value="${grafana_admin_password}" ;;
     WIREGUARD_SERVER_PRIVATE_KEY) value="${wg_private_key}" ;;
+    ADMIN_DISPLAY_NAME) value="${admin_display_name}" ;;
+    ADMIN_EMAIL) value="${admin_email}" ;;
+    ADMIN_PASSWORD) value="${admin_password}" ;;
+    CHALLENGE_SOURCE_HOST_PATH)
+      if [[ -n "${challenge_source_host_path}" ]]; then
+        value="${challenge_source_host_path}"
+      else
+        printf '%s\n' "${line}" >>"${tmp_file}"
+        continue
+      fi
+      ;;
     *)
       printf '%s\n' "${line}" >>"${tmp_file}"
       continue
@@ -96,4 +120,16 @@ chmod 600 "${OUTPUT}"
 trap - EXIT
 
 echo "generated ${OUTPUT}"
-echo "review hostnames, public URLs, smoke credentials, and WireGuard endpoint before starting prod."
+echo
+echo "Organizer login (bootstrap with: make create-admin after the stack is up)"
+echo "  ADMIN_DISPLAY_NAME=${admin_display_name}"
+echo "  ADMIN_EMAIL=${admin_email}"
+echo "  ADMIN_PASSWORD=${admin_password}"
+if [[ -n "${challenge_source_host_path}" ]]; then
+  echo "  CHALLENGE_SOURCE_HOST_PATH=${challenge_source_host_path}"
+fi
+echo
+echo "Next:"
+echo "  make setup-prod-env DOMAIN=localhost SCHEME=http   # or your public host"
+echo "  make up-prod-host && make create-admin"
+echo "Review WireGuard endpoint and public URLs before going live."

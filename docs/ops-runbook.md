@@ -1,5 +1,27 @@
 # Operations Runbook
 
+## Challenge maintenance (mid-match)
+
+Use this when one service is broken and must stop scoring without pausing the whole match.
+
+1. Open **Admin → Challenges**.
+2. Click **Maintain** on the broken challenge.
+3. Effects:
+   - Team containers for that challenge are torn down (service becomes unreachable).
+   - Participant unlock / SSH / reset / source download are blocked.
+   - Checker skips the challenge (no new flags, no new SLA).
+   - Flag submits for that challenge are rejected.
+   - Points already earned for that challenge stay on the scoreboard.
+4. Fix images / config as needed (Validate / Redeploy remain available).
+5. Click **Resume**:
+   - Clears maintenance and requeues team instances.
+   - Sets **play_from_tick** to the **next** tick id (when ticks already exist).
+   - Challenge stays out of checker/scoring until that tick starts (avoids mid-tick races and placeholder flags).
+6. Open **Deployments → Reconcile** so instances are **ready** before the next tick.
+7. Wait for the next tick (or **Game → Advance tick**). Checker `put` writes real flags; the challenge is fully back in play.
+
+Prefer this over match-wide **Pause** when only one challenge is affected. Prefer an announcement so teams know why the service is down.
+
 ## Scoring Mismatch
 
 1. Open `Admin -> Game -> Quick Actions` and run `Audit Scores`.

@@ -1,12 +1,12 @@
-# Deployment: Debian/Ubuntu Host Enforcement
+# Deployment: Host Enforcement (Debian / Ubuntu / Arch)
 
-This guide explains how to prepare and run the AD Platform on a Debian or Ubuntu server using the "Host Enforcement" model (`prod-host`). 
+This guide explains how to prepare and run the AD Platform on a Linux server using the "Host Enforcement" model (`prod-host`).
 
 In this model, the **Controller** and **WireGuard Gateway** run with `network_mode: host` and `NET_ADMIN` privileges to manage real Linux firewall rules (`nftables` and `iptables`) and the host's WireGuard interface.
 
 ## 1. System Requirements
 
-- **OS**: Debian 12 (Bookworm) or Ubuntu 22.04/24.04 LTS.
+- **OS**: Debian 12 (Bookworm), Ubuntu 22.04/24.04 LTS, or Arch Linux (and Arch-based hosts with `pacman`).
 - **Hardware**: At least 4GB RAM and 2 CPUs (scaling depends on team count).
 - **Network**: A public IPv4 address and port `51820/udp` open for WireGuard.
 
@@ -26,7 +26,13 @@ Each challenge instance is a full container plus checker work per tick. Disk, Do
 
 ## 2. Server Preparation
 
-Install the required system packages:
+Preferred path (detects apt vs pacman and installs Docker correctly):
+
+```bash
+make install-host-deps
+```
+
+### Manual packages (Debian / Ubuntu)
 
 ```bash
 sudo apt update
@@ -41,6 +47,30 @@ sudo apt install -y \
     iptables \
     iproute2 \
     jq
+```
+
+On Ubuntu/Debian production hosts, prefer Docker’s official packages (what
+`make install-host-deps` installs) over distro `docker.io` when you need a
+current engine + compose plugin.
+
+### Manual packages (Arch Linux)
+
+```bash
+sudo pacman -Syu --needed \
+    curl \
+    git \
+    make \
+    ca-certificates \
+    docker \
+    docker-compose \
+    docker-buildx \
+    wireguard-tools \
+    nftables \
+    iptables \
+    iproute2 \
+    jq
+
+sudo systemctl enable --now docker
 ```
 
 ### Enable IP Forwarding
@@ -64,16 +94,23 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
 
 2. **Configure Environment**:
    ```bash
-   make generate-prod-env
-   nano deploy/compose/prod.env
+   # Optional overrides: CHALLENGE_SOURCE_HOST_PATH, ADMIN_EMAIL, ADMIN_DISPLAY_NAME, ADMIN_PASSWORD
+   make generate-prod-env CHALLENGE_SOURCE_HOST_PATH=/srv/adplatform/challenge-sources
+   make setup-prod-env DOMAIN=ctf.example.com SCHEME=https WG_PORT=51820
+   # or localhost: make setup-prod-env DOMAIN=localhost SCHEME=http
+   nano deploy/compose/prod.env   # review if needed
    ```
    `make generate-prod-env` writes `deploy/compose/prod.env` with strong random
-   secrets and refuses to overwrite an existing file unless `FORCE=true` is set.
-   **Critical values to review**:
-   - `EDGE_SITE_ADDRESS`: Your public domain or IP (e.g., `http://1.2.3.4`).
-   - `WIREGUARD_SERVER_ENDPOINT`: Your public VPN endpoint with port (e.g., `1.2.3.4:51820`).
-   - `AD_PLATFORM_EMAIL` / `AD_PLATFORM_PASSWORD`: Set these to a real participant account if you want to use the host smoke scripts. The example alpha credentials only work on seeded/demo data.
-   - `AD_PLATFORM_TEAM_ID`: Leave this empty unless you need an explicit consistency check. The smoke scripts derive the team from the authenticated participant account.
+   secrets (service tokens, DB password, WireGuard key, **organizer ADMIN_PASSWORD**,
+   Grafana password) and refuses to overwrite unless `FORCE=true` is set.
+   **Critical values**:
+   - `EDGE_SITE_ADDRESS` / `AD_PLATFORM_PUBLIC_BASE_URL` / `WIREGUARD_SERVER_ENDPOINT`
+     (set by `setup-prod-env` from DOMAIN/SCHEME/WG_PORT).
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — organizer login; create after stack up with
+     `make create-admin` (reads these from `prod.env`).
+   - `CHALLENGE_SOURCE_HOST_PATH` — host directory of challenge source bundles.
+   - Optional smoke-only: `AD_PLATFORM_EMAIL` / `AD_PLATFORM_PASSWORD` for a real
+     participant account used by `make smoke-prod-host-*`.
 
 3. **Install WireGuard Host Interface**:
    ```bash

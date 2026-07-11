@@ -671,7 +671,7 @@ The platform supports two primary deployment models:
 1. **Standard Docker Compose**: All services run in isolated containers. Suitable for development and small-scale private testing.
 2. **Host Enforcement (`prod-host`)**: Specialized for production environments where real network isolation and firewall rules are required. In this mode, the **Controller** and **WireGuard Gateway** interact directly with the host's networking stack.
 
-For detailed instructions on setting up the production model, see [Deployment: Debian/Ubuntu Host](deployment-host.md).
+For detailed instructions on setting up the production model, see [Deployment: Host (Debian/Ubuntu/Arch)](deployment-host.md).
 
 ## 16. Recommended Monorepo Layout
 

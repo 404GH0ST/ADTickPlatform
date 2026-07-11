@@ -14,12 +14,19 @@ load_default_env_files
 PROD_ENV="${PROD_ENV:-${ROOT_DIR}/deploy/compose/prod.env}"
 load_env_file_override "${PROD_ENV}"
 
-API_URL="${AD_PLATFORM_API_URL:-http://localhost:8080}"
-PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-}"
-
-if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
-  API_URL="${PUBLIC_URL}"
+# Prefer the public edge URL for host-side calls. prod-host does not publish
+# api-gateway:8080 on the host — only Caddy (EDGE_*) is reachable.
+PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-${EDGE_SITE_ADDRESS:-}}"
+API_URL="${AD_PLATFORM_API_URL:-}"
+if [[ -z "${API_URL}" || "${API_URL}" == *"api-gateway"* || "${API_URL}" == *"localhost:8080"* || "${API_URL}" == *"127.0.0.1:8080"* ]]; then
+  if [[ -n "${PUBLIC_URL}" ]]; then
+    API_URL="${PUBLIC_URL}"
+  else
+    API_URL="http://localhost:8080"
+  fi
 fi
+# Strip trailing slash so paths join cleanly.
+API_URL="${API_URL%/}"
 
 CURL_TLS_ARGS=()
 if [[ "${API_URL}" == https://* ]]; then
@@ -39,20 +46,32 @@ fi
 
 ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
-# User information from environment or positional arguments
-DISPLAY_NAME="${1:-${ADMIN_DISPLAY_NAME:-"System Admin"}}"
-EMAIL="${2:-${ADMIN_EMAIL:-"admin@example.com"}}"
-PASSWORD="${3:-${ADMIN_PASSWORD:-""}}"
-WIREGUARD_OUTPUT_DIR="${4:-${ADMIN_WIREGUARD_OUTPUT_DIR:-"${ROOT_DIR}/.runtime/admin-wireguard"}}"
+# User information from environment or positional arguments.
+# Empty positional args (e.g. from make) fall through to env/prod.env.
+arg_or_default() {
+  local arg="${1-}"
+  local fallback="${2-}"
+  if [[ -n "${arg}" ]]; then
+    printf '%s' "${arg}"
+  else
+    printf '%s' "${fallback}"
+  fi
+}
+
+DISPLAY_NAME="$(arg_or_default "${1-}" "${ADMIN_DISPLAY_NAME:-Organizer}")"
+EMAIL="$(arg_or_default "${2-}" "${ADMIN_EMAIL:-admin@example.com}")"
+PASSWORD="$(arg_or_default "${3-}" "${ADMIN_PASSWORD:-}")"
+WIREGUARD_OUTPUT_DIR="$(arg_or_default "${4-}" "${ADMIN_WIREGUARD_OUTPUT_DIR:-${ROOT_DIR}/.runtime/admin-wireguard}")"
 AUTO_RECONCILE="${ADMIN_AUTO_RECONCILE:-true}"
 
 if [[ -z "${PASSWORD}" ]]; then
   echo "Error: ADMIN_PASSWORD is required." >&2
-  echo "Usage: $0 [display_name] [email] [password] [wireguard_output_dir]" >&2
+  echo "Set it in ${PROD_ENV} (make generate-prod-env) or pass: $0 [display_name] [email] [password]" >&2
   exit 1
 fi
 
 echo "creating organizer account: ${EMAIL} (${DISPLAY_NAME})"
+echo "using API: ${API_URL}"
 
 curl_json() {
   local label="$1"

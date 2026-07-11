@@ -49,7 +49,7 @@ It comes equipped with highly concurrent Go-based microservices, a real-time res
 Comprehensive documentation guides are available in the [docs/](docs/) directory:
 
 - [System Architecture](docs/architecture.md) — Under-the-hood design and service relationships.
-- [Deployment: Ubuntu/Debian Host](docs/deployment-host.md) — Production setup guide.
+- [Deployment: Host (Debian/Ubuntu/Arch)](docs/deployment-host.md) — Production setup guide.
 - [Game Rules & Runtime Flows](docs/game-rules.md) — Scoring formulas and tick structure.
 - [Participant Platform Manual](docs/platform-manual.md) — A guide for CTF competitors.
 - [Organizer Admin API Guide](docs/admin-api.md) — Controlling the match programmatically.
@@ -120,16 +120,19 @@ Live documentation is also exposed on the running platform under `/docs/particip
 
 The production deployment runs behind a Caddy reverse proxy with automated database migrations and host network enforcement.
 
-1. Configure production secrets and properties:
+1. Configure production secrets and public addresses:
    ```bash
-   cp deploy/compose/prod.env.example deploy/compose/prod.env
-   # Edit prod.env with your database credentials and EDGE_SITE_ADDRESS
+   make generate-prod-env CHALLENGE_SOURCE_HOST_PATH=/srv/adplatform/challenge-sources
+   make setup-prod-env DOMAIN=localhost SCHEME=http   # or your domain / https
+   # Creates deploy/compose/prod.env with random secrets + ADMIN_PASSWORD
+   make create-admin   # after the stack is up; uses ADMIN_* from prod.env
    ```
 
 2. Validate and spin up the production container stack:
    ```bash
    make preflight-prod-host
    make up-prod-host
+   make create-admin
    ```
    *Note: Operator operations require root execution or `sudo NOPASSWD` for host inspection commands.*
 

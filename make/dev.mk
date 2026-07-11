@@ -116,8 +116,14 @@ report-faust-balance:
 export-runtime-incident-bundle:
 	./scripts/export-runtime-incident-bundle.sh
 
+# Reads ADMIN_DISPLAY_NAME / ADMIN_EMAIL / ADMIN_PASSWORD from prod.env (or .env).
+# Optional overrides: make create-admin DISPLAY_NAME=... EMAIL=... PASSWORD=...
 create-admin:
-	./scripts/create-admin.sh "$(DISPLAY_NAME)" "$(EMAIL)" "$(PASSWORD)" "$(ADMIN_WIREGUARD_OUTPUT_DIR)"
+	@if [ -n "$(PASSWORD)$(EMAIL)$(DISPLAY_NAME)" ]; then \
+		./scripts/create-admin.sh "$(DISPLAY_NAME)" "$(EMAIL)" "$(PASSWORD)" "$(ADMIN_WIREGUARD_OUTPUT_DIR)"; \
+	else \
+		./scripts/create-admin.sh; \
+	fi
 
 create-teams:
 	./scripts/create-teams.sh "$(TEAM_COUNT)" "$(TEAM_PREFIX)" "$(TEAM_EMAIL_DOMAIN)" "$(TEAM_START_INDEX)"
