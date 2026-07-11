@@ -11,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EmptyTableRow } from "@/components/ui/empty-state";
 import { ScoreboardRank, RankBadge } from "@/components/ui/scoreboard-rank";
 import { cn } from "@/lib/utils";
 
@@ -238,14 +237,15 @@ export function ScoreboardTable({
       <button
         type="button"
         onClick={() => handleSort(field)}
+        title={label}
         className={cn(
-          "flex items-center gap-1.5 hover:text-foreground text-left focus:outline-none focus:ring-1 focus:ring-ring rounded-sm px-1.5 -mx-1.5 py-1 transition-colors w-full font-semibold group/sort",
+          "flex w-full items-center gap-1 rounded-sm px-0.5 py-1 text-left font-semibold transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background group/sort",
           isActive ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        {icon}
-        <span className="truncate">{label}</span>
-        <span className="shrink-0 ml-auto">
+        {icon ? <span className="shrink-0">{icon}</span> : null}
+        <span className="min-w-0 whitespace-nowrap">{label}</span>
+        <span className="shrink-0">
           {isActive ? (
             sortDirection === "asc" ? (
               <ArrowUp className="h-3.5 w-3.5" />
@@ -253,7 +253,7 @@ export function ScoreboardTable({
               <ArrowDown className="h-3.5 w-3.5" />
             )
           ) : (
-            <ArrowUp className="h-3.5 w-3.5 text-muted-foreground/30 opacity-0 group-hover/sort:opacity-100 transition-opacity" />
+            <ArrowUp className="h-3.5 w-3.5 text-muted-foreground/30 opacity-0 transition-opacity group-hover/sort:opacity-100" />
           )}
         </span>
       </button>
@@ -261,8 +261,28 @@ export function ScoreboardTable({
   };
 
   const serviceColumns = collectServiceColumns(scoreRows);
-  const columnCount = 6 + serviceColumns.length;
-  const desktopTableWidthRem = 7 + 14 + serviceColumns.length * 8 + 28;
+  const isEmpty = sortedRows.length === 0;
+  // Wide boards scroll; sparse / empty boards fill the card width.
+  const useHorizontalScroll = !isEmpty && serviceColumns.length >= 3;
+  const contentWidthRem =
+    5.5 + 11 + serviceColumns.length * 9.5 + 4 * 5.5;
+
+  if (isEmpty) {
+    return (
+      <>
+        <div className="flex min-h-40 w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/15 px-4 py-10 text-center text-sm text-muted-foreground md:hidden">
+          {emptyMessage}
+        </div>
+        <div
+          className="hidden min-h-40 w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/15 px-6 py-12 text-center text-sm text-muted-foreground md:flex"
+          role="status"
+          data-testid="scoreboard-empty"
+        >
+          {emptyMessage}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -275,142 +295,182 @@ export function ScoreboardTable({
         onSortFieldChange={setSortField}
         onSortDirectionChange={setSortDirection}
       />
-      <Table
-        className="hidden border-separate border-spacing-0 text-xs md:table"
-        style={{
-          width: `${desktopTableWidthRem}rem`,
-          minWidth: `${desktopTableWidthRem}rem`,
-          tableLayout: "fixed",
-        }}
-      >
-      <caption className="caption-bottom px-2 py-3 text-left">
-        <span className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <span><span className="font-semibold text-foreground">A</span> Attack</span>
-          <span><span className="font-semibold text-foreground">D</span> Defense</span>
-          <span><span className="font-semibold text-foreground">SLA</span> Availability</span>
-          <span><span className="font-semibold text-positive">Green +</span></span>
-          <span><span className="font-semibold text-negative">Red -</span></span>
-          <span>Neutral cell background</span>
-        </span>
-      </caption>
-      <colgroup>
-        <col className="w-28" />
-        <col className="w-56" />
-        {serviceColumns.map((service) => (
-          <col key={service.key} className="w-32" />
-        ))}
-        <col className="w-28" />
-        <col className="w-28" />
-        <col className="w-28" />
-        <col className="w-28" />
-      </colgroup>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <TableHead className="sticky left-0 z-30 h-auto w-28 min-w-28 max-w-28 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("rank", "Rank")}
-          </TableHead>
-          <TableHead className="sticky left-28 z-30 h-auto w-56 min-w-56 max-w-56 border-r border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("team", "Team")}
-          </TableHead>
-          {serviceColumns.map((service) => (
-            <TableHead
-              key={service.key}
-              className="h-auto w-32 min-w-32 max-w-32 bg-card px-2 py-3 align-top text-xs font-semibold text-foreground"
-              scope="col"
-            >
-              <div className="space-y-1">
-                <div className="truncate">{service.service}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">
-                  A / D / SLA
-                </div>
-              </div>
-            </TableHead>
-          ))}
-          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("attack", "Total Offense", <Flame className="h-3.5 w-3.5" />)}
-          </TableHead>
-          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("defense", "Total Defense", <Shield className="h-3.5 w-3.5" />)}
-          </TableHead>
-          <TableHead className="h-auto w-28 min-w-28 max-w-28 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("sla", "Total SLA", <Gauge className="h-3.5 w-3.5" />)}
-          </TableHead>
-          <TableHead className="sticky right-0 z-30 h-auto w-28 min-w-28 max-w-28 border-l border-border/70 bg-card px-3 py-2 text-xs font-semibold text-foreground" scope="col">
-            {renderSortHeader("total", "Total")}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sortedRows.length === 0 ? (
-          <EmptyTableRow colSpan={columnCount} message={emptyMessage} />
-        ) : (
-          sortedRows.map((score) => {
-            const isCurrentTeam =
-              currentTeamName !== undefined && score.team === currentTeamName;
-            const services = serviceLookup(score);
-            const stickyCellClassName = isCurrentTeam
-              ? "bg-[color-mix(in_oklab,var(--card)_88%,var(--primary))]"
-              : "bg-card";
-
-            return (
-              <TableRow
-                key={score.team}
-                className={cn(
-                  "border-b border-border/60 transition-colors hover:bg-muted/20",
-                  isCurrentTeam && "bg-primary/5",
-                )}
-              >
-                <TableCell
-                  className={cn(
-                    "sticky left-0 z-20 w-28 min-w-28 max-w-28 border-r border-border/70 px-3 py-3",
-                    stickyCellClassName,
-                  )}
-                >
-                  <ScoreboardRank
-                    rank={score.rank}
-                    delta={score.delta}
-                    isCurrentTeam={isCurrentTeam}
-                  />
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "sticky left-28 z-20 w-56 min-w-56 max-w-56 overflow-hidden border-r border-border/70 px-3 py-3 font-semibold",
-                    stickyCellClassName,
-                    isCurrentTeam && "text-primary",
-                  )}
-                >
-                  <div className="block truncate text-sm" title={score.team}>
-                    {score.team}
-                  </div>
-                </TableCell>
-                {serviceColumns.map((service) => (
-                  <TableCell key={service.key} className="w-32 min-w-32 max-w-32 px-2 py-3">
-                    <ServiceCell value={services.get(service.key)} />
-                  </TableCell>
-                ))}
-                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
-                  {compactNumber(score.attack)}
-                </TableCell>
-                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
-                  {compactNumber(score.defense)}
-                </TableCell>
-                <TableCell className="w-28 min-w-28 max-w-28 px-3 py-3 font-mono text-sm">
-                  {compactNumber(score.sla)}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "sticky right-0 z-20 w-28 min-w-28 max-w-28 border-l border-border/70 px-3 py-3 font-mono text-sm font-semibold",
-                    stickyCellClassName,
-                  )}
-                >
-                  {compactNumber(score.total)}
-                </TableCell>
-              </TableRow>
-            );
-          })
+      <div
+        className={cn(
+          "hidden w-full md:block",
+          useHorizontalScroll && "overflow-x-auto",
         )}
-      </TableBody>
-      </Table>
+      >
+        <Table
+          className="w-full border-separate border-spacing-0 text-xs"
+          style={
+            useHorizontalScroll
+              ? {
+                  width: `${contentWidthRem}rem`,
+                  minWidth: `${contentWidthRem}rem`,
+                  tableLayout: "fixed",
+                }
+              : {
+                  width: "100%",
+                  tableLayout: "fixed",
+                }
+          }
+        >
+          <caption className="caption-bottom border-t border-border px-1 pt-3 text-left">
+            <span className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              <span>
+                <span className="font-semibold text-foreground">A</span> Attack
+              </span>
+              <span>
+                <span className="font-semibold text-foreground">D</span> Defense
+              </span>
+              <span>
+                <span className="font-semibold text-foreground">SLA</span>{" "}
+                Availability
+              </span>
+              <span>
+                <span className="font-semibold text-positive">Green +</span>
+              </span>
+              <span>
+                <span className="font-semibold text-negative">Red -</span>
+              </span>
+              <span>Right-side columns are team totals across all services</span>
+            </span>
+          </caption>
+          <colgroup>
+            <col style={{ width: useHorizontalScroll ? "5.5rem" : "12%" }} />
+            <col style={{ width: useHorizontalScroll ? "11rem" : "22%" }} />
+            {serviceColumns.map((service) => (
+              <col
+                key={service.key}
+                style={{ width: useHorizontalScroll ? "9.5rem" : undefined }}
+              />
+            ))}
+            <col style={{ width: useHorizontalScroll ? "5.5rem" : "14%" }} />
+            <col style={{ width: useHorizontalScroll ? "5.5rem" : "14%" }} />
+            <col style={{ width: useHorizontalScroll ? "5.5rem" : "14%" }} />
+            <col style={{ width: useHorizontalScroll ? "5.5rem" : "14%" }} />
+          </colgroup>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead
+                className="sticky left-0 z-30 h-auto min-w-[5.5rem] border-r border-border/70 bg-card px-2 py-2 text-xs font-semibold text-foreground"
+                scope="col"
+              >
+                {renderSortHeader("rank", "Rank")}
+              </TableHead>
+              <TableHead
+                className="sticky left-[5.5rem] z-30 h-auto min-w-[11rem] border-r border-border/70 bg-card px-2 py-2 text-xs font-semibold text-foreground"
+                scope="col"
+              >
+                {renderSortHeader("team", "Team")}
+              </TableHead>
+              {serviceColumns.map((service) => (
+                <TableHead
+                  key={service.key}
+                  className="h-auto min-w-[9.5rem] bg-card px-2 py-2 align-bottom text-xs font-semibold text-foreground"
+                  scope="col"
+                >
+                  <div className="space-y-0.5">
+                    <div className="truncate" title={service.service}>
+                      {service.service}
+                    </div>
+                    <div className="font-mono text-[10px] font-normal text-muted-foreground">
+                      A / D / SLA
+                    </div>
+                  </div>
+                </TableHead>
+              ))}
+              <TableHead className="h-auto min-w-[5.5rem] bg-card px-2 py-2 text-xs font-semibold text-foreground" scope="col">
+                {renderSortHeader("attack", "Attack", <Flame className="h-3.5 w-3.5" />)}
+              </TableHead>
+              <TableHead className="h-auto min-w-[5.5rem] bg-card px-2 py-2 text-xs font-semibold text-foreground" scope="col">
+                {renderSortHeader("defense", "Defense", <Shield className="h-3.5 w-3.5" />)}
+              </TableHead>
+              <TableHead className="h-auto min-w-[5.5rem] bg-card px-2 py-2 text-xs font-semibold text-foreground" scope="col">
+                {renderSortHeader("sla", "SLA", <Gauge className="h-3.5 w-3.5" />)}
+              </TableHead>
+              <TableHead
+                className={cn(
+                  "h-auto min-w-[5.5rem] bg-card px-2 py-2 text-xs font-semibold text-foreground",
+                  useHorizontalScroll && "sticky right-0 z-30 border-l border-border/70",
+                )}
+                scope="col"
+              >
+                {renderSortHeader("total", "Total")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedRows.map((score) => {
+              const isCurrentTeam =
+                currentTeamName !== undefined && score.team === currentTeamName;
+              const services = serviceLookup(score);
+              const stickyCellClassName = isCurrentTeam
+                ? "bg-[color-mix(in_oklab,var(--card)_88%,var(--primary))]"
+                : "bg-card";
+
+              return (
+                <TableRow
+                  key={score.team}
+                  className={cn(
+                    "border-b border-border/60 transition-colors hover:bg-muted/20",
+                    isCurrentTeam && "bg-primary/5",
+                  )}
+                >
+                  <TableCell
+                    className={cn(
+                      "sticky left-0 z-20 min-w-[5.5rem] border-r border-border/70 px-2 py-3",
+                      stickyCellClassName,
+                    )}
+                  >
+                    <ScoreboardRank
+                      rank={score.rank}
+                      delta={score.delta}
+                      isCurrentTeam={isCurrentTeam}
+                    />
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "sticky left-[5.5rem] z-20 min-w-[11rem] overflow-hidden border-r border-border/70 px-2 py-3 font-semibold",
+                      stickyCellClassName,
+                      isCurrentTeam && "text-primary",
+                    )}
+                  >
+                    <div className="block truncate text-sm" title={score.team}>
+                      {score.team}
+                    </div>
+                  </TableCell>
+                  {serviceColumns.map((service) => (
+                    <TableCell key={service.key} className="min-w-[9.5rem] px-2 py-3">
+                      <ServiceCell value={services.get(service.key)} />
+                    </TableCell>
+                  ))}
+                  <TableCell className="min-w-[5.5rem] px-2 py-3 font-mono text-sm tabular-nums">
+                    {compactNumber(score.attack)}
+                  </TableCell>
+                  <TableCell className="min-w-[5.5rem] px-2 py-3 font-mono text-sm tabular-nums">
+                    {compactNumber(score.defense)}
+                  </TableCell>
+                  <TableCell className="min-w-[5.5rem] px-2 py-3 font-mono text-sm tabular-nums">
+                    {compactNumber(score.sla)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "min-w-[5.5rem] px-2 py-3 font-mono text-sm font-semibold tabular-nums",
+                      useHorizontalScroll &&
+                        "sticky right-0 z-20 border-l border-border/70",
+                      stickyCellClassName,
+                    )}
+                  >
+                    {compactNumber(score.total)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
     </>
   );
 }
@@ -436,7 +496,10 @@ function MobileScoreboardCards({
 
   if (scoreRows.length === 0) {
     return (
-      <div className="rounded-sm border border-border/55 bg-muted/20 p-4 text-sm text-muted-foreground md:hidden">
+      <div
+        className="flex min-h-32 w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/15 px-4 py-8 text-center text-sm text-muted-foreground md:hidden"
+        role="status"
+      >
         {emptyMessage}
       </div>
     );

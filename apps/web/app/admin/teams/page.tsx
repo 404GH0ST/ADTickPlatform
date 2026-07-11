@@ -13,7 +13,6 @@ export default async function AdminTeamsPage() {
       activePath="/admin/teams"
       overview={dashboard.overview}
       title="Teams"
-      description="Team creation and registry state."
     >
       <div className="grid gap-4">
         <BulkImportPanel />

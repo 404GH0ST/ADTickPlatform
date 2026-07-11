@@ -17,6 +17,7 @@ type Challenge = {
   id: number;
   name: string;
   has_source_download: boolean;
+  maintenance?: boolean;
 };
 
 type ScoreRow = {
@@ -107,6 +108,7 @@ export type TeamServiceState = {
   ssh_hint: string;
   last_event: string;
   reset_cooldown: string;
+  maintenance?: boolean;
   sla_status?: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
   sla_phase?: string;
   sla_tick_id?: number;

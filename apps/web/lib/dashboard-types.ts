@@ -32,6 +32,7 @@ export type ServiceRow = {
   sshHint: string;
   lastEvent: string;
   resetCooldown: string;
+  maintenance: boolean;
   slaStatus: "ok" | "recovering" | "flag_not_found" | "faulty" | "down" | "unknown";
   slaPhase: string;
   slaTickId: number | null;

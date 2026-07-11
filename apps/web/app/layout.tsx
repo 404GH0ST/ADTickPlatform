@@ -1,6 +1,14 @@
 import type { Metadata } from 'next';
+import { IBM_Plex_Sans } from 'next/font/google';
 import { cookies } from 'next/headers';
 import './globals.css';
+
+const ibmPlexSans = IBM_Plex_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-plex',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'AD Platform',
@@ -8,46 +16,83 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // Render data-theme from the cookie so React owns the attribute. Without this
-  // a router.refresh() re-renders <html> without data-theme and the theme snaps
-  // back to the CSS default. The inline script below still covers the first
-  // visit (no cookie yet) to avoid a flash.
-  const storedTheme = (await cookies()).get('ad-platform-theme')?.value;
-  const theme = storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : undefined;
+  // SSR paints explicit light/dark + scheme so router.refresh() does not flash.
+  // System mode and first visit still resolve in the inline FOUC script.
+  const cookieStore = await cookies();
+  const storedTheme = cookieStore.get('ad-platform-theme')?.value;
+  const storedScheme = cookieStore.get('ad-platform-scheme')?.value;
+
+  const preference =
+    storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
+      ? storedTheme
+      : undefined;
+  const scheme =
+    storedScheme === 'graphite' ||
+    storedScheme === 'ink' ||
+    storedScheme === 'paper' ||
+    storedScheme === 'moss'
+      ? storedScheme
+      : undefined;
+  const theme = preference === 'dark' || preference === 'light' ? preference : undefined;
 
   return (
-    <html lang="en" data-theme={theme} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={ibmPlexSans.variable}
+      data-scheme={scheme ?? 'graphite'}
+      data-theme={theme}
+      data-theme-preference={preference}
+      suppressHydrationWarning
+    >
       <head>
         <script
           dangerouslySetInnerHTML={{
             __html: `(() => {
-  const storageKey = "ad-platform-theme";
+  const themeKey = "ad-platform-theme";
+  const schemeKey = "ad-platform-scheme";
   const root = document.documentElement;
-  const match = document.cookie.match(/(?:^|; )ad-platform-theme=(dark|light)/);
-  let stored = match ? match[1] : null;
-  if (!stored) {
-    try {
-      stored = window.localStorage.getItem(storageKey);
-    } catch {}
+  const schemes = { graphite: 1, ink: 1, paper: 1, moss: 1 };
+
+  function readCookie(name) {
+    const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=(graphite|ink|paper|moss|dark|light|system)"));
+    return match ? match[1] : null;
   }
-  const hasStored = stored === "dark" || stored === "light";
-  const theme = hasStored
-    ? stored
-    : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  root.dataset.theme = theme;
-  // Persist on first visit so the server can render data-theme on the next
-  // request and later refreshes don't flip the theme on their own.
-  if (!hasStored) {
-    try {
-      window.localStorage.setItem(storageKey, theme);
-    } catch {}
-    document.cookie = "ad-platform-theme=" + theme + "; path=/; max-age=31536000; samesite=lax";
+
+  let themeStored = readCookie(themeKey);
+  if (!themeStored) {
+    try { themeStored = window.localStorage.getItem(themeKey); } catch {}
+  }
+  let schemeStored = readCookie(schemeKey);
+  if (!schemeStored) {
+    try { schemeStored = window.localStorage.getItem(schemeKey); } catch {}
+  }
+
+  const hasTheme = themeStored === "dark" || themeStored === "light" || themeStored === "system";
+  const hasScheme = schemeStored && schemes[schemeStored];
+  const preference = hasTheme ? themeStored : "system";
+  const scheme = hasScheme ? schemeStored : "graphite";
+  const resolved =
+    preference === "system"
+      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : preference;
+
+  root.dataset.scheme = scheme;
+  root.dataset.theme = resolved;
+  root.dataset.themePreference = preference;
+
+  if (!hasTheme) {
+    try { window.localStorage.setItem(themeKey, preference); } catch {}
+    document.cookie = themeKey + "=" + preference + "; path=/; max-age=31536000; samesite=lax";
+  }
+  if (!hasScheme) {
+    try { window.localStorage.setItem(schemeKey, scheme); } catch {}
+    document.cookie = schemeKey + "=" + scheme + "; path=/; max-age=31536000; samesite=lax";
   }
 })();`,
           }}
         />
       </head>
-      <body>{children}</body>
+      <body className={ibmPlexSans.className}>{children}</body>
     </html>
   );
 }

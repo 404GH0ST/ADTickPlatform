@@ -1,5 +1,3 @@
-
-
 import { ParticipantShell } from '@/components/dashboard/participant-shell';
 import { ActionCard } from '@/components/ui/action-card';
 import { loadDashboardData } from '@/lib/dashboard-data';
@@ -14,9 +12,8 @@ export default async function HomePage() {
       activePath="/"
       overview={dashboard.platform}
       title="Participant Overview"
-      description="Move between the live scoreboard, your services, recent attacks, and the participant manual."
     >
-      <section className="surface-workroom grid overflow-hidden rounded-sm border md:grid-cols-2 xl:grid-cols-4 [&>*]:border-b [&>*]:border-border [&>*:last-child]:border-b-0 md:[&>*:nth-child(odd)]:border-r md:[&>*:nth-last-child(-n+2)]:border-b-0 xl:[&>*]:border-b-0 xl:[&>*]:border-r xl:[&>*:last-child]:border-r-0">
+      <section className="surface-inset grid overflow-hidden rounded-sm border md:grid-cols-2 xl:grid-cols-4 [&>*]:border-b [&>*]:border-border [&>*:last-child]:border-b-0 md:[&>*:nth-child(odd)]:border-r md:[&>*:nth-last-child(-n+2)]:border-b-0 xl:[&>*]:border-b-0 xl:[&>*]:border-r xl:[&>*:last-child]:border-r-0">
         <ActionCard
           href="/scoreboard"
           title="Scoreboard"
@@ -26,7 +23,7 @@ export default async function HomePage() {
         <ActionCard
           href="/services"
           title="Services"
-          description="Manage unlocks, SSH access, restarts, and resets for your own services."
+          description="Submit flags and manage unlocks, SSH access, restarts, and resets."
           meta={`${dashboard.services.length} services under your team`}
         />
         <ActionCard

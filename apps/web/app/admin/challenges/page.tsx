@@ -12,7 +12,6 @@ export default async function AdminChallengesPage() {
       activePath="/admin/challenges"
       overview={dashboard.overview}
       title="Challenges"
-      description="Draft, validate, and deploy challenge packages."
     >
       <OrganizerDashboard
         attackPage={dashboard.attackPage}

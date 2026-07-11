@@ -212,6 +212,7 @@ export function useControlCenter({
       sshHint: state.ssh_hint,
       lastEvent: state.last_event,
       resetCooldown: state.reset_cooldown,
+      maintenance: state.maintenance ?? row.maintenance,
       slaStatus: state.sla_status ?? row.slaStatus,
       slaPhase: state.sla_phase ?? row.slaPhase,
       slaTickId: state.sla_tick_id ?? row.slaTickId,

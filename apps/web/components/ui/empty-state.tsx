@@ -24,8 +24,11 @@ export function EmptyTableRow({
   message,
 }: EmptyTableRowProps): ReactElement {
   return (
-    <TableRow>
-      <TableCell colSpan={colSpan} className="text-center text-sm text-muted-foreground">
+    <TableRow className="hover:bg-transparent">
+      <TableCell
+        colSpan={colSpan}
+        className="h-32 bg-muted/10 px-4 text-center text-sm text-muted-foreground"
+      >
         {message}
       </TableCell>
     </TableRow>

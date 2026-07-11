@@ -19,7 +19,6 @@ export default async function AdminAttacksPage() {
       activePath="/admin/attacks"
       overview={dashboard.overview}
       title="Attacks"
-      description="Accepted attack events with shared filters, pagination, and live updates."
     >
       <div className="grid gap-4">
         <ExportDataPanel

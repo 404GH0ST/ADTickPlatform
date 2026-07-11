@@ -12,7 +12,6 @@ export default async function AdminGamePage() {
       activePath="/admin/game"
       overview={dashboard.overview}
       title="Game"
-      description="Match lifecycle, scheduler, and checker history. Use the dedicated scoreboard and attacks routes for read-heavy views."
     >
       <OrganizerDashboard
         attackPage={dashboard.attackPage}

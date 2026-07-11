@@ -14,7 +14,6 @@ export default async function AdminPage() {
       activePath="/admin"
       overview={dashboard.overview}
       title="Organizer Overview"
-      description="Open the control surfaces for teams, challenges, deployments, and live game state."
     >
       <div className="grid gap-4">
         <TrustedStatePanel />

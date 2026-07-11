@@ -328,7 +328,7 @@ export function PlatformSettingsCard(): ReactElement {
 
         {saveState.kind === "saved" ? (
           <p
-            className="text-sm text-emerald-600"
+            className="text-sm text-positive"
             data-testid="note-platform-settings"
           >
             Platform settings saved. Flags issued by the checker now use the new prefix.

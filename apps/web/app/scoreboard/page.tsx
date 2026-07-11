@@ -12,7 +12,6 @@ export default async function ScoreboardPage() {
       activePath="/scoreboard"
       overview={dashboard.platform}
       title="Scoreboard"
-      description="Live ranking table with attack, defense, SLA, and total."
     >
       <ControlCenter
         attackPage={dashboard.attackPage}

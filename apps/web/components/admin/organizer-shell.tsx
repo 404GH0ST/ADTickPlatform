@@ -22,7 +22,6 @@ type Props = {
   overview: AdminOverview;
   children: ReactNode;
   title?: string;
-  description?: string;
 };
 
 export function OrganizerShell({
@@ -30,14 +29,12 @@ export function OrganizerShell({
   overview,
   children,
   title = 'Organizer',
-  description = 'Teams, players, challenges, deployments, and live match operations.',
 }: Props) {
   return (
     <AppShell
       activePath={activePath}
       navItems={navItems}
       title={title}
-      description={description}
       headerActions={
         <Button asChild variant="outline">
           <a href="/">Participant</a>

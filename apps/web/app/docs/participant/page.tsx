@@ -41,7 +41,6 @@ export default async function ParticipantManualPage() {
       activePath="/docs/participant"
       overview={platform}
       title="Participant Manual"
-      description="Core participant workflow and API entry points."
     >
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-4">
@@ -58,8 +57,6 @@ export default async function ParticipantManualPage() {
               ))}
             </CardContent>
           </Card>
-
-
 
           <Card>
             <CardHeader>

@@ -85,7 +85,7 @@ export function OrganizerStatusSummary({ overview }: Props) {
 
   return (
     <>
-      <section className="surface-workroom rounded-sm border" data-testid="organizer-summary">
+      <section className="surface-inset overflow-hidden rounded-sm border" data-testid="organizer-summary">
         <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-9">
           <SummaryItem label="Teams" value={String(overview.teamCount)} />
           <SummaryItem label="Players" value={String(overview.playerCount)} />

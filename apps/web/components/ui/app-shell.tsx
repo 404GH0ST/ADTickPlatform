@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { ThemeToggle } from '@/components/ui/theme-toggle';
-import { cn } from '@/lib/utils';
+import { AppearanceControls } from '@/components/ui/appearance-controls';
+import { WorkspaceFrame } from '@/components/ui/workspace-frame';
 
 export type NavItem = {
   href: string;
@@ -13,9 +13,12 @@ export type AppShellProps = {
   activePath: string;
   navItems: readonly NavItem[];
   title: string;
-  description: string;
   children: ReactNode;
   headerActions?: ReactNode;
+  /** Right side of the primary nav row (e.g. match readiness). */
+  navActions?: ReactNode;
+  /** Directly under the nav, above summary/alerts (e.g. expanded readiness). */
+  belowNav?: ReactNode;
   summarySection?: ReactNode;
   alertSection?: ReactNode;
 };
@@ -24,46 +27,56 @@ export function AppShell({
   activePath,
   navItems,
   title,
-  description,
   children,
   headerActions,
+  navActions,
+  belowNav,
   summarySection,
   alertSection,
 }: AppShellProps) {
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 px-3 py-4 sm:px-5 lg:px-6">
-        <header className="workroom-rule flex flex-col gap-3 border-b pb-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl space-y-1">
-            <h1 className="text-2xl font-semibold leading-8">{title}</h1>
-            <p className="text-sm leading-6 text-muted-foreground">{description}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <ThemeToggle />
+    <main className="workspace-canvas text-foreground">
+      <WorkspaceFrame>
+        <header className="workroom-rule flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-balance text-2xl font-semibold tracking-tight text-foreground">
+            {title}
+          </h1>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <AppearanceControls />
             {headerActions}
           </div>
         </header>
 
-        <nav className="workroom-rule flex flex-wrap gap-1 border-b pb-3">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'rounded-sm border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground',
-                activePath === item.href && 'border-border bg-card text-foreground shadow-[0_1px_0_var(--border)]',
-              )}
-            >
-              {item.label}
-            </Link>
-          ))}
+        <nav
+          className="workroom-rule flex flex-wrap items-center gap-1 border-b pb-3"
+          aria-label="Primary"
+        >
+          <div className="flex flex-wrap gap-0.5 rounded-sm border border-border bg-background/60 p-0.5">
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                data-active={activePath === item.href ? 'true' : 'false'}
+                className="shell-nav-link"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+          {navActions ? (
+            <div className="ml-auto flex flex-wrap items-center gap-2 pt-1 sm:pt-0">
+              {navActions}
+            </div>
+          ) : null}
         </nav>
+
+        {belowNav}
 
         {summarySection}
         {alertSection}
 
-        {children}
-      </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3">{children}</div>
+      </WorkspaceFrame>
     </main>
   );
 }

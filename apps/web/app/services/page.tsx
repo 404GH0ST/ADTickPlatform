@@ -12,7 +12,6 @@ export default async function ServicesPage() {
       activePath="/services"
       overview={dashboard.platform}
       title="Services"
-      description="Owned service controls for unlock, root access, restart, and factory reset."
     >
       <ControlCenter
         attackPage={dashboard.attackPage}

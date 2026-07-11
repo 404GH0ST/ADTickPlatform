@@ -21,7 +21,10 @@ export function StatusBanner({
   variant,
 }: StatusBannerProps): ReactElement {
   return (
-    <div className={`rounded-sm border px-3 py-2 text-sm ${bannerTone[variant]}`}>
+    <div
+      role="status"
+      className={`rounded-sm border px-3.5 py-2.5 text-sm leading-5 ${bannerTone[variant]}`}
+    >
       {message}
     </div>
   );

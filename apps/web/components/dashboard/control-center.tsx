@@ -12,7 +12,6 @@ import {
   UnlockServiceDialog,
 } from "@/components/dashboard/control-center-sections";
 import { FlagSubmitPanel } from "@/components/dashboard/flag-submit-panel";
-import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist";
 import {
   type ControlCenterOptions,
   useControlCenter,
@@ -40,9 +39,6 @@ export function ControlCenter({
 
   return (
     <div className="grid gap-4">
-      {overview.authenticated && overview.role !== "organizer" ? (
-        <OnboardingChecklist overview={overview} services={state.rows} />
-      ) : null}
       {renderControlCenterPanel({
         attackLiveMode: state.attackLiveMode,
         attackPage: state.attackPageState,
@@ -187,19 +183,25 @@ function renderControlCenterPanel({
   }
 
   if (initialTab === "services") {
+    const showFlagSubmit =
+      overview.authenticated &&
+      overview.role !== "organizer" &&
+      (overview.teamID ?? 0) > 0;
     return (
       <div className="grid gap-4">
-      {overview.authenticated && overview.role !== "organizer" ? (
-        <FlagSubmitPanel acceptingSubmissions={overview.acceptingSubmissions} />
-      ) : null}
-      <ServicesPanel
-        rows={rows}
-        pendingAction={pendingAction}
-        overview={overview}
-        onSelectPrimaryAction={onSelectPrimaryAction}
-        onRestart={onRequestRestart}
-        onSelectReset={onSelectResetTarget}
-      />
+        {showFlagSubmit ? (
+          <FlagSubmitPanel
+            acceptingSubmissions={overview.acceptingSubmissions}
+          />
+        ) : null}
+        <ServicesPanel
+          rows={rows}
+          pendingAction={pendingAction}
+          overview={overview}
+          onSelectPrimaryAction={onSelectPrimaryAction}
+          onRestart={onRequestRestart}
+          onSelectReset={onSelectResetTarget}
+        />
       </div>
     );
   }

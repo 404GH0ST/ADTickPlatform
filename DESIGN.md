@@ -17,11 +17,10 @@ The interface should feel like a prepared event desk: structured, legible, resil
 Name: Tactical Workroom
 
 Core traits:
-- Editorial grid structure with precise alignment.
-- Warm paper and low-chroma ink surfaces in light mode.
-- Evening umber surfaces in dark mode, not neon or blue-black.
-- Hard 1px borders and compact controls.
-- Tactile paper-stack shadows used sparingly.
+- Modern minimal product chrome: hard 1px borders, compact controls, no gradients/glass/neon.
+- **Default scheme: Graphite** — strict cool neutrals, near-monochrome primary.
+- Additional curated schemes (Ink, Paper, Moss), each with independent light/dark.
+- Soft field grid only on the **Paper** scheme; other schemes stay solid.
 - Dense operational tables and summaries that stay readable.
 
 Anti-patterns:
@@ -47,31 +46,36 @@ Use one family across product UI. It is readable for tables, labels, code-adjace
 
 ### Color
 
-Use OKLCH for custom values.
+Use OKLCH for custom values. Schemes live in `apps/web/app/globals.css` under `data-scheme`.
 
-Light mode:
-- Background: warm paper.
-- Card: high-light work slip.
-- Foreground: brown-black ink.
-- Primary: deep brass.
-- Accent: muted moss.
-- Danger: dry clay.
-- Borders: warm paper fiber.
+| Scheme | Feel | Primary |
+|--------|------|---------|
+| **Graphite** (default) | Strict neutral minimal | Near-black / near-white ink |
+| **Ink** | Cool modern ops | Restrained slate blue |
+| **Paper** | Warm workroom desk | Deep brass |
+| **Moss** | Calm technical | Muted sage |
 
-Dark mode:
-- Background: dark umber.
-- Card: low-chroma ink surface.
-- Foreground: parchment.
-- Primary: aged brass.
-- Accent: muted moss.
-- Danger: dry clay.
-- Borders: warm graphite.
+Semantics (success / warning / danger / info) stay meaning-stable across schemes. Medals and signals use dedicated tokens; prefer `text-positive` / `tone-*` over raw Tailwind palette utilities.
 
 Rules:
-- Accent color marks selection, action, or state only.
-- State colors must include text or labels, never color alone.
-- Avoid pure black and pure white.
-- Keep inactive UI low chroma.
+- Accent marks selection, action, or state only — not decoration.
+- State colors always pair with text or labels.
+- No pure black/white, no neon, no gradients, no glassmorphism.
+- Highlight text tokens must stay ≥4.5:1 on background and card.
+
+### Appearance (scheme × mode)
+
+Two independent axes:
+
+1. **Scheme** — `graphite | ink | paper | moss` (`ad-platform-scheme` cookie + localStorage).
+2. **Mode** — light / dark / system (`ad-platform-theme`).
+
+DOM:
+- `data-scheme` — active scheme
+- `data-theme` — resolved `light|dark`
+- `data-theme-preference` — user mode choice
+
+Controls: `AppearanceControls` in the shell header (scheme radios + mode cycle).
 
 ### Shape
 
@@ -94,7 +98,7 @@ The system is intentionally sharp:
 - Use 150 to 200 ms transitions.
 - Animate color and opacity for state feedback.
 - Avoid layout choreography and decorative page-load animation.
-- Respect reduced motion when adding new movement.
+- Base layer honors `prefers-reduced-motion: reduce` (scroll + transitions/animations).
 
 ## Components
 
@@ -122,6 +126,7 @@ Cards are work slips:
 - Ghost is for quiet controls.
 - Destructive styling is reserved for destructive actions.
 - Active state can move down 1px.
+- Focus: `ring-2 ring-ring ring-offset-2 ring-offset-background` (full ring, not diluted opacity).
 
 ### Tables
 

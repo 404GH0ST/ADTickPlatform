@@ -175,6 +175,30 @@ function formatFreezeTimestamp(value: string): string {
   return parsed.toLocaleString();
 }
 
+function formatMatchStateLabel(state?: string): string {
+  if (!state) {
+    return "Inactive";
+  }
+  const labels: Record<string, string> = {
+    not_started: "Not started",
+    running: "Running",
+    paused: "Paused",
+    stopped: "Stopped",
+    finished: "Finished",
+  };
+  const key = state.toLowerCase();
+  return labels[key] ?? state.replaceAll("_", " ");
+}
+
+function formatCountdown(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+}
+
 function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [overdue, setOverdue] = useState(false);
@@ -226,76 +250,128 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     return () => clearInterval(interval);
   }, [overdue, overview.nextTickAt, router]);
 
-
   const matchState = overview.matchState?.toLowerCase();
   const isRunning = matchState === "running";
   const isPaused = matchState === "paused";
-  const isStopped = matchState === "stopped" || matchState === "finished" || matchState === "not_started" || !matchState;
+  const isStopped =
+    matchState === "stopped" ||
+    matchState === "finished" ||
+    matchState === "not_started" ||
+    !matchState;
+  const stateLabel = formatMatchStateLabel(overview.matchState);
+  const stateTone = isPaused
+    ? "text-highlight"
+    : isRunning
+      ? "text-positive"
+      : "text-muted-foreground";
+  const stateDot = isPaused
+    ? "bg-[var(--signal-highlight)]"
+    : isRunning
+      ? "bg-[var(--signal-positive)] animate-pulse"
+      : "bg-muted-foreground/50";
+
+  const countdown = (() => {
+    if (isPaused) {
+      return { primary: "Suspended", secondary: "Match paused" };
+    }
+    if (isStopped) {
+      return {
+        primary: "Idle",
+        secondary:
+          matchState === "finished"
+            ? "Match finished"
+            : matchState === "not_started"
+              ? "Match not started"
+              : "Ticks not running",
+      };
+    }
+    if (timeLeft !== null) {
+      return {
+        primary: formatCountdown(timeLeft),
+        secondary: overview.tickInterval
+          ? `Every ${overview.tickInterval}s`
+          : undefined,
+      };
+    }
+    return { primary: "—", secondary: undefined };
+  })();
 
   return (
-    <Card className="border border-border/70 bg-card shadow-sm">
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <Timer className="h-5 w-5 text-primary" />
-          <CardTitle className="text-base font-semibold">Match Progress</CardTitle>
+    <section
+      className="overflow-hidden rounded-sm border border-border bg-card"
+      data-testid="match-progress"
+      aria-label="Match progress"
+    >
+      <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
+        <Timer className="size-4 text-muted-foreground" aria-hidden />
+        <h2 className="text-sm font-semibold tracking-tight text-foreground">
+          Match Progress
+        </h2>
+      </div>
+      <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="border-b border-border px-3.5 py-3 sm:border-r xl:border-b-0">
+          <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Activity className="size-3.5 shrink-0" aria-hidden />
+            Current tick
+          </dt>
+          <dd className="mt-1.5 font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground">
+            {overview.currentTick !== undefined && overview.currentTick !== null
+              ? `#${overview.currentTick}`
+              : "—"}
+          </dd>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
-            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Activity className="h-3.5 w-3.5" /> Current Tick
-            </dt>
-            <dd className="mt-1.5 text-2xl font-bold tracking-tight text-foreground">
-              {overview.currentTick !== undefined ? `#${overview.currentTick}` : "—"}
-            </dd>
-          </div>
 
-          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
-            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <RefreshCw className="h-3.5 w-3.5" /> Match State
-            </dt>
-            <dd className="mt-1.5 text-lg font-semibold flex items-center gap-2">
-              <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-highlight' : isRunning ? 'bg-positive animate-pulse' : 'bg-negative'}`} />
-              <span className={isPaused ? 'text-highlight' : isRunning ? 'text-positive' : 'text-negative'}>
-                {overview.matchState || "inactive"}
+        <div className="border-b border-border px-3.5 py-3 sm:border-r-0 xl:border-r xl:border-b-0">
+          <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <RefreshCw className="size-3.5 shrink-0" aria-hidden />
+            Match state
+          </dt>
+          <dd className={`mt-1.5 flex items-center gap-2 text-sm font-semibold ${stateTone}`}>
+            <span className={`inline-block size-2 shrink-0 rounded-full ${stateDot}`} />
+            {stateLabel}
+          </dd>
+        </div>
+
+        <div className="border-b border-border px-3.5 py-3 sm:border-r xl:border-b-0">
+          <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Calendar className="size-3.5 shrink-0" aria-hidden />
+            Next tick at
+          </dt>
+          <dd className="mt-1.5 text-sm font-semibold tabular-nums text-foreground">
+            {overview.nextTickAt
+              ? new Date(overview.nextTickAt).toLocaleTimeString(undefined, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })
+              : "—"}
+          </dd>
+        </div>
+
+        <div className="px-3.5 py-3">
+          <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <Timer className="size-3.5 shrink-0" aria-hidden />
+            Countdown
+          </dt>
+          <dd className="mt-1.5">
+            <span
+              className={
+                isRunning && timeLeft !== null
+                  ? "font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground"
+                  : "text-sm font-semibold text-muted-foreground"
+              }
+            >
+              {countdown.primary}
+            </span>
+            {countdown.secondary ? (
+              <span className="mt-0.5 block text-xs font-medium text-muted-foreground">
+                {countdown.secondary}
               </span>
-            </dd>
-          </div>
-
-          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
-            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5" /> Next Tick Run
-            </dt>
-            <dd className="mt-1.5 text-sm font-semibold text-foreground">
-              {overview.nextTickAt ? new Date(overview.nextTickAt).toLocaleTimeString() : "—"}
-            </dd>
-          </div>
-
-          <div className="rounded-sm border border-border/55 bg-muted/10 p-3">
-            <dt className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Timer className="h-3.5 w-3.5" /> Next Tick Countdown
-            </dt>
-            <dd className="mt-1.5 text-2xl font-mono font-bold tracking-tight text-highlight">
-              {isPaused ? (
-                <span className="text-sm font-sans font-semibold text-muted-foreground">Suspended (Paused)</span>
-              ) : isStopped ? (
-                <span className="text-sm font-sans font-semibold text-muted-foreground">Suspended</span>
-              ) : timeLeft !== null ? (
-                `${timeLeft}s`
-              ) : (
-                "—"
-              )}
-              {!isPaused && !isStopped && overview.tickInterval && (
-                <span className="text-xs font-sans font-medium text-muted-foreground ml-1.5">
-                  (interval: {overview.tickInterval}s)
-                </span>
-              )}
-            </dd>
-          </div>
+            ) : null}
+          </dd>
         </div>
-      </CardContent>
-    </Card>
+      </dl>
+    </section>
   );
 }
 
@@ -673,12 +749,24 @@ function ServiceCard({
             <CardTitle>{service.name}</CardTitle>
             <CardDescription>{service.endpoint}</CardDescription>
           </div>
-          <Badge
-            className={serviceStatusTone[service.status]}
-            variant="outline"
-          >
-            {service.status}
-          </Badge>
+          <div className="flex flex-wrap gap-2">
+            {service.maintenance ? (
+              <Badge
+                className="tone-warning"
+                data-testid={`service-maintenance-badge-${service.challengeId}`}
+                variant="outline"
+              >
+                Under maintenance
+              </Badge>
+            ) : (
+              <Badge
+                className={serviceStatusTone[service.status]}
+                variant="outline"
+              >
+                {service.status}
+              </Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -750,49 +838,57 @@ function ServiceActionBar({
     pendingAction === `ssh:${service.id}`;
   const isRestartPending = pendingAction === `restart:${service.id}`;
   const isResetPending = pendingAction === `reset:${service.id}`;
+  const actionsDisabled = pendingAction !== null || service.maintenance;
 
   return (
-    <div className="flex flex-wrap gap-3">
-      <Button
-        disabled={pendingAction !== null}
-        onClick={() => onSelectPrimaryAction(service)}
-      >
-        {isPrimaryPending ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-        ) : null}
-        {service.unlocked ? "SSH Access" : "Unlock Service"}
-      </Button>
-      <Button
-        disabled={pendingAction !== null}
-        onClick={() => onRestart(service)}
-        variant="secondary"
-      >
-        {isRestartPending ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-      ) : null}
-      Restart
-      </Button>
-      {service.hasSourceDownload ? (
-        <Button asChild variant="outline">
-          <a
-            href={`/api/platform/challenges/${service.challengeId}/source`}
-            download
-          >
-            <Download className="h-4 w-4" />
-            Download Source
-          </a>
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        <Button
+          disabled={actionsDisabled}
+          onClick={() => onSelectPrimaryAction(service)}
+        >
+          {isPrimaryPending ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : null}
+          {service.unlocked ? "SSH Access" : "Unlock Service"}
         </Button>
-      ) : null}
-      <Button
-        disabled={pendingAction !== null}
-        onClick={() => onSelectReset(service)}
-        variant="outline"
-      >
-        {isResetPending ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
+        <Button
+          disabled={actionsDisabled}
+          onClick={() => onRestart(service)}
+          variant="secondary"
+        >
+          {isRestartPending ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : null}
+          Restart
+        </Button>
+        {service.hasSourceDownload && !service.maintenance ? (
+          <Button asChild variant="outline">
+            <a
+              href={`/api/platform/challenges/${service.challengeId}/source`}
+              download
+            >
+              <Download className="h-4 w-4" />
+              Download Source
+            </a>
+          </Button>
         ) : null}
-        Factory Reset
-      </Button>
+        <Button
+          disabled={actionsDisabled}
+          onClick={() => onSelectReset(service)}
+          variant="outline"
+        >
+          {isResetPending ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : null}
+          Factory Reset
+        </Button>
+      </div>
+      {service.maintenance ? (
+        <p className="text-sm text-muted-foreground">
+          Actions unavailable while this challenge is under maintenance.
+        </p>
+      ) : null}
     </div>
   );
 }

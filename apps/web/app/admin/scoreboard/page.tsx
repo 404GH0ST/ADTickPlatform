@@ -13,7 +13,6 @@ export default async function AdminScoreboardPage() {
       activePath="/admin/scoreboard"
       overview={dashboard.overview}
       title="Scoreboard"
-      description="Authoritative rankings from game-core. Use the Game route for match and scheduler operations."
     >
       <div className="grid gap-4">
         <ExportDataPanel

@@ -13,7 +13,6 @@ export default async function AdminDeploymentsPage() {
       activePath="/admin/deployments"
       overview={dashboard.overview}
       title="Deployments"
-      description="Rollout jobs, queued instances, and reconcile flow."
     >
       <div className="grid gap-4">
         <TrustedStatePanel />

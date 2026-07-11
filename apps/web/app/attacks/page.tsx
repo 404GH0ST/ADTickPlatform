@@ -18,7 +18,6 @@ export default async function AttacksPage() {
       activePath="/attacks"
       overview={dashboard.platform}
       title="Attacks"
-      description="Accepted attack events with shared filters, globe context, pagination, and live updates."
     >
       <ControlCenter
         attackPage={dashboard.attackPage}

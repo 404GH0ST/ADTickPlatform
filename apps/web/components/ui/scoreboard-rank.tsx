@@ -3,40 +3,37 @@
 import type { ReactElement } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
+import { cn } from "@/lib/utils";
+
 type Props = {
   rank: number;
   delta: string;
   isCurrentTeam?: boolean;
 };
 
+const medalClass = {
+  1: "medal-gold",
+  2: "medal-silver",
+  3: "medal-bronze",
+} as const;
+
+const medalTitle = {
+  1: "1st Place (Gold)",
+  2: "2nd Place (Silver)",
+  3: "3rd Place (Bronze)",
+} as const;
+
 export function RankBadge({ rank }: { rank: number }): ReactElement {
-  if (rank === 1) {
+  if (rank === 1 || rank === 2 || rank === 3) {
     return (
       <div
-        className="flex h-5 w-5 items-center justify-center rounded-sm bg-amber-500/10 text-[10px] font-extrabold uppercase tracking-wider text-amber-500 border border-amber-500/30 select-none shadow-sm font-mono"
-        title="1st Place (Gold)"
+        className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-sm border text-[10px] font-extrabold uppercase tracking-wider select-none shadow-sm font-mono",
+          medalClass[rank],
+        )}
+        title={medalTitle[rank]}
       >
-        1
-      </div>
-    );
-  }
-  if (rank === 2) {
-    return (
-      <div
-        className="flex h-5 w-5 items-center justify-center rounded-sm bg-slate-400/10 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 border border-slate-400/30 select-none shadow-sm font-mono"
-        title="2nd Place (Silver)"
-      >
-        2
-      </div>
-    );
-  }
-  if (rank === 3) {
-    return (
-      <div
-        className="flex h-5 w-5 items-center justify-center rounded-sm bg-orange-600/10 text-[10px] font-extrabold uppercase tracking-wider text-orange-600 border border-orange-600/30 select-none shadow-sm font-mono"
-        title="3rd Place (Bronze)"
-      >
-        3
+        {rank}
       </div>
     );
   }

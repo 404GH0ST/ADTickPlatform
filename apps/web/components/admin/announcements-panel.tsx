@@ -121,7 +121,7 @@ export function AnnouncementsPanel(): ReactElement {
       <CardContent className="grid gap-3">
         <form className="grid gap-2" onSubmit={createAnnouncement}>
           <textarea
-            className="min-h-20 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-h-20 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             value={body}
             onChange={(event) => setBody(event.target.value)}
             placeholder="Warmup starts in 10 minutes. WireGuard must be up."

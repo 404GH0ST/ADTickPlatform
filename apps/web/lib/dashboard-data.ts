@@ -171,7 +171,10 @@ function buildServiceRows(data: DashboardLiveData, ownID: string): ServiceRow[] 
 
 function serviceStateToRow(
   state: TeamServiceState,
-  challengeByID: Map<string, { id: number; name: string; has_source_download: boolean }>,
+  challengeByID: Map<
+    string,
+    { id: number; name: string; has_source_download: boolean; maintenance?: boolean }
+  >,
 ): ServiceRow {
   const port = Number(state.endpoint.split(":").at(-1) ?? 0);
   const challenge = challengeByID.get(String(state.challenge_id));
@@ -192,6 +195,7 @@ function serviceStateToRow(
     sshHint: state.ssh_hint,
     lastEvent: state.last_event,
     resetCooldown: state.reset_cooldown,
+    maintenance: state.maintenance ?? challenge?.maintenance ?? false,
     slaStatus: state.sla_status ?? "unknown",
     slaPhase: state.sla_phase ?? "",
     slaTickId: state.sla_tick_id ?? null,
@@ -203,7 +207,10 @@ function fallbackServiceRows(
   challengeID: string,
   endpoints: string[],
   ownID: string,
-  challengeByID: Map<string, { id: number; name: string; has_source_download: boolean }>,
+  challengeByID: Map<
+    string,
+    { id: number; name: string; has_source_download: boolean; maintenance?: boolean }
+  >,
 ): ServiceRow[] {
   const challenge = challengeByID.get(challengeID);
   return endpoints.map((endpoint, index) => ({
@@ -220,6 +227,7 @@ function fallbackServiceRows(
     sshHint: "service state endpoint unavailable",
     lastEvent: "service state endpoint unavailable",
     resetCooldown: "unknown",
+    maintenance: challenge?.maintenance ?? false,
     slaStatus: "unknown",
     slaPhase: "",
     slaTickId: null,

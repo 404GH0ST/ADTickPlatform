@@ -14,7 +14,6 @@ export default async function ParticipantSwaggerPage() {
       activePath="/docs/platform-api"
       overview={platform}
       title="Participant API"
-      description="Interactive Swagger reference for the participant API."
     >
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-4">

@@ -12,7 +12,6 @@ export default async function AdminPlayersPage() {
       activePath="/admin/players"
       overview={dashboard.overview}
       title="Players"
-      description="Player accounts, WireGuard peers, gateway sync, and access policy."
     >
       <OrganizerDashboard
         attackPage={dashboard.attackPage}

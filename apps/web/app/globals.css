@@ -2,8 +2,8 @@
 @import "tw-animate-css";
 
 @theme inline {
-  --font-sans: "IBM Plex Sans", sans-serif;
-  --font-heading: "IBM Plex Sans", sans-serif;
+  --font-sans: var(--font-plex), "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-plex), "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -25,7 +25,252 @@
   --color-ring: var(--ring);
 }
 
-:root {
+/*
+  Color schemes (data-scheme) × modes (data-theme).
+  Default: Graphite light. Each scheme owns independent light/dark ramps.
+  Semantics (success/warn/danger/info) stay legible and meaning-stable.
+  No gradients, glass, or neon accents.
+*/
+
+/* ── Graphite (default): strict neutral minimal ───────────────────────── */
+:root,
+:root[data-scheme="graphite"] {
+  color-scheme: light;
+  --background: oklch(0.972 0.003 260);
+  --foreground: oklch(0.2 0.01 260);
+  --card: oklch(0.995 0.002 260);
+  --card-foreground: oklch(0.2 0.01 260);
+  --popover: oklch(0.995 0.002 260);
+  --popover-foreground: oklch(0.2 0.01 260);
+  --primary: oklch(0.24 0.012 260);
+  --primary-foreground: oklch(0.985 0.002 260);
+  --secondary: oklch(0.95 0.004 260);
+  --secondary-foreground: oklch(0.28 0.01 260);
+  --muted: oklch(0.95 0.004 260);
+  --muted-foreground: oklch(0.44 0.012 260);
+  --accent: oklch(0.94 0.006 260);
+  --accent-foreground: oklch(0.26 0.01 260);
+  --border: oklch(0.87 0.006 260);
+  --input: oklch(0.84 0.006 260);
+  --ring: oklch(0.24 0.012 260);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.9 0.004 260 / 0.7);
+  --canvas-line: oklch(0.55 0.006 260 / 0.055);
+  --frame-mark: color-mix(in oklab, var(--foreground) 42%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 22%, var(--border));
+  --reticle-dot: color-mix(in oklab, var(--foreground) 72%, var(--border));
+  --shadow-paper: 0 1px 0 oklch(0.86 0.004 260), 0 10px 28px oklch(0.28 0.012 260 / 0.06);
+  --tone-success-background: oklch(0.96 0.02 150);
+  --tone-success-border: oklch(0.86 0.035 150);
+  --tone-success-foreground: oklch(0.36 0.07 145);
+  --tone-warning-background: oklch(0.97 0.025 85);
+  --tone-warning-border: oklch(0.88 0.04 85);
+  --tone-warning-foreground: oklch(0.4 0.08 75);
+  --tone-danger-background: oklch(0.97 0.018 25);
+  --tone-danger-border: oklch(0.88 0.03 25);
+  --tone-danger-foreground: oklch(0.4 0.09 25);
+  --tone-info-background: oklch(0.96 0.02 250);
+  --tone-info-border: oklch(0.86 0.04 250);
+  --tone-info-foreground: oklch(0.38 0.07 250);
+  --tone-neutral-background: oklch(0.94 0.004 260);
+  --tone-neutral-border: oklch(0.82 0.006 260);
+  --tone-neutral-foreground: oklch(0.38 0.01 260);
+  --signal-positive: oklch(0.38 0.07 145);
+  --signal-negative: oklch(0.4 0.09 25);
+  --signal-info: oklch(0.38 0.07 250);
+  --signal-highlight: oklch(0.4 0.02 260);
+  --medal-gold-background: oklch(0.95 0.03 85);
+  --medal-gold-border: oklch(0.8 0.07 80);
+  --medal-gold-foreground: oklch(0.48 0.12 80);
+  --medal-silver-background: oklch(0.95 0.006 260);
+  --medal-silver-border: oklch(0.8 0.01 260);
+  --medal-silver-foreground: oklch(0.42 0.012 260);
+  --medal-bronze-background: oklch(0.96 0.025 50);
+  --medal-bronze-border: oklch(0.82 0.05 48);
+  --medal-bronze-foreground: oklch(0.45 0.1 48);
+  --attack-map-background: oklch(0.97 0.004 260);
+  --attack-map-border: oklch(0.84 0.006 260);
+  --attack-map-grid: oklch(0.78 0.006 260);
+  --attack-map-land: oklch(0.72 0.01 260);
+  --attack-map-outline: oklch(0.5 0.01 260);
+  --attack-map-node: oklch(0.48 0.012 260);
+  --attack-map-node-label: oklch(0.3 0.01 260);
+  --attack-map-node-label-halo: oklch(0.99 0.002 260 / 0.92);
+  --attack-map-node-highlight: oklch(0.55 0.04 260);
+  --attack-map-node-highlight-halo: oklch(0.98 0.002 260);
+  --attack-map-legend-background: oklch(1 0.001 260 / 0.92);
+  --attack-map-legend-border: oklch(0.86 0.006 260);
+  --attack-map-legend-foreground: oklch(0.35 0.01 260);
+  --attack-map-scanline: oklch(0.2 0.01 260 / 0.05);
+  --attack-map-outer-glow-opacity: 0.06;
+  --attack-map-rim-opacity: 0.14;
+  --attack-map-rim-width: 1.2;
+}
+
+:root[data-theme="dark"],
+:root[data-scheme="graphite"][data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.155 0.005 260);
+  --foreground: oklch(0.93 0.006 260);
+  --card: oklch(0.195 0.006 260);
+  --card-foreground: oklch(0.93 0.006 260);
+  --popover: oklch(0.2 0.006 260);
+  --popover-foreground: oklch(0.93 0.006 260);
+  --primary: oklch(0.93 0.006 260);
+  --primary-foreground: oklch(0.17 0.006 260);
+  --secondary: oklch(0.235 0.006 260);
+  --secondary-foreground: oklch(0.9 0.006 260);
+  --muted: oklch(0.235 0.006 260);
+  --muted-foreground: oklch(0.72 0.01 260);
+  --accent: oklch(0.25 0.008 260);
+  --accent-foreground: oklch(0.92 0.006 260);
+  --border: oklch(0.3 0.008 260);
+  --input: oklch(0.32 0.008 260);
+  --ring: oklch(0.88 0.008 260);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.32 0.006 260 / 0.75);
+  --canvas-line: oklch(0.75 0.006 260 / 0.045);
+  --frame-mark: color-mix(in oklab, var(--foreground) 38%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 28%, transparent);
+  --reticle-dot: color-mix(in oklab, var(--foreground) 78%, transparent);
+  --shadow-paper: 0 1px 0 oklch(0.28 0.006 260), 0 14px 32px oklch(0.06 0.004 260 / 0.45);
+  --tone-success-background: oklch(0.22 0.03 150);
+  --tone-success-border: oklch(0.38 0.045 150);
+  --tone-success-foreground: oklch(0.82 0.055 150);
+  --tone-warning-background: oklch(0.23 0.028 85);
+  --tone-warning-border: oklch(0.4 0.04 85);
+  --tone-warning-foreground: oklch(0.84 0.055 85);
+  --tone-danger-background: oklch(0.22 0.022 25);
+  --tone-danger-border: oklch(0.38 0.035 25);
+  --tone-danger-foreground: oklch(0.84 0.05 25);
+  --tone-info-background: oklch(0.22 0.025 250);
+  --tone-info-border: oklch(0.4 0.045 250);
+  --tone-info-foreground: oklch(0.84 0.05 250);
+  --tone-neutral-background: oklch(0.22 0.006 260);
+  --tone-neutral-border: oklch(0.4 0.008 260);
+  --tone-neutral-foreground: oklch(0.84 0.008 260);
+  --signal-positive: oklch(0.82 0.055 150);
+  --signal-negative: oklch(0.84 0.05 25);
+  --signal-info: oklch(0.84 0.05 250);
+  --signal-highlight: oklch(0.88 0.015 260);
+  --medal-gold-background: oklch(0.26 0.035 85);
+  --medal-gold-border: oklch(0.48 0.07 80);
+  --medal-gold-foreground: oklch(0.88 0.09 85);
+  --medal-silver-background: oklch(0.24 0.006 260);
+  --medal-silver-border: oklch(0.48 0.01 260);
+  --medal-silver-foreground: oklch(0.86 0.01 260);
+  --medal-bronze-background: oklch(0.26 0.03 50);
+  --medal-bronze-border: oklch(0.48 0.055 48);
+  --medal-bronze-foreground: oklch(0.86 0.07 55);
+  --attack-map-background: oklch(0.17 0.005 260);
+  --attack-map-border: oklch(0.32 0.008 260);
+  --attack-map-grid: oklch(0.4 0.008 260);
+  --attack-map-land: oklch(0.38 0.01 260);
+  --attack-map-outline: oklch(0.52 0.01 260);
+  --attack-map-node: oklch(0.68 0.01 260);
+  --attack-map-node-label: oklch(0.82 0.008 260);
+  --attack-map-node-label-halo: oklch(0.14 0.004 260 / 0.9);
+  --attack-map-node-highlight: oklch(0.88 0.02 260);
+  --attack-map-node-highlight-halo: oklch(0.95 0.004 260);
+  --attack-map-legend-background: oklch(0.2 0.005 260 / 0.92);
+  --attack-map-legend-border: oklch(0.34 0.008 260);
+  --attack-map-legend-foreground: oklch(0.88 0.008 260);
+  --attack-map-scanline: oklch(0.08 0.004 260 / 0.16);
+  --attack-map-outer-glow-opacity: 0.04;
+  --attack-map-rim-opacity: 0.12;
+  --attack-map-rim-width: 1.1;
+}
+
+/* ── Ink: cool slate, modern ops ──────────────────────────────────────── */
+:root[data-scheme="ink"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.006 250);
+  --foreground: oklch(0.18 0.02 255);
+  --card: oklch(0.995 0.004 250);
+  --card-foreground: oklch(0.18 0.02 255);
+  --popover: oklch(0.995 0.004 250);
+  --popover-foreground: oklch(0.18 0.02 255);
+  --primary: oklch(0.4 0.09 250);
+  --primary-foreground: oklch(0.98 0.01 250);
+  --secondary: oklch(0.95 0.012 250);
+  --secondary-foreground: oklch(0.28 0.03 255);
+  --muted: oklch(0.95 0.01 250);
+  --muted-foreground: oklch(0.45 0.025 255);
+  --accent: oklch(0.94 0.02 250);
+  --accent-foreground: oklch(0.3 0.06 250);
+  --border: oklch(0.88 0.015 250);
+  --input: oklch(0.84 0.015 250);
+  --ring: oklch(0.4 0.09 250);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.9 0.012 250 / 0.7);
+  --canvas-line: oklch(0.55 0.02 250 / 0.1);
+  --frame-mark: color-mix(in oklab, var(--foreground) 42%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 32%, var(--card));
+  --reticle-dot: var(--foreground);
+  --shadow-paper: 0 1px 0 oklch(0.82 0.012 250), 0 8px 20px oklch(0.25 0.03 250 / 0.07);
+  /* Semantic tones inherit shared Graphite light values (success/warn/danger/info). */
+  --signal-highlight: oklch(0.4 0.09 250);
+  --attack-map-background: oklch(0.97 0.01 250);
+  --attack-map-border: oklch(0.84 0.015 250);
+  --attack-map-grid: oklch(0.76 0.02 250);
+  --attack-map-land: oklch(0.7 0.025 250);
+  --attack-map-outline: oklch(0.48 0.03 250);
+  --attack-map-node: oklch(0.46 0.04 250);
+  --attack-map-node-label: oklch(0.3 0.03 255);
+  --attack-map-node-label-halo: oklch(0.99 0.004 250 / 0.92);
+  --attack-map-node-highlight: oklch(0.55 0.1 250);
+  --attack-map-node-highlight-halo: oklch(0.98 0.01 250);
+  --attack-map-legend-background: oklch(0.995 0.004 250 / 0.92);
+  --attack-map-legend-border: oklch(0.86 0.015 250);
+  --attack-map-legend-foreground: oklch(0.34 0.03 255);
+  --attack-map-scanline: oklch(0.2 0.02 250 / 0.06);
+}
+
+:root[data-scheme="ink"][data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.14 0.012 250);
+  --foreground: oklch(0.93 0.012 250);
+  --card: oklch(0.18 0.014 250);
+  --card-foreground: oklch(0.93 0.012 250);
+  --popover: oklch(0.18 0.014 250);
+  --popover-foreground: oklch(0.93 0.012 250);
+  --primary: oklch(0.78 0.08 250);
+  --primary-foreground: oklch(0.16 0.02 250);
+  --secondary: oklch(0.23 0.016 250);
+  --secondary-foreground: oklch(0.9 0.012 250);
+  --muted: oklch(0.23 0.016 250);
+  --muted-foreground: oklch(0.72 0.02 250);
+  --accent: oklch(0.25 0.03 250);
+  --accent-foreground: oklch(0.88 0.04 250);
+  --border: oklch(0.3 0.02 250);
+  --input: oklch(0.32 0.02 250);
+  --ring: oklch(0.78 0.08 250);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.32 0.016 250 / 0.75);
+  --canvas-line: oklch(0.7 0.02 250 / 0.08);
+  --frame-mark: color-mix(in oklab, var(--foreground) 38%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 48%, transparent);
+  --reticle-dot: oklch(0.96 0.008 250);
+  --shadow-paper: 0 1px 0 oklch(0.34 0.016 250), 0 12px 24px oklch(0.08 0.01 250 / 0.42);
+  --signal-highlight: oklch(0.82 0.07 250);
+  --attack-map-background: oklch(0.17 0.014 250);
+  --attack-map-border: oklch(0.34 0.02 250);
+  --attack-map-grid: oklch(0.42 0.025 250);
+  --attack-map-land: oklch(0.4 0.03 250);
+  --attack-map-outline: oklch(0.52 0.03 250);
+  --attack-map-node: oklch(0.68 0.04 250);
+  --attack-map-node-label: oklch(0.82 0.02 250);
+  --attack-map-node-label-halo: oklch(0.14 0.01 250 / 0.9);
+  --attack-map-node-highlight: oklch(0.8 0.08 250);
+  --attack-map-node-highlight-halo: oklch(0.95 0.01 250);
+  --attack-map-legend-background: oklch(0.2 0.014 250 / 0.92);
+  --attack-map-legend-border: oklch(0.34 0.02 250);
+  --attack-map-legend-foreground: oklch(0.88 0.015 250);
+  --attack-map-scanline: oklch(0.08 0.01 250 / 0.16);
+}
+
+/* ── Paper: warm workroom (previous default, optional) ────────────────── */
+:root[data-scheme="paper"] {
   color-scheme: light;
   --background: oklch(0.975 0.012 75);
   --foreground: oklch(0.18 0.015 55);
@@ -44,28 +289,14 @@
   --border: oklch(0.86 0.015 70);
   --input: oklch(0.82 0.015 70);
   --ring: oklch(0.36 0.07 52);
-  --surface-grid: oklch(0.79 0.01 74 / 0.28);
+  --surface-grid: oklch(0.79 0.01 74 / 0.1);
   --surface-ruled: oklch(0.88 0.012 74 / 0.62);
+  --canvas-line: oklch(0.7 0.012 74 / 0.12);
+  --frame-mark: color-mix(in oklab, var(--foreground) 40%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 30%, var(--card));
+  --reticle-dot: var(--foreground);
   --shadow-paper: 0 1px 0 oklch(0.77 0.013 74), 0 10px 22px oklch(0.36 0.022 60 / 0.08);
-  --tone-success-background: oklch(0.96 0.03 150);
-  --tone-success-border: oklch(0.86 0.04 150);
-  --tone-success-foreground: oklch(0.36 0.08 145);
-  --tone-warning-background: oklch(0.97 0.03 85);
-  --tone-warning-border: oklch(0.88 0.04 85);
-  --tone-warning-foreground: oklch(0.38 0.08 80);
-  --tone-danger-background: oklch(0.97 0.02 25);
-  --tone-danger-border: oklch(0.88 0.03 25);
-  --tone-danger-foreground: oklch(0.40 0.09 25);
-  --tone-info-background: oklch(0.95 0.026 230);
-  --tone-info-border: oklch(0.82 0.052 230);
-  --tone-info-foreground: oklch(0.36 0.08 230);
-  --tone-neutral-background: oklch(0.93 0.006 72);
-  --tone-neutral-border: oklch(0.78 0.01 72);
-  --tone-neutral-foreground: oklch(0.36 0.01 72);
-  --signal-positive: oklch(0.36 0.08 145);
-  --signal-negative: oklch(0.40 0.09 25);
-  --signal-info: oklch(0.36 0.08 230);
-  --signal-highlight: oklch(0.72 0.16 80);
+  --signal-highlight: oklch(0.5 0.13 72);
   --attack-map-background: oklch(0.948 0.014 78);
   --attack-map-border: oklch(0.8 0.014 74);
   --attack-map-grid: oklch(0.73 0.012 74);
@@ -85,7 +316,7 @@
   --attack-map-rim-width: 1.6;
 }
 
-:root[data-theme="dark"] {
+:root[data-scheme="paper"][data-theme="dark"] {
   color-scheme: dark;
   --background: oklch(0.15 0.015 60);
   --foreground: oklch(0.92 0.012 78);
@@ -101,31 +332,17 @@
   --muted-foreground: oklch(0.72 0.012 78);
   --accent: oklch(0.24 0.04 135);
   --accent-foreground: oklch(0.82 0.04 135);
-  --border: oklch(0.30 0.015 60);
+  --border: oklch(0.3 0.015 60);
   --input: oklch(0.32 0.015 60);
   --ring: oklch(0.76 0.07 60);
-  --surface-grid: oklch(0.55 0.014 74 / 0.16);
+  --surface-grid: oklch(0.55 0.014 74 / 0.07);
   --surface-ruled: oklch(0.34 0.012 62 / 0.68);
+  --canvas-line: oklch(0.55 0.012 62 / 0.1);
+  --frame-mark: color-mix(in oklab, var(--foreground) 38%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 45%, transparent);
+  --reticle-dot: oklch(0.95 0.01 78);
   --shadow-paper: 0 1px 0 oklch(0.39 0.012 62), 0 12px 24px oklch(0.09 0.006 62 / 0.36);
-  --tone-success-background: oklch(0.22 0.035 150);
-  --tone-success-border: oklch(0.38 0.05 150);
-  --tone-success-foreground: oklch(0.82 0.06 150);
-  --tone-warning-background: oklch(0.23 0.03 85);
-  --tone-warning-border: oklch(0.4 0.045 85);
-  --tone-warning-foreground: oklch(0.84 0.06 85);
-  --tone-danger-background: oklch(0.22 0.025 25);
-  --tone-danger-border: oklch(0.38 0.04 25);
-  --tone-danger-foreground: oklch(0.82 0.05 25);
-  --tone-info-background: oklch(0.22 0.03 230);
-  --tone-info-border: oklch(0.42 0.052 230);
-  --tone-info-foreground: oklch(0.82 0.052 230);
-  --tone-neutral-background: oklch(0.21 0.01 70);
-  --tone-neutral-border: oklch(0.43 0.012 70);
-  --tone-neutral-foreground: oklch(0.82 0.012 80);
-  --signal-positive: oklch(0.82 0.06 150);
-  --signal-negative: oklch(0.82 0.05 25);
-  --signal-info: oklch(0.8 0.04 230);
-  --signal-highlight: oklch(0.76 0.14 80);
+  --signal-highlight: oklch(0.82 0.12 80);
   --attack-map-background: oklch(0.215 0.014 62);
   --attack-map-border: oklch(0.35 0.014 62);
   --attack-map-grid: oklch(0.43 0.014 68);
@@ -145,6 +362,94 @@
   --attack-map-rim-width: 1.15;
 }
 
+/* ── Moss: calm sage technical ────────────────────────────────────────── */
+:root[data-scheme="moss"] {
+  color-scheme: light;
+  --background: oklch(0.98 0.01 145);
+  --foreground: oklch(0.18 0.02 150);
+  --card: oklch(0.995 0.006 145);
+  --card-foreground: oklch(0.18 0.02 150);
+  --popover: oklch(0.995 0.006 145);
+  --popover-foreground: oklch(0.18 0.02 150);
+  --primary: oklch(0.38 0.07 150);
+  --primary-foreground: oklch(0.98 0.01 145);
+  --secondary: oklch(0.95 0.015 145);
+  --secondary-foreground: oklch(0.28 0.03 150);
+  --muted: oklch(0.95 0.012 145);
+  --muted-foreground: oklch(0.44 0.025 150);
+  --accent: oklch(0.93 0.03 145);
+  --accent-foreground: oklch(0.28 0.05 150);
+  --border: oklch(0.87 0.015 145);
+  --input: oklch(0.83 0.015 145);
+  --ring: oklch(0.38 0.07 150);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.9 0.012 145 / 0.7);
+  --canvas-line: oklch(0.55 0.02 145 / 0.1);
+  --frame-mark: color-mix(in oklab, var(--foreground) 42%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 32%, var(--card));
+  --reticle-dot: var(--foreground);
+  --shadow-paper: 0 1px 0 oklch(0.8 0.015 145), 0 8px 20px oklch(0.25 0.02 150 / 0.07);
+  /* Semantic tones inherit shared values — scheme only changes brand + highlight. */
+  --signal-highlight: oklch(0.4 0.07 150);
+  --attack-map-background: oklch(0.97 0.012 145);
+  --attack-map-border: oklch(0.84 0.015 145);
+  --attack-map-grid: oklch(0.76 0.02 145);
+  --attack-map-land: oklch(0.68 0.035 145);
+  --attack-map-outline: oklch(0.48 0.03 150);
+  --attack-map-node: oklch(0.46 0.04 150);
+  --attack-map-node-label: oklch(0.3 0.03 150);
+  --attack-map-node-label-halo: oklch(0.99 0.004 145 / 0.92);
+  --attack-map-node-highlight: oklch(0.55 0.09 150);
+  --attack-map-node-highlight-halo: oklch(0.98 0.01 145);
+  --attack-map-legend-background: oklch(0.995 0.004 145 / 0.92);
+  --attack-map-legend-border: oklch(0.86 0.015 145);
+  --attack-map-legend-foreground: oklch(0.34 0.03 150);
+  --attack-map-scanline: oklch(0.2 0.02 150 / 0.06);
+}
+
+:root[data-scheme="moss"][data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.14 0.014 150);
+  --foreground: oklch(0.93 0.012 145);
+  --card: oklch(0.18 0.016 150);
+  --card-foreground: oklch(0.93 0.012 145);
+  --popover: oklch(0.18 0.016 150);
+  --popover-foreground: oklch(0.93 0.012 145);
+  --primary: oklch(0.78 0.07 150);
+  --primary-foreground: oklch(0.16 0.02 150);
+  --secondary: oklch(0.23 0.016 150);
+  --secondary-foreground: oklch(0.9 0.012 145);
+  --muted: oklch(0.23 0.016 150);
+  --muted-foreground: oklch(0.72 0.02 150);
+  --accent: oklch(0.25 0.035 150);
+  --accent-foreground: oklch(0.88 0.04 150);
+  --border: oklch(0.3 0.02 150);
+  --input: oklch(0.32 0.02 150);
+  --ring: oklch(0.78 0.07 150);
+  --surface-grid: transparent;
+  --surface-ruled: oklch(0.32 0.016 150 / 0.75);
+  --canvas-line: oklch(0.7 0.02 150 / 0.08);
+  --frame-mark: color-mix(in oklab, var(--foreground) 38%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 48%, transparent);
+  --reticle-dot: oklch(0.95 0.01 145);
+  --shadow-paper: 0 1px 0 oklch(0.34 0.016 150), 0 12px 24px oklch(0.08 0.01 150 / 0.42);
+  --signal-highlight: oklch(0.82 0.06 150);
+  --attack-map-background: oklch(0.17 0.016 150);
+  --attack-map-border: oklch(0.34 0.02 150);
+  --attack-map-grid: oklch(0.42 0.025 150);
+  --attack-map-land: oklch(0.4 0.035 150);
+  --attack-map-outline: oklch(0.52 0.03 150);
+  --attack-map-node: oklch(0.68 0.04 150);
+  --attack-map-node-label: oklch(0.82 0.02 145);
+  --attack-map-node-label-halo: oklch(0.14 0.01 150 / 0.9);
+  --attack-map-node-highlight: oklch(0.8 0.07 150);
+  --attack-map-node-highlight-halo: oklch(0.95 0.01 145);
+  --attack-map-legend-background: oklch(0.2 0.014 150 / 0.92);
+  --attack-map-legend-border: oklch(0.34 0.02 150);
+  --attack-map-legend-foreground: oklch(0.88 0.015 145);
+  --attack-map-scanline: oklch(0.08 0.01 150 / 0.16);
+}
+
 @layer base {
   * {
     @apply border-border;
@@ -156,11 +461,17 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    background-image:
-      linear-gradient(var(--surface-grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--surface-grid) 1px, transparent 1px);
-    background-size: 28px 28px;
     line-height: 1.5;
+    /* Quiet field grid — structure without noise */
+    background-image:
+      linear-gradient(var(--canvas-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--canvas-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 22%, transparent);
+    color: var(--foreground);
   }
 
   a {
@@ -169,6 +480,21 @@
 
   code {
     @apply rounded-sm bg-foreground/5 px-1.5 py-0.5 font-mono text-[0.8em];
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -181,11 +507,17 @@
 
   .surface-workroom {
     background: var(--card);
-    box-shadow: var(--shadow-paper);
+    box-shadow: none;
   }
 
   .workroom-rule {
-    border-color: color-mix(in oklab, var(--border) 84%, var(--foreground) 16%);
+    border-color: var(--border);
+  }
+
+  /* Nested operational strips: slightly recessed against the work panel */
+  .surface-inset {
+    background: color-mix(in oklab, var(--background) 72%, var(--card));
+    border-color: var(--border);
   }
 
   .tone-warning {
@@ -249,7 +581,322 @@
   .text-highlight {
     color: var(--signal-highlight);
   }
+
+  .medal-gold {
+    border-color: var(--medal-gold-border);
+    background: var(--medal-gold-background);
+    color: var(--medal-gold-foreground);
+  }
+
+  .medal-silver {
+    border-color: var(--medal-silver-border);
+    background: var(--medal-silver-background);
+    color: var(--medal-silver-foreground);
+  }
+
+  .medal-bronze {
+    border-color: var(--medal-bronze-border);
+    background: var(--medal-bronze-background);
+    color: var(--medal-bronze-foreground);
+  }
+
+  .focus-ring {
+    outline: none;
+  }
+
+  .focus-ring:focus-visible {
+    border-color: var(--ring);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px color-mix(in oklab, var(--ring) 88%, transparent);
+  }
+
+  /*
+   * Expand pickers (scheme + mode): collapsed single chip; hover/focus expands.
+   * Selection driven by html data attributes — no React flash on navigation.
+   * Selected state uses muted surface + foreground (not primary fill).
+   */
+  .expand-picker {
+    --expand-chip-pad-x: 0.55rem;
+    --expand-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    transition: max-width 220ms var(--expand-ease);
+  }
+
+  .scheme-picker {
+    max-width: 6.5rem;
+  }
+
+  .mode-picker {
+    max-width: 5.5rem;
+  }
+
+  .expand-option {
+    max-width: 0;
+    min-width: 0;
+    flex: 0 0 auto;
+    overflow: hidden;
+    opacity: 0;
+    padding-inline: 0;
+    border-inline-end: 0 solid transparent;
+    pointer-events: none;
+    transition:
+      max-width 220ms var(--expand-ease),
+      opacity 160ms ease-out,
+      padding 220ms var(--expand-ease),
+      background-color 150ms ease-out,
+      color 150ms ease-out,
+      font-weight 150ms ease-out;
+  }
+
+  /* Collapsed: only the active option is visible */
+  :root[data-scheme="graphite"] .scheme-option[data-scheme-option="graphite"],
+  :root[data-scheme="ink"] .scheme-option[data-scheme-option="ink"],
+  :root[data-scheme="paper"] .scheme-option[data-scheme-option="paper"],
+  :root[data-scheme="moss"] .scheme-option[data-scheme-option="moss"],
+  .scheme-option[aria-checked="true"] {
+    max-width: 6.75rem;
+    opacity: 1;
+    padding-inline: var(--expand-chip-pad-x);
+    pointer-events: auto;
+    color: var(--foreground);
+    background: transparent;
+    font-weight: 500;
+  }
+
+  :root[data-theme-preference="light"] .mode-option[data-mode-option="light"],
+  :root[data-theme-preference="dark"] .mode-option[data-mode-option="dark"],
+  :root[data-theme-preference="system"] .mode-option[data-mode-option="system"],
+  :root:not([data-theme-preference]) .mode-option[data-mode-option="system"],
+  .mode-option[aria-checked="true"] {
+    max-width: 5.75rem;
+    opacity: 1;
+    padding-inline: var(--expand-chip-pad-x);
+    pointer-events: auto;
+    color: var(--foreground);
+    background: transparent;
+    font-weight: 500;
+  }
+
+  /* Expanded: reveal all options */
+  .scheme-picker:hover,
+  .scheme-picker:focus-within {
+    max-width: 22rem;
+  }
+
+  .mode-picker:hover,
+  .mode-picker:focus-within {
+    max-width: 16rem;
+  }
+
+  .expand-picker:hover .expand-option,
+  .expand-picker:focus-within .expand-option {
+    opacity: 1;
+    padding-inline: var(--expand-chip-pad-x);
+    pointer-events: auto;
+    border-inline-end: 1px solid var(--border);
+  }
+
+  .scheme-picker:hover .scheme-option,
+  .scheme-picker:focus-within .scheme-option {
+    max-width: 5.5rem;
+  }
+
+  .mode-picker:hover .mode-option,
+  .mode-picker:focus-within .mode-option {
+    max-width: 5.25rem;
+  }
+
+  .expand-picker:hover .expand-option:last-child,
+  .expand-picker:focus-within .expand-option:last-child {
+    border-inline-end-width: 0;
+  }
+
+  /* Active option while expanded — muted surface, always readable ink */
+  :root[data-scheme="graphite"] .scheme-picker:hover .scheme-option[data-scheme-option="graphite"],
+  :root[data-scheme="ink"] .scheme-picker:hover .scheme-option[data-scheme-option="ink"],
+  :root[data-scheme="paper"] .scheme-picker:hover .scheme-option[data-scheme-option="paper"],
+  :root[data-scheme="moss"] .scheme-picker:hover .scheme-option[data-scheme-option="moss"],
+  :root[data-scheme="graphite"] .scheme-picker:focus-within .scheme-option[data-scheme-option="graphite"],
+  :root[data-scheme="ink"] .scheme-picker:focus-within .scheme-option[data-scheme-option="ink"],
+  :root[data-scheme="paper"] .scheme-picker:focus-within .scheme-option[data-scheme-option="paper"],
+  :root[data-scheme="moss"] .scheme-picker:focus-within .scheme-option[data-scheme-option="moss"],
+  .scheme-picker:hover .scheme-option[aria-checked="true"],
+  .scheme-picker:focus-within .scheme-option[aria-checked="true"],
+  :root[data-theme-preference="light"] .mode-picker:hover .mode-option[data-mode-option="light"],
+  :root[data-theme-preference="dark"] .mode-picker:hover .mode-option[data-mode-option="dark"],
+  :root[data-theme-preference="system"] .mode-picker:hover .mode-option[data-mode-option="system"],
+  :root:not([data-theme-preference]) .mode-picker:hover .mode-option[data-mode-option="system"],
+  :root[data-theme-preference="light"] .mode-picker:focus-within .mode-option[data-mode-option="light"],
+  :root[data-theme-preference="dark"] .mode-picker:focus-within .mode-option[data-mode-option="dark"],
+  :root[data-theme-preference="system"] .mode-picker:focus-within .mode-option[data-mode-option="system"],
+  :root:not([data-theme-preference]) .mode-picker:focus-within .mode-option[data-mode-option="system"],
+  .mode-picker:hover .mode-option[aria-checked="true"],
+  .mode-picker:focus-within .mode-option[aria-checked="true"] {
+    background: var(--muted);
+    color: var(--foreground);
+    font-weight: 600;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .expand-picker,
+    .expand-option {
+      transition: none;
+    }
+  }
+
+  /*
+   * Product workspace layout (ops dashboard):
+   * - Canvas: quiet outer field (body grid) with inset padding
+   * - Frame: solid card panel + 1px border + corner reticles on the panel only
+   * - Body: consistent shell padding + vertical rhythm
+   * Avoid full-viewport rails, transparent floating content, ruler ticks.
+   */
+  .workspace-canvas {
+    --workspace-max: 90rem;
+    --workspace-pad: 0.75rem;
+    --workspace-gap: 0.75rem;
+    min-height: 100vh;
+    min-height: 100dvh;
+    box-sizing: border-box;
+    padding: var(--workspace-pad);
+  }
+
+  @media (min-width: 640px) {
+    .workspace-canvas {
+      --workspace-pad: 1rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .workspace-canvas {
+      --workspace-pad: 1.25rem;
+    }
+  }
+
+  .workspace-frame {
+    --reticle-size: 12px;
+    --reticle-stroke: 1px;
+    --reticle-dot-size: 2.5px;
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: var(--workspace-max);
+    min-height: calc(100vh - 2 * var(--workspace-pad));
+    min-height: calc(100dvh - 2 * var(--workspace-pad));
+    margin-inline: auto;
+    border: 1px solid var(--border);
+    background-color: var(--card);
+    box-shadow: var(--shadow-paper);
+  }
+
+  /* Quiet corner marks — crop-style, not loud decoration */
+  .frame-reticle {
+    position: absolute;
+    z-index: 2;
+    width: var(--reticle-size);
+    height: var(--reticle-size);
+    pointer-events: none;
+    opacity: 0.85;
+  }
+
+  .frame-reticle::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--reticle-line), var(--reticle-line)),
+      linear-gradient(var(--reticle-line), var(--reticle-line));
+    background-size:
+      100% var(--reticle-stroke),
+      var(--reticle-stroke) 100%;
+    background-position: center, center;
+    background-repeat: no-repeat;
+  }
+
+  .frame-reticle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--reticle-dot-size);
+    height: var(--reticle-dot-size);
+    transform: translate(-50%, -50%) rotate(45deg);
+    background: var(--reticle-dot);
+  }
+
+  .frame-reticle--tl {
+    top: -1px;
+    left: -1px;
+    transform: translate(-50%, -50%);
+  }
+
+  .frame-reticle--tr {
+    top: -1px;
+    right: -1px;
+    transform: translate(50%, -50%);
+  }
+
+  .frame-reticle--bl {
+    bottom: -1px;
+    left: -1px;
+    transform: translate(-50%, 50%);
+  }
+
+  .frame-reticle--br {
+    bottom: -1px;
+    right: -1px;
+    transform: translate(50%, 50%);
+  }
+
+  .workspace-frame-body {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: var(--workspace-gap);
+    box-sizing: border-box;
+    padding: 1rem 0.75rem 1.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .workspace-frame-body {
+      padding: 1.125rem 1.25rem 1.25rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .workspace-frame-body {
+      padding: 1.25rem 1.5rem 1.5rem;
+    }
+  }
+
+  /* Shell chrome density */
+  .shell-nav-link {
+    border-radius: 0.125rem;
+    border: 1px solid transparent;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--muted-foreground);
+    transition:
+      color 150ms ease-out,
+      background-color 150ms ease-out,
+      border-color 150ms ease-out;
+  }
+
+  .shell-nav-link:hover {
+    border-color: var(--border);
+    background: var(--muted);
+    color: var(--foreground);
+  }
+
+  .shell-nav-link[data-active="true"] {
+    border-color: var(--border);
+    background: color-mix(in oklab, var(--background) 55%, var(--card));
+    color: var(--foreground);
+    font-weight: 600;
+  }
 }
+
 
 .swagger-shell .swagger-ui {
   color: var(--foreground);

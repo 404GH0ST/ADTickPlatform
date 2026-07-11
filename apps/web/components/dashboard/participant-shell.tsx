@@ -1,13 +1,19 @@
+"use client";
+
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Download } from 'lucide-react';
 
 import { AppShell } from '@/components/ui/app-shell';
 import { AnnouncementBanner } from '@/components/dashboard/announcement-banner';
-import { markVpnConfigDownloaded } from '@/components/dashboard/onboarding-checklist';
+import {
+  MatchReadinessNavButton,
+  MatchReadinessPanel,
+  useMatchReadiness,
+} from '@/components/dashboard/match-readiness';
 import { ParticipantAccountSettings } from '@/components/dashboard/participant-account-settings';
 import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join-team-form';
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
+import { VpnConfigDownloadButton } from '@/components/dashboard/vpn-config-download-button';
 import { Button } from '@/components/ui/button';
 import { StatusBanner } from '@/components/ui/status-banner';
 import type { PlatformOverview } from '@/lib/dashboard-types';
@@ -24,7 +30,6 @@ type Props = {
   overview: PlatformOverview;
   children: ReactNode;
   title?: string;
-  description?: string;
 };
 
 export function ParticipantShell({
@@ -32,9 +37,9 @@ export function ParticipantShell({
   overview,
   children,
   title = 'Participant',
-  description = 'Live standings, owned service controls, and accepted attacks.',
 }: Props) {
   const gameAlertMessage = getParticipantGameAlertMessage(overview);
+  const readiness = useMatchReadiness(overview);
   const hasParticipantTeam =
     overview.authenticated &&
     overview.role !== "organizer" &&
@@ -49,7 +54,23 @@ export function ParticipantShell({
       activePath={activePath}
       navItems={navItems}
       title={title}
-      description={description}
+      navActions={
+        readiness.visible ? (
+          <MatchReadinessNavButton
+            remaining={readiness.remaining}
+            open={readiness.open}
+            onToggle={readiness.toggle}
+          />
+        ) : null
+      }
+      belowNav={
+        readiness.open ? (
+          <MatchReadinessPanel
+            items={readiness.items}
+            remaining={readiness.remaining}
+          />
+        ) : null
+      }
       headerActions={
         <>
           {overview.role === "organizer" && (
@@ -57,22 +78,7 @@ export function ParticipantShell({
               <a href="/admin">Organizer</a>
             </Button>
           )}
-          {hasParticipantTeam ? (
-            <Button
-              asChild
-              data-testid="participant-vpn-config"
-              variant="outline"
-            >
-              <a
-                href="/api/platform/me/wireguard"
-                download
-                onClick={() => markVpnConfigDownloaded()}
-              >
-                <Download className="h-4 w-4" />
-                VPN Config
-              </a>
-            </Button>
-          ) : null}
+          {hasParticipantTeam ? <VpnConfigDownloadButton /> : null}
           <Button asChild variant="outline">
             <Link href="/docs/participant">Manual</Link>
           </Button>
@@ -91,8 +97,8 @@ export function ParticipantShell({
         </>
       }
       summarySection={
-        <section className="surface-workroom rounded-sm border">
-          <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-7">
+        <section className="surface-inset overflow-hidden rounded-sm border" data-testid="participant-summary">
+          <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-6">
             <SummaryItem label="Challenge Catalog" value={String(overview.challengeCount)} />
             <SummaryItem label="Owned Services" value={String(overview.ownServiceCount)} />
             <SummaryItem label="Enemy Targets" value={String(overview.enemyTargetCount)} />
@@ -115,7 +121,6 @@ export function ParticipantShell({
               }
             />
             <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
-            <SummaryItem label="Realtime" value={overview.realtimeBaseUrl} mono />
           </dl>
         </section>
       }
@@ -167,13 +172,15 @@ function SummaryItem({
   mono?: boolean;
 }) {
   return (
-    <div className="border-b px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+    <div className="border-b border-border px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
       <dd
         className={
           mono
-            ? "mt-1 break-all font-mono text-sm"
-            : "mt-1 text-sm font-semibold"
+            ? "mt-1 break-all font-mono text-xs leading-5 text-foreground"
+            : "mt-1 text-sm font-semibold tabular-nums tracking-tight text-foreground"
         }
       >
         {value}

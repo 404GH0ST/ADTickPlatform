@@ -22,7 +22,7 @@ test("participant scoreboard page shows the finished-match banner and ranking ro
   ).toBeVisible();
   const scoreboardTable = page.getByRole("table");
   await expect(scoreboardTable.locator("caption")).toContainText(
-    "Neutral cell background",
+    "Right-side columns are team totals across all services",
   );
   await expect(page.locator('[aria-label*="current team"]')).toHaveCount(1);
   await expect(scoreboardTable.getByText("Floppcraft", { exact: true }).first()).toBeVisible();
@@ -52,7 +52,9 @@ test("participant scoreboard page shows an explicit empty state when no scores e
   await page.goto("/scoreboard");
 
   await expect(page.locator("h1", { hasText: "Scoreboard" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "No score rows are available yet." })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "No score rows are available yet." }),
+  ).toBeVisible();
 });
 
 test("organizer scoreboard page filters and sorts authoritative rankings", async ({
@@ -100,5 +102,7 @@ test("organizer scoreboard page shows degraded warning and empty state when the 
     ),
   ).toBeVisible();
   await expect(page.getByText("Showing 0 of 0 teams.")).toBeVisible();
-  await expect(page.getByRole("cell", { name: "No score rows persisted yet." })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "No score rows persisted yet." }),
+  ).toBeVisible();
 });

@@ -87,7 +87,7 @@ export function BulkImportPanel(): ReactElement {
       <CardContent>
         <form className="grid gap-3" onSubmit={onSubmit}>
           <textarea
-            className="min-h-36 w-full rounded-sm border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-h-36 w-full rounded-sm border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             value={csvText}
             onChange={(event) => setCsvText(event.target.value)}
           />
