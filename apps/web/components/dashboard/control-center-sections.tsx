@@ -2,7 +2,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Download, LoaderCircle, Wrench, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
+import { Download, LoaderCircle, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 
@@ -35,15 +35,16 @@ import {
   SliceCountBadge,
 } from "@/components/ui/paged-filter-controls";
 import { StatusBanner } from "@/components/ui/status-banner";
-export type SSHSessionData = {
-  challenge_id: number;
-  host: string;
-  port: number;
-  username: "root";
-  password: string;
-  password_mode?: "stable";
-  connection_hint: string;
-};
+import {
+  formatSLAState,
+  ServiceSLADetail,
+} from "@/components/dashboard/service-sla-detail";
+import {
+  IssuedRootCredentialBlock,
+  type SSHSessionData,
+} from "@/components/dashboard/ssh-credential-block";
+
+export type { SSHSessionData };
 
 type AttackFilters = {
   limit: string;
@@ -721,85 +722,14 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
         }
       />
       <DetailRow label="Last event" value={service.lastEvent} />
-      <DetailRow label="SLA detail" value={service.slaMessage} wide />
+      <DetailRow
+        label="SLA detail"
+        value={<ServiceSLADetail service={service} />}
+        wide
+      />
       <DetailRow label="Access hint" value={service.sshHint} wide />
     </dl>
   );
-}
-
-function formatSLAState(service: ServiceRow): ReactNode {
-  const status = service.slaStatus;
-  const phase = formatSLAPhaseLabel(service.slaPhase);
-  const tick = service.slaTickId;
-
-  const tickSuffix = tick ? ` on tick #${tick}` : "";
-
-  switch (status) {
-    case "ok":
-      return <span className="font-semibold text-positive">ok{tickSuffix}</span>;
-    case "recovering":
-      if (phase) {
-        return (
-          <span className="font-semibold text-highlight">
-            recovering after {phase}
-            {tickSuffix}
-          </span>
-        );
-      }
-      return <span className="font-semibold text-highlight">recovering{tickSuffix}</span>;
-    case "flag_not_found":
-      if (phase) {
-        return (
-          <span className="font-semibold text-negative">
-            flag not found during {phase}
-            {tickSuffix}
-          </span>
-        );
-      }
-      return <span className="font-semibold text-negative">flag not found{tickSuffix}</span>;
-    case "faulty":
-      if (phase) {
-        return (
-          <span className="font-semibold text-negative">
-            faulty during {phase}
-            {tickSuffix}
-          </span>
-        );
-      }
-      return <span className="font-semibold text-negative">faulty{tickSuffix}</span>;
-    case "down":
-      if (phase) {
-        return (
-          <span className="font-semibold text-negative">
-            down during {phase}
-            {tickSuffix}
-          </span>
-        );
-      }
-      return <span className="font-semibold text-negative">down{tickSuffix}</span>;
-    default:
-      if (tick) {
-        return (
-          <span className="text-muted-foreground">
-            awaiting detail after tick #{tick}
-          </span>
-        );
-      }
-      return <span className="text-muted-foreground">awaiting checker detail</span>;
-  }
-}
-
-function formatSLAPhaseLabel(phase: string): string {
-  switch (phase.trim().toLowerCase()) {
-    case "put":
-      return "flag storage";
-    case "get":
-      return "flag retrieval";
-    case "check":
-      return "service functionality";
-    default:
-      return phase.trim();
-  }
 }
 
 function ServiceActionBar({
@@ -883,73 +813,6 @@ function ServiceTargetBlock({
   );
 }
 
-
-function IssuedRootCredentialBlock({
-  issuedSession,
-}: {
-  issuedSession: SSHSessionData;
-}): ReactElement {
-  return (
-    <div className="space-y-4">
-      <InfoPanel compact>
-        <p className="font-mono text-sm text-foreground">
-          {issuedSession.connection_hint}
-        </p>
-        <InfoLine
-          className="mt-2"
-          label="password"
-          value={issuedSession.password}
-          valueClassName="font-mono"
-        />
-      </InfoPanel>
-      <PatchWorkflowBlock issuedSession={issuedSession} />
-    </div>
-  );
-}
-
-function PatchWorkflowBlock({
-  issuedSession,
-}: {
-  issuedSession: SSHSessionData;
-}): ReactElement {
-  return (
-    <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <Wrench className="h-4 w-4" />
-        Patch Workflow
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Participant patching happens directly inside the owned service
-        container. There is no participant image redeploy path.
-      </p>
-      <ol className="space-y-2 text-sm text-muted-foreground">
-        <li>
-          <span className="font-medium text-foreground">1.</span> Use the
-          service card source download and identify the file or config you need
-          to change.
-        </li>
-        <li>
-          <span className="font-medium text-foreground">2.</span> Connect with{" "}
-          <span className="font-mono text-foreground">
-            {issuedSession.connection_hint}
-          </span>{" "}
-          and edit files directly inside the running container.
-        </li>
-        <li>
-          <span className="font-medium text-foreground">3.</span> Use{" "}
-          <span className="font-medium text-foreground">Restart</span> after a
-          live patch when you want to keep the current filesystem changes.
-        </li>
-        <li>
-          <span className="font-medium text-foreground">4.</span> Use{" "}
-          <span className="font-medium text-foreground">Factory Reset</span> to
-          discard the current patch state and restore the organizer baseline
-          image.
-        </li>
-      </ol>
-    </div>
-  );
-}
 
 function ResetWarningBlock(): ReactElement {
   return (

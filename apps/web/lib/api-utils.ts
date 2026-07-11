@@ -6,6 +6,17 @@ export type ProblemDetails = {
   instance?: string;
 };
 
+/** Upstream API failure that preserves HTTP status for proxy routes. */
+export class PlatformAPIError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "PlatformAPIError";
+    this.status = status;
+  }
+}
+
 export function buildQueryString(
   query: Record<string, string | number | undefined>,
 ) {
@@ -51,7 +62,10 @@ export async function processApiResponse<T>(
   path: string,
 ): Promise<T> {
   if (!response.ok) {
-    throw new Error(await parseApiError(response, path));
+    throw new PlatformAPIError(
+      await parseApiError(response, path),
+      response.status,
+    );
   }
   if (response.status === 204) {
     return undefined as T;

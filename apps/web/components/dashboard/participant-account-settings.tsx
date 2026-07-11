@@ -26,6 +26,12 @@ type Draft = {
   teamContactEmail: string;
 };
 
+type PasswordDraft = {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+};
+
 export function ParticipantAccountSettings({
   overview,
 }: {
@@ -37,11 +43,21 @@ export function ParticipantAccountSettings({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => draftFromOverview(overview));
+  const [passwordDraft, setPasswordDraft] = useState<PasswordDraft>({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const hasTeam = (overview.teamID ?? 0) > 0 && overview.role !== "organizer";
 
   useEffect(() => {
     if (open) {
       setDraft(draftFromOverview(overview));
+      setPasswordDraft({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
       setMessage(null);
       setError(null);
     }
@@ -69,7 +85,43 @@ export function ParticipantAccountSettings({
           await parseApiError(response, "/api/platform/session/profile"),
         );
       }
-      setMessage("Account settings saved.");
+
+      const wantsPasswordChange =
+        passwordDraft.currentPassword !== "" ||
+        passwordDraft.newPassword !== "" ||
+        passwordDraft.confirmPassword !== "";
+      if (wantsPasswordChange) {
+        if (passwordDraft.newPassword.length < 8) {
+          throw new Error("new password must be at least 8 characters");
+        }
+        if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+          throw new Error("new password confirmation does not match");
+        }
+        const passwordResponse = await fetch("/api/platform/session/password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            current_password: passwordDraft.currentPassword,
+            new_password: passwordDraft.newPassword,
+          }),
+        });
+        if (!passwordResponse.ok) {
+          throw new Error(
+            await parseApiError(
+              passwordResponse,
+              "/api/platform/session/password",
+            ),
+          );
+        }
+        setPasswordDraft({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
+        setMessage("Account settings and password saved.");
+      } else {
+        setMessage("Account settings saved.");
+      }
       router.refresh();
     } catch (updateError) {
       setError(
@@ -176,6 +228,62 @@ export function ParticipantAccountSettings({
                 variant="warning"
               />
             )}
+
+            <section className="grid gap-3 border-t pt-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Change password
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Leave blank to keep your current password.
+                </p>
+              </div>
+              <Field label="Current password" htmlFor="participant-current-password">
+                <Input
+                  id="participant-current-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={passwordDraft.currentPassword}
+                  onChange={(event) =>
+                    setPasswordDraft({
+                      ...passwordDraft,
+                      currentPassword: event.target.value,
+                    })
+                  }
+                />
+              </Field>
+              <Field label="New password" htmlFor="participant-new-password">
+                <Input
+                  id="participant-new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordDraft.newPassword}
+                  onChange={(event) =>
+                    setPasswordDraft({
+                      ...passwordDraft,
+                      newPassword: event.target.value,
+                    })
+                  }
+                />
+              </Field>
+              <Field
+                label="Confirm new password"
+                htmlFor="participant-confirm-password"
+              >
+                <Input
+                  id="participant-confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordDraft.confirmPassword}
+                  onChange={(event) =>
+                    setPasswordDraft({
+                      ...passwordDraft,
+                      confirmPassword: event.target.value,
+                    })
+                  }
+                />
+              </Field>
+            </section>
 
             {error ? <StatusBanner message={error} variant="error" /> : null}
             {message ? (

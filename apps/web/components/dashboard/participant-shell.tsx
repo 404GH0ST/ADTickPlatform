@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Download } from 'lucide-react';
 
 import { AppShell } from '@/components/ui/app-shell';
+import { AnnouncementBanner } from '@/components/dashboard/announcement-banner';
+import { markVpnConfigDownloaded } from '@/components/dashboard/onboarding-checklist';
 import { ParticipantAccountSettings } from '@/components/dashboard/participant-account-settings';
 import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join-team-form';
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
@@ -61,7 +63,11 @@ export function ParticipantShell({
               data-testid="participant-vpn-config"
               variant="outline"
             >
-              <a href="/api/platform/me/wireguard" download>
+              <a
+                href="/api/platform/me/wireguard"
+                download
+                onClick={() => markVpnConfigDownloaded()}
+              >
                 <Download className="h-4 w-4" />
                 VPN Config
               </a>
@@ -115,6 +121,7 @@ export function ParticipantShell({
       }
       alertSection={
         <>
+          <AnnouncementBanner />
           {overview.message ? <StatusBanner message={overview.message} variant="warning" /> : null}
           {needsTeamJoin ? <ParticipantJoinTeamForm /> : null}
           {gameAlertMessage ? (
@@ -140,7 +147,11 @@ function getParticipantGameAlertMessage(overview: PlatformOverview): string | nu
   }
 
   if (overview.matchState === 'paused') {
-    return 'The match is currently paused. Tick progression and checker runs are temporarily suspended.';
+    return 'The match is currently paused. Tick progression and checker runs are temporarily suspended. Submissions are blocked until organizers resume. VPN and SSH to unlocked services remain available.';
+  }
+
+  if (overview.scoreboardFrozen) {
+    return 'The public scoreboard is frozen. Attack submissions and service controls still follow match state, but standings will not move until organizers unfreeze.';
   }
 
   return null;

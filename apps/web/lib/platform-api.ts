@@ -115,7 +115,14 @@ export type TeamServiceState = {
 
 export type ServicesResponseData = Record<string, Record<string, string[]>>;
 
-import { authenticatedFetch, buildQueryString, parseApiError } from "./api-utils";
+import {
+  authenticatedFetch,
+  buildQueryString,
+  parseApiError,
+  PlatformAPIError,
+} from "./api-utils";
+
+export { PlatformAPIError } from "./api-utils";
 
 type UnlockResponseData = {
   challenge_id: number;
@@ -469,4 +476,48 @@ export async function downloadChallengeSource(challengeID: number) {
 
 export async function downloadParticipantWireGuard() {
   return participantFetchResponse("/api/v2/me/wireguard");
+}
+
+export type SubmissionVerdict = {
+  flag: string;
+  status: string;
+  detail?: string;
+  message?: string;
+};
+
+export type SubmissionResult = {
+  results: SubmissionVerdict[];
+  accepted_count: number;
+  rejected_count: number;
+};
+
+export async function submitFlags(flags: string[]) {
+  return participantFetch<SubmissionResult>("/api/v2/submit", {
+    method: "POST",
+    body: JSON.stringify({ flags }),
+  });
+}
+
+export async function changeParticipantPassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  return participantFetch<{ updated: boolean }>("/api/v2/me/password", {
+    method: "PUT",
+    body: JSON.stringify({
+      current_password: input.currentPassword,
+      new_password: input.newPassword,
+    }),
+  });
+}
+
+export type MatchAnnouncement = {
+  id: number;
+  body: string;
+  created_by?: string;
+  created_at: string;
+};
+
+export async function listAnnouncements() {
+  return publicFetch<MatchAnnouncement[]>("/api/v2/announcements");
 }

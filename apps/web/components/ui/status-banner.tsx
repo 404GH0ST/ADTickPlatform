@@ -2,7 +2,7 @@
 
 import type { ReactElement } from 'react';
 
-type StatusBannerVariant = 'error' | 'success' | 'warning';
+type StatusBannerVariant = 'error' | 'success' | 'warning' | 'info';
 
 type StatusBannerProps = {
   message: string;
@@ -13,6 +13,7 @@ const bannerTone: Record<StatusBannerVariant, string> = {
   error: 'tone-danger',
   success: 'tone-success',
   warning: 'tone-warning',
+  info: 'tone-info',
 };
 
 export function StatusBanner({
