@@ -105,6 +105,14 @@
   --attack-map-node-label-halo: oklch(0.99 0.002 260 / 0.92);
   --attack-map-node-highlight: oklch(0.55 0.04 260);
   --attack-map-node-highlight-halo: oklch(0.98 0.002 260);
+  --attack-map-route-1: oklch(0.42 0.01 260);
+  --attack-map-route-2: oklch(0.5 0.012 260);
+  --attack-map-route-3: oklch(0.58 0.014 260);
+  --attack-map-route-4: oklch(0.36 0.012 260);
+  --attack-map-route-5: oklch(0.46 0.006 260);
+  --attack-map-route-6: oklch(0.54 0.008 260);
+  --attack-map-route-7: oklch(0.4 0.018 260);
+  --attack-map-route-8: oklch(0.62 0.01 260);
   --attack-map-legend-background: oklch(1 0.001 260 / 0.92);
   --attack-map-legend-border: oklch(0.86 0.006 260);
   --attack-map-legend-foreground: oklch(0.35 0.01 260);
@@ -179,6 +187,14 @@
   --attack-map-node-label-halo: oklch(0.14 0.004 260 / 0.9);
   --attack-map-node-highlight: oklch(0.88 0.02 260);
   --attack-map-node-highlight-halo: oklch(0.95 0.004 260);
+  --attack-map-route-1: oklch(0.82 0.01 260);
+  --attack-map-route-2: oklch(0.72 0.014 260);
+  --attack-map-route-3: oklch(0.64 0.018 260);
+  --attack-map-route-4: oklch(0.88 0.008 260);
+  --attack-map-route-5: oklch(0.76 0.006 260);
+  --attack-map-route-6: oklch(0.68 0.01 260);
+  --attack-map-route-7: oklch(0.84 0.02 260);
+  --attack-map-route-8: oklch(0.6 0.012 260);
   --attack-map-legend-background: oklch(0.2 0.005 260 / 0.92);
   --attack-map-legend-border: oklch(0.34 0.008 260);
   --attack-map-legend-foreground: oklch(0.88 0.008 260);
@@ -227,6 +243,14 @@
   --attack-map-node-label-halo: oklch(0.99 0.004 250 / 0.92);
   --attack-map-node-highlight: oklch(0.55 0.1 250);
   --attack-map-node-highlight-halo: oklch(0.98 0.01 250);
+  --attack-map-route-1: oklch(0.5 0.11 250);
+  --attack-map-route-2: oklch(0.56 0.08 235);
+  --attack-map-route-3: oklch(0.44 0.09 265);
+  --attack-map-route-4: oklch(0.6 0.07 220);
+  --attack-map-route-5: oklch(0.4 0.07 250);
+  --attack-map-route-6: oklch(0.54 0.06 275);
+  --attack-map-route-7: oklch(0.48 0.08 205);
+  --attack-map-route-8: oklch(0.62 0.06 255);
   --attack-map-legend-background: oklch(0.995 0.004 250 / 0.92);
   --attack-map-legend-border: oklch(0.86 0.015 250);
   --attack-map-legend-foreground: oklch(0.34 0.03 255);
@@ -270,6 +294,14 @@
   --attack-map-node-label-halo: oklch(0.14 0.01 250 / 0.9);
   --attack-map-node-highlight: oklch(0.8 0.08 250);
   --attack-map-node-highlight-halo: oklch(0.95 0.01 250);
+  --attack-map-route-1: oklch(0.78 0.1 250);
+  --attack-map-route-2: oklch(0.74 0.08 235);
+  --attack-map-route-3: oklch(0.82 0.07 265);
+  --attack-map-route-4: oklch(0.7 0.08 220);
+  --attack-map-route-5: oklch(0.86 0.05 250);
+  --attack-map-route-6: oklch(0.76 0.07 275);
+  --attack-map-route-7: oklch(0.72 0.08 205);
+  --attack-map-route-8: oklch(0.84 0.06 255);
   --attack-map-legend-background: oklch(0.2 0.014 250 / 0.92);
   --attack-map-legend-border: oklch(0.34 0.02 250);
   --attack-map-legend-foreground: oklch(0.88 0.015 250);
@@ -324,6 +356,14 @@
   --attack-map-node-label-halo: oklch(0.96 0.004 72 / 0.92);
   --attack-map-node-highlight: oklch(0.72 0.16 80);
   --attack-map-node-highlight-halo: oklch(0.98 0.01 90);
+  --attack-map-route-1: oklch(0.56 0.12 68);
+  --attack-map-route-2: oklch(0.52 0.08 105);
+  --attack-map-route-3: oklch(0.48 0.08 48);
+  --attack-map-route-4: oklch(0.6 0.1 82);
+  --attack-map-route-5: oklch(0.44 0.07 62);
+  --attack-map-route-6: oklch(0.55 0.07 125);
+  --attack-map-route-7: oklch(0.5 0.09 32);
+  --attack-map-route-8: oklch(0.64 0.08 96);
   --attack-map-legend-background: oklch(0.99 0.003 72 / 0.9);
   --attack-map-legend-border: oklch(0.84 0.01 72);
   --attack-map-legend-foreground: oklch(0.35 0.01 72);
@@ -379,6 +419,14 @@
   --attack-map-node-label-halo: oklch(0.18 0.01 72 / 0.9);
   --attack-map-node-highlight: oklch(0.76 0.14 80);
   --attack-map-node-highlight-halo: oklch(0.97 0.005 90);
+  --attack-map-route-1: oklch(0.76 0.12 68);
+  --attack-map-route-2: oklch(0.7 0.08 105);
+  --attack-map-route-3: oklch(0.72 0.09 48);
+  --attack-map-route-4: oklch(0.82 0.1 82);
+  --attack-map-route-5: oklch(0.66 0.07 62);
+  --attack-map-route-6: oklch(0.74 0.07 125);
+  --attack-map-route-7: oklch(0.7 0.09 32);
+  --attack-map-route-8: oklch(0.84 0.08 96);
   --attack-map-legend-background: oklch(0.24 0.01 72 / 0.9);
   --attack-map-legend-border: oklch(0.35 0.01 72);
   --attack-map-legend-foreground: oklch(0.86 0.01 80);
@@ -427,6 +475,14 @@
   --attack-map-node-label-halo: oklch(0.99 0.004 145 / 0.92);
   --attack-map-node-highlight: oklch(0.55 0.09 150);
   --attack-map-node-highlight-halo: oklch(0.98 0.01 145);
+  --attack-map-route-1: oklch(0.48 0.1 150);
+  --attack-map-route-2: oklch(0.54 0.08 135);
+  --attack-map-route-3: oklch(0.42 0.08 165);
+  --attack-map-route-4: oklch(0.58 0.07 120);
+  --attack-map-route-5: oklch(0.4 0.07 150);
+  --attack-map-route-6: oklch(0.52 0.06 180);
+  --attack-map-route-7: oklch(0.46 0.08 105);
+  --attack-map-route-8: oklch(0.62 0.06 145);
   --attack-map-legend-background: oklch(0.995 0.004 145 / 0.92);
   --attack-map-legend-border: oklch(0.86 0.015 145);
   --attack-map-legend-foreground: oklch(0.34 0.03 150);
@@ -470,6 +526,14 @@
   --attack-map-node-label-halo: oklch(0.14 0.01 150 / 0.9);
   --attack-map-node-highlight: oklch(0.8 0.07 150);
   --attack-map-node-highlight-halo: oklch(0.95 0.01 145);
+  --attack-map-route-1: oklch(0.76 0.09 150);
+  --attack-map-route-2: oklch(0.72 0.08 135);
+  --attack-map-route-3: oklch(0.8 0.07 165);
+  --attack-map-route-4: oklch(0.68 0.08 120);
+  --attack-map-route-5: oklch(0.84 0.05 150);
+  --attack-map-route-6: oklch(0.74 0.07 180);
+  --attack-map-route-7: oklch(0.7 0.08 105);
+  --attack-map-route-8: oklch(0.82 0.06 145);
   --attack-map-legend-background: oklch(0.2 0.014 150 / 0.92);
   --attack-map-legend-border: oklch(0.34 0.02 150);
   --attack-map-legend-foreground: oklch(0.88 0.015 145);
@@ -1145,4 +1209,3 @@
 .swagger-shell .swagger-ui .btn.authorize svg {
   fill: currentColor !important;
 }
-

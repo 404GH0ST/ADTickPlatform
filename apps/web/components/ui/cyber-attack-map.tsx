@@ -2258,12 +2258,12 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 const attackPalette = [
-  'oklch(0.76 0.13 52)',
-  'oklch(0.72 0.1 145)',
-  'oklch(0.74 0.09 225)',
-  'oklch(0.72 0.12 28)',
-  'oklch(0.78 0.1 92)',
-  'oklch(0.7 0.1 178)',
-  'oklch(0.74 0.1 305)',
-  'oklch(0.75 0.1 15)',
+  'var(--attack-map-route-1)',
+  'var(--attack-map-route-2)',
+  'var(--attack-map-route-3)',
+  'var(--attack-map-route-4)',
+  'var(--attack-map-route-5)',
+  'var(--attack-map-route-6)',
+  'var(--attack-map-route-7)',
+  'var(--attack-map-route-8)',
 ];
