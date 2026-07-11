@@ -457,3 +457,16 @@ export type AdminPlatformSettingsInput = {
   flag_format_prefix: string;
   max_team_members: number;
 };
+
+export type AdminMatchAnnouncement = {
+  id: number;
+  body: string;
+  created_by?: string;
+  created_at: string;
+};
+
+export type AdminBulkImportResult = {
+  teams_created: number;
+  players_created: number;
+  errors?: string[];
+};

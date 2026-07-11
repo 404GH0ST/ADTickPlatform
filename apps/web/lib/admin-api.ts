@@ -5,6 +5,7 @@ import type {
   AdminAttackFeedQuery,
   AdminAuditLogPage,
   AdminAuditLogQuery,
+  AdminBulkImportResult,
   AdminChallenge,
   AdminChallengeValidationResult,
   AdminControllerAccessStatus,
@@ -13,6 +14,7 @@ import type {
   AdminDeployment,
   AdminDeploymentJob,
   AdminGameScoreRow,
+  AdminMatchAnnouncement,
   AdminPlatformSettings,
   AdminPlatformSettingsInput,
   AdminScoringAudit,
@@ -32,7 +34,11 @@ import type {
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
 
-import { authenticatedFetch, buildQueryString } from "./api-utils";
+import {
+  authenticatedFetch,
+  buildQueryString,
+  parseApiError,
+} from "./api-utils";
 
 export type CreateTeamInput = {
   name: string;
@@ -822,4 +828,49 @@ export async function reloadAdminFlagFormat() {
       method: "POST",
     },
   );
+}
+
+export async function listAdminAnnouncements() {
+  return adminFetch<AdminMatchAnnouncement[]>("/api/v2/admin/announcements");
+}
+
+export async function createAdminAnnouncement(body: string) {
+  return adminFetch<AdminMatchAnnouncement>("/api/v2/admin/announcements", {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteAdminAnnouncement(announcementID: number) {
+  return adminFetch<{ deleted: boolean }>(
+    `/api/v2/admin/announcements/${announcementID}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function bulkImportAdminTeams(teams: Array<{
+  name: string;
+  contact_email: string;
+  players?: Array<{
+    display_name: string;
+    email: string;
+    password: string;
+    role?: string;
+  }>;
+}>): Promise<{ status: number; body: AdminBulkImportResult }> {
+  const token = await getAdminToken();
+  const response = await fetch(`${adminBaseUrl()}/api/v2/admin/import/teams`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ teams }),
+    cache: "no-store",
+  });
+  if (response.status !== 200 && response.status !== 422) {
+    throw new Error(await parseApiError(response, "/api/v2/admin/import/teams"));
+  }
+  const body = (await response.json()) as AdminBulkImportResult;
+  return { status: response.status, body };
 }

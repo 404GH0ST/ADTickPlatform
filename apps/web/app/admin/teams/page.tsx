@@ -1,4 +1,5 @@
 import { OrganizerDashboard } from '@/components/admin/organizer-dashboard';
+import { BulkImportPanel } from '@/components/admin/bulk-import-panel';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
 import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
 
@@ -14,19 +15,22 @@ export default async function AdminTeamsPage() {
       title="Teams"
       description="Team creation and registry state."
     >
-      <OrganizerDashboard
-        attackPage={dashboard.attackPage}
-        challenges={dashboard.challenges}
-        checkerRunPage={dashboard.checkerRunPage}
-        deployments={dashboard.deployments}
-        gameStatus={dashboard.gameStatus}
-        players={dashboard.players}
-        serviceMetrics={dashboard.serviceMetrics}
-        schedulerEventPage={dashboard.schedulerEventPage}
-        scoreboard={dashboard.scoreboard}
-        teams={dashboard.teams}
-        initialTab="teams"
-      />
+      <div className="grid gap-4">
+        <BulkImportPanel />
+        <OrganizerDashboard
+          attackPage={dashboard.attackPage}
+          challenges={dashboard.challenges}
+          checkerRunPage={dashboard.checkerRunPage}
+          deployments={dashboard.deployments}
+          gameStatus={dashboard.gameStatus}
+          players={dashboard.players}
+          serviceMetrics={dashboard.serviceMetrics}
+          schedulerEventPage={dashboard.schedulerEventPage}
+          scoreboard={dashboard.scoreboard}
+          teams={dashboard.teams}
+          initialTab="teams"
+        />
+      </div>
     </OrganizerShell>
   );
 }
