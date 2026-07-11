@@ -43,7 +43,11 @@ type memoryStore struct {
 	// so every existing construction site stays active-by-default without edits.
 	deactivatedTeams   map[int]bool
 	deactivatedPlayers map[int]bool
-	freeze             scoreboardFreezeWindow
+	// matchStarted is nil (treat as started) or explicitly false for pre-match tests.
+	matchStarted *bool
+	// matchPaused is nil/false unless set for pause-gate tests.
+	matchPaused *bool
+	freeze      scoreboardFreezeWindow
 	challenges         map[int]*adminChallenge
 	teamStates         map[int]map[int]*serviceState
 	instances          map[int]map[int]*serviceInstanceRecord
@@ -84,9 +88,9 @@ func NewMemoryStore(teamID int) Store {
 			4: mustNewAdminPlayerRecord(4, 104, "Team Orchid", "Orchid Captain", "orchid.captain@example.com", "captain", "orchid-secret", now.Add(-69*time.Hour)),
 		},
 		challenges: map[int]*adminChallenge{
-			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
-			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
-			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
+			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
+			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
+			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
 		},
 		teamStates:  make(map[int]map[int]*serviceState),
 		instances:   make(map[int]map[int]*serviceInstanceRecord),
@@ -367,18 +371,31 @@ func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, 
 	}, nil
 }
 
-func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
+func (s *memoryStore) ListChallenges(ctx context.Context) ([]challenge, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !started {
+		return []challenge{}, nil
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	result := make([]challenge, 0, len(s.challenges))
 	for _, item := range s.challenges {
 		if item.Published {
+			unavailable := item.Maintenance || item.PlayFromTick > 0 || paused
+			hasSource := strings.TrimSpace(item.SourceBundlePath) != "" && !paused
 			result = append(result, challenge{
 				ID:                item.ID,
 				Name:              item.Name,
-				HasSourceDownload: strings.TrimSpace(item.SourceBundlePath) != "",
-				Maintenance:       item.Maintenance,
+				HasSourceDownload: hasSource,
+				Maintenance:       unavailable,
 			})
 		}
 	}
@@ -386,15 +403,38 @@ func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
 	return result, nil
 }
 
-func (s *memoryStore) ListPublicServices(_ context.Context) (map[string]map[string][]string, error) {
+func (s *memoryStore) ListPublicServices(ctx context.Context) (map[string]map[string][]string, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !started {
+		return map[string]map[string][]string{}, nil
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if paused {
+		return map[string]map[string][]string{}, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	services := make(map[string]map[string][]string)
 	for teamID, challengeStates := range s.teamStates {
+		if s.deactivatedTeams[teamID] {
+			continue
+		}
+		if team, ok := s.teams[teamID]; ok && team != nil && team.PlayFromTick > 0 {
+			continue
+		}
 		for challengeID, state := range challengeStates {
 			challengeMeta := s.challenges[challengeID]
 			if challengeMeta == nil || !challengeMeta.Published {
+				continue
+			}
+			if challengeMeta.Maintenance || challengeMeta.PlayFromTick > 0 {
 				continue
 			}
 			challengeKey := fmt.Sprintf("%d", challengeID)
@@ -467,7 +507,15 @@ func (s *memoryStore) ListAttackFeed(_ context.Context) ([]attackEvent, error) {
 	return append([]attackEvent(nil), s.attackFeed...), nil
 }
 
-func (s *memoryStore) ListTeamServices(_ context.Context, teamID int) ([]serviceState, error) {
+func (s *memoryStore) ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -483,7 +531,30 @@ func (s *memoryStore) ListTeamServices(_ context.Context, teamID int) ([]service
 			continue
 		}
 		cloned := *cloneServiceState(state)
-		cloned.Maintenance = challengeMeta.Maintenance || challengeMeta.PlayFromTick > 0
+		switch {
+		case !started:
+			cloned.Maintenance = true
+			cloned.LockReason = "match_not_started"
+			cloned.Unlocked = false
+			cloned.Endpoint = ""
+			cloned.SSHHint = "match has not started"
+			cloned.LastEvent = "waiting for match start"
+			cloned.ResetCooldown = "match not started"
+		case paused:
+			cloned.Maintenance = true
+			cloned.LockReason = "match_paused"
+			cloned.Unlocked = false
+			cloned.Endpoint = ""
+			cloned.SSHHint = "match is paused"
+			cloned.LastEvent = "contest temporarily paused"
+			cloned.ResetCooldown = "match paused"
+		case challengeMeta.Maintenance:
+			cloned.Maintenance = true
+			cloned.LockReason = "maintenance"
+		case challengeMeta.PlayFromTick > 0:
+			cloned.Maintenance = true
+			cloned.LockReason = "deferred"
+		}
 		states = append(states, cloned)
 	}
 	slices.SortFunc(states, func(a, b serviceState) int { return a.ChallengeID - b.ChallengeID })
@@ -494,12 +565,32 @@ func (s *memoryStore) SubmitFlags(_ context.Context, teamID int, flags []string)
 	return nil, ErrSubmissionUnavailable
 }
 
-func (s *memoryStore) ValidateServiceAction(_ context.Context, teamID, challengeID int) error {
+func (s *memoryStore) ValidateServiceAction(ctx context.Context, teamID, challengeID int) error {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return ErrMatchNotStarted
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return err
+	}
+	if paused {
+		return ErrMatchPaused
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, err := s.lookupTeamStateLocked(teamID, challengeID); err != nil {
 		return err
+	}
+	if s.deactivatedTeams[teamID] {
+		return ErrTeamNotFound
+	}
+	if team, ok := s.teams[teamID]; ok && team != nil && team.PlayFromTick > 0 {
+		return ErrChallengeDeferred
 	}
 	challenge, ok := s.challenges[challengeID]
 	if !ok || !challenge.Published {
@@ -525,7 +616,10 @@ func (s *memoryStore) ValidateServiceAction(_ context.Context, teamID, challenge
 	return nil
 }
 
-func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) (unlockData, error) {
+func (s *memoryStore) UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return unlockData{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -534,7 +628,13 @@ func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) 
 		return unlockData{}, err
 	}
 	challenge, ok := s.challenges[challengeID]
-	if !ok || !challenge.Published {
+	if !ok || !challenge.Published || challenge.Maintenance || challenge.PlayFromTick > 0 {
+		if ok && challenge.Maintenance {
+			return unlockData{}, ErrChallengeMaintenance
+		}
+		if ok && challenge.PlayFromTick > 0 {
+			return unlockData{}, ErrChallengeDeferred
+		}
 		return unlockData{}, ErrChallengeNotFound
 	}
 	instance, ok := s.instances[teamID][challengeID]
@@ -552,7 +652,10 @@ func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) 
 	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
 }
 
-func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
+func (s *memoryStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return sshSessionData{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -596,7 +699,10 @@ func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, chal
 	return nil
 }
 
-func (s *memoryStore) PrepareFactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
+func (s *memoryStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return resetData{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -661,7 +767,10 @@ func (s *memoryStore) MarkFactoryResetFailure(_ context.Context, teamID, challen
 	return nil
 }
 
-func (s *memoryStore) RestartService(_ context.Context, teamID, challengeID int) (resetData, error) {
+func (s *memoryStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return resetData{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1025,7 +1134,35 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 }
 
 func (s *memoryStore) IsMatchPaused(_ context.Context) (bool, error) {
-	return false, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.matchPaused == nil {
+		return false, nil
+	}
+	return *s.matchPaused, nil
+}
+
+// IsMatchStarted defaults true in memory so unit tests keep a live catalog; set
+// matchStarted=false via setMatchStartedForTest to exercise pre-match gating.
+func (s *memoryStore) IsMatchStarted(_ context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.matchStarted == nil {
+		return true, nil
+	}
+	return *s.matchStarted, nil
+}
+
+func (s *memoryStore) setMatchStartedForTest(started bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.matchStarted = &started
+}
+
+func (s *memoryStore) setMatchPausedForTest(paused bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.matchPaused = &paused
 }
 
 func (s *memoryStore) ListAdminChallenges(_ context.Context) ([]adminChallenge, error) {
@@ -1108,6 +1245,7 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
 		Published:          false,
+		UnlockProofEpoch:   1,
 		TotalTeams:         len(s.teams),
 		RuntimeStatus:      "draft",
 		CreatedAt:          now.UTC().Format(time.RFC3339),
@@ -1385,20 +1523,7 @@ func (s *memoryStore) ListControllerRuntimeTasks(_ context.Context) ([]Controlle
 			if instance.RuntimeStatus != "queued" {
 				continue
 			}
-			tasks = append(tasks, ControllerRuntimeTask{
-				DeploymentJobID: instance.DeploymentJobID,
-				TeamID:          teamID,
-				ChallengeID:     challengeID,
-				ChallengeName:   instance.ChallengeName,
-				RuntimeKind:     instance.RuntimeKind,
-				ContainerName:   instance.ContainerName,
-				StateVolume:     instance.StateVolume,
-				BaselineImage:   instance.BaselineImage,
-				CheckerToken:    instance.CheckerToken,
-				Endpoint:        instance.Endpoint,
-				SSHHost:         instance.SSHHost,
-				ServicePort:     instance.ServicePort,
-			})
+			tasks = append(tasks, s.controllerRuntimeTaskLocked(teamID, challengeID, instance))
 		}
 	}
 	slices.SortFunc(tasks, func(a, b ControllerRuntimeTask) int {
@@ -1426,20 +1551,29 @@ func (s *memoryStore) GetControllerRuntimeTask(_ context.Context, teamID, challe
 		return ControllerRuntimeTask{}, ErrChallengeNotFound
 	}
 
+	return s.controllerRuntimeTaskLocked(teamID, challengeID, instance), nil
+}
+
+func (s *memoryStore) controllerRuntimeTaskLocked(teamID, challengeID int, instance *serviceInstanceRecord) ControllerRuntimeTask {
+	epoch := 1
+	if challenge, ok := s.challenges[challengeID]; ok && challenge != nil && challenge.UnlockProofEpoch > 0 {
+		epoch = challenge.UnlockProofEpoch
+	}
 	return ControllerRuntimeTask{
-		DeploymentJobID: instance.DeploymentJobID,
-		TeamID:          teamID,
-		ChallengeID:     challengeID,
-		ChallengeName:   instance.ChallengeName,
-		RuntimeKind:     instance.RuntimeKind,
-		ContainerName:   instance.ContainerName,
-		StateVolume:     instance.StateVolume,
-		BaselineImage:   instance.BaselineImage,
-		CheckerToken:    instance.CheckerToken,
-		Endpoint:        instance.Endpoint,
-		SSHHost:         instance.SSHHost,
-		ServicePort:     instance.ServicePort,
-	}, nil
+		DeploymentJobID:  instance.DeploymentJobID,
+		TeamID:           teamID,
+		ChallengeID:      challengeID,
+		ChallengeName:    instance.ChallengeName,
+		RuntimeKind:      instance.RuntimeKind,
+		ContainerName:    instance.ContainerName,
+		StateVolume:      instance.StateVolume,
+		BaselineImage:    instance.BaselineImage,
+		CheckerToken:     instance.CheckerToken,
+		Endpoint:         instance.Endpoint,
+		SSHHost:          instance.SSHHost,
+		ServicePort:      instance.ServicePort,
+		UnlockProofEpoch: epoch,
+	}
 }
 
 func (s *memoryStore) ListControllerServiceAccessPolicies(_ context.Context) ([]ControllerServiceAccessPolicy, error) {
@@ -1480,26 +1614,50 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 	allowedPeers := make([]string, 0)
 	serviceIP, servicePort := ParseEndpoint(state.Endpoint)
 
+	networkClosed := s.deactivatedTeams[teamID]
+	if s.matchStarted != nil && !*s.matchStarted {
+		networkClosed = true
+	}
+	if s.matchPaused != nil && *s.matchPaused {
+		networkClosed = true
+	}
+	if team, ok := s.teams[teamID]; ok && team != nil && team.PlayFromTick > 0 {
+		networkClosed = true
+	}
+	egressEnabled := true
+	if challenge, ok := s.challenges[challengeID]; ok && challenge != nil {
+		egressEnabled = challenge.EgressEnabled
+		// Memory store treats any play_from_tick > 0 as still deferred.
+		if challenge.Maintenance || challenge.PlayFromTick > 0 {
+			networkClosed = true
+		}
+	}
+
 	for _, player := range s.players {
 		if strings.EqualFold(strings.TrimSpace(player.WireGuard.Status), "revoked") {
 			continue
 		}
-		// Allow team members only if unlocked
-		if player.Player.TeamID == teamID && state.Unlocked {
+		// Organizers keep WireGuard access while closed (maintenance / pre-match /
+		// deferred) so admins can probe warm redeploys.
+		if player.Player.Role == "organizer" {
 			allowedPeers = append(allowedPeers, player.WireGuard.Address)
 			continue
 		}
-		// Always allow organizers
-		if player.Player.Role == "organizer" {
+		if networkClosed {
+			continue
+		}
+		// Team members only when open and unlocked (SSH allowlist).
+		if player.Player.TeamID == teamID && state.Unlocked {
 			allowedPeers = append(allowedPeers, player.WireGuard.Address)
 		}
 	}
 	slices.Sort(allowedPeers)
 	allowedPeers = slices.Compact(allowedPeers)
 
-	egressEnabled := true
-	if challenge, ok := s.challenges[challengeID]; ok && challenge != nil {
-		egressEnabled = challenge.EgressEnabled
+	sshUnlocked := state.Unlocked && !networkClosed
+	if networkClosed && len(allowedPeers) > 0 {
+		// Organizer allowlist only: enable SSH rule emission for admin peers.
+		sshUnlocked = true
 	}
 
 	return ControllerServiceAccessPolicy{
@@ -1510,9 +1668,10 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 		ServiceIP:            serviceIP,
 		ServicePort:          servicePort,
 		SSHPort:              22,
-		SSHUnlocked:          state.Unlocked,
+		SSHUnlocked:          sshUnlocked,
 		AllowedPeerAddresses: allowedPeers,
 		EgressEnabled:        egressEnabled,
+		NetworkClosed:        networkClosed,
 	}
 }
 
@@ -1698,9 +1857,13 @@ func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, 
 		delete(s.deactivatedTeams, teamID)
 		clone.Active = true
 		clone.DeactivatedAt = ""
+		// Memory has no tick clock; leave play_from_tick unset (immediate open).
+		// Postgres sets play_from_tick = current_tick + 1 when ticks exist.
+		clone.PlayFromTick = 0
 	} else {
 		s.deactivatedTeams[teamID] = true
 		clone.Active = false
+		clone.PlayFromTick = 0
 		// Drop the team off the in-memory leaderboard immediately.
 		filtered := s.scoreboard[:0]
 		for _, row := range s.scoreboard {
@@ -1710,6 +1873,7 @@ func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, 
 		}
 		s.scoreboard = filtered
 	}
+	*team = clone
 	clone.PlayerCount = s.playerCountForTeamLocked(teamID)
 	clone.DeployedChallenges = len(s.teamStates[teamID])
 	return clone, nil
@@ -1732,6 +1896,23 @@ func (s *memoryStore) RequeueTeamServices(_ context.Context, teamID int) error {
 	return nil
 }
 
+func (s *memoryStore) ChallengePlayBlocked(ctx context.Context, challengeID int) (bool, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !started {
+		return true, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok || challenge == nil || !challenge.Published {
+		return false, ErrChallengeNotFound
+	}
+	return challenge.Maintenance || challenge.PlayFromTick > 0, nil
+}
+
 func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1744,12 +1925,16 @@ func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int
 	if maintenance {
 		clone.MaintenanceAt = now.UTC().Format(time.RFC3339)
 		clone.PlayFromTick = 0
+		if clone.UnlockProofEpoch < 1 {
+			clone.UnlockProofEpoch = 1
+		}
+		clone.UnlockProofEpoch++
 		for teamID, challengeStates := range s.teamStates {
 			if state, ok := challengeStates[challengeID]; ok && state != nil {
 				state.Status = "degraded"
 				state.Checker = "pending"
 				state.Unlocked = false
-				state.LastEvent = "challenge under organizer maintenance"
+				state.LastEvent = "challenge under organizer maintenance; unlock proofs rotated"
 				state.ResetCooldown = "maintenance"
 			}
 			if instances, ok := s.instances[teamID]; ok {
@@ -1766,6 +1951,47 @@ func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int
 		clone.PlayFromTick = 0
 	}
 	s.challenges[challengeID] = &clone
+	clone.TotalTeams = len(s.teams)
+	clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challengeID)
+	clone.ReadyTeams = s.readyTeamsForChallengeLocked(challengeID)
+	clone.QueuedTeams = s.queuedTeamsForChallengeLocked(challengeID)
+	clone.RuntimeStatus = challengeRuntimeStatus(clone.Published, clone.TotalTeams, clone.ReadyTeams, clone.QueuedTeams)
+	return clone, nil
+}
+
+func (s *memoryStore) GetChallengeUnlockProofEpoch(_ context.Context, challengeID int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok || challenge == nil {
+		return 0, ErrChallengeNotFound
+	}
+	if challenge.UnlockProofEpoch < 1 {
+		return 1, nil
+	}
+	return challenge.UnlockProofEpoch, nil
+}
+
+func (s *memoryStore) RotateChallengeUnlockProof(_ context.Context, challengeID int, now time.Time) (adminChallenge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok || challenge == nil {
+		return adminChallenge{}, ErrChallengeNotFound
+	}
+	clone := *challenge
+	if clone.UnlockProofEpoch < 1 {
+		clone.UnlockProofEpoch = 1
+	}
+	clone.UnlockProofEpoch++
+	s.challenges[challengeID] = &clone
+	for _, challengeStates := range s.teamStates {
+		if state, ok := challengeStates[challengeID]; ok && state != nil {
+			state.Unlocked = false
+			state.LastEvent = "unlock proofs rotated by organizer"
+		}
+	}
+	_ = now
 	clone.TotalTeams = len(s.teams)
 	clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challengeID)
 	clone.ReadyTeams = s.readyTeamsForChallengeLocked(challengeID)

@@ -45,6 +45,12 @@ The platform injects:
 - `AD_PLATFORM_UNLOCK_PROOF`
 - `PORT`
 
+Unlock proofs are deterministic per `(team, challenge, unlock_proof_epoch)`.
+Putting a challenge under **maintenance** (or calling **rotate unlock
+proof**) bumps the epoch so previously stolen proofs stop verifying after
+instances are redeployed with the new env value. Teams must re-exploit the
+fixed image to recover the new proof.
+
 Recommended service-image behavior:
 
 - bind the vulnerable service to `AD_PLATFORM_SERVICE_PORT` or `PORT`

@@ -882,6 +882,7 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 		  AND c.maintenance = FALSE
 		  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 		  AND t.active = TRUE
+		  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 		  AND (si.runtime_status IS NULL OR si.runtime_status = 'ready')
 		ORDER BY t.id, c.id
 	`)

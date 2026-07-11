@@ -334,8 +334,21 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 }
 
 func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error) {
+	// Pre-match: keep the challenge catalog dark until the match leaves not_started.
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !started {
+		return []challenge{}, nil
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, COALESCE(source_bundle_path, '') <> '', maintenance
+		SELECT id, name, COALESCE(source_bundle_path, '') <> '',
+		       (maintenance OR (play_from_tick IS NOT NULL AND play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS unavailable
 		FROM challenges
 		WHERE published = TRUE
 		ORDER BY id
@@ -351,17 +364,43 @@ func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error)
 		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload, &item.Maintenance); err != nil {
 			return nil, err
 		}
+		if paused {
+			// Pause freezes play: no source download or attack actions.
+			item.Maintenance = true
+			item.HasSourceDownload = false
+		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
 }
 
 func (s *postgresStore) ListPublicServices(ctx context.Context) (map[string]map[string][]string, error) {
+	// Hide endpoints pre-match, while paused, and while challenge/team is under
+	// maintenance or deferred (play_from_tick).
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !started {
+		return map[string]map[string][]string{}, nil
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if paused {
+		return map[string]map[string][]string{}, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tss.challenge_id, tss.team_id, tss.endpoint
 		FROM team_service_states tss
 		JOIN challenges c ON c.id = tss.challenge_id
+		JOIN teams t ON t.id = tss.team_id
 		WHERE c.published = TRUE
+		  AND c.maintenance = FALSE
+		  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+		  AND t.active = TRUE
+		  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 		ORDER BY tss.challenge_id, tss.team_id, tss.endpoint
 	`)
 	if err != nil {
@@ -521,9 +560,18 @@ func (s *postgresStore) ListAttackFeed(ctx context.Context) ([]attackEvent, erro
 }
 
 func (s *postgresStore) ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return nil, err
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tss.challenge_id, tss.team_id, c.name, tss.endpoint, tss.status, tss.checker, tss.unlocked, tss.ssh_hint, tss.last_event, tss.reset_cooldown,
-		       (c.maintenance OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS unavailable
+		       c.maintenance,
+		       (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0)) AS deferred
 		FROM team_service_states tss
 		JOIN challenges c ON c.id = tss.challenge_id
 		WHERE tss.team_id = $1 AND c.published = TRUE
@@ -537,8 +585,36 @@ func (s *postgresStore) ListTeamServices(ctx context.Context, teamID int) ([]ser
 	result := make([]serviceState, 0)
 	for rows.Next() {
 		var state serviceState
-		if err := rows.Scan(&state.ChallengeID, &state.TeamID, &state.Name, &state.Endpoint, &state.Status, &state.Checker, &state.Unlocked, &state.SSHHint, &state.LastEvent, &state.ResetCooldown, &state.Maintenance); err != nil {
+		var challengeMaintenance bool
+		var deferred bool
+		if err := rows.Scan(&state.ChallengeID, &state.TeamID, &state.Name, &state.Endpoint, &state.Status, &state.Checker, &state.Unlocked, &state.SSHHint, &state.LastEvent, &state.ResetCooldown, &challengeMaintenance, &deferred); err != nil {
 			return nil, err
+		}
+		// Global match gates first, then per-challenge gates. LockReason drives UI
+		// labels so pause is not mislabeled as "Under maintenance".
+		switch {
+		case !started:
+			state.Maintenance = true
+			state.LockReason = "match_not_started"
+			state.Unlocked = false
+			state.Endpoint = ""
+			state.SSHHint = "match has not started"
+			state.LastEvent = "waiting for match start"
+			state.ResetCooldown = "match not started"
+		case paused:
+			state.Maintenance = true
+			state.LockReason = "match_paused"
+			state.Unlocked = false
+			state.Endpoint = ""
+			state.SSHHint = "match is paused"
+			state.LastEvent = "contest temporarily paused"
+			state.ResetCooldown = "match paused"
+		case challengeMaintenance:
+			state.Maintenance = true
+			state.LockReason = "maintenance"
+		case deferred:
+			state.Maintenance = true
+			state.LockReason = "deferred"
 		}
 		result = append(result, state)
 	}
@@ -550,17 +626,34 @@ func (s *postgresStore) SubmitFlags(ctx context.Context, teamID int, flags []str
 }
 
 func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, challengeID int) error {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return ErrMatchNotStarted
+	}
+	paused, err := s.IsMatchPaused(ctx)
+	if err != nil {
+		return err
+	}
+	if paused {
+		return ErrMatchPaused
+	}
 	var published bool
 	var maintenance bool
 	var playFromTick sql.NullInt64
 	var runtimeStatus sql.NullString
+	var teamActive bool
+	var teamPlayFromTick sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT c.published, c.maintenance, c.play_from_tick, si.runtime_status
+		SELECT c.published, c.maintenance, c.play_from_tick, si.runtime_status, t.active, t.play_from_tick
 		FROM team_service_states tss
 		JOIN challenges c ON c.id = tss.challenge_id
+		JOIN teams t ON t.id = tss.team_id
 		LEFT JOIN service_instances si ON si.team_id = tss.team_id AND si.challenge_id = tss.challenge_id
 		WHERE tss.team_id = $1 AND tss.challenge_id = $2
-	`, teamID, challengeID).Scan(&published, &maintenance, &playFromTick, &runtimeStatus); err != nil {
+	`, teamID, challengeID).Scan(&published, &maintenance, &playFromTick, &runtimeStatus, &teamActive, &teamPlayFromTick); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrChallengeNotFound
 		}
@@ -569,17 +662,23 @@ func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, chall
 	if !published {
 		return ErrChallengeNotFound
 	}
+	if !teamActive {
+		return ErrTeamNotFound
+	}
 	if maintenance {
 		return ErrChallengeMaintenance
 	}
-	if playFromTick.Valid && playFromTick.Int64 > 0 {
-		var currentTick int
+	var currentTick int
+	if (playFromTick.Valid && playFromTick.Int64 > 0) || (teamPlayFromTick.Valid && teamPlayFromTick.Int64 > 0) {
 		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM game_ticks`).Scan(&currentTick); err != nil {
 			return err
 		}
-		if int(playFromTick.Int64) > currentTick {
-			return ErrChallengeDeferred
-		}
+	}
+	if playFromTick.Valid && playFromTick.Int64 > 0 && int(playFromTick.Int64) > currentTick {
+		return ErrChallengeDeferred
+	}
+	if teamPlayFromTick.Valid && teamPlayFromTick.Int64 > 0 && int(teamPlayFromTick.Int64) > currentTick {
+		return ErrChallengeDeferred
 	}
 	if !runtimeStatus.Valid {
 		return ErrChallengeNotFound
@@ -591,6 +690,11 @@ func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, chall
 }
 
 func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error) {
+	// Defense in depth: handlers call ValidateServiceAction; store refuses too so
+	// direct/internal callers cannot unlock under maintenance or deferred resume.
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return unlockData{}, err
+	}
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
 		SET unlocked = TRUE,
@@ -602,8 +706,13 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 			SELECT 1
 			FROM challenges c
 			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			JOIN teams t ON t.id = team_service_states.team_id
 			WHERE c.id = team_service_states.challenge_id
 			  AND c.published = TRUE
+			  AND c.maintenance = FALSE
+			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			  AND t.active = TRUE
+			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 			  AND si.runtime_status = 'ready'
 		  )
 	`, teamID, challengeID)
@@ -617,6 +726,9 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 }
 
 func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return sshSessionData{}, err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return sshSessionData{}, err
@@ -633,8 +745,13 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 			SELECT 1
 			FROM challenges c
 			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			JOIN teams t ON t.id = team_service_states.team_id
 			WHERE c.id = team_service_states.challenge_id
 			  AND c.published = TRUE
+			  AND c.maintenance = FALSE
+			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			  AND t.active = TRUE
+			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 			  AND si.runtime_status = 'ready'
 		  )
 		FOR UPDATE
@@ -682,21 +799,31 @@ func (s *postgresStore) MarkSSHSessionApplyFailure(ctx context.Context, teamID, 
 }
 
 func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return resetData{}, err
+	}
 	checkerToken, err := newCheckerToken()
 	if err != nil {
 		return resetData{}, err
 	}
 	var unlocked bool
+	// PostgreSQL UPDATE … FROM cannot reference the target alias (si) inside a
+	// JOIN … ON of from_item; use a comma FROM list + WHERE instead.
 	if err := s.db.QueryRowContext(ctx, `
 		WITH updated_instance AS (
 			UPDATE service_instances si
 			SET checker_token = $3,
 			    updated_at = NOW()
-			FROM challenges c
+			FROM challenges c, teams t
 			WHERE si.team_id = $1
 			  AND si.challenge_id = $2
 			  AND c.id = si.challenge_id
+			  AND t.id = si.team_id
 			  AND c.published = TRUE
+			  AND c.maintenance = FALSE
+			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			  AND t.active = TRUE
+			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 			  AND si.runtime_status = 'ready'
 			RETURNING si.team_id, si.challenge_id
 		)
@@ -761,6 +888,9 @@ func (s *postgresStore) MarkFactoryResetFailure(ctx context.Context, teamID, cha
 }
 
 func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return resetData{}, err
+	}
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
 		SET status = 'warming',
@@ -772,8 +902,13 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 			SELECT 1
 			FROM challenges c
 			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
+			JOIN teams t ON t.id = team_service_states.team_id
 			WHERE c.id = team_service_states.challenge_id
 			  AND c.published = TRUE
+			  AND c.maintenance = FALSE
+			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			  AND t.active = TRUE
+			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 			  AND si.runtime_status = 'ready'
 		  )
 	`, teamID, challengeID)
@@ -788,11 +923,11 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 
 func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at
+		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at, t.play_from_tick
 		FROM teams t
 		LEFT JOIN players p ON p.team_id = t.id
 		LEFT JOIN team_service_states tss ON tss.team_id = t.id
-		GROUP BY t.id, t.name, t.email, t.join_key, t.active, t.deactivated_at
+		GROUP BY t.id, t.name, t.email, t.join_key, t.active, t.deactivated_at, t.play_from_tick
 		ORDER BY t.id
 	`)
 	if err != nil {
@@ -804,11 +939,15 @@ func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 	for rows.Next() {
 		var team adminTeam
 		var deactivatedAt sql.NullTime
-		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt); err != nil {
+		var playFromTick sql.NullInt64
+		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt, &playFromTick); err != nil {
 			return nil, err
 		}
 		if deactivatedAt.Valid {
 			team.DeactivatedAt = deactivatedAt.Time.UTC().Format(time.RFC3339)
+		}
+		if playFromTick.Valid {
+			team.PlayFromTick = int(playFromTick.Int64)
 		}
 		result = append(result, team)
 	}
@@ -1327,6 +1466,20 @@ func (s *postgresStore) IsMatchPaused(ctx context.Context) (bool, error) {
 	return state == "paused", nil
 }
 
+func (s *postgresStore) IsMatchStarted(ctx context.Context) (bool, error) {
+	var state string
+	err := s.db.QueryRowContext(ctx, `SELECT state FROM game_match_state LIMIT 1`).Scan(&state)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No row yet → treat as pre-match (hide challenges, close network).
+			return false, nil
+		}
+		return false, err
+	}
+	state = strings.TrimSpace(state)
+	return state != "" && state != "not_started", nil
+}
+
 func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallenge, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id,
@@ -1341,6 +1494,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       c.maintenance,
 		       c.maintenance_at,
 		       c.play_from_tick,
+		       COALESCE(c.unlock_proof_epoch, 1),
 		       c.created_at,
 		       c.last_validation_status,
 		       c.last_validation_baseline_ssh_contract_ok,
@@ -1354,7 +1508,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.unlock_proof_epoch, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1387,6 +1541,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.Maintenance,
 			&maintenanceAt,
 			&playFromTick,
+			&challenge.UnlockProofEpoch,
 			&createdAt,
 			&validationStatus,
 			&validationBaselineOK,
@@ -1400,6 +1555,9 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.TotalTeams,
 		); err != nil {
 			return nil, err
+		}
+		if challenge.UnlockProofEpoch < 1 {
+			challenge.UnlockProofEpoch = 1
 		}
 		challenge.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		if maintenanceAt.Valid {
@@ -1546,11 +1704,35 @@ func (s *postgresStore) SetTeamActive(ctx context.Context, teamID int, active bo
 	defer tx.Rollback()
 
 	if active {
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET active = TRUE, deactivated_at = NULL WHERE id = $1`, teamID); err != nil {
-			return adminTeam{}, fmt.Errorf("reactivate team: %w", err)
+		// Resume mid-match: defer network/checker until next tick so warm
+		// redeploy cannot leak placeholder flags before the team re-enters play.
+		var currentTick int
+		if qErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM game_ticks`).Scan(&currentTick); qErr != nil {
+			return adminTeam{}, fmt.Errorf("lookup current tick for team reactivate: %w", qErr)
+		}
+		if currentTick > 0 {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE teams
+				SET active = TRUE, deactivated_at = NULL, play_from_tick = $2
+				WHERE id = $1
+			`, teamID, currentTick+1); err != nil {
+				return adminTeam{}, fmt.Errorf("reactivate team: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE teams
+				SET active = TRUE, deactivated_at = NULL, play_from_tick = NULL
+				WHERE id = $1
+			`, teamID); err != nil {
+				return adminTeam{}, fmt.Errorf("reactivate team: %w", err)
+			}
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET active = FALSE, deactivated_at = $2 WHERE id = $1`, teamID, now.UTC()); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE teams
+			SET active = FALSE, deactivated_at = $2, play_from_tick = NULL
+			WHERE id = $1
+		`, teamID, now.UTC()); err != nil {
 			return adminTeam{}, fmt.Errorf("deactivate team: %w", err)
 		}
 		// Drop the team off the leaderboard immediately. buildScoreboard upserts
@@ -1611,14 +1793,42 @@ func (s *postgresStore) RequeueTeamServices(ctx context.Context, teamID int) err
 	return tx.Commit()
 }
 
+func (s *postgresStore) ChallengePlayBlocked(ctx context.Context, challengeID int) (bool, error) {
+	started, err := s.IsMatchStarted(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !started {
+		return true, nil
+	}
+	var blocked bool
+	err = s.db.QueryRowContext(ctx, `
+		SELECT c.maintenance
+		    OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+		FROM challenges c
+		WHERE c.id = $1 AND c.published = TRUE
+	`, challengeID).Scan(&blocked)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrChallengeNotFound
+		}
+		return false, err
+	}
+	return blocked, nil
+}
+
 func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error) {
 	var result sql.Result
 	var err error
 	if maintenance {
-		// Entering maintenance: block immediately and clear any deferred resume gate.
+		// Entering maintenance: block immediately, clear deferred resume, and bump
+		// unlock_proof_epoch so stolen proofs stop verifying after redeploy.
 		result, err = s.db.ExecContext(ctx, `
 			UPDATE challenges
-			SET maintenance = TRUE, maintenance_at = $2, play_from_tick = NULL
+			SET maintenance = TRUE,
+			    maintenance_at = $2,
+			    play_from_tick = NULL,
+			    unlock_proof_epoch = COALESCE(unlock_proof_epoch, 1) + 1
 			WHERE id = $1
 		`, challengeID, now.UTC())
 	} else {
@@ -1656,7 +1866,7 @@ func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID
 			SET status = 'degraded',
 			    checker = 'pending',
 			    unlocked = FALSE,
-			    last_event = 'challenge under organizer maintenance',
+			    last_event = 'challenge under organizer maintenance; unlock proofs rotated',
 			    reset_cooldown = 'maintenance'
 			WHERE challenge_id = $1
 		`, challengeID); err != nil {
@@ -1676,6 +1886,58 @@ func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID
 		}
 	}
 
+	challenges, err := s.ListAdminChallenges(ctx)
+	if err != nil {
+		return adminChallenge{}, err
+	}
+	for _, challenge := range challenges {
+		if challenge.ID == challengeID {
+			return challenge, nil
+		}
+	}
+	return adminChallenge{}, ErrChallengeNotFound
+}
+
+func (s *postgresStore) GetChallengeUnlockProofEpoch(ctx context.Context, challengeID int) (int, error) {
+	var epoch int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(unlock_proof_epoch, 1)
+		FROM challenges
+		WHERE id = $1
+	`, challengeID).Scan(&epoch); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrChallengeNotFound
+		}
+		return 0, err
+	}
+	if epoch < 1 {
+		return 1, nil
+	}
+	return epoch, nil
+}
+
+func (s *postgresStore) RotateChallengeUnlockProof(ctx context.Context, challengeID int, now time.Time) (adminChallenge, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE challenges
+		SET unlock_proof_epoch = COALESCE(unlock_proof_epoch, 1) + 1
+		WHERE id = $1
+	`, challengeID)
+	if err != nil {
+		return adminChallenge{}, fmt.Errorf("rotate unlock proof epoch: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return adminChallenge{}, ErrChallengeNotFound
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET unlocked = FALSE,
+		    last_event = 'unlock proofs rotated by organizer',
+		    reset_cooldown = CASE WHEN reset_cooldown = 'maintenance' THEN reset_cooldown ELSE 'ready' END
+		WHERE challenge_id = $1
+	`, challengeID); err != nil {
+		return adminChallenge{}, fmt.Errorf("clear unlocks after proof rotate: %w", err)
+	}
+	_ = now
 	challenges, err := s.ListAdminChallenges(ctx)
 	if err != nil {
 		return adminChallenge{}, err
@@ -2273,7 +2535,7 @@ func (s *postgresStore) SetActiveFlagFormat(ctx context.Context, format string, 
 
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, COALESCE(c.unlock_proof_epoch, 1)
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		LEFT JOIN deployment_jobs dj ON dj.id = si.deployment_job_id
@@ -2301,8 +2563,12 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 			&task.Endpoint,
 			&task.SSHHost,
 			&task.ServicePort,
+			&task.UnlockProofEpoch,
 		); err != nil {
 			return nil, err
+		}
+		if task.UnlockProofEpoch < 1 {
+			task.UnlockProofEpoch = 1
 		}
 		result = append(result, task)
 	}
@@ -2312,7 +2578,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (ControllerRuntimeTask, error) {
 	var task ControllerRuntimeTask
 	if err := s.db.QueryRowContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, COALESCE(c.unlock_proof_epoch, 1)
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		WHERE si.team_id = $1 AND si.challenge_id = $2
@@ -2329,11 +2595,15 @@ func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, ch
 		&task.Endpoint,
 		&task.SSHHost,
 		&task.ServicePort,
+		&task.UnlockProofEpoch,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ControllerRuntimeTask{}, ErrChallengeNotFound
 		}
 		return ControllerRuntimeTask{}, err
+	}
+	if task.UnlockProofEpoch < 1 {
+		task.UnlockProofEpoch = 1
 	}
 	return task, nil
 }
@@ -2353,9 +2623,31 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 				SELECT string_agg(wp.address, ',')
 				FROM players p
 				JOIN wireguard_peers wp ON wp.player_id = p.id
-				WHERE ((p.team_id = tss.team_id AND tss.unlocked = TRUE) OR p.role = 'organizer')
-				  AND wp.status <> 'revoked'
-			), '')
+				WHERE wp.status <> 'revoked'
+				  AND (
+					-- Organizers keep WireGuard access while closed (maintenance /
+					-- pre-match / deferred) so admins can probe warm redeploys.
+					p.role = 'organizer'
+					OR (
+						p.team_id = tss.team_id
+						AND tss.unlocked = TRUE
+						AND NOT (
+							c.maintenance
+							OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+							OR t.active = FALSE
+							OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+							OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+						)
+					)
+				  )
+			), ''),
+			(
+				c.maintenance
+				OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+				OR t.active = FALSE
+				OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+			) AS network_closed
 		FROM team_service_states tss
 		JOIN teams t ON t.id = tss.team_id
 		JOIN challenges c ON c.id = tss.challenge_id
@@ -2381,12 +2673,18 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 			&policy.SSHUnlocked,
 			&policy.EgressEnabled,
 			&allowedPeersCSV,
+			&policy.NetworkClosed,
 		); err != nil {
 			return nil, err
 		}
 		policy.ServicePort, _ = strconv.Atoi(servicePortText)
 		policy.SSHPort = 22
 		policy.AllowedPeerAddresses = splitCSVList(allowedPeersCSV)
+		if policy.NetworkClosed {
+			// Participants are excluded by SQL; remaining peers are organizers.
+			// Mark SSH unlocked so access apply emits the organizer allowlist.
+			policy.SSHUnlocked = len(policy.AllowedPeerAddresses) > 0
+		}
 		result = append(result, policy)
 	}
 	return result, rows.Err()
@@ -2410,9 +2708,29 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 				SELECT string_agg(wp.address, ',')
 				FROM players p
 				JOIN wireguard_peers wp ON wp.player_id = p.id
-				WHERE ((p.team_id = tss.team_id AND tss.unlocked = TRUE) OR p.role = 'organizer')
-				  AND wp.status <> 'revoked'
-			), '')
+				WHERE wp.status <> 'revoked'
+				  AND (
+					p.role = 'organizer'
+					OR (
+						p.team_id = tss.team_id
+						AND tss.unlocked = TRUE
+						AND NOT (
+							c.maintenance
+							OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+							OR t.active = FALSE
+							OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+							OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+						)
+					)
+				  )
+			), ''),
+			(
+				c.maintenance
+				OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+				OR t.active = FALSE
+				OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+			) AS network_closed
 		FROM team_service_states tss
 		JOIN teams t ON t.id = tss.team_id
 		JOIN challenges c ON c.id = tss.challenge_id
@@ -2427,6 +2745,7 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 		&policy.SSHUnlocked,
 		&policy.EgressEnabled,
 		&allowedPeersCSV,
+		&policy.NetworkClosed,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ControllerServiceAccessPolicy{}, ErrChallengeNotFound
@@ -2436,6 +2755,10 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 	policy.ServicePort, _ = strconv.Atoi(servicePortText)
 	policy.SSHPort = 22
 	policy.AllowedPeerAddresses = splitCSVList(allowedPeersCSV)
+	if policy.NetworkClosed {
+		// Participants excluded by SQL; organizer WireGuard peers remain.
+		policy.SSHUnlocked = len(policy.AllowedPeerAddresses) > 0
+	}
 	return policy, nil
 }
 

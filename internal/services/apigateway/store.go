@@ -22,6 +22,12 @@ var (
 	// ErrChallengeDeferred is returned when a challenge was resumed but only
 	// re-enters play starting at play_from_tick (usually the next tick).
 	ErrChallengeDeferred = errors.New("challenge resumes next tick")
+	// ErrMatchNotStarted is returned when participant play is requested before the
+	// match leaves not_started (pre-game warm deploy must stay dark).
+	ErrMatchNotStarted = errors.New("contest has not started yet")
+	// ErrMatchPaused is returned when participant play is requested while the
+	// match is temporarily paused (submissions, unlock, reset, SSH, source).
+	ErrMatchPaused = errors.New("contest is temporarily paused")
 	ErrDeploymentActive     = errors.New("deployment job is still active")
 	ErrDeploymentNotFound    = errors.New("deployment job not found")
 	ErrServiceLocked         = errors.New("service locked")
@@ -82,6 +88,14 @@ type Store interface {
 	SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error)
 	RequeueTeamServices(ctx context.Context, teamID int) error
 	SetChallengeMaintenance(ctx context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error)
+	// ChallengePlayBlocked is true while maintenance is set or play_from_tick is
+	// still in the future (warm redeploy window before the challenge re-enters play).
+	ChallengePlayBlocked(ctx context.Context, challengeID int) (bool, error)
+	// GetChallengeUnlockProofEpoch returns the current unlock proof epoch (>= 1).
+	GetChallengeUnlockProofEpoch(ctx context.Context, challengeID int) (int, error)
+	// RotateChallengeUnlockProof bumps unlock_proof_epoch and clears unlocks so
+	// previously extracted proofs no longer verify after instances are redeployed.
+	RotateChallengeUnlockProof(ctx context.Context, challengeID int, now time.Time) (adminChallenge, error)
 	RequeueChallengeServices(ctx context.Context, challengeID int) error
 	ListAdminPlayers(ctx context.Context) ([]adminPlayer, error)
 	CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error)
@@ -93,6 +107,10 @@ type Store interface {
 	RevokeAdminPlayerWireGuardConfig(ctx context.Context, playerID int, now time.Time) (adminWireGuardPeer, error)
 	ListWireGuardGatewayPeers(ctx context.Context) ([]WireGuardGatewayPeer, error)
 	IsMatchPaused(ctx context.Context) (bool, error)
+	// IsMatchStarted is true once the match has left not_started (running,
+	// paused, or finished). Before that, challenges/public services stay hidden
+	// and network access stays closed.
+	IsMatchStarted(ctx context.Context) (bool, error)
 	ListAdminChallenges(ctx context.Context) ([]adminChallenge, error)
 	CreateAdminChallenge(ctx context.Context, input adminCreateChallengeRequest, now time.Time) (adminChallenge, error)
 	UpdateAdminChallenge(ctx context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error)

@@ -20,7 +20,7 @@ Core traits:
 - Modern minimal product chrome: hard 1px borders, compact controls, no gradients/glass/neon.
 - **Default scheme: Graphite** — strict cool neutrals, near-monochrome primary.
 - Additional curated schemes (Ink, Paper, Moss), each with independent light/dark.
-- Soft field grid only on the **Paper** scheme; other schemes stay solid.
+- Soft field grid only on the **Paper** scheme outer canvas gutter; content panels and other schemes stay solid (no body-wide notebook grid).
 - Dense operational tables and summaries that stay readable.
 
 Anti-patterns:
@@ -57,25 +57,30 @@ Use OKLCH for custom values. Schemes live in `apps/web/app/globals.css` under `d
 
 Semantics (success / warning / danger / info) stay meaning-stable across schemes. Medals and signals use dedicated tokens; prefer `text-positive` / `tone-*` over raw Tailwind palette utilities.
 
+Registered Tailwind signal colors (via `@theme`): `positive`, `negative`, `highlight`, `info` map to `--signal-*`. Use them for text, status dots, and light tints (`bg-positive/5`, `border-negative/30`). Do not hardcode Tailwind palette greens/ambers for scoreboard or SLA.
+
 Rules:
 - Accent marks selection, action, or state only — not decoration.
 - State colors always pair with text or labels.
 - No pure black/white, no neon, no gradients, no glassmorphism.
-- Highlight text tokens must stay ≥4.5:1 on background and card.
+- **Highlight as text:** `--signal-highlight` must stay ≥4.5:1 on `--background` and `--card` in every scheme × mode. Prefer `text-highlight` for attention (paused, pending, SLA soft-fail), not body copy.
+- **Medals:** `medal-gold|silver|bronze` chips only. Number color ≥4.5:1 on medal background; border ≥3:1 on card. Paper scheme uses warmer brass/copper medal ramps; Graphite/Ink/Moss share the default medal ramp.
 
 ### Appearance (scheme × mode)
 
 Two independent axes:
 
 1. **Scheme** — `graphite | ink | paper | moss` (`ad-platform-scheme` cookie + localStorage).
-2. **Mode** — light / dark / system (`ad-platform-theme`).
+2. **Mode** — light / dark / **system** (`ad-platform-theme`).
+
+**Default mode is System.** First visit does not persist a mode cookie; absence means follow `prefers-color-scheme`. Explicit Light, Dark, or System clicks write storage. Multi-day CTFs can track day/night without re-picking.
 
 DOM:
 - `data-scheme` — active scheme
-- `data-theme` — resolved `light|dark`
-- `data-theme-preference` — user mode choice
+- `data-theme` — resolved `light|dark` (never store the resolved value as preference)
+- `data-theme-preference` — `light | dark | system`
 
-Controls: `AppearanceControls` in the shell header (scheme radios + mode cycle).
+Controls: `AppearanceControls` in the shell header (expand pickers for scheme + mode).
 
 ### Shape
 

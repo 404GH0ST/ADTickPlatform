@@ -5,28 +5,7 @@
 	up-prod-arm64 up-prod-host-arm64
 
 firewall-cleanup:
-	@echo "cleaning up all platform firewall rules..."
-	@source scripts/lib/common.sh; \
-	load_default_env_files; \
-	test -f $(PROD_ENV) && load_env_file_override $(PROD_ENV) || true; \
-	ADMIN_TOKEN="$$(resolve_admin_api_token .runtime/backend-stack.env)"; \
-	API_URL="$${AD_PLATFORM_API_URL:-http://localhost:8080}"; \
-	PUBLIC_URL="$${AD_PLATFORM_PUBLIC_BASE_URL:-}"; \
-	if [[ "$${API_URL}" == *"api-gateway"* && -n "$${PUBLIC_URL}" ]]; then API_URL="$${PUBLIC_URL}"; fi; \
-	CURL_TLS_ARGS=(); \
-	if [[ "$${API_URL}" == https://* ]]; then \
-		default_admin_ca_cert="deploy/caddy/certs/adplatform-selfsigned.crt"; \
-		if [[ "$${ADMIN_CURL_INSECURE:-false}" == "true" ]]; then \
-			CURL_TLS_ARGS=(-k); \
-		elif [[ -n "$${ADMIN_CA_CERT:-}" && -f "$${ADMIN_CA_CERT}" ]]; then \
-			CURL_TLS_ARGS=(--cacert "$${ADMIN_CA_CERT}"); \
-		elif [[ "$${EDGE_TLS_DIRECTIVE:-}" == *"adplatform-selfsigned.crt"* && -f "$${default_admin_ca_cert}" ]]; then \
-			CURL_TLS_ARGS=(--cacert "$${default_admin_ca_cert}"); \
-		fi; \
-	fi; \
-	curl "$${CURL_TLS_ARGS[@]}" -sS -X POST -H "Authorization: Bearer $${ADMIN_TOKEN}" "$${API_URL}/api/v2/admin/access/teardown" || true; \
-	curl "$${CURL_TLS_ARGS[@]}" -sS -X POST -H "Authorization: Bearer $${ADMIN_TOKEN}" "$${API_URL}/api/v2/admin/wireguard/teardown" || true
-	@echo "cleanup requested."
+	@./scripts/firewall-cleanup.sh
 
 prod-runtime-cleanup:
 	@echo "removing controller-created service containers, volumes, and game networks..."

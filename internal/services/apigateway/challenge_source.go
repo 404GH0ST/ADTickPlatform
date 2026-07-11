@@ -49,7 +49,10 @@ func (s *Server) handleChallengeSourceDownload(w http.ResponseWriter, r *http.Re
 
 	descriptor, err := s.lookupChallengeSourceDescriptor(r.Context(), challengeID)
 	if err != nil {
-		if errors.Is(err, ErrChallengeMaintenance) {
+		if errors.Is(err, ErrChallengeMaintenance) ||
+			errors.Is(err, ErrChallengeDeferred) ||
+			errors.Is(err, ErrMatchNotStarted) ||
+			errors.Is(err, ErrMatchPaused) {
 			writeDomainFailure(w, err)
 			return
 		}
@@ -87,8 +90,30 @@ func (s *Server) lookupChallengeSourceDescriptor(ctx context.Context, challengeI
 		if challenge.ID != challengeID || !challenge.Published {
 			continue
 		}
-		if challenge.Maintenance {
-			return challengeSourceDescriptor{}, ErrChallengeMaintenance
+		started, startErr := s.store.IsMatchStarted(ctx)
+		if startErr != nil {
+			return challengeSourceDescriptor{}, startErr
+		}
+		if !started {
+			return challengeSourceDescriptor{}, ErrMatchNotStarted
+		}
+		paused, pauseErr := s.store.IsMatchPaused(ctx)
+		if pauseErr != nil {
+			return challengeSourceDescriptor{}, pauseErr
+		}
+		if paused {
+			return challengeSourceDescriptor{}, ErrMatchPaused
+		}
+		blocked, blockErr := s.store.ChallengePlayBlocked(ctx, challengeID)
+		if blockErr != nil {
+			return challengeSourceDescriptor{}, blockErr
+		}
+		if blocked {
+			// Maintenance and deferred resume both block whitebox until open.
+			if challenge.Maintenance {
+				return challengeSourceDescriptor{}, ErrChallengeMaintenance
+			}
+			return challengeSourceDescriptor{}, ErrChallengeDeferred
 		}
 		path := sanitizeSourceBundlePath(challenge.SourceBundlePath)
 		if path == "" {

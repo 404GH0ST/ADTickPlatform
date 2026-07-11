@@ -22,6 +22,10 @@ func (s wireGuardStartupStoreStub) IsMatchPaused(context.Context) (bool, error) 
 	return false, nil
 }
 
+func (s wireGuardStartupStoreStub) IsMatchStarted(context.Context) (bool, error) {
+	return true, nil
+}
+
 
 type wireGuardApplierStub struct {
 	status   apigateway.WireGuardGatewayStatus

@@ -47,6 +47,50 @@ func TestRenderControllerAccessRulesEnforcesPublicServiceAndSSHAllowlist(t *test
 	}
 }
 
+func TestRenderControllerAccessRulesDropsTrafficWhenNetworkClosed(t *testing.T) {
+	rules := renderControllerAccessRules("adplatform_service_access", "wg0", "eth0", []apigateway.ControllerServiceAccessPolicy{
+		{
+			TeamID: 101, ChallengeID: 1, ChallengeName: "banking",
+			ServiceIP: "10.80.1.11", ServicePort: 10001, SSHPort: 22,
+			SSHUnlocked: true, EgressEnabled: true,
+			// While closed, AllowedPeerAddresses are organizer WireGuard peers only.
+			AllowedPeerAddresses: []string{"10.70.0.2"},
+			NetworkClosed:        true,
+		},
+	})
+
+	// Organizer WG may probe; other WG peers dropped; host nc stays open.
+	if !strings.Contains(rules, `ip saddr { 10.70.0.2 } ip daddr 10.80.1.11 accept`) {
+		t.Fatalf("expected organizer WireGuard accept while closed, got:\n%s", rules)
+	}
+	if !strings.Contains(rules, `iifname "wg0" ip daddr 10.80.1.11 drop`) {
+		t.Fatalf("expected WG-interface drop for closed service, got:\n%s", rules)
+	}
+	// Blanket dest drop would block host-local nc — must not appear when wg iif is set.
+	for _, line := range strings.Split(rules, "\n") {
+		if strings.TrimSpace(line) == "ip daddr 10.80.1.11 drop" {
+			t.Fatalf("did not expect full destination drop (blocks host nc):\n%s", rules)
+		}
+	}
+	acceptIdx := strings.Index(rules, `ip saddr { 10.70.0.2 } ip daddr 10.80.1.11 accept`)
+	dropIdx := strings.Index(rules, `iifname "wg0" ip daddr 10.80.1.11 drop`)
+	// Closed rules live only in forward; output must not drop closed destinations.
+	outputIdx := strings.Index(rules, "chain output")
+	if outputIdx < 0 {
+		t.Fatalf("expected output chain, got:\n%s", rules)
+	}
+	outputSection := rules[outputIdx:]
+	if strings.Contains(outputSection, `ip daddr 10.80.1.11 drop`) || strings.Contains(outputSection, `iifname "wg0" ip daddr 10.80.1.11 drop`) {
+		t.Fatalf("output chain must allow host nc while closed, got:\n%s", outputSection)
+	}
+	if acceptIdx < 0 || dropIdx < 0 || acceptIdx > dropIdx {
+		t.Fatalf("expected organizer accept before WG drop, got:\n%s", rules)
+	}
+	if strings.Contains(rules, `tcp dport 10001 accept`) {
+		t.Fatalf("did not expect public service accept while network closed:\n%s", rules)
+	}
+}
+
 func TestFileServiceAccessExecutorWritesArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	executor := &fileServiceAccessExecutor{
@@ -297,6 +341,63 @@ func containsControllerCommand(commands []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &recordingControllerCommandRunner{
+		failCommands: map[string]error{
+			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
+			"iptables -S DOCKER-USER":                            nil,
+			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
+			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
+			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
+			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
+			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
+			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
+		},
+	}
+	executor := &hostServiceAccessExecutor{
+		fileServiceAccessExecutor: fileServiceAccessExecutor{
+			mode:            "host",
+			interfaceName:   "wg0",
+			firewallBackend: "iptables",
+			firewallTable:   "adplatform_service_access",
+			paths: controllerAccessArtifactPaths{
+				rulesPath:  filepath.Join(tmpDir, "access.nft"),
+				statusPath: filepath.Join(tmpDir, "access-status.json"),
+			},
+		},
+		nftBinary:      "nft",
+		iptablesBinary: "iptables",
+		applyTimeout:   5 * time.Second,
+		runner:         runner,
+	}
+
+	_, err := executor.Apply(context.Background(), []apigateway.ControllerServiceAccessPolicy{{
+		TeamID: 101, ChallengeID: 1, ChallengeName: "sealbroker",
+		ServiceIP: "10.80.1.12", ServicePort: 8160, SSHPort: 22,
+		SSHUnlocked: true, EgressEnabled: true,
+		AllowedPeerAddresses: []string{"10.70.0.2"}, // organizer WG
+		NetworkClosed:        true,
+	}}, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("expected apply to succeed, got %v", err)
+	}
+	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.0.2 -d 10.80.1.12/32 -j ACCEPT") {
+		t.Fatalf("expected organizer WireGuard accept while closed, got %#v", runner.commands)
+	}
+	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.12/32 -j DROP") {
+		t.Fatalf("expected WG-interface drop while closed, got %#v", runner.commands)
+	}
+	// Full dest DROP would block host paths that hairpin through FORWARD.
+	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -j DROP") {
+		t.Fatalf("did not expect full destination DROP while wg iif is set, got %#v", runner.commands)
+	}
+	// No public service-port ACCEPT for participants.
+	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -p tcp --dport 8160 -j ACCEPT") {
+		t.Fatalf("did not expect public service ACCEPT while closed, got %#v", runner.commands)
+	}
 }
 
 func TestHostServiceAccessExecutorIptablesDropsEgressWhenDisabled(t *testing.T) {

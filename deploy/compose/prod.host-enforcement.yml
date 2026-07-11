@@ -29,6 +29,16 @@ services:
       CONTROLLER_INTERNAL_URL: ${CONTROLLER_INTERNAL_URL_HOST:-http://host.docker.internal:18084}
       WIREGUARD_GATEWAY_INTERNAL_URL: ${WIREGUARD_GATEWAY_INTERNAL_URL_HOST:-http://host.docker.internal:18087}
 
+  # game-core re-applies access after each tick (play_from_tick open after
+  # maintenance resume). Controller runs on host network under this overlay, so
+  # Docker DNS name controller-service is unreachable — use the host loopback.
+  game-core:
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      CONTROLLER_INTERNAL_URL: ${CONTROLLER_INTERNAL_URL_HOST:-http://host.docker.internal:18084}
+      CONTROLLER_INTERNAL_TOKEN: ${CONTROLLER_INTERNAL_TOKEN}
+
   controller-service:
     networks: !reset []
     network_mode: host

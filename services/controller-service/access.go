@@ -160,8 +160,8 @@ func (e *fileServiceAccessExecutor) Teardown(_ context.Context) error {
 func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigateway.ControllerServiceAccessPolicy, now time.Time) (apigateway.ControllerAccessStatus, error) {
 	log.Printf("applying %d service access policies", len(policies))
 	for _, p := range policies {
-		log.Printf("policy: team=%d (%s), challenge=%d (%s), ip=%s, port=%d, unlocked=%v, peers=%v",
-			p.TeamID, p.TeamName, p.ChallengeID, p.ChallengeName, p.ServiceIP, p.ServicePort, p.SSHUnlocked, p.AllowedPeerAddresses)
+		log.Printf("policy: team=%d (%s), challenge=%d (%s), ip=%s, port=%d, unlocked=%v, closed=%v, peers=%v",
+			p.TeamID, p.TeamName, p.ChallengeID, p.ChallengeName, p.ServiceIP, p.ServicePort, p.SSHUnlocked, p.NetworkClosed, p.AllowedPeerAddresses)
 	}
 
 	status := buildControllerAccessStatus("host", e.interfaceName, e.internetInterface, e.firewallBackend, e.paths.rulesPath, policies, now)
@@ -289,6 +289,8 @@ func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, ipt
 		if !isValidIP(policy.ServiceIP) {
 			continue
 		}
+		// Always accept in raw for docker/WG path quirks. Closed participant
+		// traffic is still dropped in filter; organizer peers are allowlisted.
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		if strings.TrimSpace(e.interfaceName) != "" {
 			if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
@@ -332,6 +334,38 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 			return err
 		}
 	}
+	// Closed services first (before ESTABLISHED): organizer WG peers may probe;
+	// other WG peers are dropped. Host-local paths (no WG iif) stay open for nc.
+	for _, policy := range policies {
+		if !policy.NetworkClosed || !isValidIP(policy.ServiceIP) {
+			continue
+		}
+		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
+		for _, peer := range policy.AllowedPeerAddresses {
+			if !isValidIP(peer) {
+				continue
+			}
+			if strings.TrimSpace(e.interfaceName) != "" {
+				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
+					return err
+				}
+			}
+			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(e.interfaceName) != "" {
+			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
+				return err
+			}
+		} else {
+			// No WG interface configured: fall back to full dest drop (host path
+			// still works via OUTPUT, which is outside this FORWARD chain).
+			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
+				return err
+			}
+		}
+	}
 	if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
 		return err
 	}
@@ -339,14 +373,18 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		if !isValidIP(policy.ServiceIP) {
 			continue
 		}
+		if policy.NetworkClosed {
+			continue
+		}
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		servicePort := fmt.Sprintf("%d", policy.ServicePort)
+		sshPort := fmt.Sprintf("%d", policy.SSHPort)
 		if !policy.EgressEnabled && strings.TrimSpace(e.internetInterface) != "" {
 			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.internetInterface, "-s", serviceCIDR, "-j", "DROP"); err != nil {
 				return err
 			}
 		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.ServicePort), "-j", "ACCEPT"); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
 			return err
 		}
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
@@ -366,18 +404,18 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 				if !isValidIP(peer) {
 					continue
 				}
-				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "ACCEPT"); err != nil {
+				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
 					return err
 				}
-				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "ACCEPT"); err != nil {
+				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
 					return err
 				}
 			}
 		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "DROP"); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
 			return err
 		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", fmt.Sprintf("%d", policy.SSHPort), "-j", "DROP"); err != nil {
+		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
 			return err
 		}
 	}
@@ -469,28 +507,91 @@ func buildControllerAccessStatus(mode, interfaceName, internetInterface, firewal
 func renderControllerAccessRules(tableName, interfaceName, internetInterface string, policies []apigateway.ControllerServiceAccessPolicy) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
+	// Forward: participant WG → services (closed = organizer allow + WG drop).
+	// Output: host-local probes (nc on the contest host) — always allowed so
+	// operators can check warm redeploys without a WG client.
 	builder.WriteString("  chain forward {\n")
 	builder.WriteString("    type filter hook forward priority filter;\n")
 	builder.WriteString("    policy accept;\n")
+	appendClosedNetworkRules(&builder, interfaceName, policies)
 	builder.WriteString("    ct state established,related accept\n")
+	appendControllerAccessPolicyRules(&builder, interfaceName, internetInterface, policies, "forward")
+	builder.WriteString("  }\n")
+	builder.WriteString("  chain output {\n")
+	builder.WriteString("    type filter hook output priority filter;\n")
+	builder.WriteString("    policy accept;\n")
+	builder.WriteString("    ct state established,related accept\n")
+	appendControllerAccessPolicyRules(&builder, "", internetInterface, policies, "output")
+	builder.WriteString("  }\n")
+	builder.WriteString("}\n")
+	return builder.String()
+}
+
+// appendClosedNetworkRules emits organizer allowlist + participant WG drop for
+// closed service IPs (maintenance, match not started, deferred play_from_tick).
+// Host-local traffic is not dropped here (see output chain / non-WG paths).
+func appendClosedNetworkRules(builder *strings.Builder, interfaceName string, policies []apigateway.ControllerServiceAccessPolicy) {
+	wgIF := strings.TrimSpace(interfaceName)
 	for _, policy := range policies {
-		if !isValidIP(policy.ServiceIP) {
+		if !policy.NetworkClosed || !isValidIP(policy.ServiceIP) {
+			continue
+		}
+		var validPeers []string
+		for _, peer := range policy.AllowedPeerAddresses {
+			if isValidIP(peer) {
+				validPeers = append(validPeers, peer)
+			}
+		}
+		if len(validPeers) > 0 {
+			// Full access for admin WireGuard (service + SSH + any probe ports).
+			builder.WriteString(fmt.Sprintf("    ip saddr { %s } ip daddr %s accept\n", strings.Join(validPeers, ", "), policy.ServiceIP))
+		}
+		if wgIF != "" {
+			// Block remaining WireGuard peers only; host nc does not use this iif.
+			builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip daddr %s drop\n", wgIF, policy.ServiceIP))
+		} else {
+			builder.WriteString(fmt.Sprintf("    ip daddr %s drop\n", policy.ServiceIP))
+		}
+	}
+}
+
+// appendControllerAccessPolicyRules writes per-service accept/drop rules for open
+// (not NetworkClosed) services. chainKind is "forward" (with optional iif/oif)
+// or "output".
+func appendControllerAccessPolicyRules(
+	builder *strings.Builder,
+	interfaceName, internetInterface string,
+	policies []apigateway.ControllerServiceAccessPolicy,
+	chainKind string,
+) {
+	for _, policy := range policies {
+		if !isValidIP(policy.ServiceIP) || policy.NetworkClosed {
 			continue
 		}
 		ingressPrefix := ""
 		egressPrefix := ""
-		if strings.TrimSpace(interfaceName) != "" {
+		if chainKind == "forward" && strings.TrimSpace(interfaceName) != "" {
 			ingressPrefix = fmt.Sprintf("iifname \"%s\" ", interfaceName)
 			egressPrefix = fmt.Sprintf("oifname \"%s\" ", interfaceName)
 		}
-		if !policy.EgressEnabled && strings.TrimSpace(internetInterface) != "" {
+		if !policy.EgressEnabled && strings.TrimSpace(internetInterface) != "" && chainKind == "forward" {
 			builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip saddr %s drop\n", internetInterface, policy.ServiceIP))
 		}
-		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d accept\n", ingressPrefix, policy.ServiceIP, policy.ServicePort))
-		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d accept\n", policy.ServiceIP, policy.ServicePort))
-		builder.WriteString(fmt.Sprintf("    %sip saddr %s tcp sport %d accept\n", egressPrefix, policy.ServiceIP, policy.ServicePort))
-		builder.WriteString(fmt.Sprintf("    ip saddr %s tcp sport %d accept\n", policy.ServiceIP, policy.ServicePort))
-		builder.WriteString(fmt.Sprintf("    %sip saddr %s ct state established,related accept\n", egressPrefix, policy.ServiceIP))
+		if policy.ServicePort > 0 {
+			if ingressPrefix != "" {
+				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d accept\n", ingressPrefix, policy.ServiceIP, policy.ServicePort))
+			}
+			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d accept\n", policy.ServiceIP, policy.ServicePort))
+			if chainKind == "forward" {
+				if egressPrefix != "" {
+					builder.WriteString(fmt.Sprintf("    %sip saddr %s tcp sport %d accept\n", egressPrefix, policy.ServiceIP, policy.ServicePort))
+				}
+				builder.WriteString(fmt.Sprintf("    ip saddr %s tcp sport %d accept\n", policy.ServiceIP, policy.ServicePort))
+				if egressPrefix != "" {
+					builder.WriteString(fmt.Sprintf("    %sip saddr %s ct state established,related accept\n", egressPrefix, policy.ServiceIP))
+				}
+			}
+		}
 		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
 			var validPeers []string
 			for _, peer := range policy.AllowedPeerAddresses {
@@ -499,16 +600,19 @@ func renderControllerAccessRules(tableName, interfaceName, internetInterface str
 				}
 			}
 			if len(validPeers) > 0 {
-				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
+				if ingressPrefix != "" {
+					builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
+				}
 				builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
 			}
 		}
-		builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
-		builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))
+		if policy.SSHPort > 0 {
+			if ingressPrefix != "" {
+				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
+			}
+			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))
+		}
 	}
-	builder.WriteString("  }\n")
-	builder.WriteString("}\n")
-	return builder.String()
 }
 
 func controllerAccessRevision(rules string) string {

@@ -147,6 +147,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/validate", s.handleAdminValidateChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/deploy", s.handleAdminDeployChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/maintenance", s.handleAdminChallengeMaintenance)
+	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/rotate-unlock-proof", s.handleAdminRotateChallengeUnlockProof)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/resume", s.handleAdminChallengeResume)
 	mux.HandleFunc("GET /api/v2/admin/deployments", s.handleAdminListDeployments)
 	mux.HandleFunc("DELETE /api/v2/admin/deployments/{deployment_id}", s.handleAdminDeleteDeployment)
@@ -980,7 +981,12 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "unlock proof is invalid.")
 		return
 	}
-	if !unlockproof.Verify(s.unlockProofSecret, teamID, challengeID, req.Proof) {
+	epoch, epochErr := s.store.GetChallengeUnlockProofEpoch(r.Context(), challengeID)
+	if epochErr != nil {
+		writeDomainFailure(w, epochErr)
+		return
+	}
+	if !unlockproof.Verify(s.unlockProofSecret, teamID, challengeID, epoch, req.Proof) {
 		writeProblem(w, http.StatusBadRequest, "Unlock rejected", "unlock proof is invalid.")
 		return
 	}
@@ -1223,6 +1229,10 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusServiceUnavailable, "Challenge maintenance", "challenge is under maintenance.")
 	case errors.Is(err, ErrChallengeDeferred):
 		writeProblem(w, http.StatusServiceUnavailable, "Challenge deferred", "challenge resumes on the next tick.")
+	case errors.Is(err, ErrMatchNotStarted):
+		writeProblem(w, http.StatusServiceUnavailable, "Match not started", "contest has not started yet.")
+	case errors.Is(err, ErrMatchPaused):
+		writeProblem(w, http.StatusServiceUnavailable, "Match paused", "contest is temporarily paused.")
 	case errors.Is(err, ErrChallengeNotFound):
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 	case errors.Is(err, ErrTeamNotFound):

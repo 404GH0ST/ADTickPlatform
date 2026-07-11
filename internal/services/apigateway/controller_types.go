@@ -13,6 +13,9 @@ type ControllerRuntimeTask struct {
 	Endpoint        string `json:"endpoint"`
 	SSHHost         string `json:"ssh_host"`
 	ServicePort     int    `json:"service_port"`
+	// UnlockProofEpoch is mixed into AD_PLATFORM_UNLOCK_PROOF. Bumping it
+	// invalidates previously stolen proofs after a security-fix redeploy.
+	UnlockProofEpoch int `json:"unlock_proof_epoch"`
 }
 
 type ControllerServiceAccessPolicy struct {
@@ -26,6 +29,11 @@ type ControllerServiceAccessPolicy struct {
 	SSHUnlocked          bool     `json:"ssh_unlocked"`
 	AllowedPeerAddresses []string `json:"allowed_peer_addresses"`
 	EgressEnabled        bool     `json:"egress_enabled"`
+	// NetworkClosed blocks participant traffic to the service IP. True while the
+	// match is not started or paused, the challenge is under maintenance, the
+	// team is inactive or deferred (play_from_tick). Organizer WireGuard peers
+	// listed in AllowedPeerAddresses still reach service + SSH for ops checks.
+	NetworkClosed bool `json:"network_closed"`
 }
 
 type ControllerAccessStatus struct {

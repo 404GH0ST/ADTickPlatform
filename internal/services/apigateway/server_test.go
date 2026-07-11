@@ -978,7 +978,7 @@ func newTestMuxWithLimiter(limiter rateLimiter) *http.ServeMux {
 }
 
 func testUnlockProof(teamID, challengeID int) string {
-	return unlockproof.Issue("dev-team-token", teamID, challengeID)
+	return unlockproof.Issue("dev-team-token", teamID, challengeID, 1)
 }
 
 func findServiceStateForTest(t *testing.T, services []serviceState, challengeID int) serviceState {

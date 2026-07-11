@@ -53,6 +53,9 @@ type adminTeam struct {
 	DeployedChallenges int    `json:"deployed_challenges"`
 	Active             bool   `json:"active"`
 	DeactivatedAt      string `json:"deactivated_at,omitempty"`
+	// PlayFromTick, when set, defers network/checker play until that tick
+	// (set on mid-match reactivation so warm redeploy cannot leak flags early).
+	PlayFromTick int `json:"play_from_tick,omitempty"`
 }
 
 type adminPlayer struct {
@@ -152,8 +155,11 @@ type adminChallenge struct {
 	MaintenanceAt      string                     `json:"maintenance_at,omitempty"`
 	// PlayFromTick, when set, defers checker/scoring/participant access until
 	// that tick id exists (set on maintenance resume to "next tick").
-	PlayFromTick       int                        `json:"play_from_tick,omitempty"`
-	DeployedTeams      int                        `json:"deployed_teams"`
+	PlayFromTick int `json:"play_from_tick,omitempty"`
+	// UnlockProofEpoch is mixed into unlock proofs. Bumped on maintenance (and
+	// via explicit rotate) so stolen proofs stop working after a security fix.
+	UnlockProofEpoch int `json:"unlock_proof_epoch"`
+	DeployedTeams    int `json:"deployed_teams"`
 	TotalTeams         int                        `json:"total_teams"`
 	RuntimeStatus      string                     `json:"runtime_status"`
 	QueuedTeams        int                        `json:"queued_teams"`

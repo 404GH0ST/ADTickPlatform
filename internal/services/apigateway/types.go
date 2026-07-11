@@ -75,11 +75,14 @@ type serviceState struct {
 	SSHHint       string `json:"ssh_hint"`
 	LastEvent     string `json:"last_event"`
 	ResetCooldown string `json:"reset_cooldown"`
-	Maintenance   bool   `json:"maintenance"`
-	SLAStatus     string `json:"sla_status,omitempty"`
-	SLAPhase      string `json:"sla_phase,omitempty"`
-	SLATickID     int    `json:"sla_tick_id,omitempty"`
-	SLAMessage    string `json:"sla_message,omitempty"`
+	// Maintenance locks participant actions. Use LockReason for the real cause
+	// (maintenance vs match_paused vs match_not_started vs deferred).
+	Maintenance bool   `json:"maintenance"`
+	LockReason  string `json:"lock_reason,omitempty"`
+	SLAStatus   string `json:"sla_status,omitempty"`
+	SLAPhase    string `json:"sla_phase,omitempty"`
+	SLATickID   int    `json:"sla_tick_id,omitempty"`
+	SLAMessage  string `json:"sla_message,omitempty"`
 }
 
 type ScoreRowAlias struct {

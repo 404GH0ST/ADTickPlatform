@@ -34,8 +34,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	adminToken := config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN")
 	server := newGameCoreServer(
-		config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
+		adminToken,
 		store,
 		newCheckerClient(
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
@@ -57,6 +58,11 @@ func main() {
 		WithWarmupPutRetries(config.Int("GAME_CORE_WARMUP_PUT_RETRIES", 2)).
 		WithWarmupPutRetryDelay(config.Duration("GAME_CORE_WARMUP_PUT_RETRY_DELAY", 2*time.Second)).
 		WithAutoTickOnMatchStart(config.Bool("GAME_CORE_AUTO_TICK_ON_MATCH_START", true))
+	// After each tick, re-apply access so challenges deferred to this tick open.
+	server.accessReconcile = newAccessReconcileClient(
+		config.String("CONTROLLER_INTERNAL_URL", ""),
+		config.Secret("CONTROLLER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
+	)
 	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {

@@ -130,8 +130,10 @@ func (s *Server) handleAdminDeactivateTeam(w http.ResponseWriter, r *http.Reques
 }
 
 // handleAdminReactivateTeam restores a deactivated team and re-queues its
-// instances so the controller reconcile loop boots them back to ready. The team
-// reappears on the leaderboard on the next scoreboard recompute.
+// instances so the controller reconcile loop boots them back to ready. While
+// ticks exist, play is deferred to the next tick (teams.play_from_tick) so warm
+// redeploy cannot leak placeholder flags mid-window. The team reappears on the
+// leaderboard on the next scoreboard recompute after it is active.
 func (s *Server) handleAdminReactivateTeam(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -149,10 +151,12 @@ func (s *Server) handleAdminReactivateTeam(w http.ResponseWriter, r *http.Reques
 		writeStoreFailure(w, err)
 		return
 	}
+	// Apply NetworkClosed for deferred reactivation (and clear inactive drops).
 	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 
 	s.recordAdminAudit(r.Context(), "team.reactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "reactivated team", map[string]any{
-		"team_id": teamID,
+		"team_id":        teamID,
+		"play_from_tick": team.PlayFromTick,
 	})
 	writeData(w, http.StatusOK, team)
 }
@@ -509,9 +513,32 @@ func (s *Server) handleAdminDeleteChallenge(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleAdminRotateChallengeUnlockProof bumps unlock_proof_epoch and clears
+// unlocks so previously extracted proofs stop verifying after instances are
+// redeployed with the new AD_PLATFORM_UNLOCK_PROOF.
+func (s *Server) handleAdminRotateChallengeUnlockProof(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	challengeID, ok := parseChallengeID(w, r)
+	if !ok {
+		return
+	}
+	challenge, err := s.store.RotateChallengeUnlockProof(r.Context(), challengeID, s.now())
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(r.Context(), "challenge.unlock_proof.rotate", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "rotated challenge unlock proof epoch", map[string]any{
+		"challenge_id":        challengeID,
+		"unlock_proof_epoch":  challenge.UnlockProofEpoch,
+	})
+	writeData(w, http.StatusOK, challenge)
+}
+
 // handleAdminChallengeMaintenance puts a challenge under mid-match maintenance:
 // participant actions and scoring stop, and all team containers for that challenge
-// are torn down. Historical points already earned remain on the scoreboard.
+// are torn down. Unlock proofs are rotated (epoch bump). Historical points remain.
 func (s *Server) handleAdminChallengeMaintenance(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -767,6 +794,8 @@ func (s *Server) handleAdminStartGameMatch(w http.ResponseWriter, r *http.Reques
 		writeGameCoreFailure(w, err, "game-core match start failed.")
 		return
 	}
+	// Open network for warm-deployed services now that the match is live.
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 	s.recordAdminAudit(r.Context(), "match.start", "match", "primary-match", "started match", map[string]any{
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
@@ -804,6 +833,8 @@ func (s *Server) handleAdminPauseGameMatch(w http.ResponseWriter, r *http.Reques
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
 
+	// Close participant network while paused (organizer WG still allowlisted).
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
 		log.Printf("warning: automatic wireguard reconcile on match pause failed: %v", wgErr)
 	}
@@ -825,6 +856,8 @@ func (s *Server) handleAdminResumeGameMatch(w http.ResponseWriter, r *http.Reque
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
 
+	// Re-open participant network after pause.
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
 		log.Printf("warning: automatic wireguard reconcile on match resume failed: %v", wgErr)
 	}
@@ -867,6 +900,9 @@ func (s *Server) handleAdminAdvanceGameTick(w http.ResponseWriter, r *http.Reque
 		writeGameCoreFailure(w, err, "game-core tick advance failed.")
 		return
 	}
+	// Opening play_from_tick gates needs a fresh access policy apply so warm
+	// instances become reachable only when the deferred tick arrives.
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 	s.recordAdminAudit(r.Context(), "tick.advance", "tick", fmt.Sprintf("tick:%d", status.ID), "advanced authoritative tick", map[string]any{
 		"tick_id":                 status.ID,
 		"status":                  status.Status,

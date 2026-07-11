@@ -132,6 +132,9 @@ services:
       GAME_CORE_TICK_TIMEOUT: ${GAME_CORE_TICK_TIMEOUT:-180s}
       GAME_CORE_SCORING_DEBOUNCE: ${GAME_CORE_SCORING_DEBOUNCE:-1s}
       GAME_CORE_SCORING_RETRY_DELAY: ${GAME_CORE_SCORING_RETRY_DELAY:-5s}
+      # After each tick, re-apply host access (+ WG) so resumed play_from_tick challenges open.
+      CONTROLLER_INTERNAL_URL: http://controller-service:8084
+      CONTROLLER_INTERNAL_TOKEN: ${CONTROLLER_INTERNAL_TOKEN}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
     networks:
       - control

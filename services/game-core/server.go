@@ -20,6 +20,7 @@ type gameCoreServer struct {
 	adminToken           string
 	store                gameStore
 	checker              checkerClient
+	accessReconcile      accessReconcileClient
 	flags                flagCodec
 	flagsMu              sync.RWMutex
 	scheduler            gameScheduler
@@ -45,6 +46,12 @@ type gameCoreServer struct {
 	lastWarmup           apigateway.GameWarmupResult
 	autoTickOnMatchStart bool
 	now                  func() time.Time
+}
+
+// accessReconcileClient re-applies host access policies after a tick so deferred
+// (play_from_tick) challenges open to players when their gate is reached.
+type accessReconcileClient interface {
+	ReconcileAccess(ctx context.Context) error
 }
 
 type scoringRecomputeStatus struct {
@@ -424,6 +431,13 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		return
 	}
 	status = s.applyMatchWindow(status)
+
+	// Open network for warm-deployed services (closed while match was not_started).
+	if s.accessReconcile != nil {
+		if recErr := s.accessReconcile.ReconcileAccess(r.Context()); recErr != nil {
+			log.Printf("game-core: access reconcile on match start failed: %v", recErr)
+		}
+	}
 
 	// Best-effort: fire the first tick immediately so a scoreable tick-1 flag
 	// is in every container by the time this response returns. The scheduler's
@@ -904,6 +918,14 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 	}
 	if _, err := s.store.RecomputeScoreboard(ctx); err != nil {
 		return apigateway.GameTickStatus{}, err
+	}
+	// Best-effort: open network (+ WG converge via controller) for challenges whose
+	// play_from_tick was this tick (post-maintenance resume). Failures must not
+	// fail the tick — access can be re-applied by admin reconcile.
+	if s.accessReconcile != nil {
+		if recErr := s.accessReconcile.ReconcileAccess(ctx); recErr != nil {
+			log.Printf("game-core: access/WG reconcile after tick %d failed: %v", completed.ID, recErr)
+		}
 	}
 	return completed, nil
 }
