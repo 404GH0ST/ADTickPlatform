@@ -17,6 +17,43 @@ production services reject example and development token values.
 ADMIN_API_TOKEN=<strong random admin token>
 ```
 
+## Product ops endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v2/announcements` | Public match announcements |
+| `GET` / `POST` | `/api/v2/admin/announcements` | List / create organizer announcements |
+| `DELETE` | `/api/v2/admin/announcements/{id}` | Delete an announcement |
+| `POST` | `/api/v2/admin/import/teams` | Bulk create teams and nested players |
+| `PUT` | `/api/v2/me/password` | Participant password change |
+
+Bulk import creates each team **atomically** with its players (a player failure rolls that team back). Response status:
+
+- `200` when at least one team was created (partial success may include `errors`)
+- `422` when the body is valid but nothing was created
+- `400` when the request body is invalid
+
+Bulk import body:
+
+```json
+{
+  "teams": [
+    {
+      "name": "Team Nova",
+      "contact_email": "nova@example.com",
+      "players": [
+        {
+          "display_name": "Nova Cap",
+          "email": "nova.cap@example.com",
+          "password": "secret-password",
+          "role": "captain"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Endpoints
 
 ### GET `/api/v2/admin/teams`

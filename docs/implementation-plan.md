@@ -13,14 +13,16 @@ Completed:
 - Phase 2 participant API contract and dashboard wiring
 - Phase 3 runtime plane (docker controller, isolation, wireguard)
 - Phase 4 unlock, SSH, and reset semantics
-- Phase 5 checker and scoring (initial worker and SLA model)
+- Phase 5 checker and scoring (Faust model, scoring worker, audit path)
 - Phase 6 frontend and realtime (team dashboard, live attack map, scoreboard)
 - Admin control plane security and resource management (DELETE support)
+- Phase 7 hardening baseline: observability dashboards, smokes, backup/restore, trusted reconcile, release-candidate gates
 
-In progress:
+Follow-on product work (see `docs/product-findings.md`):
 
-- extending the authoritative model beyond the participant API seed data into real match, tick, flag, and checker state
-- Phase 7 hardening and observability
+- participant day-of UX (flag submit UI, onboarding, password change)
+- organizer ops (bulk import, export, announcements; jury scoring left post-event/manual)
+- single-host capacity honesty and operator trusted-state surfaces
 
 
 ## Hard Requirements

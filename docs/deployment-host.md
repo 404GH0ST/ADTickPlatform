@@ -10,6 +10,20 @@ In this model, the **Controller** and **WireGuard Gateway** run with `network_mo
 - **Hardware**: At least 4GB RAM and 2 CPUs (scaling depends on team count).
 - **Network**: A public IPv4 address and port `51820/udp` open for WireGuard.
 
+### Single-host capacity (honest limits)
+
+Production `prod-host` runs the control plane and **all** `team × service` containers on **one Docker host**. Architecture docs may describe multi-worker placement; that is not the current production topology.
+
+Planning guidance (order-of-magnitude, not a guarantee):
+
+| Teams | Services | Rough host sizing |
+| --- | --- | --- |
+| ≤ 8 | 2–3 light services | 8 GB RAM, 4 vCPU |
+| 8–16 | 3–4 medium services | 16–32 GB RAM, 8 vCPU |
+| 16–32 | 3–4 services | 32–64 GB RAM, 16 vCPU; validate with load smokes |
+
+Each challenge instance is a full container plus checker work per tick. Disk, Docker overlay I/O, and concurrent checker CPU often saturate before raw RAM. Rehearse with `make simulate-attack-map-load` and a short match smoke before go-live. If you need more teams than one host can hold, treat multi-host runtime placement as a separate engineering project—not a config toggle.
+
 ## 2. Server Preparation
 
 Install the required system packages:

@@ -46,18 +46,19 @@ It comes equipped with highly concurrent Go-based microservices, a real-time res
 
 ## Documentation
 
-Comprehensive documentation guides are available in the [docs/](file:///home/jergal/ADTickPlatform/docs) directory:
+Comprehensive documentation guides are available in the [docs/](docs/) directory:
 
-- [System Architecture](file:///home/jergal/ADTickPlatform/docs/architecture.md) — Under-the-hood design and service relationships.
-- [Deployment: Ubuntu/Debian Host](file:///home/jergal/ADTickPlatform/docs/deployment-host.md) — Production setup guide.
-- [Game Rules & Runtime Flows](file:///home/jergal/ADTickPlatform/docs/game-rules.md) — Scoring formulas and tick structure.
-- [Participant Platform Manual](file:///home/jergal/ADTickPlatform/docs/platform-manual.md) — A guide for CTF competitors.
-- [Organizer Admin API Guide](file:///home/jergal/ADTickPlatform/docs/admin-api.md) — Controlling the match programmatically.
-- [Operator CLI Cheatsheet](file:///home/jergal/ADTickPlatform/docs/operator-cheatsheet.md) — Rapid control commands.
-- [Ops Runbook](file:///home/jergal/ADTickPlatform/docs/ops-runbook.md) & [Trusted Reconcile](file:///home/jergal/ADTickPlatform/docs/trusted-reconcile-runbook.md) — Operational guidelines.
-- [Final Rehearsal Checklist](file:///home/jergal/ADTickPlatform/docs/final-rehearsal-checklist.md) — Pre-flight sanity checks.
-- [Participant OpenAPI Spec](file:///home/jergal/ADTickPlatform/docs/platform-api-v2.openapi.yaml) — Platform API specs.
-- [Challenge Runtime Contract](file:///home/jergal/ADTickPlatform/docs/challenge-runtime.md) — Specifications for challenge builders.
+- [System Architecture](docs/architecture.md) — Under-the-hood design and service relationships.
+- [Deployment: Ubuntu/Debian Host](docs/deployment-host.md) — Production setup guide.
+- [Game Rules & Runtime Flows](docs/game-rules.md) — Scoring formulas and tick structure.
+- [Participant Platform Manual](docs/platform-manual.md) — A guide for CTF competitors.
+- [Organizer Admin API Guide](docs/admin-api.md) — Controlling the match programmatically.
+- [Operator CLI Cheatsheet](docs/operator-cheatsheet.md) — Rapid control commands.
+- [Ops Runbook](docs/ops-runbook.md) & [Trusted Reconcile](docs/trusted-reconcile-runbook.md) — Operational guidelines.
+- [Final Rehearsal Checklist](docs/final-rehearsal-checklist.md) — Pre-flight sanity checks.
+- [Participant OpenAPI Spec](docs/platform-api-v2.openapi.yaml) — Platform API specs.
+- [Challenge Runtime Contract](docs/challenge-runtime.md) — Specifications for challenge builders.
+- [Product Findings](docs/product-findings.md) — Gaps, polish items, and prioritized backlog.
 
 Live documentation is also exposed on the running platform under `/docs/participant`, `/docs/platform-api`, and `/docs/platform-api-v2.openapi.yaml`.
 
@@ -155,13 +156,13 @@ make bootstrap-clean-match
 
 ## Challenge Development Contract
 
-Custom challenges deployed to the platform must conform to the [Challenge Runtime Contract](file:///home/jergal/ADTickPlatform/docs/challenge-runtime.md):
+Custom challenges deployed to the platform must conform to the [Challenge Runtime Contract](docs/challenge-runtime.md):
 - Provide a working `/bin/sh` shell environment.
 - Expose an SSH daemon (`sshd` or `dropbear`).
 - Include a password setting command (`chpasswd` or `passwd`).
 - Support exposing or protecting the generated `AD_PLATFORM_UNLOCK_PROOF` environment variable.
 
 See our included examples to get started:
-- [Sample HTTP Challenge](file:///home/jergal/ADTickPlatform/examples/sample-http-challenge/README.md)
-- [Sample LFI Challenge](file:///home/jergal/ADTickPlatform/examples/sample-lfi-challenge/README.md)
-- [Sample RCE Challenge](file:///home/jergal/ADTickPlatform/examples/sample-rce-challenge/README.md)
+- [Sample HTTP Challenge](examples/sample-http-challenge/README.md)
+- [Sample LFI Challenge](examples/sample-lfi-challenge/README.md)
+- [Sample RCE Challenge](examples/sample-rce-challenge/README.md)
