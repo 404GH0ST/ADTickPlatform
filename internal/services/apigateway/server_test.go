@@ -3135,6 +3135,44 @@ func TestAdminAuditLogCanFilterChallengeCreate(t *testing.T) {
 	}
 }
 
+func TestAdminChallengeMaintenanceToggle(t *testing.T) {
+	mux := newTestMux()
+	adminAuth := "Bearer dev-admin-token"
+
+	challengeRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges", bytes.NewBufferString(`{"name":"maint-svc","baseline_image":"registry.local/maint:baseline","checker_image":"registry.local/maint-checker:latest"}`))
+	challengeRequest.Header.Set("Authorization", adminAuth)
+	challengeResponse := httptest.NewRecorder()
+	mux.ServeHTTP(challengeResponse, challengeRequest)
+	if challengeResponse.Code != http.StatusOK {
+		t.Fatalf("expected challenge create 200, got %d", challengeResponse.Code)
+	}
+	challenge := decodeCompat[adminChallenge](t, challengeResponse.Body.Bytes())
+
+	maintRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/maintenance", challenge.ID), nil)
+	maintRequest.Header.Set("Authorization", adminAuth)
+	maintResponse := httptest.NewRecorder()
+	mux.ServeHTTP(maintResponse, maintRequest)
+	if maintResponse.Code != http.StatusOK {
+		t.Fatalf("expected maintenance 200, got %d body=%s", maintResponse.Code, maintResponse.Body.String())
+	}
+	underMaint := decodeCompat[adminChallenge](t, maintResponse.Body.Bytes())
+	if !underMaint.Maintenance || underMaint.MaintenanceAt == "" {
+		t.Fatalf("expected maintenance flag and timestamp, got %+v", underMaint)
+	}
+
+	resumeRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/resume", challenge.ID), nil)
+	resumeRequest.Header.Set("Authorization", adminAuth)
+	resumeResponse := httptest.NewRecorder()
+	mux.ServeHTTP(resumeResponse, resumeRequest)
+	if resumeResponse.Code != http.StatusOK {
+		t.Fatalf("expected resume 200, got %d body=%s", resumeResponse.Code, resumeResponse.Body.String())
+	}
+	resumed := decodeCompat[adminChallenge](t, resumeResponse.Body.Bytes())
+	if resumed.Maintenance || resumed.MaintenanceAt != "" {
+		t.Fatalf("expected cleared maintenance, got %+v", resumed)
+	}
+}
+
 func TestAdminRequiresAuth(t *testing.T) {
 	mux := newTestMux()
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/admin/teams", nil)

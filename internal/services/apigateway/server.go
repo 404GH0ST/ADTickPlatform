@@ -146,6 +146,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v2/admin/challenges/{challenge_id}", s.handleAdminDeleteChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/validate", s.handleAdminValidateChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/deploy", s.handleAdminDeployChallenge)
+	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/maintenance", s.handleAdminChallengeMaintenance)
+	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/resume", s.handleAdminChallengeResume)
 	mux.HandleFunc("GET /api/v2/admin/deployments", s.handleAdminListDeployments)
 	mux.HandleFunc("DELETE /api/v2/admin/deployments/{deployment_id}", s.handleAdminDeleteDeployment)
 	mux.HandleFunc("POST /api/v2/admin/deployments/reconcile", s.handleAdminReconcileDeployments)
@@ -1217,6 +1219,10 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "service is not unlocked yet.")
 	case errors.Is(err, ErrServiceUnavailable):
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "service is not available yet.")
+	case errors.Is(err, ErrChallengeMaintenance):
+		writeProblem(w, http.StatusServiceUnavailable, "Challenge maintenance", "challenge is under maintenance.")
+	case errors.Is(err, ErrChallengeDeferred):
+		writeProblem(w, http.StatusServiceUnavailable, "Challenge deferred", "challenge resumes on the next tick.")
 	case errors.Is(err, ErrChallengeNotFound):
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "challenge id is invalid.")
 	case errors.Is(err, ErrTeamNotFound):

@@ -1017,6 +1017,57 @@ func TestSchedulerEventsEndpointSupportsFiltersAndOffset(t *testing.T) {
 	}
 }
 
+func TestSubmitFlagsRejectsChallengeUnderMaintenance(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(false).
+		RegisterRoutes(mux)
+	startTestMatch(t, mux)
+
+	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
+	advanceRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	advanceResponse := httptest.NewRecorder()
+	mux.ServeHTTP(advanceResponse, advanceRequest)
+	if advanceResponse.Code != http.StatusOK {
+		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
+	}
+
+	// Same issuance path as the happy-path submit test (checker put during advance).
+	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	store.setChallengeMaintenanceForTest(1, true)
+
+	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
+	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
+	submitResponse := httptest.NewRecorder()
+	mux.ServeHTTP(submitResponse, submitRequest)
+	if submitResponse.Code != http.StatusOK {
+		t.Fatalf("expected submit 200, got %d body=%s", submitResponse.Code, submitResponse.Body.String())
+	}
+
+	payload := decodeResponse[[]apigateway.SubmissionVerdictAlias](t, submitResponse.Body.Bytes())
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 verdict, got %d", len(payload))
+	}
+	if payload[0].Status != "invalid" || payload[0].Detail != "challenge is under maintenance." {
+		t.Fatalf("unexpected maintenance verdict %+v", payload[0])
+	}
+
+	otherFlag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 2, 1, 1)
+	otherSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+otherFlag+`"]}`))
+	otherSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
+	otherResponse := httptest.NewRecorder()
+	mux.ServeHTTP(otherResponse, otherSubmit)
+	if otherResponse.Code != http.StatusOK {
+		t.Fatalf("expected other submit 200, got %d", otherResponse.Code)
+	}
+	otherPayload := decodeResponse[[]apigateway.SubmissionVerdictAlias](t, otherResponse.Body.Bytes())
+	if len(otherPayload) != 1 || otherPayload[0].Status != "accepted" {
+		t.Fatalf("expected other challenge accepted, got %+v", otherPayload)
+	}
+}
+
 func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 	mux := newTestGameCoreMux(testCheckerClient{})
 	startTestMatch(t, mux)

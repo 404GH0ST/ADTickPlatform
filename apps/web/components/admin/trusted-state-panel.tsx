@@ -154,7 +154,7 @@ export function TrustedStatePanel(): ReactElement {
         );
       }
       setNote(
-        "Trusted reconcile completed. Host access and WireGuard truth should match the control plane.",
+        "Reconcile finished: deployments, SSH access, and WireGuard should match host truth.",
       );
       await refresh();
     } catch (reconcileError) {
@@ -183,8 +183,8 @@ export function TrustedStatePanel(): ReactElement {
           <CardTitle className="text-base">Trusted runtime state</CardTitle>
         </div>
         <CardDescription>
-          Single operator view for deployment backlog, controller access policy,
-          and WireGuard apply state. Trusted reconcile owns full recovery.
+          Host truth after deploy: queued instances, SSH access policy, and
+          WireGuard peers. One action advances all of them.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -239,14 +239,28 @@ export function TrustedStatePanel(): ReactElement {
         ) : null}
         {error ? <StatusBanner message={error} variant="error" /> : null}
         {note ? <StatusBanner message={note} variant="success" /> : null}
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => void runTrustedReconcile()} disabled={pending}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            data-testid="run-trusted-reconcile"
+            onClick={() => void runTrustedReconcile()}
+            disabled={pending}
+          >
             {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-            Run trusted reconcile
+            Reconcile
           </Button>
-          <Button type="button" variant="outline" onClick={() => void refresh()}>
-            Refresh status
+          <Button
+            type="button"
+            variant="outline"
+            data-testid="refresh-trusted-status"
+            onClick={() => void refresh()}
+            disabled={pending}
+          >
+            Refresh
           </Button>
+          <p className="text-xs text-muted-foreground sm:ml-1">
+            Use after Deploy, or when access / WireGuard looks stale.
+          </p>
         </div>
       </CardContent>
     </Card>

@@ -378,6 +378,7 @@ func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
 				ID:                item.ID,
 				Name:              item.Name,
 				HasSourceDownload: strings.TrimSpace(item.SourceBundlePath) != "",
+				Maintenance:       item.Maintenance,
 			})
 		}
 	}
@@ -477,10 +478,13 @@ func (s *memoryStore) ListTeamServices(_ context.Context, teamID int) ([]service
 
 	states := make([]serviceState, 0, len(challengeStates))
 	for challengeID, state := range challengeStates {
-		if challengeMeta := s.challenges[challengeID]; challengeMeta == nil || !challengeMeta.Published {
+		challengeMeta := s.challenges[challengeID]
+		if challengeMeta == nil || !challengeMeta.Published {
 			continue
 		}
-		states = append(states, *cloneServiceState(state))
+		cloned := *cloneServiceState(state)
+		cloned.Maintenance = challengeMeta.Maintenance || challengeMeta.PlayFromTick > 0
+		states = append(states, cloned)
 	}
 	slices.SortFunc(states, func(a, b serviceState) int { return a.ChallengeID - b.ChallengeID })
 	return states, nil
@@ -500,6 +504,12 @@ func (s *memoryStore) ValidateServiceAction(_ context.Context, teamID, challenge
 	challenge, ok := s.challenges[challengeID]
 	if !ok || !challenge.Published {
 		return ErrChallengeNotFound
+	}
+	if challenge.Maintenance {
+		return ErrChallengeMaintenance
+	}
+	if challenge.PlayFromTick > 0 {
+		return ErrChallengeDeferred
 	}
 	instances, ok := s.instances[teamID]
 	if !ok {
@@ -1718,6 +1728,72 @@ func (s *memoryStore) RequeueTeamServices(_ context.Context, teamID int) error {
 		state.Unlocked = false
 		state.LastEvent = "redeploy queued by organizer reactivation"
 		state.ResetCooldown = "deploying"
+	}
+	return nil
+}
+
+func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok || challenge == nil {
+		return adminChallenge{}, ErrChallengeNotFound
+	}
+	clone := *challenge
+	clone.Maintenance = maintenance
+	if maintenance {
+		clone.MaintenanceAt = now.UTC().Format(time.RFC3339)
+		clone.PlayFromTick = 0
+		for teamID, challengeStates := range s.teamStates {
+			if state, ok := challengeStates[challengeID]; ok && state != nil {
+				state.Status = "degraded"
+				state.Checker = "pending"
+				state.Unlocked = false
+				state.LastEvent = "challenge under organizer maintenance"
+				state.ResetCooldown = "maintenance"
+			}
+			if instances, ok := s.instances[teamID]; ok {
+				if instance, ok := instances[challengeID]; ok && instance != nil {
+					instance.RuntimeStatus = "stopped"
+					instance.UpdatedAt = now.UTC().Format(time.RFC3339)
+				}
+			}
+		}
+	} else {
+		clone.MaintenanceAt = ""
+		// Memory store has no tick clock; leave play_from_tick unset (immediate).
+		// Postgres resume sets play_from_tick = current_tick + 1 when ticks exist.
+		clone.PlayFromTick = 0
+	}
+	s.challenges[challengeID] = &clone
+	clone.TotalTeams = len(s.teams)
+	clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challengeID)
+	clone.ReadyTeams = s.readyTeamsForChallengeLocked(challengeID)
+	clone.QueuedTeams = s.queuedTeamsForChallengeLocked(challengeID)
+	clone.RuntimeStatus = challengeRuntimeStatus(clone.Published, clone.TotalTeams, clone.ReadyTeams, clone.QueuedTeams)
+	return clone, nil
+}
+
+func (s *memoryStore) RequeueChallengeServices(_ context.Context, challengeID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.challenges[challengeID]; !ok {
+		return ErrChallengeNotFound
+	}
+	for teamID, instances := range s.instances {
+		if instance, ok := instances[challengeID]; ok && instance != nil {
+			instance.RuntimeStatus = "queued"
+			instance.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		if states, ok := s.teamStates[teamID]; ok {
+			if state, ok := states[challengeID]; ok && state != nil {
+				state.Status = "provisioning"
+				state.Checker = "pending"
+				state.Unlocked = false
+				state.LastEvent = "redeploy queued after challenge maintenance resume"
+				state.ResetCooldown = "deploying"
+			}
+		}
 	}
 	return nil
 }

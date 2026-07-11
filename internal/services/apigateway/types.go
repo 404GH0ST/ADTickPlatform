@@ -19,6 +19,7 @@ type challenge struct {
 	ID                int    `json:"id"`
 	Name              string `json:"name"`
 	HasSourceDownload bool   `json:"has_source_download"`
+	Maintenance       bool   `json:"maintenance"`
 }
 
 type authenticateResponse struct {
@@ -74,6 +75,7 @@ type serviceState struct {
 	SSHHint       string `json:"ssh_hint"`
 	LastEvent     string `json:"last_event"`
 	ResetCooldown string `json:"reset_cooldown"`
+	Maintenance   bool   `json:"maintenance"`
 	SLAStatus     string `json:"sla_status,omitempty"`
 	SLAPhase      string `json:"sla_phase,omitempty"`
 	SLATickID     int    `json:"sla_tick_id,omitempty"`

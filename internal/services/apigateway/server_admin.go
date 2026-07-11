@@ -509,6 +509,58 @@ func (s *Server) handleAdminDeleteChallenge(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleAdminChallengeMaintenance puts a challenge under mid-match maintenance:
+// participant actions and scoring stop, and all team containers for that challenge
+// are torn down. Historical points already earned remain on the scoreboard.
+func (s *Server) handleAdminChallengeMaintenance(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	challengeID, ok := parseChallengeID(w, r)
+	if !ok {
+		return
+	}
+	challenge, err := s.store.SetChallengeMaintenance(r.Context(), challengeID, true, s.now())
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	_ = s.controller.RemoveChallengeServices(r.Context(), challengeID)
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+
+	s.recordAdminAudit(r.Context(), "challenge.maintenance", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "put challenge under maintenance", map[string]any{
+		"challenge_id": challengeID,
+	})
+	writeData(w, http.StatusOK, challenge)
+}
+
+// handleAdminChallengeResume clears challenge maintenance and requeues team
+// instances so the controller boots them back to ready.
+func (s *Server) handleAdminChallengeResume(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	challengeID, ok := parseChallengeID(w, r)
+	if !ok {
+		return
+	}
+	challenge, err := s.store.SetChallengeMaintenance(r.Context(), challengeID, false, s.now())
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	if err := s.store.RequeueChallengeServices(r.Context(), challengeID); err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+
+	s.recordAdminAudit(r.Context(), "challenge.resume", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "resumed challenge after maintenance", map[string]any{
+		"challenge_id": challengeID,
+	})
+	writeData(w, http.StatusOK, challenge)
+}
+
 func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return

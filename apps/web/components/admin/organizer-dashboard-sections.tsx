@@ -160,6 +160,10 @@ type ChallengesTabProps = {
   onSelectDeleteTarget: (target: DeleteTarget) => void;
   onDeployChallenge: (challenge: AdminChallenge) => void;
   onValidateChallenge: (challenge: AdminChallenge) => void;
+  onSetChallengeMaintenanceState: (
+    challenge: AdminChallenge,
+    underMaintenance: boolean,
+  ) => void;
 };
 
 type DeploymentsTabProps = {
@@ -168,7 +172,6 @@ type DeploymentsTabProps = {
   pendingAction: string | null;
   onCloseDeleteDialog: () => void;
   onConfirmDelete: () => void;
-  onReconcileDeployments: () => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
 };
 
@@ -297,7 +300,7 @@ const checkerRunTone = {
 } as const;
 
 const selectClassName =
-  "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25";
+  "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 function toDateTimeLocalValue(isoString?: string): string {
   if (!isoString) {
@@ -577,6 +580,7 @@ export function ChallengesTab({
   onSelectDeleteTarget,
   onDeployChallenge,
   onValidateChallenge,
+  onSetChallengeMaintenanceState,
 }: ChallengesTabProps): ReactElement {
   return (
     <>
@@ -590,6 +594,7 @@ export function ChallengesTab({
           onSelectDeleteTarget={onSelectDeleteTarget}
           onDeployChallenge={onDeployChallenge}
           onValidateChallenge={onValidateChallenge}
+          onSetChallengeMaintenanceState={onSetChallengeMaintenanceState}
         />
       </div>
       <DeleteConfirmDialog
@@ -1088,6 +1093,7 @@ function ChallengeCatalogCard({
   onSelectDeleteTarget,
   onDeployChallenge,
   onValidateChallenge,
+  onSetChallengeMaintenanceState,
 }: {
   challengeRows: AdminChallenge[];
   pendingAction: string | null;
@@ -1097,6 +1103,10 @@ function ChallengeCatalogCard({
   onSelectDeleteTarget: (target: DeleteTarget) => void;
   onDeployChallenge: (challenge: AdminChallenge) => void;
   onValidateChallenge: (challenge: AdminChallenge) => void;
+  onSetChallengeMaintenanceState: (
+    challenge: AdminChallenge,
+    underMaintenance: boolean,
+  ) => void;
 }): ReactElement {
   return (
     <AdminRegistryCard
@@ -1129,6 +1139,7 @@ function ChallengeCatalogCard({
                 onSelectDeleteTarget={onSelectDeleteTarget}
                 onDeployChallenge={onDeployChallenge}
                 onValidateChallenge={onValidateChallenge}
+                onSetChallengeMaintenanceState={onSetChallengeMaintenanceState}
               />
             ))}
           </TableBody>
@@ -1145,6 +1156,7 @@ function ChallengeCatalogRow({
   onSelectDeleteTarget,
   onDeployChallenge,
   onValidateChallenge,
+  onSetChallengeMaintenanceState,
 }: {
   challenge: AdminChallenge;
   pendingAction: string | null;
@@ -1153,13 +1165,42 @@ function ChallengeCatalogRow({
   onSelectDeleteTarget: (target: DeleteTarget) => void;
   onDeployChallenge: (challenge: AdminChallenge) => void;
   onValidateChallenge: (challenge: AdminChallenge) => void;
+  onSetChallengeMaintenanceState: (
+    challenge: AdminChallenge,
+    underMaintenance: boolean,
+  ) => void;
 }): ReactElement {
   const validationStatus = validation?.status ?? "unchecked";
 
   return (
     <TableRow data-testid={`challenge-row-${challenge.id}`}>
       <TableCell className="font-semibold">#{challenge.id}</TableCell>
-      <TableCell>{challenge.name}</TableCell>
+      <TableCell>
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{challenge.name}</span>
+          {challenge.maintenance ? (
+            <Badge
+              className="tone-warning"
+              data-testid={`challenge-maintenance-badge-${challenge.id}`}
+              variant="outline"
+            >
+              Maintenance
+            </Badge>
+          ) : null}
+          {!challenge.maintenance &&
+          challenge.play_from_tick &&
+          challenge.play_from_tick > 0 ? (
+            <Badge
+              className="tone-warning"
+              data-testid={`challenge-deferred-badge-${challenge.id}`}
+              variant="outline"
+              title="Instances may be booting; checker and scoring start on this tick"
+            >
+              From tick #{challenge.play_from_tick}
+            </Badge>
+          ) : null}
+        </div>
+      </TableCell>
       <TableCell>
         <div className="max-w-[20rem] text-xs text-muted-foreground">
           <p>{challenge.baseline_image}</p>
@@ -1259,6 +1300,31 @@ function ChallengeCatalogRow({
             {challenge.published ? "Redeploy" : "Deploy"}
           </Button>
           <Button
+            disabled={pendingAction !== null || !challenge.published}
+            size="sm"
+            variant="outline"
+            className={challenge.maintenance ? undefined : "button-danger-subtle"}
+            data-testid={`toggle-challenge-maintenance-${challenge.id}`}
+            title={
+              challenge.maintenance
+                ? "Resume challenge after maintenance"
+                : "Put challenge under maintenance"
+            }
+            aria-label={
+              challenge.maintenance
+                ? "Resume challenge after maintenance"
+                : "Put challenge under maintenance"
+            }
+            onClick={() =>
+              onSetChallengeMaintenanceState(challenge, !challenge.maintenance)
+            }
+          >
+            {pendingAction === `challenge:maintenance:${challenge.id}` ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : null}
+            {challenge.maintenance ? "Resume" : "Maintain"}
+          </Button>
+          <Button
             disabled={pendingAction !== null}
             size="sm"
             variant="ghost"
@@ -1288,149 +1354,104 @@ export function DeploymentsTab({
   pendingAction,
   onCloseDeleteDialog,
   onConfirmDelete,
-  onReconcileDeployments,
   onSelectDeleteTarget,
 }: DeploymentsTabProps): ReactElement {
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-[0.78fr_1.22fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Controller Reconcile</CardTitle>
-            <CardDescription>
-              Queued deployment jobs stay in provisioning until the controller
-              marks their service replicas ready.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <InfoPanel className="leading-7">
-              <p>
-                Deploy creates one active service instance record per team and
-                puts the rollout into a queued job.
-              </p>
-              <p>
-                Trusted reconcile flips queued instances to ready and verifies
-                controller access plus WireGuard truth before rollout success is
-                reported.
-              </p>
-              <p>
-                Inactive jobs can be deleted from the table without removing
-                deployed services.
-              </p>
-            </InfoPanel>
-            <CardActionRow>
-              <Button
-                disabled={pendingAction !== null || deploymentRows.length === 0}
-                onClick={onReconcileDeployments}
-              >
-                {pendingAction === "deployments:reconcile" ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Network className="h-4 w-4" />
-                )}
-                Reconcile Deployments
-              </Button>
-            </CardActionRow>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Deployment Jobs</CardTitle>
-            <CardDescription>
-              Organizer-visible rollout queue sourced from the admin API.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Job</TableHead>
-                  <TableHead>Challenge</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Ready</TableHead>
-                  <TableHead>Queued</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deploymentRows.length === 0 ? (
-                  <EmptyTableRow
-                    colSpan={7}
-                    message="No deployment jobs yet."
-                  />
-                ) : (
-                  deploymentRows.map((deployment) => {
-                    return (
-                      <TableRow
-                        key={deployment.id}
-                        data-testid={`deployment-row-${deployment.id}`}
-                      >
-                        <TableCell className="font-semibold">
-                          #{deployment.id}
-                        </TableCell>
-                        <TableCell>{deployment.challenge_name}</TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
-                              deployment.status === "completed"
-                                ? challengeTone.ready
-                                : challengeTone.deploying
-                            }
-                            variant="outline"
-                          >
-                            {deployment.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {deployment.ready_team_count}/
-                          {deployment.target_team_count}
-                        </TableCell>
-                        <TableCell>{deployment.queued_team_count}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          <div>
-                            <p>{formatIndonesianDate(deployment.created_at)}</p>
-                            {deployment.completed_at ? (
-                              <p>
-                                done{" "}
-                                {formatIndonesianDate(deployment.completed_at)}
-                              </p>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="button-danger-subtle"
-                            data-testid={`delete-deployment-${deployment.id}`}
-                            disabled={pendingAction !== null}
-                            title={
-                              "Delete deployment job. Active queued jobs will be rejected by the API."
-                            }
-                            onClick={() =>
-                              onSelectDeleteTarget({
-                                kind: "deployment",
-                                id: deployment.id,
-                                label: `#${deployment.id} ${deployment.challenge_name}`,
-                                warning:
-                                  "This only removes the deployment job record. Deployed services remain intact.",
-                              })
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Deployment jobs</CardTitle>
+          <CardDescription>
+            Rollout queue after you Deploy a challenge. Queued jobs advance when
+            you run <span className="font-medium text-foreground">Reconcile</span>{" "}
+            in the status card above. Deleting a job only removes the job record —
+            team service instances stay.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Job</TableHead>
+                <TableHead>Challenge</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Ready</TableHead>
+                <TableHead>Queued</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {deploymentRows.length === 0 ? (
+                <EmptyTableRow colSpan={7} message="No deployment jobs yet." />
+              ) : (
+                deploymentRows.map((deployment) => {
+                  return (
+                    <TableRow
+                      key={deployment.id}
+                      data-testid={`deployment-row-${deployment.id}`}
+                    >
+                      <TableCell className="font-semibold">
+                        #{deployment.id}
+                      </TableCell>
+                      <TableCell>{deployment.challenge_name}</TableCell>
+                      <TableCell>
+                        <Badge
+                          className={
+                            deployment.status === "completed"
+                              ? challengeTone.ready
+                              : challengeTone.deploying
+                          }
+                          variant="outline"
+                        >
+                          {deployment.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {deployment.ready_team_count}/
+                        {deployment.target_team_count}
+                      </TableCell>
+                      <TableCell>{deployment.queued_team_count}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <div>
+                          <p>{formatIndonesianDate(deployment.created_at)}</p>
+                          {deployment.completed_at ? (
+                            <p>
+                              done{" "}
+                              {formatIndonesianDate(deployment.completed_at)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="button-danger-subtle"
+                          data-testid={`delete-deployment-${deployment.id}`}
+                          disabled={pendingAction !== null}
+                          title="Delete deployment job record only"
+                          onClick={() =>
+                            onSelectDeleteTarget({
+                              kind: "deployment",
+                              id: deployment.id,
+                              label: `#${deployment.id} ${deployment.challenge_name}`,
+                              warning:
+                                "This only removes the deployment job record. Deployed services remain intact.",
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
       <DeleteConfirmDialog
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
@@ -5737,7 +5758,7 @@ export function EntityFormDialog({
                   egressEnabled: event.target.checked,
                 })
               }
-              className="mt-1 h-4 w-4 rounded-sm border border-border bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+              className="mt-1 h-4 w-4 rounded-sm border border-border bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             />
             <span>
               Allow service containers to reach the public internet

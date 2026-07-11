@@ -349,12 +349,13 @@ test("organizer deployments reconcile completes queued jobs", async ({
   await expect(deploymentRow.getByText("1/3")).toBeVisible();
   await expect(queuedCountCell).toHaveText("2");
 
-  await page.getByRole("button", { name: "Reconcile Deployments" }).click();
+  await page.getByTestId("run-trusted-reconcile").click();
 
-  await expectActionNote(
-    page,
-    /Trusted reconcile processed 1 job\(s\), advanced 2 team service instance\(s\), and refreshed deployment, SSH access, and WireGuard truth\./,
-  );
+  await expect(
+    page.getByText(
+      /Reconcile finished: deployments, SSH access, and WireGuard should match host truth\./,
+    ),
+  ).toBeVisible();
   await expect(deploymentRow.getByText("completed")).toBeVisible();
   await expect(deploymentRow.getByText("3/3")).toBeVisible();
   await expect(queuedCountCell).toHaveText("0");
@@ -369,7 +370,7 @@ test("organizer deployments reconcile surfaces trusted-truth failure details", a
   });
 
   await page.goto("/admin/deployments");
-  await page.getByRole("button", { name: "Reconcile Deployments" }).click();
+  await page.getByTestId("run-trusted-reconcile").click();
 
   await expect(
     page.getByText(

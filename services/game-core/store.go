@@ -101,6 +101,7 @@ type checkerRunGroupKey struct {
 
 type gameStore interface {
 	ListCheckerTargets(ctx context.Context) ([]checkerTarget, error)
+	IsChallengeInMaintenance(ctx context.Context, challengeID int) (bool, error)
 	LookupTeamName(ctx context.Context, teamID int) (string, error)
 	StartNextTick(ctx context.Context, now time.Time) (apigateway.GameTickStatus, error)
 	RecordCheckerRun(ctx context.Context, run checkerRunRecord) (apigateway.GameCheckerRun, error)
@@ -151,6 +152,8 @@ type memoryChallenge struct {
 	Name               string
 	ServicePort        int
 	ServiceSubnetOctet int
+	Maintenance        bool
+	PlayFromTick       int // 0 = no deferred gate
 }
 
 func newMemoryGameStore() gameStore {
@@ -228,7 +231,25 @@ func (s *memoryGameStore) ListCheckerTargets(_ context.Context) ([]checkerTarget
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := append([]checkerTarget(nil), s.targets...)
+	currentTick := 0
+	for _, tick := range s.ticks {
+		if tick.ID > currentTick {
+			currentTick = tick.ID
+		}
+	}
+
+	result := make([]checkerTarget, 0, len(s.targets))
+	for _, target := range s.targets {
+		if challenge, ok := s.challenges[target.ChallengeID]; ok {
+			if challenge.Maintenance {
+				continue
+			}
+			if challenge.PlayFromTick > 0 && challenge.PlayFromTick > currentTick {
+				continue
+			}
+		}
+		result = append(result, target)
+	}
 	slices.SortFunc(result, func(a, b checkerTarget) int {
 		if a.TeamID != b.TeamID {
 			return a.TeamID - b.TeamID
@@ -236,6 +257,57 @@ func (s *memoryGameStore) ListCheckerTargets(_ context.Context) ([]checkerTarget
 		return a.ChallengeID - b.ChallengeID
 	})
 	return result, nil
+}
+
+func (s *memoryGameStore) IsChallengeInMaintenance(_ context.Context, challengeID int) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok {
+		return false, nil
+	}
+	if challenge.Maintenance {
+		return true, nil
+	}
+	if challenge.PlayFromTick > 0 {
+		currentTick := 0
+		for _, tick := range s.ticks {
+			if tick.ID > currentTick {
+				currentTick = tick.ID
+			}
+		}
+		if challenge.PlayFromTick > currentTick {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// setChallengeMaintenanceForTest is used by unit tests to toggle maintenance on
+// the in-memory game store without a full admin plane.
+func (s *memoryGameStore) setChallengeMaintenanceForTest(challengeID int, maintenance bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok {
+		return
+	}
+	challenge.Maintenance = maintenance
+	if maintenance {
+		challenge.PlayFromTick = 0
+	}
+	s.challenges[challengeID] = challenge
+}
+
+func (s *memoryGameStore) setChallengePlayFromTickForTest(challengeID, tick int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	challenge, ok := s.challenges[challengeID]
+	if !ok {
+		return
+	}
+	challenge.PlayFromTick = tick
+	s.challenges[challengeID] = challenge
 }
 
 func (s *memoryGameStore) LookupTeamName(_ context.Context, teamID int) (string, error) {
@@ -796,6 +868,10 @@ func newPostgresGameStore(db *sql.DB) gameStore {
 }
 
 func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTarget, error) {
+	// play_from_tick gates post-maintenance resume: challenge only re-enters the
+	// checker once the current max tick id has reached that value (set to next
+	// tick on resume). StartNextTick runs before this query, so the new tick id
+	// is already visible when the tick that should include the challenge starts.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.id, t.name, c.id, c.name, c.checker_image, COALESCE(si.checker_token, ''), tss.endpoint, split_part(tss.endpoint, ':', 1), split_part(tss.endpoint, ':', 2)
 		FROM teams t
@@ -803,6 +879,8 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 		JOIN challenges c ON c.id = tss.challenge_id
 		LEFT JOIN service_instances si ON si.team_id = t.id AND si.challenge_id = c.id
 		WHERE c.published = TRUE
+		  AND c.maintenance = FALSE
+		  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 		  AND t.active = TRUE
 		  AND (si.runtime_status IS NULL OR si.runtime_status = 'ready')
 		ORDER BY t.id, c.id
@@ -824,6 +902,24 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (s *postgresGameStore) IsChallengeInMaintenance(ctx context.Context, challengeID int) (bool, error) {
+	// True when the challenge must not accept scoring (maintenance or deferred resume).
+	var blocked bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.maintenance
+		    OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+		FROM challenges c
+		WHERE c.id = $1
+	`, challengeID).Scan(&blocked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return blocked, nil
 }
 
 func (s *postgresGameStore) LookupTeamName(ctx context.Context, teamID int) (string, error) {

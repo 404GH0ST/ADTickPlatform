@@ -121,6 +121,9 @@ export function OrganizerDashboard({
         onSetPlayerActiveState: (player, active) => {
           void state.setPlayerActiveState(player, active);
         },
+        onSetChallengeMaintenanceState: (challenge, underMaintenance) => {
+          void state.setChallengeMaintenanceState(challenge, underMaintenance);
+        },
         deleteTarget: state.deleteTarget,
         onDeployChallenge: (challenge) => {
           void state.deployChallenge(challenge);
@@ -146,9 +149,6 @@ export function OrganizerDashboard({
         },
         onReconcileAccess: () => {
           void state.reconcileAccess();
-        },
-        onReconcileDeployments: () => {
-          void state.reconcileDeployments();
         },
         onReconcileWireGuardGateway: () => {
           void state.reconcileWireGuardGateway();
@@ -300,6 +300,7 @@ function renderOrganizerPanel({
   onSelectDeleteTarget,
   onSetTeamActiveState,
   onSetPlayerActiveState,
+  onSetChallengeMaintenanceState,
   deleteTarget,
   onDeployChallenge,
   onDownloadWireGuardConfig,
@@ -310,7 +311,6 @@ function renderOrganizerPanel({
   onAuditGameScoring,
   onRecomputeGameScoring,
   onReconcileAccess,
-  onReconcileDeployments,
   onReconcileWireGuardGateway,
   onRefreshAccessStatus,
   onRefreshAttacks,
@@ -398,6 +398,10 @@ function renderOrganizerPanel({
     player: OrganizerDashboardOptions["players"][number],
     active: boolean,
   ) => void;
+  onSetChallengeMaintenanceState: (
+    challenge: OrganizerDashboardOptions["challenges"][number],
+    underMaintenance: boolean,
+  ) => void;
   deleteTarget: DeleteTarget | null;
   onDeployChallenge: (
     challenge: OrganizerDashboardOptions["challenges"][number],
@@ -412,7 +416,6 @@ function renderOrganizerPanel({
   onAuditGameScoring: () => void;
   onRecomputeGameScoring: () => void;
   onReconcileAccess: () => void;
-  onReconcileDeployments: () => void;
   onReconcileWireGuardGateway: () => void;
   onRefreshAccessStatus: () => void;
   onRefreshAttacks: () => void;
@@ -512,6 +515,7 @@ function renderOrganizerPanel({
         onSelectDeleteTarget={onSelectDeleteTarget}
         onDeployChallenge={onDeployChallenge}
         onValidateChallenge={onValidateChallenge}
+        onSetChallengeMaintenanceState={onSetChallengeMaintenanceState}
       />
     );
   }
@@ -524,7 +528,6 @@ function renderOrganizerPanel({
         pendingAction={pendingAction}
         onCloseDeleteDialog={onCloseDeleteDialog}
         onConfirmDelete={onConfirmDelete}
-        onReconcileDeployments={onReconcileDeployments}
         onSelectDeleteTarget={onSelectDeleteTarget}
       />
     );

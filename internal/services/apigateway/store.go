@@ -17,8 +17,12 @@ import (
 )
 
 var (
-	ErrChallengeNotFound     = errors.New("challenge not found")
-	ErrDeploymentActive      = errors.New("deployment job is still active")
+	ErrChallengeNotFound    = errors.New("challenge not found")
+	ErrChallengeMaintenance = errors.New("challenge under maintenance")
+	// ErrChallengeDeferred is returned when a challenge was resumed but only
+	// re-enters play starting at play_from_tick (usually the next tick).
+	ErrChallengeDeferred = errors.New("challenge resumes next tick")
+	ErrDeploymentActive     = errors.New("deployment job is still active")
 	ErrDeploymentNotFound    = errors.New("deployment job not found")
 	ErrServiceLocked         = errors.New("service locked")
 	ErrServiceUnavailable    = errors.New("service unavailable")
@@ -77,6 +81,8 @@ type Store interface {
 	DeleteAdminTeam(ctx context.Context, teamID int) error
 	SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error)
 	RequeueTeamServices(ctx context.Context, teamID int) error
+	SetChallengeMaintenance(ctx context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error)
+	RequeueChallengeServices(ctx context.Context, challengeID int) error
 	ListAdminPlayers(ctx context.Context) ([]adminPlayer, error)
 	CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error)
 	UpdateAdminPlayer(ctx context.Context, playerID int, input adminUpdatePlayerRequest) (adminPlayer, error)

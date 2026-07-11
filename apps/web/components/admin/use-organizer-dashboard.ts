@@ -191,6 +191,10 @@ export type OrganizerDashboardState = {
   selectDeleteTarget: (target: DeleteTarget) => void;
   setTeamActiveState: (team: AdminTeam, active: boolean) => Promise<void>;
   setPlayerActiveState: (player: AdminPlayer, active: boolean) => Promise<void>;
+  setChallengeMaintenanceState: (
+    challenge: AdminChallenge,
+    underMaintenance: boolean,
+  ) => Promise<void>;
   submitForm: () => Promise<void>;
   deploymentRows: AdminDeploymentJob[];
   deployChallenge: (challenge: AdminChallenge) => Promise<void>;
@@ -1226,6 +1230,44 @@ export function useOrganizerDashboard({
     });
   }
 
+  async function setChallengeMaintenanceState(
+    challenge: AdminChallenge,
+    underMaintenance: boolean,
+  ): Promise<void> {
+    setPendingAction(`challenge:maintenance:${challenge.id}`);
+    setActionError(null);
+    setActionNote(null);
+    const url = `/api/admin/challenges/${challenge.id}/${underMaintenance ? "maintenance" : "resume"}`;
+    try {
+      const response = await fetch(url, { method: "POST" });
+      const data = await processApiResponse<AdminChallenge>(response, url);
+      setChallengeRows((current) =>
+        current.map((item) => (item.id === challenge.id ? data : item)),
+      );
+      if (underMaintenance) {
+        setActionNote(`Challenge "${challenge.name}" put under maintenance.`);
+      } else if (data.play_from_tick && data.play_from_tick > 0) {
+        setActionNote(
+          `Challenge "${challenge.name}" resumed. It rejoins checker and scoring on tick #${data.play_from_tick}. Reconcile now so instances are ready by then.`,
+        );
+      } else {
+        setActionNote(
+          `Challenge "${challenge.name}" resumed. Reconcile deployments so instances come ready.`,
+        );
+      }
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : underMaintenance
+            ? "challenge maintenance failed"
+            : "challenge resume failed",
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function deleteChallenge(challenge: AdminChallenge): Promise<void> {
     return deleteEntity({
       actionKey: `challenge:delete:${challenge.id}`,
@@ -1473,7 +1515,7 @@ export function useOrganizerDashboard({
 
       setActionNote(
         payload.status === "queued"
-          ? `Queued ${payload.challenge_name} for ${payload.deployed_team_count} team runtimes. Run trusted reconcile to verify rollout, SSH access, and WireGuard state.`
+          ? `Queued ${payload.challenge_name} for ${payload.deployed_team_count} team runtime(s). Open Deployments and click Reconcile to finish rollout and host access.`
           : `${payload.challenge_name} was already fully deployed across all teams.`,
       );
     } catch (error) {
@@ -2459,6 +2501,7 @@ export function useOrganizerDashboard({
     selectDeleteTarget,
     setTeamActiveState,
     setPlayerActiveState,
+    setChallengeMaintenanceState,
     submitForm,
     deploymentRows,
     deployChallenge,

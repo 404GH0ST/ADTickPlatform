@@ -2,6 +2,40 @@ import { expect } from "@playwright/test";
 import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
 
+test("organizer can put a challenge under maintenance and resume it", async ({
+  page,
+}) => {
+  await page.goto("/admin/challenges");
+
+  const challengeRow = page.getByTestId("challenge-row-1");
+  await expect(challengeRow).toBeVisible();
+  await expect(
+    page.getByTestId("challenge-maintenance-badge-1"),
+  ).toHaveCount(0);
+
+  await page.getByTestId("toggle-challenge-maintenance-1").click();
+  await expect(
+    page.getByText('Challenge "college-http" put under maintenance.'),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("challenge-maintenance-badge-1"),
+  ).toBeVisible();
+  await expect(page.getByTestId("toggle-challenge-maintenance-1")).toContainText(
+    "Resume",
+  );
+
+  await page.getByTestId("toggle-challenge-maintenance-1").click();
+  await expect(
+    page.getByText('Challenge "college-http" resumed.'),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("challenge-maintenance-badge-1"),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("toggle-challenge-maintenance-1")).toContainText(
+    "Maintain",
+  );
+});
+
 test("organizer challenge redeploy supersedes the older queued job", async ({
   page,
   request,
@@ -22,7 +56,7 @@ test("organizer challenge redeploy supersedes the older queued job", async ({
 
   await expect(
     page.getByText(
-      "Queued college-http for 3 team runtimes. Run trusted reconcile to verify rollout, SSH access, and WireGuard state.",
+      "Queued college-http for 3 team runtime(s). Open Deployments and click Reconcile to finish rollout and host access.",
     ),
   ).toBeVisible();
   await expect(challengeRow.getByText("valid", { exact: true })).toBeVisible();

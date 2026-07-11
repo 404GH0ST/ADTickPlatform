@@ -148,6 +148,11 @@ type adminChallenge struct {
 	ServiceSubnetOctet int                        `json:"service_subnet_octet"`
 	EgressEnabled      bool                       `json:"egress_enabled"`
 	Published          bool                       `json:"published"`
+	Maintenance        bool                       `json:"maintenance"`
+	MaintenanceAt      string                     `json:"maintenance_at,omitempty"`
+	// PlayFromTick, when set, defers checker/scoring/participant access until
+	// that tick id exists (set on maintenance resume to "next tick").
+	PlayFromTick       int                        `json:"play_from_tick,omitempty"`
 	DeployedTeams      int                        `json:"deployed_teams"`
 	TotalTeams         int                        `json:"total_teams"`
 	RuntimeStatus      string                     `json:"runtime_status"`

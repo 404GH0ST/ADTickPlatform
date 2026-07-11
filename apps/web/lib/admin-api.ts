@@ -462,6 +462,20 @@ export async function reactivateAdminTeam(teamID: number) {
   });
 }
 
+export async function putAdminChallengeMaintenance(challengeID: number) {
+  return adminFetch<AdminChallenge>(
+    `/api/v2/admin/challenges/${challengeID}/maintenance`,
+    { method: "POST" },
+  );
+}
+
+export async function resumeAdminChallenge(challengeID: number) {
+  return adminFetch<AdminChallenge>(
+    `/api/v2/admin/challenges/${challengeID}/resume`,
+    { method: "POST" },
+  );
+}
+
 export async function listAdminPlayers() {
   return adminFetch<AdminPlayer[]>("/api/v2/admin/players");
 }

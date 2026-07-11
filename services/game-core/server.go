@@ -1356,6 +1356,15 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			continue
 		}
 
+		inMaintenance, err := s.store.IsChallengeInMaintenance(ctx, issued.ChallengeID)
+		if err != nil {
+			return nil, err
+		}
+		if inMaintenance {
+			results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "invalid", Detail: "challenge is under maintenance."})
+			continue
+		}
+
 		accepted, err := s.store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
 			Flag:           trimmed,
 			SubmittingTeam: teamID,

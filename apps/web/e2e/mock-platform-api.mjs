@@ -281,6 +281,7 @@ const adminChallenges = [
     service_subnet_octet: 50,
     egress_enabled: true,
     published: true,
+    maintenance: false,
     deployed_teams: 3,
     total_teams: 3,
     runtime_status: "ready",
@@ -629,6 +630,7 @@ function createInitialState() {
         ssh_hint: "unlock required before requesting root access",
         last_event: "service stable",
         reset_cooldown: "ready",
+        maintenance: false,
         sla_status: "ok",
         sla_phase: "check",
         sla_tick_id: 12,
@@ -1746,6 +1748,9 @@ async function handleServiceUnlock({ req, res, url, method }) {
   if (!serviceState || !body?.proof) {
     return writeFailure(res, 400, "unlock proof is invalid.");
   }
+  if (serviceState.maintenance) {
+    return writeFailure(res, 503, "challenge is under maintenance.");
+  }
 
   serviceState.unlocked = true;
   serviceState.ssh_hint =
@@ -1768,6 +1773,9 @@ function serviceActionRoute(pattern, handler) {
     const serviceState = findServiceState(challengeID);
     if (!serviceState) {
       return writeFailure(res, 404, "service not found.");
+    }
+    if (serviceState.maintenance) {
+      return writeFailure(res, 503, "challenge is under maintenance.");
     }
     return handler({ res, req, challengeID, serviceState });
   };
@@ -2116,7 +2124,47 @@ async function handleAdminChallengeRoutes({ req, res, url, method }) {
     return handleDeployChallenge(res, deployID);
   }
 
+  const maintenanceID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/challenges\/(\d+)\/maintenance$/,
+  );
+  if (method === "POST" && maintenanceID !== null) {
+    return handleChallengeMaintenance(res, maintenanceID, true);
+  }
+
+  const resumeID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/challenges\/(\d+)\/resume$/,
+  );
+  if (method === "POST" && resumeID !== null) {
+    return handleChallengeMaintenance(res, resumeID, false);
+  }
+
   return false;
+}
+
+function handleChallengeMaintenance(res, challengeID, underMaintenance) {
+  const challenge = state.challenges.find((item) => item.id === challengeID);
+  if (!challenge) {
+    return writeFailure(res, 404, "challenge not found.");
+  }
+  challenge.maintenance = underMaintenance;
+  challenge.maintenance_at = underMaintenance ? nowIso() : undefined;
+  state.teamServiceStates = state.teamServiceStates.map((entry) =>
+    entry.challenge_id === challengeID
+      ? {
+          ...entry,
+          maintenance: underMaintenance,
+          status: underMaintenance ? "degraded" : entry.status,
+          unlocked: underMaintenance ? false : entry.unlocked,
+          last_event: underMaintenance
+            ? "challenge under organizer maintenance"
+            : "redeploy queued after challenge maintenance resume",
+          reset_cooldown: underMaintenance ? "maintenance" : "deploying",
+        }
+      : entry,
+  );
+  return writeSuccess(res, challenge);
 }
 
 async function handleCreateChallenge(req, res) {
@@ -2137,6 +2185,7 @@ async function handleCreateChallenge(req, res) {
     egress_enabled:
       body?.egress_enabled === undefined ? true : Boolean(body.egress_enabled),
     published: false,
+    maintenance: false,
     deployed_teams: 0,
     total_teams: state.teams.length,
     runtime_status: "draft",

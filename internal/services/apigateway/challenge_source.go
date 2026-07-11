@@ -49,6 +49,10 @@ func (s *Server) handleChallengeSourceDownload(w http.ResponseWriter, r *http.Re
 
 	descriptor, err := s.lookupChallengeSourceDescriptor(r.Context(), challengeID)
 	if err != nil {
+		if errors.Is(err, ErrChallengeMaintenance) {
+			writeDomainFailure(w, err)
+			return
+		}
 		if errors.Is(err, errChallengeSourceUnavailable) || errors.Is(err, ErrChallengeNotFound) {
 			writeProblem(w, http.StatusNotFound, "Source unavailable", "challenge source is unavailable.")
 			return
@@ -82,6 +86,9 @@ func (s *Server) lookupChallengeSourceDescriptor(ctx context.Context, challengeI
 	for _, challenge := range challenges {
 		if challenge.ID != challengeID || !challenge.Published {
 			continue
+		}
+		if challenge.Maintenance {
+			return challengeSourceDescriptor{}, ErrChallengeMaintenance
 		}
 		path := sanitizeSourceBundlePath(challenge.SourceBundlePath)
 		if path == "" {

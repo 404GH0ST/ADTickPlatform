@@ -334,7 +334,12 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 }
 
 func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(source_bundle_path, '') <> '' FROM challenges WHERE published = TRUE ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, COALESCE(source_bundle_path, '') <> '', maintenance
+		FROM challenges
+		WHERE published = TRUE
+		ORDER BY id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +348,7 @@ func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error)
 	result := make([]challenge, 0)
 	for rows.Next() {
 		var item challenge
-		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload, &item.Maintenance); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -517,7 +522,8 @@ func (s *postgresStore) ListAttackFeed(ctx context.Context) ([]attackEvent, erro
 
 func (s *postgresStore) ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT tss.challenge_id, tss.team_id, c.name, tss.endpoint, tss.status, tss.checker, tss.unlocked, tss.ssh_hint, tss.last_event, tss.reset_cooldown
+		SELECT tss.challenge_id, tss.team_id, c.name, tss.endpoint, tss.status, tss.checker, tss.unlocked, tss.ssh_hint, tss.last_event, tss.reset_cooldown,
+		       (c.maintenance OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS unavailable
 		FROM team_service_states tss
 		JOIN challenges c ON c.id = tss.challenge_id
 		WHERE tss.team_id = $1 AND c.published = TRUE
@@ -531,7 +537,7 @@ func (s *postgresStore) ListTeamServices(ctx context.Context, teamID int) ([]ser
 	result := make([]serviceState, 0)
 	for rows.Next() {
 		var state serviceState
-		if err := rows.Scan(&state.ChallengeID, &state.TeamID, &state.Name, &state.Endpoint, &state.Status, &state.Checker, &state.Unlocked, &state.SSHHint, &state.LastEvent, &state.ResetCooldown); err != nil {
+		if err := rows.Scan(&state.ChallengeID, &state.TeamID, &state.Name, &state.Endpoint, &state.Status, &state.Checker, &state.Unlocked, &state.SSHHint, &state.LastEvent, &state.ResetCooldown, &state.Maintenance); err != nil {
 			return nil, err
 		}
 		result = append(result, state)
@@ -545,14 +551,16 @@ func (s *postgresStore) SubmitFlags(ctx context.Context, teamID int, flags []str
 
 func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, challengeID int) error {
 	var published bool
+	var maintenance bool
+	var playFromTick sql.NullInt64
 	var runtimeStatus sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT c.published, si.runtime_status
+		SELECT c.published, c.maintenance, c.play_from_tick, si.runtime_status
 		FROM team_service_states tss
 		JOIN challenges c ON c.id = tss.challenge_id
 		LEFT JOIN service_instances si ON si.team_id = tss.team_id AND si.challenge_id = tss.challenge_id
 		WHERE tss.team_id = $1 AND tss.challenge_id = $2
-	`, teamID, challengeID).Scan(&published, &runtimeStatus); err != nil {
+	`, teamID, challengeID).Scan(&published, &maintenance, &playFromTick, &runtimeStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrChallengeNotFound
 		}
@@ -560,6 +568,18 @@ func (s *postgresStore) ValidateServiceAction(ctx context.Context, teamID, chall
 	}
 	if !published {
 		return ErrChallengeNotFound
+	}
+	if maintenance {
+		return ErrChallengeMaintenance
+	}
+	if playFromTick.Valid && playFromTick.Int64 > 0 {
+		var currentTick int
+		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM game_ticks`).Scan(&currentTick); err != nil {
+			return err
+		}
+		if int(playFromTick.Int64) > currentTick {
+			return ErrChallengeDeferred
+		}
 	}
 	if !runtimeStatus.Valid {
 		return ErrChallengeNotFound
@@ -1318,6 +1338,9 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
 		       c.egress_enabled,
 		       c.published,
+		       c.maintenance,
+		       c.maintenance_at,
+		       c.play_from_tick,
 		       c.created_at,
 		       c.last_validation_status,
 		       c.last_validation_baseline_ssh_contract_ok,
@@ -1331,7 +1354,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1343,6 +1366,8 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 	for rows.Next() {
 		var challenge adminChallenge
 		var createdAt time.Time
+		var maintenanceAt sql.NullTime
+		var playFromTick sql.NullInt64
 		var validationStatus sql.NullString
 		var validationBaselineOK sql.NullBool
 		var validationCheckerOK sql.NullBool
@@ -1359,6 +1384,9 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.ServiceSubnetOctet,
 			&challenge.EgressEnabled,
 			&challenge.Published,
+			&challenge.Maintenance,
+			&maintenanceAt,
+			&playFromTick,
 			&createdAt,
 			&validationStatus,
 			&validationBaselineOK,
@@ -1374,6 +1402,12 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			return nil, err
 		}
 		challenge.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		if maintenanceAt.Valid {
+			challenge.MaintenanceAt = maintenanceAt.Time.UTC().Format(time.RFC3339)
+		}
+		if playFromTick.Valid && playFromTick.Int64 > 0 {
+			challenge.PlayFromTick = int(playFromTick.Int64)
+		}
 		if validationStatus.Valid && validationCheckedAt.Valid {
 			challenge.LastValidation = &ChallengeValidationResult{
 				ChallengeID:            challenge.ID,
@@ -1573,6 +1607,111 @@ func (s *postgresStore) RequeueTeamServices(ctx context.Context, teamID int) err
 		WHERE team_id = $1
 	`, teamID); err != nil {
 		return fmt.Errorf("reset team service states: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID int, maintenance bool, now time.Time) (adminChallenge, error) {
+	var result sql.Result
+	var err error
+	if maintenance {
+		// Entering maintenance: block immediately and clear any deferred resume gate.
+		result, err = s.db.ExecContext(ctx, `
+			UPDATE challenges
+			SET maintenance = TRUE, maintenance_at = $2, play_from_tick = NULL
+			WHERE id = $1
+		`, challengeID, now.UTC())
+	} else {
+		// Resume: clear maintenance and schedule re-entry for the *next* tick so
+		// checker put/scoring does not race mid-tick with still-booting instances.
+		// If no ticks exist yet, leave play_from_tick NULL (available when ready).
+		var currentTick int
+		if qErr := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM game_ticks`).Scan(&currentTick); qErr != nil {
+			return adminChallenge{}, fmt.Errorf("lookup current tick for resume: %w", qErr)
+		}
+		if currentTick > 0 {
+			result, err = s.db.ExecContext(ctx, `
+				UPDATE challenges
+				SET maintenance = FALSE, maintenance_at = NULL, play_from_tick = $2
+				WHERE id = $1
+			`, challengeID, currentTick+1)
+		} else {
+			result, err = s.db.ExecContext(ctx, `
+				UPDATE challenges
+				SET maintenance = FALSE, maintenance_at = NULL, play_from_tick = NULL
+				WHERE id = $1
+			`, challengeID)
+		}
+	}
+	if err != nil {
+		return adminChallenge{}, fmt.Errorf("set challenge maintenance: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return adminChallenge{}, ErrChallengeNotFound
+	}
+
+	if maintenance {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE team_service_states
+			SET status = 'degraded',
+			    checker = 'pending',
+			    unlocked = FALSE,
+			    last_event = 'challenge under organizer maintenance',
+			    reset_cooldown = 'maintenance'
+			WHERE challenge_id = $1
+		`, challengeID); err != nil {
+			return adminChallenge{}, fmt.Errorf("mark service states maintenance: %w", err)
+		}
+	} else {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE team_service_states
+			SET last_event = CASE
+			      WHEN (SELECT play_from_tick FROM challenges WHERE id = $1) IS NOT NULL
+			      THEN 'resumed; joins play on next tick'
+			      ELSE 'resumed after maintenance'
+			    END
+			WHERE challenge_id = $1
+		`, challengeID); err != nil {
+			return adminChallenge{}, fmt.Errorf("mark service states resume: %w", err)
+		}
+	}
+
+	challenges, err := s.ListAdminChallenges(ctx)
+	if err != nil {
+		return adminChallenge{}, err
+	}
+	for _, challenge := range challenges {
+		if challenge.ID == challengeID {
+			return challenge, nil
+		}
+	}
+	return adminChallenge{}, ErrChallengeNotFound
+}
+
+func (s *postgresStore) RequeueChallengeServices(ctx context.Context, challengeID int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE service_instances
+		SET runtime_status = 'queued', deployment_job_id = NULL, updated_at = NOW()
+		WHERE challenge_id = $1
+	`, challengeID); err != nil {
+		return fmt.Errorf("requeue challenge service instances: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET status = 'provisioning',
+		    checker = 'pending',
+		    unlocked = FALSE,
+		    last_event = 'redeploy queued after challenge maintenance resume',
+		    reset_cooldown = 'deploying'
+		WHERE challenge_id = $1
+	`, challengeID); err != nil {
+		return fmt.Errorf("reset challenge service states: %w", err)
 	}
 	return tx.Commit()
 }

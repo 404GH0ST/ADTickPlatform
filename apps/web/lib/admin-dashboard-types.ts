@@ -97,6 +97,10 @@ export type AdminChallenge = {
   service_subnet_octet: number;
   egress_enabled: boolean;
   published: boolean;
+  maintenance: boolean;
+  maintenance_at?: string;
+  /** When set, challenge re-enters play at this tick after maintenance resume. */
+  play_from_tick?: number;
   deployed_teams: number;
   total_teams: number;
   runtime_status: string;
