@@ -52,11 +52,13 @@ type memoryStore struct {
 	scoreboard         []scoreRow
 	attackFeed         []attackEvent
 	platformSettings   adminPlatformSettings
+	announcements      []matchAnnouncement
 	nextTeamID         int
 	nextPlayerID       int
 	nextChallengeID    int
 	nextDeploymentID   int
 	nextAuditLogID     int
+	nextAnnouncementID int
 }
 
 func NewMemoryStore(teamID int) Store {

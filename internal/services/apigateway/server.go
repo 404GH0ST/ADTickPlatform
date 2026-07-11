@@ -104,6 +104,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/me/team", s.handleJoinExistingTeam)
 	mux.HandleFunc("PUT /api/v2/me/profile", s.handleUpdateParticipantProfile)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
+	s.registerOpsFeatureRoutes(mux)
 	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
 	mux.HandleFunc("GET /api/v2/challenges/{challenge_id}/source", s.handleChallengeSourceDownload)

@@ -30,6 +30,7 @@ var (
 	ErrInvalidRuntimeConfig  = errors.New("invalid runtime config")
 	ErrSubmissionUnavailable = errors.New("authoritative submission backend unavailable")
 	ErrTeamMemberLimit       = errors.New("team member limit reached")
+	ErrResourceNotFound      = errors.New("resource not found")
 )
 
 type authenticatedPlayer struct {
@@ -47,6 +48,11 @@ type Store interface {
 	RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error)
 	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error)
 	UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error)
+	ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) error
+	ListAnnouncements(ctx context.Context) ([]matchAnnouncement, error)
+	CreateAnnouncement(ctx context.Context, body, createdBy string, now time.Time) (matchAnnouncement, error)
+	DeleteAnnouncement(ctx context.Context, id int) error
+	ImportAdminTeams(ctx context.Context, teams []adminBulkImportTeam, now time.Time) (adminBulkImportResult, error)
 	ListChallenges(ctx context.Context) ([]challenge, error)
 	ListPublicServices(ctx context.Context) (map[string]map[string][]string, error)
 	ListScoreboard(ctx context.Context) ([]scoreRow, error)
