@@ -46,7 +46,6 @@ function buildItems(
   services: ServiceRow[],
   vpnDownloaded: boolean,
 ): ChecklistItem[] {
-  const unlocked = services.some((service) => service.unlocked);
   const hasServices = services.length > 0;
   const hasTeam = (overview.teamID ?? 0) > 0;
   return [
@@ -67,13 +66,6 @@ function buildItems(
       label: "Confirm owned services are listed",
       detail: "Open Services after the organizer deploys challenges.",
       done: hasServices,
-    },
-    {
-      id: "unlock",
-      label: "Unlock at least one service for SSH",
-      detail:
-        "Exploit your own service, submit the unlock proof, then open SSH.",
-      done: unlocked,
     },
   ];
 }
