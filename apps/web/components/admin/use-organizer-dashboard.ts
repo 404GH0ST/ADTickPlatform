@@ -311,6 +311,23 @@ export function useOrganizerDashboard({
   const [playerRows, setPlayerRows] = useState(players);
   const [challengeRows, setChallengeRows] = useState(challenges);
   const [deploymentRows, setDeploymentRows] = useState(deployments);
+
+  useEffect(() => {
+    const handleDeploymentsReconciled = () => {
+      void refreshDeploymentRows(true);
+    };
+
+    window.addEventListener(
+      "ad-platform:deployments-reconciled",
+      handleDeploymentsReconciled,
+    );
+    return () => {
+      window.removeEventListener(
+        "ad-platform:deployments-reconciled",
+        handleDeploymentsReconciled,
+      );
+    };
+  }, []);
   const [gameState, setGameState] = useState(gameStatus);
   const [schedulerEventPageState, setSchedulerEventPageState] =
     useState<AdminSchedulerEventPage>(schedulerEventPage);

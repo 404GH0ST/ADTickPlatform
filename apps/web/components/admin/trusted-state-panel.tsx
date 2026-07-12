@@ -157,6 +157,7 @@ export function TrustedStatePanel(): ReactElement {
         "Reconcile finished: deployments, SSH access, and WireGuard should match host truth.",
       );
       await refresh();
+      window.dispatchEvent(new Event("ad-platform:deployments-reconciled"));
     } catch (reconcileError) {
       setError(
         reconcileError instanceof Error
