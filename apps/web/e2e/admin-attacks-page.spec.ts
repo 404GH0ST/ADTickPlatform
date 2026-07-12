@@ -1,7 +1,6 @@
 import { expect } from "@playwright/test";
 import { adminTest as test, mockApiBaseUrl } from "./test-utils";
 
-
 test("organizer attacks page renders the paginated accepted-attack feed", async ({
   page,
 }) => {
@@ -9,10 +8,16 @@ test("organizer attacks page renders the paginated accepted-attack feed", async 
 
   await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
   await expect(page.getByText("Accepted Attacks")).toBeVisible();
-  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
-  await expect(page.getByText("College Alpha").first()).toBeVisible();
-  await expect(page.getByText("College Beta").first()).toBeVisible();
-  await expect(page.getByText("first valid submission accepted").first()).toBeVisible();
+  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "College Alpha" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "College Beta" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "first valid submission accepted" }).first(),
+  ).toBeVisible();
 });
 
 test("organizer attacks page filters the accepted-attack feed", async ({
@@ -23,7 +28,9 @@ test("organizer attacks page filters the accepted-attack feed", async ({
   await page.getByLabel("Attacker").selectOption("College Alpha");
   await page.getByRole("button", { name: "Apply view" }).click();
 
-  await expect(page.getByText("College Alpha").first()).toBeVisible();
+  const table = page.locator("table").filter({ hasText: "Attacker" });
+  await expect(table.getByRole("cell", { name: "College Alpha" }).first()).toBeVisible();
+  await expect(table.getByRole("row")).toHaveCount(4); // header + 3 College Alpha rows
 });
 
 test("organizer attacks page shows empty-state messaging when no accepted attacks exist", async ({
@@ -36,7 +43,7 @@ test("organizer attacks page shows empty-state messaging when no accepted attack
 
   await page.goto("/admin/attacks");
   await expect(
-    page.getByText("No accepted attacks match the current organizer slice."),
+    page.getByText("No accepted attacks in this view"),
   ).toBeVisible();
 });
 
@@ -56,6 +63,6 @@ test("organizer attacks page shows degraded warning and empty-state messaging wh
     ),
   ).toBeVisible();
   await expect(
-    page.getByText("No accepted attacks match the current organizer slice."),
+    page.getByText("No accepted attacks in this view"),
   ).toBeVisible();
 });

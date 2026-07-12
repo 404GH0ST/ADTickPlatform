@@ -45,6 +45,8 @@ test("organizer scoreboard category leaders panel renders the explicit empty sta
 
   const panel = page.getByTestId("scoreboard-category-leaders-panel");
   await expect(panel).toBeVisible();
-  const empty = panel.getByText("No teams have played yet.");
+  const empty = panel.getByText(
+    "No team has a score yet. Rankings will appear after the first scored tick; verify the match and scheduler are running if this remains empty.",
+  );
   await expect(empty).toHaveCount(3);
 });
