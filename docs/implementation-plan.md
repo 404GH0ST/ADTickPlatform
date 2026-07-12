@@ -18,13 +18,6 @@ Completed:
 - Admin control plane security and resource management (DELETE support)
 - Phase 7 hardening baseline: observability dashboards, smokes, backup/restore, trusted reconcile, release-candidate gates
 
-Follow-on product work (see `docs/product-findings.md`):
-
-- participant day-of UX (flag submit UI, onboarding, password change)
-- organizer ops (bulk import, export, announcements; jury scoring left post-event/manual)
-- single-host capacity honesty and operator trusted-state surfaces
-
-
 ## Hard Requirements
 
 - one isolated runtime per `team x service`

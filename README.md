@@ -58,7 +58,6 @@ Comprehensive documentation guides are available in the [docs/](docs/) directory
 - [Final Rehearsal Checklist](docs/final-rehearsal-checklist.md) — Pre-flight sanity checks.
 - [Participant OpenAPI Spec](docs/platform-api-v2.openapi.yaml) — Platform API specs.
 - [Challenge Runtime Contract](docs/challenge-runtime.md) — Specifications for challenge builders.
-- [Product Findings](docs/product-findings.md) — Gaps, polish items, and prioritized backlog.
 
 Live documentation is also exposed on the running platform under `/docs/participant`, `/docs/platform-api`, and `/docs/platform-api-v2.openapi.yaml`.
 
