@@ -27,7 +27,7 @@ test("theme toggle persists dark mode across reload and organizer navigation", a
   await page.reload();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect(page.locator('[data-mode-option="light"]')).toBeVisible();
+  await expect(page.locator('[data-mode-option="light"]')).toHaveAttribute("aria-checked", "true");
 
   // Collapsed mode chip; expand on hover then pick Dark
   await selectExpandedOption(page, ".mode-picker", '[data-mode-option="dark"]');
@@ -41,13 +41,13 @@ test("theme toggle persists dark mode across reload and organizer navigation", a
   await page.reload();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator('[data-mode-option="dark"]')).toBeVisible();
+  await expect(page.locator('[data-mode-option="dark"]')).toHaveAttribute("aria-checked", "true");
 
   await page.goto("/admin");
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "graphite");
-  await expect(page.locator('[data-mode-option="dark"]')).toBeVisible();
+  await expect(page.locator('[data-mode-option="dark"]')).toHaveAttribute("aria-checked", "true");
 });
 
 test("system theme follows OS color scheme", async ({ page }) => {
@@ -62,7 +62,7 @@ test("system theme follows OS color scheme", async ({ page }) => {
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme-preference", "system");
-  await expect(page.locator('[data-mode-option="system"]')).toBeVisible();
+  await expect(page.locator('[data-mode-option="system"]')).toHaveAttribute("aria-checked", "true");
 
   await page.emulateMedia({ colorScheme: "light" });
   await expect
@@ -158,9 +158,7 @@ test("color scheme picker persists and keeps independent mode", async ({ page })
 
   await page.goto("/scoreboard");
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "ink");
-  await expect(page.locator('[data-scheme-option="ink"][aria-checked="true"]')).toBeVisible({
-    timeout: 5000,
-  });
+  await expect(page.locator('[data-scheme-option="ink"]')).toHaveAttribute("aria-checked", "true");
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "ink");
@@ -172,15 +170,17 @@ test("color scheme picker persists and keeps independent mode", async ({ page })
 });
 
 /**
- * Expand pickers hide non-active options with opacity/max-width, which confuses
- * Playwright hit-testing. Drive selection via DOM click for reliability.
+ * Appearance options live in a native disclosure so low-frequency preferences
+ * do not occupy the primary header scan path.
  */
 async function selectExpandedOption(
   page: import("@playwright/test").Page,
   pickerSelector: string,
   optionSelector: string,
 ) {
-  await page.locator(pickerSelector).locator(optionSelector).evaluate((el) => {
-    (el as HTMLButtonElement).click();
-  });
+  const picker = page.locator(pickerSelector);
+  if (!(await picker.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await picker.locator("summary").click();
+  }
+  await picker.locator(optionSelector).click();
 }

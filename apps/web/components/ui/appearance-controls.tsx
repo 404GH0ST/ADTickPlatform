@@ -1,6 +1,6 @@
 "use client";
 
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Palette, Sun } from "lucide-react";
 import { useEffect } from "react";
 
 import {
@@ -16,9 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Compact appearance chrome:
- * - Scheme: one chip; hover/focus expands to all four options
- * - Mode: one chip; hover/focus expands to light / dark / system
+ * Appearance stays available without placing seven low-frequency choices in
+ * the primary header scan path.
  *
  * Selection chrome is CSS-driven from html data attributes so navigation
  * remounts never flash Graphite / wrong mode.
@@ -79,72 +78,81 @@ export function AppearanceControls({ className }: { className?: string }) {
   }
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", className)}>
-      <div
-        role="radiogroup"
-        aria-label="Color scheme. Hover or focus to choose Graphite, Ink, Paper, or Moss."
-        className="expand-picker scheme-picker inline-flex h-9 items-stretch overflow-hidden rounded-sm border border-border bg-background"
-      >
-        {COLOR_SCHEMES.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="radio"
-            data-scheme-option={item.id}
-            aria-label={`${item.label}: ${item.description}`}
-            title={`${item.label} — ${item.description}`}
-            onClick={() => selectScheme(item.id)}
-            className={cn(
-              "expand-option scheme-option inline-flex h-full items-center gap-1.5 text-xs font-medium",
-              "text-foreground/85 hover:bg-muted hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-            )}
+    <details className={cn("scheme-picker mode-picker group relative", className)}>
+      <summary className="inline-flex h-9 cursor-pointer list-none items-center gap-2 rounded-sm border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [&::-webkit-details-marker]:hidden">
+        <Palette className="size-4" aria-hidden />
+        Appearance
+      </summary>
+      <div className="absolute right-0 top-full z-20 mt-1 grid min-w-64 gap-4 rounded-sm border border-border bg-popover p-3 text-popover-foreground shadow-sm">
+        <fieldset className="grid gap-2">
+          <legend className="text-sm font-medium">Color scheme</legend>
+          <div
+            role="radiogroup"
+            aria-label="Color scheme"
+            className="grid grid-cols-2 gap-1"
           >
-            <span
-              aria-hidden
-              className="relative flex size-3 shrink-0 overflow-hidden rounded-sm border border-border"
-            >
-              <span className="h-full w-1/2" style={{ background: item.swatch.light }} />
-              <span className="h-full w-1/2" style={{ background: item.swatch.dark }} />
-              <span
-                className="absolute bottom-0 right-0 size-1.5"
-                style={{ background: item.swatch.accent }}
-              />
-            </span>
-            <span className="whitespace-nowrap">{item.label}</span>
-          </button>
-        ))}
-      </div>
+            {COLOR_SCHEMES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="radio"
+                data-scheme-option={item.id}
+                aria-label={`${item.label}: ${item.description}`}
+                title={`${item.label} — ${item.description}`}
+                onClick={() => selectScheme(item.id)}
+                className={cn(
+                  "scheme-option inline-flex h-9 items-center gap-2 rounded-sm px-2 text-xs font-medium",
+                  "text-foreground/85 hover:bg-muted hover:text-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className="relative flex size-3 shrink-0 overflow-hidden rounded-sm border border-border"
+                >
+                  <span className="h-full w-1/2" style={{ background: item.swatch.light }} />
+                  <span className="h-full w-1/2" style={{ background: item.swatch.dark }} />
+                  <span
+                    className="absolute bottom-0 right-0 size-1.5"
+                    style={{ background: item.swatch.accent }}
+                  />
+                </span>
+                <span className="whitespace-nowrap">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
 
-      <div
-        role="radiogroup"
-        aria-label="Color mode. Hover or focus to choose Light, Dark, or System."
-        className="expand-picker mode-picker inline-flex h-9 items-stretch overflow-hidden rounded-sm border border-border bg-background"
-      >
-        {MODE_OPTIONS.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="radio"
-              data-mode-option={item.id}
-              aria-label={`${item.label}: ${item.description}`}
-              title={`${item.label} — ${item.description}`}
-              onClick={() => selectMode(item.id)}
-              className={cn(
-                "expand-option mode-option inline-flex h-full items-center gap-1.5 text-xs font-medium",
-                "text-foreground/85 hover:bg-muted hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-              )}
-            >
-              <Icon className="size-3.5 shrink-0" aria-hidden />
-              <span className="whitespace-nowrap">{item.label}</span>
-            </button>
-          );
-        })}
+        <fieldset className="grid gap-2 border-t border-border pt-3">
+          <legend className="sr-only">Color mode</legend>
+          <p className="text-sm font-medium">Color mode</p>
+          <div role="radiogroup" aria-label="Color mode" className="grid grid-cols-3 gap-1">
+            {MODE_OPTIONS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="radio"
+                  data-mode-option={item.id}
+                  aria-label={`${item.label}: ${item.description}`}
+                  title={`${item.label} — ${item.description}`}
+                  onClick={() => selectMode(item.id)}
+                  className={cn(
+                    "mode-option inline-flex h-9 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium",
+                    "text-foreground/85 hover:bg-muted hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  )}
+                >
+                  <Icon className="size-3.5 shrink-0" aria-hidden />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
       </div>
-    </div>
+    </details>
   );
 }
 

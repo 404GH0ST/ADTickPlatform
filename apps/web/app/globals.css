@@ -698,56 +698,15 @@
       0 0 0 4px var(--ring);
   }
 
-  /*
-   * Expand pickers (scheme + mode): collapsed single chip; hover/focus expands.
-   * Selection driven by html data attributes — no React flash on navigation.
-   * Selected state uses muted surface + foreground (not primary fill).
-   */
-  .expand-picker {
-    --expand-chip-pad-x: 0.55rem;
-    --expand-ease: cubic-bezier(0.16, 1, 0.3, 1);
-    transition: max-width 220ms var(--expand-ease);
-  }
-
-  .scheme-picker {
-    max-width: 6.5rem;
-  }
-
-  .mode-picker {
-    max-width: 5.5rem;
-  }
-
-  .expand-option {
-    max-width: 0;
-    min-width: 0;
-    flex: 0 0 auto;
-    overflow: hidden;
-    opacity: 0;
-    padding-inline: 0;
-    border-inline-end: 0 solid transparent;
-    pointer-events: none;
-    transition:
-      max-width 220ms var(--expand-ease),
-      opacity 160ms ease-out,
-      padding 220ms var(--expand-ease),
-      background-color 150ms ease-out,
-      color 150ms ease-out,
-      font-weight 150ms ease-out;
-  }
-
-  /* Collapsed: only the active option is visible */
+  /* Appearance selection remains CSS-driven to avoid navigation flashes. */
   :root[data-scheme="graphite"] .scheme-option[data-scheme-option="graphite"],
   :root[data-scheme="ink"] .scheme-option[data-scheme-option="ink"],
   :root[data-scheme="paper"] .scheme-option[data-scheme-option="paper"],
   :root[data-scheme="moss"] .scheme-option[data-scheme-option="moss"],
   .scheme-option[aria-checked="true"] {
-    max-width: 6.75rem;
-    opacity: 1;
-    padding-inline: var(--expand-chip-pad-x);
-    pointer-events: auto;
     color: var(--foreground);
-    background: transparent;
-    font-weight: 500;
+    background: var(--muted);
+    font-weight: 600;
   }
 
   :root[data-theme-preference="light"] .mode-option[data-mode-option="light"],
@@ -755,80 +714,9 @@
   :root[data-theme-preference="system"] .mode-option[data-mode-option="system"],
   :root:not([data-theme-preference]) .mode-option[data-mode-option="system"],
   .mode-option[aria-checked="true"] {
-    max-width: 5.75rem;
-    opacity: 1;
-    padding-inline: var(--expand-chip-pad-x);
-    pointer-events: auto;
     color: var(--foreground);
-    background: transparent;
-    font-weight: 500;
-  }
-
-  /* Expanded: reveal all options */
-  .scheme-picker:hover,
-  .scheme-picker:focus-within {
-    max-width: 22rem;
-  }
-
-  .mode-picker:hover,
-  .mode-picker:focus-within {
-    max-width: 16rem;
-  }
-
-  .expand-picker:hover .expand-option,
-  .expand-picker:focus-within .expand-option {
-    opacity: 1;
-    padding-inline: var(--expand-chip-pad-x);
-    pointer-events: auto;
-    border-inline-end: 1px solid var(--border);
-  }
-
-  .scheme-picker:hover .scheme-option,
-  .scheme-picker:focus-within .scheme-option {
-    max-width: 5.5rem;
-  }
-
-  .mode-picker:hover .mode-option,
-  .mode-picker:focus-within .mode-option {
-    max-width: 5.25rem;
-  }
-
-  .expand-picker:hover .expand-option:last-child,
-  .expand-picker:focus-within .expand-option:last-child {
-    border-inline-end-width: 0;
-  }
-
-  /* Active option while expanded — muted surface, always readable ink */
-  :root[data-scheme="graphite"] .scheme-picker:hover .scheme-option[data-scheme-option="graphite"],
-  :root[data-scheme="ink"] .scheme-picker:hover .scheme-option[data-scheme-option="ink"],
-  :root[data-scheme="paper"] .scheme-picker:hover .scheme-option[data-scheme-option="paper"],
-  :root[data-scheme="moss"] .scheme-picker:hover .scheme-option[data-scheme-option="moss"],
-  :root[data-scheme="graphite"] .scheme-picker:focus-within .scheme-option[data-scheme-option="graphite"],
-  :root[data-scheme="ink"] .scheme-picker:focus-within .scheme-option[data-scheme-option="ink"],
-  :root[data-scheme="paper"] .scheme-picker:focus-within .scheme-option[data-scheme-option="paper"],
-  :root[data-scheme="moss"] .scheme-picker:focus-within .scheme-option[data-scheme-option="moss"],
-  .scheme-picker:hover .scheme-option[aria-checked="true"],
-  .scheme-picker:focus-within .scheme-option[aria-checked="true"],
-  :root[data-theme-preference="light"] .mode-picker:hover .mode-option[data-mode-option="light"],
-  :root[data-theme-preference="dark"] .mode-picker:hover .mode-option[data-mode-option="dark"],
-  :root[data-theme-preference="system"] .mode-picker:hover .mode-option[data-mode-option="system"],
-  :root:not([data-theme-preference]) .mode-picker:hover .mode-option[data-mode-option="system"],
-  :root[data-theme-preference="light"] .mode-picker:focus-within .mode-option[data-mode-option="light"],
-  :root[data-theme-preference="dark"] .mode-picker:focus-within .mode-option[data-mode-option="dark"],
-  :root[data-theme-preference="system"] .mode-picker:focus-within .mode-option[data-mode-option="system"],
-  :root:not([data-theme-preference]) .mode-picker:focus-within .mode-option[data-mode-option="system"],
-  .mode-picker:hover .mode-option[aria-checked="true"],
-  .mode-picker:focus-within .mode-option[aria-checked="true"] {
     background: var(--muted);
-    color: var(--foreground);
     font-weight: 600;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .expand-picker,
-    .expand-option {
-      transition: none;
-    }
   }
 
   /*
