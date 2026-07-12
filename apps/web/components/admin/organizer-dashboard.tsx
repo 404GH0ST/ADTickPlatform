@@ -552,6 +552,8 @@ function renderOrganizerPanel({
         attacksLiveMode={attacksLiveMode}
         filters={attackFilters}
         pendingAction={pendingAction}
+        serviceOptions={challengeRows.map((challenge) => challenge.name)}
+        teamOptions={teamRows.map((team) => team.name)}
         onApplyFilters={onApplyAttackFilters}
         onFilterChange={onSetAttackFilters}
         onPage={onPageAttacks}
@@ -582,6 +584,8 @@ function renderOrganizerPanel({
       schedulerEventsLiveMode={schedulerEventsLiveMode}
       scoringAudit={scoringAudit}
       scoreRows={scoreRows}
+      serviceOptions={challengeRows.map((challenge) => challenge.name)}
+      teamOptions={teamRows.map((team) => team.name)}
       wireGuardGatewayStatus={wireGuardGatewayStatus}
       onAdvanceTick={onAdvanceGameTick}
       onApplyAttackFilters={onApplyAttackFilters}

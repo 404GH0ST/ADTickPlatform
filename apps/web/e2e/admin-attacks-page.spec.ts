@@ -20,8 +20,8 @@ test("organizer attacks page filters the accepted-attack feed", async ({
 }) => {
   await page.goto("/admin/attacks");
 
-  await page.getByLabel("Attacker").fill("College Alpha");
-  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await page.getByLabel("Attacker").selectOption("College Alpha");
+  await page.getByRole("button", { name: "Apply view" }).click();
 
   await expect(page.getByText("College Alpha").first()).toBeVisible();
 });

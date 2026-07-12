@@ -203,6 +203,9 @@ function renderControlCenterPanel({
     );
   }
 
+  const teamOptions = scoreRows.map((row) => row.team);
+  const serviceOptions = rows.map((row) => row.name);
+
   return (
     <AttacksPanel
       attackFilters={attackFilters}
@@ -211,6 +214,8 @@ function renderControlCenterPanel({
       attackLiveMode={attackLiveMode}
       pendingAction={pendingAction}
       currentTeamName={currentTeamName}
+      serviceOptions={serviceOptions}
+      teamOptions={teamOptions}
       onAttackerChange={onSetAttackAttacker}
       onLimitChange={onSetAttackLimit}
       onApplyFilters={onApplyAttackFilters}

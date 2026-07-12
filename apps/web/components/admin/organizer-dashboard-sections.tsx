@@ -77,6 +77,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
 import { cn } from "@/lib/utils";
 import { formatIndonesianDate } from "@/lib/date-format";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
@@ -228,6 +229,8 @@ type GameTabProps = {
   schedulerEventsLiveMode: boolean;
   scoringAudit: AdminScoringAudit | null;
   scoreRows: AdminGameScoreRow[];
+  serviceOptions?: string[];
+  teamOptions?: string[];
   wireGuardGatewayStatus: AdminWireGuardGatewayStatus | null;
   onAdvanceTick: () => void;
   onApplyAttackFilters: () => void;
@@ -1492,6 +1495,8 @@ export function GameTab({
   schedulerEventsLiveMode,
   scoringAudit,
   scoreRows,
+  serviceOptions = [],
+  teamOptions = [],
   wireGuardGatewayStatus,
   onAdvanceTick,
 
@@ -1544,6 +1549,8 @@ export function GameTab({
         attacksLiveMode={attacksLiveMode}
         filters={filters.attack}
         pendingAction={pendingAction}
+        serviceOptions={serviceOptions}
+        teamOptions={teamOptions}
         onApplyFilters={onApplyAttackFilters}
         onFilterChange={onAttackFilterChange}
         onPage={onPageAttacks}
@@ -4189,6 +4196,8 @@ export function GameAttacksCard({
   attacksLiveMode,
   filters,
   pendingAction,
+  serviceOptions = [],
+  teamOptions = [],
   onApplyFilters,
   onFilterChange,
   onPage,
@@ -4199,6 +4208,8 @@ export function GameAttacksCard({
   attacksLiveMode: boolean;
   filters: GameFilters["attack"];
   pendingAction: string | null;
+  serviceOptions?: string[];
+  teamOptions?: string[];
   onApplyFilters: () => void;
   onFilterChange: (next: GameFilters["attack"]) => void;
   onPage: (direction: "prev" | "next") => void;
@@ -4208,6 +4219,18 @@ export function GameAttacksCard({
   const attackRows = attackPage.items;
   const latestTick = attackRows.reduce((value, row) => Math.max(value, row.tick), 0);
   const filtersApplied = hasAttackFiltersApplied(filters);
+  const attackerChoices = buildAttackFilterOptions(
+    [...teamOptions, ...attackRows.map((row) => row.attacker)],
+    filters.attacker,
+  );
+  const victimChoices = buildAttackFilterOptions(
+    [...teamOptions, ...attackRows.map((row) => row.victim)],
+    filters.victim,
+  );
+  const serviceChoices = buildAttackFilterOptions(
+    [...serviceOptions, ...attackRows.map((row) => row.service)],
+    filters.service,
+  );
 
   return (
     <Card id="attack-feed">
@@ -4251,34 +4274,55 @@ export function GameAttacksCard({
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Attacker" htmlFor="admin-attack-attacker">
-              <Input
+              <select
                 id="admin-attack-attacker"
+                className={selectClassName}
                 value={filters.attacker}
                 onChange={(event) =>
                   onFilterChange({ ...filters, attacker: event.target.value })
                 }
-                placeholder="Team Alpha"
-              />
+              >
+                <option value="">Any attacker</option>
+                {attackerChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Victim" htmlFor="admin-attack-victim">
-              <Input
+              <select
                 id="admin-attack-victim"
+                className={selectClassName}
                 value={filters.victim}
                 onChange={(event) =>
                   onFilterChange({ ...filters, victim: event.target.value })
                 }
-                placeholder="Team Delta"
-              />
+              >
+                <option value="">Any victim</option>
+                {victimChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Service" htmlFor="admin-attack-service">
-              <Input
+              <select
                 id="admin-attack-service"
+                className={selectClassName}
                 value={filters.service}
                 onChange={(event) =>
                   onFilterChange({ ...filters, service: event.target.value })
                 }
-                placeholder="banking"
-              />
+              >
+                <option value="">Any service</option>
+                {serviceChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
           {filtersApplied ? (

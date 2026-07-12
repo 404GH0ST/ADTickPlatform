@@ -13,6 +13,7 @@ import type {
   ScoreRow,
   ServiceRow,
 } from "@/lib/dashboard-types";
+import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
 import { Badge } from "@/components/ui/badge";
 import { AttackMapPanel } from "@/components/ui/attack-map-panel";
 import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
@@ -80,6 +81,8 @@ type AttacksPanelProps = {
   attackLiveMode: boolean;
   pendingAction: string | null;
   currentTeamName?: string;
+  serviceOptions?: string[];
+  teamOptions?: string[];
   onAttackerChange: (value: string) => void;
   onLimitChange: (value: string) => void;
   onApplyFilters: () => void;
@@ -90,6 +93,9 @@ type AttacksPanelProps = {
   onVictimChange: (value: string) => void;
   onPage: (direction: "prev" | "next") => void;
 };
+
+const selectClassName =
+  "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 type UnlockDialogProps = {
   actionError: string | null;
@@ -420,6 +426,8 @@ export function AttacksPanel({
   attackLiveMode,
   pendingAction,
   currentTeamName,
+  serviceOptions = [],
+  teamOptions = [],
   onAttackerChange,
   onLimitChange,
   onApplyFilters,
@@ -439,6 +447,26 @@ export function AttacksPanel({
     attackFilters.tickFrom.trim() !== '' ||
     attackFilters.tickTo.trim() !== '';
   const [visibleRows, setVisibleRows] = useState<AttackEvent[]>(attackRows);
+  const attackerChoices = buildAttackFilterOptions(
+    [
+      ...teamOptions,
+      ...(currentTeamName ? [currentTeamName] : []),
+      ...attackRows.map((row) => row.attacker),
+    ],
+    attackFilters.attacker,
+  );
+  const victimChoices = buildAttackFilterOptions(
+    [
+      ...teamOptions,
+      ...(currentTeamName ? [currentTeamName] : []),
+      ...attackRows.map((row) => row.victim),
+    ],
+    attackFilters.victim,
+  );
+  const serviceChoices = buildAttackFilterOptions(
+    [...serviceOptions, ...attackRows.map((row) => row.service)],
+    attackFilters.service,
+  );
 
   useEffect(() => {
     setVisibleRows(attackRows);
@@ -477,28 +505,49 @@ export function AttacksPanel({
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Attacker" htmlFor="attack-attacker">
-              <Input
+              <select
                 id="attack-attacker"
+                className={selectClassName}
                 value={attackFilters.attacker}
                 onChange={(event) => onAttackerChange(event.target.value)}
-                placeholder="Team Alpha"
-              />
+              >
+                <option value="">Any attacker</option>
+                {attackerChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Victim" htmlFor="attack-victim">
-              <Input
+              <select
                 id="attack-victim"
+                className={selectClassName}
                 value={attackFilters.victim}
                 onChange={(event) => onVictimChange(event.target.value)}
-                placeholder="Team Delta"
-              />
+              >
+                <option value="">Any victim</option>
+                {victimChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Service" htmlFor="attack-service">
-              <Input
+              <select
                 id="attack-service"
+                className={selectClassName}
                 value={attackFilters.service}
                 onChange={(event) => onServiceChange(event.target.value)}
-                placeholder="banking"
-              />
+              >
+                <option value="">Any service</option>
+                {serviceChoices.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
           {filtersApplied ? (

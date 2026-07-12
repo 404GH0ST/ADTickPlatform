@@ -58,6 +58,28 @@ export function isDefaultAttackFilters(
 }
 
 /**
+ * Unique, sorted option labels for attack filter dropdowns.
+ * Always includes the current filter value so deep-linked filters stay selectable.
+ */
+export function buildAttackFilterOptions(
+  candidates: Iterable<string>,
+  current = "",
+): string[] {
+  const values = new Set<string>();
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      values.add(trimmed);
+    }
+  }
+  const currentTrimmed = current.trim();
+  if (currentTrimmed) {
+    values.add(currentTrimmed);
+  }
+  return Array.from(values).sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * Create an SSE `onmessage` handler for attack feed events.
  * Shared between organizer and participant dashboard hooks.
  */
