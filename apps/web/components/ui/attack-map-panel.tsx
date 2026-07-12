@@ -725,7 +725,7 @@ export function AttackMapPanel({
       ) : null}
 
       {attackRows.length === 0 ? (
-        <EmptyStateText message="No accepted attacks in the current slice to plot." />
+        <EmptyStateText message="No accepted attacks are available to plot in this view. Reset the parent attack filters or wait for the next accepted submission." />
       ) : (
         renderMapSurface(false)
       )}

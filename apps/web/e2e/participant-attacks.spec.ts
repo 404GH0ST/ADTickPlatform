@@ -62,7 +62,7 @@ test("participant services page shows an explicit empty state when the team owns
 
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
   await expect(
-    page.getByText("No owned services are available for this team yet."),
+    page.getByText(/No services are assigned to this team yet/),
   ).toBeVisible();
   await expect(page.getByTestId(/service-card-/)).toHaveCount(0);
 });

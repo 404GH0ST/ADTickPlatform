@@ -66,7 +66,6 @@ export function ControlCenter({
         onSelectResetTarget: state.selectResetTarget,
         onSetAttackAttacker: state.setAttackAttacker,
         onSetAttackLimit: state.setAttackLimit,
-        onSetAttackOffset: state.setAttackOffset,
         onSetAttackService: state.setAttackService,
         onSetAttackTickFrom: state.setAttackTickFrom,
         onSetAttackTickTo: state.setAttackTickTo,
@@ -126,7 +125,6 @@ function renderControlCenterPanel({
   onSelectResetTarget,
   onSetAttackAttacker,
   onSetAttackLimit,
-  onSetAttackOffset,
   onSetAttackService,
   onSetAttackTickFrom,
   onSetAttackTickTo,
@@ -162,7 +160,6 @@ function renderControlCenterPanel({
   ) => void;
   onSetAttackAttacker: (value: string) => void;
   onSetAttackLimit: (value: string) => void;
-  onSetAttackOffset: (value: string) => void;
   onSetAttackService: (value: string) => void;
   onSetAttackTickFrom: (value: string) => void;
   onSetAttackTickTo: (value: string) => void;
@@ -213,9 +210,9 @@ function renderControlCenterPanel({
       attackPage={attackPage}
       attackLiveMode={attackLiveMode}
       pendingAction={pendingAction}
+      currentTeamName={currentTeamName}
       onAttackerChange={onSetAttackAttacker}
       onLimitChange={onSetAttackLimit}
-      onOffsetChange={onSetAttackOffset}
       onApplyFilters={onApplyAttackFilters}
       onResetFilters={onResetAttackFilters}
       onServiceChange={onSetAttackService}

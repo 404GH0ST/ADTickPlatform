@@ -79,9 +79,9 @@ type AttacksPanelProps = {
   attackPage: AttackFeedPage;
   attackLiveMode: boolean;
   pendingAction: string | null;
+  currentTeamName?: string;
   onAttackerChange: (value: string) => void;
   onLimitChange: (value: string) => void;
-  onOffsetChange: (value: string) => void;
   onApplyFilters: () => void;
   onResetFilters: () => void;
   onServiceChange: (value: string) => void;
@@ -391,7 +391,7 @@ export function ServicesPanel({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <EmptyStateText message="No owned services are available for this team yet." />
+            <EmptyStateText message="No services are assigned to this team yet. This page refreshes automatically after an organizer deploys a challenge; contact an organizer if the match has already started." />
           </CardContent>
         </Card>
       ) : (
@@ -419,9 +419,9 @@ export function AttacksPanel({
   attackPage,
   attackLiveMode,
   pendingAction,
+  currentTeamName,
   onAttackerChange,
   onLimitChange,
-  onOffsetChange,
   onApplyFilters,
   onResetFilters,
   onServiceChange,
@@ -431,6 +431,13 @@ export function AttacksPanel({
   onPage,
 }: AttacksPanelProps): ReactElement {
   const attackRows = attackPage.items;
+  const latestTick = attackRows.reduce((value, row) => Math.max(value, row.tick), 0);
+  const filtersApplied =
+    attackFilters.attacker.trim() !== '' ||
+    attackFilters.victim.trim() !== '' ||
+    attackFilters.service.trim() !== '' ||
+    attackFilters.tickFrom.trim() !== '' ||
+    attackFilters.tickTo.trim() !== '';
   const [visibleRows, setVisibleRows] = useState<AttackEvent[]>(attackRows);
 
   useEffect(() => {
@@ -447,8 +454,28 @@ export function AttacksPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+        <section className="grid gap-3 border-b pb-4" aria-labelledby="attack-filter-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 id="attack-filter-heading" className="text-sm font-medium text-foreground">Tactical view</h3>
+              <p className="text-xs text-muted-foreground">Start with the question you need to answer, then refine only if necessary.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {currentTeamName ? (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => onVictimChange(currentTeamName)}>Against us</Button>
+                  <Button size="sm" variant="outline" onClick={() => onAttackerChange(currentTeamName)}>By us</Button>
+                </>
+              ) : null}
+              {latestTick > 0 ? (
+                <Button size="sm" variant="outline" onClick={() => {
+                  onTickFromChange(String(latestTick));
+                  onTickToChange(String(latestTick));
+                }}>Current tick</Button>
+              ) : null}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Attacker" htmlFor="attack-attacker">
               <Input
                 id="attack-attacker"
@@ -473,70 +500,47 @@ export function AttacksPanel({
                 placeholder="banking"
               />
             </Field>
-            <Field label="Tick From" htmlFor="attack-tick-from">
-              <Input
-                id="attack-tick-from"
-                type="number"
-                min="0"
-                value={attackFilters.tickFrom}
-                onChange={(event) => onTickFromChange(event.target.value)}
-                placeholder="240"
-              />
-            </Field>
-            <Field label="Tick To" htmlFor="attack-tick-to">
-              <Input
-                id="attack-tick-to"
-                type="number"
-                min="0"
-                value={attackFilters.tickTo}
-                onChange={(event) => onTickToChange(event.target.value)}
-                placeholder="248"
-              />
-            </Field>
-            <Field label="Limit" htmlFor="attack-limit">
-              <Input
-                id="attack-limit"
-                type="number"
-                min="1"
-                max="200"
-                value={attackFilters.limit}
-                onChange={(event) => onLimitChange(event.target.value)}
-              />
-            </Field>
-            <Field label="Offset" htmlFor="attack-offset">
-              <Input
-                id="attack-offset"
-                type="number"
-                min="0"
-                value={attackFilters.offset}
-                onChange={(event) => onOffsetChange(event.target.value)}
-              />
-            </Field>
           </div>
-          <div className="flex flex-wrap gap-2">
+          {filtersApplied ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              Selected view: {formatAttackFilterSummary(attackFilters)}. Choose Apply view to refresh the feed.
+            </p>
+          ) : null}
+          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced filters</summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <Field label="Tick from" htmlFor="attack-tick-from"><Input id="attack-tick-from" type="number" min="0" value={attackFilters.tickFrom} onChange={(event) => onTickFromChange(event.target.value)} placeholder="240" /></Field>
+              <Field label="Tick to" htmlFor="attack-tick-to"><Input id="attack-tick-to" type="number" min="0" value={attackFilters.tickTo} onChange={(event) => onTickToChange(event.target.value)} placeholder="248" /></Field>
+              <Field label="Rows per page" htmlFor="attack-limit"><Input id="attack-limit" type="number" min="1" max="200" value={attackFilters.limit} onChange={(event) => onLimitChange(event.target.value)} /></Field>
+            </div>
+          </details>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <PagedFilterActions
+              applyLabel="Apply view"
+              canPageNext={attackPage.has_next}
+              canPagePrev={attackPage.has_prev}
+              disabled={pendingAction !== null}
+              liveMode={attackLiveMode}
+              onApply={onApplyFilters}
+              onPage={onPage}
+              onReset={onResetFilters}
+              resetLabel="Reset view"
+              showLiveModeBadge={false}
+            />
+            <div className="flex flex-wrap gap-2">
             <SliceCountBadge
               totalCount={attackPage.total_count}
               visibleCount={visibleRows.length}
+              offset={Number.parseInt(attackFilters.offset, 10) || 0}
             />
             <LiveModeBadge
               filteredLabel="Filtered"
               liveLabel="Live"
               liveMode={attackLiveMode}
             />
+            </div>
           </div>
-        </div>
-        <PagedFilterActions
-          applyLabel="Apply Filters"
-          canPageNext={attackPage.has_next}
-          canPagePrev={attackPage.has_prev}
-          disabled={pendingAction !== null}
-          liveMode={attackLiveMode}
-          onApply={onApplyFilters}
-          onPage={onPage}
-          onReset={onResetFilters}
-          resetLabel="Reset View"
-          showLiveModeBadge={false}
-        />
+        </section>
         <AttackSliceSummaryGrid rows={visibleRows} />
         <AttackMapPanel
           attackRows={attackRows}
@@ -547,7 +551,11 @@ export function AttacksPanel({
         />
 
         {visibleRows.length === 0 ? (
-          <EmptyStateText message="No accepted attack events are available for this slice." />
+          <div className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
+            <p className="text-sm font-medium text-foreground">No accepted attacks in this view</p>
+            <EmptyStateText message={filtersApplied ? 'The active team, service, or tick filters exclude every accepted attack. Reset the view to return to the live feed.' : 'Accepted attacks will appear here automatically after a valid flag is submitted.'} />
+            {filtersApplied ? <Button size="sm" variant="outline" onClick={onResetFilters}>Reset view</Button> : null}
+          </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -564,6 +572,19 @@ export function AttacksPanel({
       </CardContent>
     </Card>
   );
+}
+
+function formatAttackFilterSummary(filters: AttackFilters): string {
+  const parts = [
+    filters.attacker.trim() ? `attacker ${filters.attacker.trim()}` : null,
+    filters.victim.trim() ? `victim ${filters.victim.trim()}` : null,
+    filters.service.trim() ? `service ${filters.service.trim()}` : null,
+    filters.tickFrom.trim() || filters.tickTo.trim()
+      ? `ticks ${filters.tickFrom.trim() || 'start'}–${filters.tickTo.trim() || 'latest'}`
+      : null,
+  ].filter((value): value is string => value !== null);
+
+  return parts.join(', ');
 }
 
 export function UnlockServiceDialog({
