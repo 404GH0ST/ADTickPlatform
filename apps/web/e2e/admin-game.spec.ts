@@ -79,7 +79,7 @@ test("organizer game page shows explicit empty states for scheduler and checker 
   );
   await openDisclosureIfNeeded(page.getByTestId("checker-runs-disclosure"));
   await expect(
-    page.getByText("No scheduler events recorded yet."),
+    page.getByText(/No scheduler events are recorded yet/),
   ).toBeVisible();
   await expect(
     page.getByText("No checker runs persisted yet."),
@@ -106,7 +106,7 @@ test("organizer game page shows degraded warning when scheduler and checker hist
     ),
   ).toBeVisible();
   await expect(
-    page.getByText("No scheduler events recorded yet."),
+    page.getByText(/No scheduler events are recorded yet/),
   ).toBeVisible();
   await expect(
     page.getByText("No checker runs persisted yet."),
@@ -502,6 +502,7 @@ test("organizer match controls handle manual match operations and recompute logi
     /Game started\. Submissions are open and the scheduler is running at 60s\./,
   );
 
+  await matchCard.getByText("End match", { exact: true }).click();
   await page.getByTestId("stop-match").click();
   await expectActionNote(
     page,
@@ -510,6 +511,7 @@ test("organizer match controls handle manual match operations and recompute logi
   await expect(matchCard.getByText("finished").first()).toBeVisible();
   await expect(matchCard.getByText("closed").first()).toBeVisible();
 
+  await quickActionsCard.getByText("Manual interventions", { exact: true }).click();
   await page.getByTestId("advance-tick").click();
   await expectActionNote(
     page,

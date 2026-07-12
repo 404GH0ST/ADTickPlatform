@@ -1554,9 +1554,9 @@ export function GameTab({
   }
 
   return (
-    <div className="grid gap-6">
-      <section className="grid gap-3">
-        <div>
+    <div className="grid gap-8">
+      <section className="grid gap-4">
+        <div className="border-b border-border pb-3">
           <h2 className="text-base font-semibold text-foreground">
             Incident Response
           </h2>
@@ -1587,8 +1587,8 @@ export function GameTab({
         />
       </section>
 
-      <section className="grid gap-3">
-        <div>
+      <section className="grid gap-4">
+        <div className="border-b border-border pb-3">
           <h2 className="text-base font-semibold text-foreground">
             Match Controls
           </h2>
@@ -1614,8 +1614,8 @@ export function GameTab({
         <PlatformSettingsCard />
       </section>
 
-      <section className="grid gap-3">
-        <div>
+      <section className="grid gap-4">
+        <div className="border-b border-border pb-3">
           <h2 className="text-base font-semibold text-foreground">
             Match Observation
           </h2>
@@ -1634,8 +1634,8 @@ export function GameTab({
         </div>
       </section>
 
-      <section className="grid gap-3">
-        <div>
+      <section className="grid gap-4">
+        <div className="border-b border-border pb-3">
           <h2 className="text-base font-semibold text-foreground">
             Diagnostics
           </h2>
@@ -1733,7 +1733,7 @@ function CategoryLeaderCard({
       </CardHeader>
       <CardContent>
         {leaders.length === 0 ? (
-          <EmptyStateText message="No teams have played yet." />
+          <EmptyStateText message="No team has a score yet. Rankings will appear after the first scored tick; verify the match and scheduler are running if this remains empty." />
         ) : (
           <ol className="grid gap-2" aria-label={title}>
             {leaders.map((leader) => (
@@ -2112,6 +2112,12 @@ function MatchLifecycleCard({
   onResumeMatch: () => void;
   onStopMatch: () => void;
 }): ReactElement {
+  const state = matchState?.state;
+  const canStart = state !== "running" && state !== "paused" && state !== "finished";
+  const canPause = state === "running";
+  const canResume = state === "paused";
+  const canStop = state === "running" || state === "paused";
+
   return (
     <Card data-testid="match-card">
       <CardHeader>
@@ -2150,10 +2156,29 @@ function MatchLifecycleCard({
             valueClassName="font-mono"
           />
         </InfoPanel>
-        <CardActionRow>
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {canStart ? (
+              <Button disabled={pendingAction !== null} data-testid="start-match" onClick={onStartMatch}>
+                {pendingAction === "game:match:start" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
+                Start game
+              </Button>
+            ) : null}
+            {canPause ? (
+              <Button disabled={pendingAction !== null} data-testid="pause-match" onClick={onPauseMatch}>
+                {pendingAction === "game:match:pause" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+                Pause game
+              </Button>
+            ) : null}
+            {canResume ? (
+              <Button disabled={pendingAction !== null} data-testid="resume-match" onClick={onResumeMatch}>
+                {pendingAction === "game:match:resume" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                Resume game
+              </Button>
+            ) : null}
           <Button
             disabled={pendingAction !== null}
-            variant="outline"
+            variant="ghost"
             data-testid="refresh-game-status"
             onClick={onRefreshGameStatus}
           >
@@ -2162,69 +2187,22 @@ function MatchLifecycleCard({
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Refresh Status
+            Refresh status
           </Button>
-          <Button
-            disabled={
-              pendingAction !== null ||
-              matchState?.state === "running" ||
-              matchState?.state === "paused" ||
-              matchState?.state === "finished"
-            }
-            variant="outline"
-            data-testid="start-match"
-            onClick={onStartMatch}
-          >
-            {pendingAction === "game:match:start" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Flag className="h-4 w-4" />
-            )}
-            Start Game
-          </Button>
-          <Button
-            disabled={pendingAction !== null || matchState?.state !== "running"}
-            variant="outline"
-            data-testid="pause-match"
-            onClick={onPauseMatch}
-          >
-            {pendingAction === "game:match:pause" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Pause className="h-4 w-4" />
-            )}
-            Pause Game
-          </Button>
-          <Button
-            disabled={pendingAction !== null || matchState?.state !== "paused"}
-            variant="outline"
-            data-testid="resume-match"
-            onClick={onResumeMatch}
-          >
-            {pendingAction === "game:match:resume" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            Resume Game
-          </Button>
-          <Button
-            disabled={
-              pendingAction !== null ||
-              (matchState?.state !== "running" && matchState?.state !== "paused")
-            }
-            variant="outline"
-            data-testid="stop-match"
-            onClick={onStopMatch}
-          >
-            {pendingAction === "game:match:stop" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Flag className="h-4 w-4" />
-            )}
-            Stop Match
-          </Button>
-        </CardActionRow>
+          </div>
+          {canStop ? (
+            <details className="rounded-sm border border-danger/30 bg-danger/5 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-foreground">End match</summary>
+              <div className="mt-3 grid justify-items-start gap-3">
+                <p className="text-sm text-muted-foreground">Stopping closes participant submissions and ends the active match. Verify the current tick before continuing.</p>
+                <Button className="button-danger-solid" disabled={pendingAction !== null} data-testid="stop-match" onClick={onStopMatch}>
+                  {pendingAction === "game:match:stop" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
+                  Stop match
+                </Button>
+              </div>
+            </details>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );
@@ -2459,7 +2437,22 @@ function QuickActionsCard({
             valueClassName="font-mono"
           />
         </InfoPanel>
-        <CardActionRow>
+        <div className="grid gap-3">
+          <CardActionRow>
+            <Button
+              disabled={pendingAction !== null}
+              variant="outline"
+              data-testid="audit-scores"
+              onClick={onAuditScores}
+            >
+              {pendingAction === "game:scoring-audit" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Audit scores
+            </Button>
+          </CardActionRow>
+          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">Manual interventions</summary>
+            <p className="mt-2 text-sm text-muted-foreground">These operations modify live progression or rebuild rankings. Use them only after checking runtime health and the latest tick.</p>
+            <CardActionRow className="mt-3">
           <Button
             disabled={pendingAction !== null}
             data-testid="advance-tick"
@@ -2470,7 +2463,7 @@ function QuickActionsCard({
             ) : (
               <Flag className="h-4 w-4" />
             )}
-            Advance Tick
+            Advance tick
           </Button>
           <Button
             disabled={pendingAction !== null}
@@ -2483,22 +2476,11 @@ function QuickActionsCard({
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Recompute Scores
+            Recompute scores
           </Button>
-          <Button
-            disabled={pendingAction !== null}
-            variant="outline"
-            data-testid="audit-scores"
-            onClick={onAuditScores}
-          >
-            {pendingAction === "game:scoring-audit" ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Audit Scores
-          </Button>
-        </CardActionRow>
+            </CardActionRow>
+          </details>
+        </div>
       </CardContent>
     </Card>
   );
@@ -4046,7 +4028,7 @@ function SchedulerEventList({
   return (
     <div className="space-y-3">
       {events.length === 0 ? (
-        <EmptyStateText message="No scheduler events recorded yet." />
+        <EmptyStateText message="No scheduler events are recorded yet. Events appear automatically after the scheduler starts; refresh runtime status if it is already running." />
       ) : (
         events.map((event) => <SchedulerEventRow key={event.id} event={event} />)
       )}
@@ -4133,7 +4115,7 @@ function CurrentTickCard({
             {currentTick.message ? <p>{currentTick.message}</p> : null}
           </InfoPanel>
         ) : (
-          <EmptyStateText message="No persisted tick yet." />
+          <EmptyStateText message="No tick has been persisted yet. Start the match and scheduler, or use the manual intervention only after confirming runtime health." />
         )}
       </div>
     </section>
@@ -4224,6 +4206,8 @@ export function GameAttacksCard({
   onResetFilters: () => void;
 }): ReactElement {
   const attackRows = attackPage.items;
+  const latestTick = attackRows.reduce((value, row) => Math.max(value, row.tick), 0);
+  const filtersApplied = hasAttackFiltersApplied(filters);
 
   return (
     <Card id="attack-feed">
@@ -4251,9 +4235,21 @@ export function GameAttacksCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+      <CardContent className="space-y-6">
+        <section className="grid gap-3 border-b pb-4" aria-labelledby="admin-attack-filter-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 id="admin-attack-filter-heading" className="text-sm font-medium text-foreground">Investigation view</h3>
+              <p className="text-xs text-muted-foreground">Use a tick preset for immediate triage or refine the feed by team and service.</p>
+            </div>
+            {latestTick > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => onFilterChange({ ...filters, tickFrom: String(latestTick), tickTo: String(latestTick), offset: '0' })}>Current tick</Button>
+                <Button size="sm" variant="outline" onClick={() => onFilterChange({ ...filters, tickFrom: String(Math.max(0, latestTick - 4)), tickTo: String(latestTick), offset: '0' })}>Last 5 ticks</Button>
+              </div>
+            ) : null}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Attacker" htmlFor="admin-attack-attacker">
               <Input
                 id="admin-attack-attacker"
@@ -4284,88 +4280,62 @@ export function GameAttacksCard({
                 placeholder="banking"
               />
             </Field>
-            <Field label="Tick From" htmlFor="admin-attack-tick-from">
-              <Input
-                id="admin-attack-tick-from"
-                type="number"
-                min="0"
-                value={filters.tickFrom}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, tickFrom: event.target.value })
-                }
-                placeholder="240"
-              />
-            </Field>
-            <Field label="Tick To" htmlFor="admin-attack-tick-to">
-              <Input
-                id="admin-attack-tick-to"
-                type="number"
-                min="0"
-                value={filters.tickTo}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, tickTo: event.target.value })
-                }
-                placeholder="248"
-              />
-            </Field>
-            <Field label="Limit" htmlFor="admin-attack-limit">
-              <Input
-                id="admin-attack-limit"
-                type="number"
-                min="1"
-                max="200"
-                value={filters.limit}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, limit: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Offset" htmlFor="admin-attack-offset">
-              <Input
-                id="admin-attack-offset"
-                type="number"
-                min="0"
-                value={filters.offset}
-                onChange={(event) =>
-                  onFilterChange({ ...filters, offset: event.target.value })
-                }
-              />
-            </Field>
           </div>
-          <div className="flex flex-wrap gap-2">
+          {filtersApplied ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              Selected filters are ready. Choose Apply view to refresh the organizer feed.
+            </p>
+          ) : null}
+          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced filters</summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <Field label="Tick from" htmlFor="admin-attack-tick-from"><Input id="admin-attack-tick-from" type="number" min="0" value={filters.tickFrom} onChange={(event) => onFilterChange({ ...filters, tickFrom: event.target.value })} placeholder="240" /></Field>
+              <Field label="Tick to" htmlFor="admin-attack-tick-to"><Input id="admin-attack-tick-to" type="number" min="0" value={filters.tickTo} onChange={(event) => onFilterChange({ ...filters, tickTo: event.target.value })} placeholder="248" /></Field>
+              <Field label="Rows per page" htmlFor="admin-attack-limit"><Input id="admin-attack-limit" type="number" min="1" max="200" value={filters.limit} onChange={(event) => onFilterChange({ ...filters, limit: event.target.value })} /></Field>
+            </div>
+          </details>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <PagedFilterActions
+              applyLabel="Apply view"
+              canPageNext={attackPage.has_next}
+              canPagePrev={attackPage.has_prev}
+              disabled={pendingAction !== null}
+              liveMode={attacksLiveMode}
+              onApply={onApplyFilters}
+              onPage={onPage}
+              onReset={onResetFilters}
+              resetLabel="Reset view"
+              showLiveModeBadge={false}
+            />
+            <div className="flex flex-wrap gap-2">
             <SliceCountBadge
               totalCount={attackPage.total_count}
               visibleCount={attackRows.length}
+              offset={Number.parseInt(filters.offset, 10) || 0}
             />
             <LiveModeBadge
               filteredLabel="Filtered"
               liveLabel="Live"
               liveMode={attacksLiveMode}
             />
+            </div>
           </div>
-        </div>
-        <PagedFilterActions
-          applyLabel="Apply Filters"
-          canPageNext={attackPage.has_next}
-          canPagePrev={attackPage.has_prev}
-          disabled={pendingAction !== null}
-          liveMode={attacksLiveMode}
-          onApply={onApplyFilters}
-          onPage={onPage}
-          onReset={onResetFilters}
-          resetLabel="Reset View"
-          showLiveModeBadge={false}
-        />
+        </section>
         <AttackSliceSummaryGrid rows={attackRows} />
         <AttackMapPanel
           attackRows={attackRows}
           description="Accepted submissions rendered as directional team flow for the current organizer slice."
           title="Attack flow"
         />
-        <AttackFeedTable
-          attackRows={attackRows}
-          emptyMessage="No accepted attacks match the current organizer slice."
-        />
+        {attackRows.length === 0 ? (
+          <div className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
+            <p className="text-sm font-medium text-foreground">No accepted attacks in this view</p>
+            <p className="text-sm text-muted-foreground">{filtersApplied ? 'The active filters exclude every accepted attack. Reset the view to return to the live organizer feed.' : 'Accepted attacks will appear here automatically after participants submit valid flags.'}</p>
+            {filtersApplied ? <Button size="sm" variant="outline" onClick={onResetFilters}>Reset view</Button> : null}
+          </div>
+        ) : (
+          <AttackFeedTable attackRows={attackRows} />
+        )}
       </CardContent>
     </Card>
   );
@@ -4826,6 +4796,17 @@ function hasSchedulerFiltersApplied(
     filters.eventType.trim() !== "" ||
     filters.source.trim() !== "" ||
     filters.state.trim() !== ""
+  );
+}
+
+function hasAttackFiltersApplied(filters: GameFilters["attack"]): boolean {
+  return (
+    filters.attacker.trim() !== "" ||
+    filters.victim.trim() !== "" ||
+    filters.service.trim() !== "" ||
+    filters.tickFrom.trim() !== "" ||
+    filters.tickTo.trim() !== "" ||
+    Number.parseInt(filters.offset, 10) > 0
   );
 }
 
