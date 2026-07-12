@@ -15,6 +15,38 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`);
 });
 
+test("participant announcement remains visible while switching pages", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/platform/announcements", async (route) => {
+    requestCount += 1;
+    if (requestCount > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: 1,
+          body: "Scoring resumes at the next tick.",
+          created_at: "2026-07-12T00:00:00Z",
+        },
+      ]),
+    });
+  });
+
+  await page.goto("/");
+  const announcement = page.getByText(
+    "Organizer: Scoring resumes at the next tick.",
+  );
+  await expect(announcement).toBeVisible();
+
+  await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
+  await expect(page).toHaveURL(/\/scoreboard$/);
+  await expect(announcement).toBeVisible({ timeout: 500 });
+});
+
 type ApiCase = {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
