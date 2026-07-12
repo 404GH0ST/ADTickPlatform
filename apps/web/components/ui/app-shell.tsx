@@ -12,6 +12,7 @@ export type NavItem = {
 export type AppShellProps = {
   activePath: string;
   navItems: readonly NavItem[];
+  secondaryNavItems?: readonly NavItem[];
   title: string;
   children: ReactNode;
   headerActions?: ReactNode;
@@ -26,6 +27,7 @@ export type AppShellProps = {
 export function AppShell({
   activePath,
   navItems,
+  secondaryNavItems = [],
   title,
   children,
   headerActions,
@@ -62,6 +64,32 @@ export function AppShell({
                 {item.label}
               </Link>
             ))}
+            {secondaryNavItems.length > 0 ? (
+              <details className="group relative">
+                <summary
+                  className="shell-nav-link cursor-pointer list-none [&::-webkit-details-marker]:hidden"
+                  data-active={
+                    secondaryNavItems.some((item) => activePath === item.href)
+                      ? 'true'
+                      : 'false'
+                  }
+                >
+                  More
+                </summary>
+                <div className="absolute left-0 top-full z-20 mt-1 min-w-44 rounded-sm border border-border bg-popover p-1 text-popover-foreground shadow-sm">
+                  {secondaryNavItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      data-active={activePath === item.href ? 'true' : 'false'}
+                      className="shell-nav-link block"
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </div>
           {navActions ? (
             <div className="ml-auto flex flex-wrap items-center gap-2 pt-1 sm:pt-0">

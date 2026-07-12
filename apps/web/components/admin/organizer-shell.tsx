@@ -7,13 +7,16 @@ import { Button } from '@/components/ui/button';
 
 const navItems = [
   { href: '/admin', label: 'Overview' },
+  { href: '/admin/game', label: 'Game' },
+  { href: '/admin/scoreboard', label: 'Scoreboard' },
+  { href: '/admin/attacks', label: 'Attacks' },
+] as const;
+
+const secondaryNavItems = [
   { href: '/admin/teams', label: 'Teams' },
   { href: '/admin/players', label: 'Players' },
   { href: '/admin/challenges', label: 'Challenges' },
   { href: '/admin/deployments', label: 'Deployments' },
-  { href: '/admin/game', label: 'Game' },
-  { href: '/admin/scoreboard', label: 'Scoreboard' },
-  { href: '/admin/attacks', label: 'Attacks' },
   { href: '/admin/audit', label: 'Audit' },
 ] as const;
 
@@ -34,6 +37,7 @@ export function OrganizerShell({
     <AppShell
       activePath={activePath}
       navItems={navItems}
+      secondaryNavItems={secondaryNavItems}
       title={title}
       headerActions={
         <Button asChild variant="outline">
