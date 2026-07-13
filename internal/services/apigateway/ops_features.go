@@ -75,18 +75,19 @@ func (s *Server) handleChangeParticipantPassword(w http.ResponseWriter, r *http.
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "password change request is invalid.")
 		return
 	}
-	current := strings.TrimSpace(req.CurrentPassword)
-	next := strings.TrimSpace(req.NewPassword)
+	current := req.CurrentPassword
+	next := req.NewPassword
 	if current == "" || next == "" {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "current_password and new_password are required.")
 		return
 	}
-	if len(next) < 8 {
+	if !validPassword(next) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "new_password must be at least 8 characters.")
 		return
 	}
 
-	if err := s.store.ChangeParticipantPassword(r.Context(), player.PlayerID, current, next); err != nil {
+	sessionVersion, err := s.store.ChangeParticipantPassword(r.Context(), player.PlayerID, current, next)
+	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidCredentials):
 			writeProblem(w, http.StatusForbidden, "Password change failed", "current password is wrong.")
@@ -95,7 +96,13 @@ func (s *Server) handleChangeParticipantPassword(w http.ResponseWriter, r *http.
 		}
 		return
 	}
-	writeData(w, http.StatusOK, map[string]any{"updated": true})
+	player.SessionVersion = sessionVersion
+	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, map[string]any{"updated": true, "token": token, "token_type": "Bearer"})
 }
 
 func (s *Server) handleListAnnouncements(w http.ResponseWriter, r *http.Request) {

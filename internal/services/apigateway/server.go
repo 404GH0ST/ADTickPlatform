@@ -200,6 +200,10 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 
 	player, err := s.store.AuthenticatePlayer(r.Context(), req.Email, req.Password)
 	if err != nil {
+		if errors.Is(err, ErrAccountDeactivated) {
+			writeProblem(w, http.StatusForbidden, "Access deactivated", "Your account or team has been deactivated by the organizers.")
+			return
+		}
 		if errors.Is(err, ErrInvalidCredentials) {
 			writeProblem(w, http.StatusForbidden, "Authentication failed", "email or password is wrong.")
 			return
@@ -243,6 +247,10 @@ func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 
 	if !validParticipantName(req.DisplayName) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "display name must be 1-96 characters with no control characters.")
+		return
+	}
+	if !validPassword(req.Password) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "password must be at least 8 characters.")
 		return
 	}
 
@@ -1162,7 +1170,7 @@ func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, messa
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return authenticatedPlayer{}, false
 	}
-	player, err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role)
+	player, err := s.store.ValidatePlayerSession(r.Context(), claims.PlayerID, claims.TeamID, claims.Role, claims.SessionVersion)
 	if err != nil {
 		if errors.Is(err, ErrAccountDeactivated) {
 			writeProblem(w, http.StatusForbidden, "Access deactivated", "Your account or team has been deactivated by the organizers. Contact them if you believe this is a mistake.")
@@ -1247,6 +1255,8 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "Duplicate resource", "resource already exists.")
 	case errors.Is(err, ErrTeamMemberLimit):
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "team has reached the maximum member count.")
+	case errors.Is(err, ErrTeamAddressPool), errors.Is(err, ErrPlayerAddressPool):
+		writeProblem(w, http.StatusConflict, "Address pool exhausted", "the configured private network address pool has no remaining capacity.")
 	case errors.Is(err, ErrInvalidRuntimeConfig):
 		writeProblem(w, http.StatusBadRequest, "Invalid runtime configuration", err.Error())
 	default:

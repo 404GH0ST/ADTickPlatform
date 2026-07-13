@@ -41,7 +41,10 @@ type wireGuardServerProfile struct {
 	DNS        string
 }
 
-func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuardPeer string, now time.Time) (wireGuardPeerState, error) {
+func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuardPeer, address string, now time.Time) (wireGuardPeerState, error) {
+	if strings.TrimSpace(address) == "" {
+		return wireGuardPeerState{}, ErrPlayerAddressPool
+	}
 	clientPrivateKey, clientPublicKey, err := generateX25519Keypair()
 	if err != nil {
 		return wireGuardPeerState{}, err
@@ -63,7 +66,7 @@ func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuar
 		TeamName:         teamName,
 		DisplayName:      displayName,
 		WireGuardPeer:    wireGuardPeer,
-		Address:          wireGuardPeerAddress(teamID, playerID),
+		Address:          address,
 		Status:           "active",
 		ServerEndpoint:   wireGuardServerEndpoint(),
 		ServerPublicKey:  serverPublicKey,
@@ -181,8 +184,12 @@ func sanitizeWireGuardDownloadStem(value string) string {
 	return strings.Trim(builder.String(), "-_.")
 }
 
-func wireGuardPeerAddress(teamID, playerID int) string {
-	return fmt.Sprintf("10.70.%d.%d", teamServiceOctet(teamID), ((playerID-1)%200)+20)
+func wireGuardPeerAddress(_ int, playerID int) string {
+	return wireGuardPeerAddressAt(max(playerID-1, 0))
+}
+
+func wireGuardPeerAddressAt(index int) string {
+	return fmt.Sprintf("10.70.%d.%d", (index/200)+1, (index%200)+20)
 }
 
 func wireGuardServerEndpoint() string {

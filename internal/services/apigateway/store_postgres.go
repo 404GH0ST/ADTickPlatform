@@ -78,8 +78,10 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	var teamID sql.NullInt64
 	var teamName sql.NullString
 	var teamContactEmail sql.NullString
+	var playerActive bool
+	var teamActive bool
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.password_hash
+		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.session_version, p.password_hash, p.active, COALESCE(t.active, TRUE)
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE LOWER(p.email) = LOWER($1)
@@ -91,10 +93,13 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		&player.DisplayName,
 		&player.Email,
 		&player.Role,
+		&player.SessionVersion,
 		&passwordHash,
+		&playerActive,
+		&teamActive,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return authenticatedPlayer{}, ErrInvalidCredentials
+			return authenticatedPlayer{}, consumeUnknownPlayerPassword(password)
 		}
 		return authenticatedPlayer{}, err
 	}
@@ -109,9 +114,8 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	if teamContactEmail.Valid {
 		player.TeamContactEmail = teamContactEmail.String
 	}
-
-	if !passwordMatches(passwordHash, password) {
-		return authenticatedPlayer{}, ErrInvalidCredentials
+	if err := validatePlayerAuthentication(passwordHash, password, player.Role, playerActive, teamActive); err != nil {
+		return authenticatedPlayer{}, err
 	}
 	if passwordHashNeedsUpgrade(passwordHash) {
 		if upgradedHash, hashErr := hashPassword(password); hashErr == nil {
@@ -125,7 +129,7 @@ func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantReg
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	password := input.Password
-	if displayName == "" || email == "" || strings.TrimSpace(password) == "" {
+	if displayName == "" || email == "" || !validPassword(password) {
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 
@@ -143,7 +147,7 @@ func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantReg
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 
-	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
+	playerID, err := s.nextIDTx(ctx, tx, `SELECT nextval('players_id_seq')`)
 	if err != nil {
 		return authenticatedPlayer{}, err
 	}
@@ -162,16 +166,17 @@ func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantReg
 		return authenticatedPlayer{}, err
 	}
 	return authenticatedPlayer{
-		PlayerID:    playerID,
-		TeamID:      0,
-		TeamName:    "",
-		DisplayName: displayName,
-		Email:       email,
-		Role:        "member",
+		PlayerID:       playerID,
+		TeamID:         0,
+		TeamName:       "",
+		DisplayName:    displayName,
+		Email:          email,
+		Role:           "member",
+		SessionVersion: 1,
 	}, nil
 }
 
-func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error) {
+func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string, sessionVersion int) (authenticatedPlayer, error) {
 	var player authenticatedPlayer
 	var currentTeamID sql.NullInt64
 	var currentTeamName sql.NullString
@@ -179,11 +184,11 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	var playerActive bool
 	var teamActive bool
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.active, COALESCE(t.active, TRUE)
+		SELECT p.id, p.team_id, t.name, t.email, p.display_name, p.email, p.role, p.session_version, p.active, COALESCE(t.active, TRUE)
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		WHERE p.id = $1
-	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &currentTeamContactEmail, &player.DisplayName, &player.Email, &player.Role, &playerActive, &teamActive); err != nil {
+	`, playerID).Scan(&player.PlayerID, &currentTeamID, &currentTeamName, &currentTeamContactEmail, &player.DisplayName, &player.Email, &player.Role, &player.SessionVersion, &playerActive, &teamActive); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
@@ -198,6 +203,9 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if player.SessionVersion != sessionVersion {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 
@@ -251,7 +259,7 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 	var player authenticatedPlayer
 	var currentTeamID sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
-		SELECT id, team_id, display_name, email, role
+		SELECT id, team_id, display_name, email, role, session_version
 		FROM players
 		WHERE id = $1
 		FOR UPDATE
@@ -261,6 +269,7 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 		&player.DisplayName,
 		&player.Email,
 		&player.Role,
+		&player.SessionVersion,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
@@ -281,22 +290,31 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 
 	if currentTeamID.Valid && currentTeamID.Int64 > 0 {
 		teamID := int(currentTeamID.Int64)
-		teamName := strings.TrimSpace(input.TeamName)
-		teamContactEmail := strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
-		if teamName == "" || teamContactEmail == "" {
-			return authenticatedPlayer{}, ErrDuplicateResource
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE (LOWER(name) = LOWER($1) OR LOWER(email) = LOWER($2)) AND id != $3)`, teamName, teamContactEmail, teamID).Scan(&duplicate); err != nil {
+		var teamName string
+		var teamContactEmail string
+		if strings.EqualFold(strings.TrimSpace(player.Role), "captain") {
+			teamName = strings.TrimSpace(input.TeamName)
+			teamContactEmail = strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
+			if teamName == "" || teamContactEmail == "" {
+				return authenticatedPlayer{}, ErrDuplicateResource
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE (LOWER(name) = LOWER($1) OR LOWER(email) = LOWER($2)) AND id != $3)`, teamName, teamContactEmail, teamID).Scan(&duplicate); err != nil {
+				return authenticatedPlayer{}, err
+			}
+			if duplicate {
+				return authenticatedPlayer{}, ErrDuplicateResource
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE teams SET name = $2, email = $3 WHERE id = $1`, teamID, teamName, teamContactEmail); err != nil {
+				return authenticatedPlayer{}, fmt.Errorf("update participant team: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE scoreboard_entries SET team_name = $2 WHERE team_id = $1`, teamID, teamName); err != nil {
+				return authenticatedPlayer{}, fmt.Errorf("update participant scoreboard team name: %w", err)
+			}
+		} else if err := tx.QueryRowContext(ctx, `SELECT name, email FROM teams WHERE id = $1`, teamID).Scan(&teamName, &teamContactEmail); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return authenticatedPlayer{}, ErrTeamNotFound
+			}
 			return authenticatedPlayer{}, err
-		}
-		if duplicate {
-			return authenticatedPlayer{}, ErrDuplicateResource
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE teams SET name = $2, email = $3 WHERE id = $1`, teamID, teamName, teamContactEmail); err != nil {
-			return authenticatedPlayer{}, fmt.Errorf("update participant team: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE scoreboard_entries SET team_name = $2 WHERE team_id = $1`, teamID, teamName); err != nil {
-			return authenticatedPlayer{}, fmt.Errorf("update participant scoreboard team name: %w", err)
 		}
 		player.TeamID = teamID
 		player.TeamName = teamName
@@ -976,7 +994,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 		}
 		defer tx.Rollback()
 
-		teamID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 100) + 1 FROM teams`)
+		teamID, err := allocateTeamNetworkIDTx(ctx, tx)
 		if err != nil {
 			return adminTeam{}, fmt.Errorf("allocate team id: %w", err)
 		}
@@ -988,7 +1006,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 			return adminTeam{}, fmt.Errorf("insert team: %w", err)
 		}
 
-		rank, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(rank), 0) + 1 FROM scoreboard_entries`)
+		rank, err := s.nextIDTx(ctx, tx, `SELECT nextval('scoreboard_rank_seq')`)
 		if err != nil {
 			return adminTeam{}, fmt.Errorf("allocate scoreboard rank: %w", err)
 		}
@@ -1152,6 +1170,9 @@ func (s *postgresStore) ListAdminPlayers(ctx context.Context) ([]adminPlayer, er
 }
 
 func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error) {
+	if !validPassword(input.Password) {
+		return adminPlayer{}, ErrInvalidCredentials
+	}
 	role := normalizedRole(input.Role)
 	var teamName string
 	if input.TeamID == 0 {
@@ -1190,7 +1211,7 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 		}
 	}
 
-	playerID, err := s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM players`)
+	playerID, err := s.nextIDTx(ctx, tx, `SELECT nextval('players_id_seq')`)
 	if err != nil {
 		return adminPlayer{}, err
 	}
@@ -1219,7 +1240,11 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 		return adminPlayer{}, err
 	}
 	if player.TeamID > 0 || player.Role == "organizer" {
-		wireGuardState, err := newWireGuardPeerState(player.ID, player.TeamID, player.TeamName, player.DisplayName, player.WireGuardPeer, now)
+		address, err := allocateWireGuardPeerAddressTx(ctx, tx)
+		if err != nil {
+			return adminPlayer{}, err
+		}
+		wireGuardState, err := newWireGuardPeerState(player.ID, player.TeamID, player.TeamName, player.DisplayName, player.WireGuardPeer, address, now)
 		if err != nil {
 			return adminPlayer{}, err
 		}
@@ -1251,7 +1276,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	var player authenticatedPlayer
 	var currentTeamID sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
-		SELECT id, team_id, display_name, email, role
+		SELECT id, team_id, display_name, email, role, session_version
 		FROM players
 		WHERE id = $1
 		FOR UPDATE
@@ -1261,6 +1286,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 		&player.DisplayName,
 		&player.Email,
 		&player.Role,
+		&player.SessionVersion,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
@@ -1301,7 +1327,11 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 		return authenticatedPlayer{}, err
 	}
 
-	wireGuardState, err := newWireGuardPeerState(playerID, teamID, teamName, player.DisplayName, wireGuardPeer, now)
+	address, err := allocateWireGuardPeerAddressTx(ctx, tx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	wireGuardState, err := newWireGuardPeerState(playerID, teamID, teamName, player.DisplayName, wireGuardPeer, address, now)
 	if err != nil {
 		return authenticatedPlayer{}, err
 	}
@@ -1371,7 +1401,14 @@ func (s *postgresStore) RotateAdminPlayerWireGuardConfig(ctx context.Context, pl
 	if err != nil {
 		return adminWireGuardPeer{}, err
 	}
-	wireGuardState, err := newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, now)
+	existingState, found, err := loadWireGuardPeerStateTx(ctx, tx, identity)
+	if err != nil {
+		return adminWireGuardPeer{}, err
+	}
+	if !found {
+		return adminWireGuardPeer{}, ErrPlayerNotFound
+	}
+	wireGuardState, err := newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, existingState.Address, now)
 	if err != nil {
 		return adminWireGuardPeer{}, err
 	}
@@ -1415,7 +1452,11 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		JOIN wireguard_peers wp ON wp.player_id = p.id
-		WHERE p.team_id IS NOT NULL OR LOWER(p.role) = 'organizer'
+		WHERE p.active = TRUE
+		  AND (
+			LOWER(p.role) = 'organizer'
+			OR (p.team_id IS NOT NULL AND COALESCE(t.active, FALSE) = TRUE)
+		  )
 		ORDER BY p.id
 	`)
 	if err != nil {
@@ -1612,7 +1653,7 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 	}
 	sourceBundlePath := sanitizeSourceBundlePath(input.SourceBundlePath)
 
-	challengeID, err := s.nextID(ctx, `SELECT COALESCE(MAX(id), 0) + 1 FROM challenges`)
+	challengeID, err := s.nextID(ctx, `SELECT nextval('challenges_id_seq')`)
 	if err != nil {
 		return adminChallenge{}, err
 	}
@@ -2143,7 +2184,7 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 	createdAt := time.Now().UTC()
 	for _, teamID := range teamIDs {
 		if jobID == 0 {
-			jobID, err = s.nextIDTx(ctx, tx, `SELECT COALESCE(MAX(id), 0) + 1 FROM deployment_jobs`)
+			jobID, err = s.nextIDTx(ctx, tx, `SELECT nextval('deployment_jobs_id_seq')`)
 			if err != nil {
 				return adminDeployment{}, err
 			}
@@ -2624,6 +2665,7 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 				FROM players p
 				JOIN wireguard_peers wp ON wp.player_id = p.id
 				WHERE wp.status <> 'revoked'
+				  AND p.active = TRUE
 				  AND (
 					-- Organizers keep WireGuard access while closed (maintenance /
 					-- pre-match / deferred) so admins can probe warm redeploys.
@@ -2709,6 +2751,7 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 				FROM players p
 				JOIN wireguard_peers wp ON wp.player_id = p.id
 				WHERE wp.status <> 'revoked'
+				  AND p.active = TRUE
 				  AND (
 					p.role = 'organizer'
 					OR (
@@ -2904,18 +2947,38 @@ func (s *postgresStore) ReconcileAdminDeployments(ctx context.Context, now time.
 }
 
 func (s *postgresStore) DeleteAdminPlayer(ctx context.Context, playerID int) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM players WHERE id = $1`, playerID)
-	return err
+	result, err := s.db.ExecContext(ctx, `DELETE FROM players WHERE id = $1`, playerID)
+	if err != nil {
+		return err
+	}
+	return requireRowsAffected(result, ErrPlayerNotFound)
 }
 
 func (s *postgresStore) DeleteAdminTeam(ctx context.Context, teamID int) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM teams WHERE id = $1`, teamID)
-	return err
+	result, err := s.db.ExecContext(ctx, `DELETE FROM teams WHERE id = $1`, teamID)
+	if err != nil {
+		return err
+	}
+	return requireRowsAffected(result, ErrTeamNotFound)
 }
 
 func (s *postgresStore) DeleteAdminChallenge(ctx context.Context, challengeID int) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM challenges WHERE id = $1`, challengeID)
-	return err
+	result, err := s.db.ExecContext(ctx, `DELETE FROM challenges WHERE id = $1`, challengeID)
+	if err != nil {
+		return err
+	}
+	return requireRowsAffected(result, ErrChallengeNotFound)
+}
+
+func requireRowsAffected(result sql.Result, notFound error) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return notFound
+	}
+	return nil
 }
 
 func (s *postgresStore) SaveAdminChallengeValidation(ctx context.Context, result ChallengeValidationResult) error {
@@ -3064,7 +3127,11 @@ func (s *postgresStore) ensureWireGuardPeer(ctx context.Context, playerID int, n
 		return err
 	}
 	if !found {
-		wireGuardState, err = newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, now)
+		address, err := allocateWireGuardPeerAddressTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		wireGuardState, err = newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, address, now)
 		if err != nil {
 			return err
 		}
@@ -3084,6 +3151,54 @@ func (s *postgresStore) ensureWireGuardPeer(ctx context.Context, playerID int, n
 		}
 	}
 	return tx.Commit()
+}
+
+func allocateTeamNetworkIDTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	// Team IDs are also their stable service-network slots. Serialize allocation
+	// and select from currently unused slots so rollbacks and deletions do not
+	// consume the small 101..344 address range for the lifetime of the database.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(71408010344)`); err != nil {
+		return 0, err
+	}
+	var teamID int
+	err := tx.QueryRowContext(ctx, `
+		SELECT candidate
+		FROM generate_series($1::integer, $2::integer) AS candidate
+		WHERE NOT EXISTS (
+			SELECT 1 FROM teams WHERE id = candidate
+		)
+		ORDER BY candidate
+		LIMIT 1
+	`, minimumTeamNetworkID, maximumTeamNetworkID).Scan(&teamID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrTeamAddressPool
+	}
+	return teamID, err
+}
+
+func allocateWireGuardPeerAddressTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	// Serialize allocation across registrations, joins, imports, and lazy peer
+	// repair. The unique constraint remains the final safety net, while scanning
+	// the pool preserves legacy addresses and reuses holes left by deletions.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(71407051820)`); err != nil {
+		return "", err
+	}
+	var address string
+	err := tx.QueryRowContext(ctx, `
+		SELECT '10.70.' || ((candidate / 200) + 1)::text || '.' || ((candidate % 200) + 20)::text
+		FROM generate_series(0, $1) AS candidate
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM wireguard_peers wp
+			WHERE wp.address = '10.70.' || ((candidate / 200) + 1)::text || '.' || ((candidate % 200) + 20)::text
+		)
+		ORDER BY candidate
+		LIMIT 1
+	`, wireGuardPeerAddressPoolSize-1).Scan(&address)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrPlayerAddressPool
+	}
+	return address, err
 }
 
 func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int) (adminWireGuardPeer, error) {

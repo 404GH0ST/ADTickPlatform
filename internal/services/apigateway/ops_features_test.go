@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestChangeParticipantPassword(t *testing.T) {
@@ -34,9 +37,111 @@ func TestChangeParticipantPassword(t *testing.T) {
 	if changeRes.Code != http.StatusOK {
 		t.Fatalf("password change status %d: %s", changeRes.Code, changeRes.Body.String())
 	}
+	var changed struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(changeRes.Body.Bytes(), &changed); err != nil || changed.Token == "" {
+		t.Fatalf("decode replacement token: %v (%s)", err, changeRes.Body.String())
+	}
+
+	oldSessionReq := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	oldSessionReq.Header.Set("Authorization", "Bearer "+auth.Token)
+	oldSessionRes := httptest.NewRecorder()
+	mux.ServeHTTP(oldSessionRes, oldSessionReq)
+	if oldSessionRes.Code != http.StatusForbidden {
+		t.Fatalf("expected old token to be revoked, got %d: %s", oldSessionRes.Code, oldSessionRes.Body.String())
+	}
+
+	newSessionReq := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	newSessionReq.Header.Set("Authorization", "Bearer "+changed.Token)
+	newSessionRes := httptest.NewRecorder()
+	mux.ServeHTTP(newSessionRes, newSessionReq)
+	if newSessionRes.Code != http.StatusOK {
+		t.Fatalf("expected replacement token to work, got %d: %s", newSessionRes.Code, newSessionRes.Body.String())
+	}
 
 	if _, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", "alpha-new-pass"); err != nil {
 		t.Fatalf("authenticate with new password: %v", err)
+	}
+}
+
+func TestChangeParticipantPasswordPreservesWhitespace(t *testing.T) {
+	store := NewMemoryStore(101)
+	registered, err := store.RegisterPlayer(context.Background(), participantRegisterRequest{
+		DisplayName: "Whitespace Password",
+		Email:       "whitespace.password@example.com",
+		Password:    "  exact password  ",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("register player: %v", err)
+	}
+	token, err := issueTeamJWT("dev-team-token", registered, time.Now())
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+	changeBody := bytes.NewBufferString(`{"current_password":"  exact password  ","new_password":"  replacement password  "}`)
+	changeReq := httptest.NewRequest(http.MethodPut, "/api/v2/me/password", changeBody)
+	changeReq.Header.Set("Authorization", "Bearer "+token)
+	changeRes := httptest.NewRecorder()
+	mux.ServeHTTP(changeRes, changeReq)
+
+	if changeRes.Code != http.StatusOK {
+		t.Fatalf("password change status %d: %s", changeRes.Code, changeRes.Body.String())
+	}
+	if _, err := store.AuthenticatePlayer(context.Background(), registered.Email, "  replacement password  "); err != nil {
+		t.Fatalf("authenticate with exact replacement password: %v", err)
+	}
+	if _, err := store.AuthenticatePlayer(context.Background(), registered.Email, "replacement password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected trimmed password to fail, got %v", err)
+	}
+}
+
+func TestConcurrentPasswordChangesAcceptCurrentPasswordOnlyOnce(t *testing.T) {
+	store := NewMemoryStore(101)
+	passwords := []string{"first-concurrent-password", "second-concurrent-password"}
+	start := make(chan struct{})
+	type result struct {
+		password string
+		err      error
+	}
+	results := make(chan result, len(passwords))
+	var ready sync.WaitGroup
+	ready.Add(len(passwords))
+	for _, password := range passwords {
+		go func() {
+			ready.Done()
+			<-start
+			_, err := store.ChangeParticipantPassword(context.Background(), 1, "alpha-secret", password)
+			results <- result{password: password, err: err}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	var successfulPassword string
+	invalidCount := 0
+	for range passwords {
+		result := <-results
+		switch {
+		case result.err == nil:
+			if successfulPassword != "" {
+				t.Fatalf("multiple concurrent password changes succeeded")
+			}
+			successfulPassword = result.password
+		case errors.Is(result.err, ErrInvalidCredentials):
+			invalidCount++
+		default:
+			t.Fatalf("unexpected password change error: %v", result.err)
+		}
+	}
+	if successfulPassword == "" || invalidCount != 1 {
+		t.Fatalf("expected one success and one rejected stale password, success=%q rejected=%d", successfulPassword, invalidCount)
+	}
+	if _, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", successfulPassword); err != nil {
+		t.Fatalf("authenticate with winning password: %v", err)
 	}
 }
 

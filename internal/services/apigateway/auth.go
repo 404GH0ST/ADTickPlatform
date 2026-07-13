@@ -21,6 +21,7 @@ type teamTokenClaims struct {
 	DisplayName      string `json:"display_name"`
 	Email            string `json:"email"`
 	Role             string `json:"role"`
+	SessionVersion   int    `json:"session_version"`
 	IssuedAt         int64  `json:"iat"`
 	ExpiresAt        int64  `json:"exp"`
 }
@@ -38,6 +39,10 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 		return "", err
 	}
 
+	sessionVersion := player.SessionVersion
+	if sessionVersion < 1 {
+		sessionVersion = 1
+	}
 	claimsJSON, err := json.Marshal(teamTokenClaims{
 		TeamID:           player.TeamID,
 		PlayerID:         player.PlayerID,
@@ -46,6 +51,7 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 		DisplayName:      player.DisplayName,
 		Email:            player.Email,
 		Role:             player.Role,
+		SessionVersion:   sessionVersion,
 		IssuedAt:         now.UTC().Unix(),
 		ExpiresAt:        now.UTC().Add(24 * time.Hour).Unix(),
 	})
@@ -104,7 +110,7 @@ func verifyTeamJWT(secret, token string, now time.Time) (teamTokenClaims, error)
 	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
 		return teamTokenClaims{}, ErrInvalidTeamToken
 	}
-	if claims.PlayerID <= 0 || claims.ExpiresAt <= now.UTC().Unix() {
+	if claims.PlayerID <= 0 || claims.SessionVersion < 1 || claims.ExpiresAt <= now.UTC().Unix() {
 		return teamTokenClaims{}, ErrInvalidTeamToken
 	}
 	if strings.EqualFold(strings.TrimSpace(claims.Role), "organizer") {

@@ -117,11 +117,7 @@ func BearerToken(r *http.Request) (string, bool) {
 }
 
 func RunServer(ctx context.Context, info ServiceInfo, handler http.Handler) error {
-	server := &http.Server{
-		Addr:              info.Addr,
-		Handler:           instrumentHandler(info, handler),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	server := newHTTPServer(info, handler)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -138,5 +134,16 @@ func RunServer(ctx context.Context, info ServiceInfo, handler http.Handler) erro
 		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
+	}
+}
+
+func newHTTPServer(info ServiceInfo, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              info.Addr,
+		Handler:           instrumentHandler(info, handler),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }

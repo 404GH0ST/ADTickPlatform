@@ -135,3 +135,14 @@ func TestAdminPlayerWireGuardConfigRefreshesServerMetadata(t *testing.T) {
 		t.Fatalf("expected refreshed public key in config, got %q", refreshedPayload.Config)
 	}
 }
+
+func TestWireGuardPeerAddressDoesNotWrapEveryTwoHundredPlayers(t *testing.T) {
+	first := wireGuardPeerAddress(101, 1)
+	later := wireGuardPeerAddress(101, 201)
+	if first == later {
+		t.Fatalf("expected unique addresses, both were %q", first)
+	}
+	if first != "10.70.1.20" || later != "10.70.2.20" {
+		t.Fatalf("unexpected address allocation: %q and %q", first, later)
+	}
+}

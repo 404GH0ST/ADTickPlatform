@@ -23,10 +23,14 @@ type testControllerClient struct {
 	deployReconcileResult adminReconcileResult
 	sshApplyErr           error
 	factoryResetErr       error
+	removeTeamErr         error
+	removeChallengeErr    error
 	validationErr         error
 	validationResult      ChallengeValidationResult
 	accessStatus          ControllerAccessStatus
 	accessErr             error
+	accessReconcileCalls  *int
+	removeTeamCalls       *int
 }
 
 type storeBackedControllerClient struct {
@@ -297,6 +301,9 @@ func (c testControllerClient) AccessStatus(_ context.Context) (ControllerAccessS
 }
 
 func (c testControllerClient) ReconcileAccessPolicies(_ context.Context) (ControllerAccessStatus, error) {
+	if c.accessReconcileCalls != nil {
+		(*c.accessReconcileCalls)++
+	}
 	if c.accessErr != nil {
 		return ControllerAccessStatus{}, c.accessErr
 	}
@@ -315,11 +322,14 @@ func (c testControllerClient) RemoveService(_ context.Context, _, _ int) error {
 }
 
 func (c testControllerClient) RemoveTeamServices(_ context.Context, _ int) error {
-	return nil
+	if c.removeTeamCalls != nil {
+		(*c.removeTeamCalls)++
+	}
+	return c.removeTeamErr
 }
 
 func (c testControllerClient) RemoveChallengeServices(_ context.Context, _ int) error {
-	return nil
+	return c.removeChallengeErr
 }
 
 func (c testWireGuardClient) Status(_ context.Context) (WireGuardGatewayStatus, error) {
@@ -1081,6 +1091,20 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
+func TestParticipantRegistrationRejectsShortPassword(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/register",
+		bytes.NewBufferString(`{"display_name":"Short Password","email":"short-password@example.com","password":"short"}`),
+	)
+	response := httptest.NewRecorder()
+	newTestMux().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected short password registration 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestParticipantCanUpdateProfileAndTeam(t *testing.T) {
 	mux := newTestMux()
 	body := bytes.NewBufferString(`{"display_name":"Alpha Renamed","email":"alpha.renamed@example.com","team_name":"Team Alpha Prime","team_contact_email":"alpha-prime@example.com"}`)
@@ -1128,6 +1152,54 @@ func TestParticipantCanUpdateProfileAndTeam(t *testing.T) {
 	rows := decodeCompat[[]scoreRow](t, scoreboardResponse.Body.Bytes())
 	if len(rows) == 0 || rows[0].Team != "Team Alpha Prime" {
 		t.Fatalf("expected scoreboard team rename, got %#v", rows)
+	}
+}
+
+func TestMemberProfileUpdateCannotRenameTeam(t *testing.T) {
+	store := NewMemoryStore(101)
+	member, err := store.CreateAdminPlayer(context.Background(), adminCreatePlayerRequest{
+		TeamID:      101,
+		DisplayName: "Alpha Member",
+		Email:       "alpha.member@example.com",
+		Password:    "member-secret",
+		Role:        "member",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	authenticated, err := store.AuthenticatePlayer(context.Background(), member.Email, "member-secret")
+	if err != nil {
+		t.Fatalf("authenticate member: %v", err)
+	}
+	token, err := issueTeamJWT("dev-team-token", authenticated, time.Now())
+	if err != nil {
+		t.Fatalf("issue member token: %v", err)
+	}
+
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/me/profile",
+		bytes.NewBufferString(`{"display_name":"Alpha Member Renamed","email":"alpha.member.renamed@example.com","team_name":"Hijacked Team","team_contact_email":"hijacked@example.com"}`),
+	)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected member profile update 200, got %d: %s", response.Code, response.Body.String())
+	}
+	updated := decodeCompat[authenticateResponse](t, response.Body.Bytes())
+	claims, err := verifyTeamJWT("dev-team-token", updated.Token, time.Now())
+	if err != nil {
+		t.Fatalf("verify refreshed member token: %v", err)
+	}
+	if claims.DisplayName != "Alpha Member Renamed" || claims.Email != "alpha.member.renamed@example.com" {
+		t.Fatalf("expected member-owned fields to update, got %+v", claims)
+	}
+	if claims.TeamName != "Team Alpha" || claims.TeamContactEmail != "team-alpha@example.com" {
+		t.Fatalf("expected team identity to remain unchanged, got %+v", claims)
 	}
 }
 
@@ -3182,6 +3254,336 @@ func TestAdminRequiresAuth(t *testing.T) {
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", response.Code)
+	}
+}
+
+func TestLifecycleOperationContextSurvivesRequestCancellation(t *testing.T) {
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+	operationContext, cancelOperation := lifecycleOperationContext(requestContext)
+	defer cancelOperation()
+	if err := operationContext.Err(); err != nil {
+		t.Fatalf("expected detached lifecycle context, got %v", err)
+	}
+}
+
+func TestAdminDeactivateTeamAttemptsEveryRevocationAfterRuntimeFailure(t *testing.T) {
+	store := NewMemoryStore(101)
+	accessCalls := 0
+	removeCalls := 0
+	wireGuard := &recordingWireGuardClient{}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps(
+		"dev-team-token",
+		"dev-admin-token",
+		101,
+		store,
+		testControllerClient{
+			removeTeamErr:        errors.New("runtime unavailable"),
+			accessReconcileCalls: &accessCalls,
+			removeTeamCalls:      &removeCalls,
+		},
+		wireGuard,
+	).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/teams/101/deactivate", nil)
+	setTestAdminAuthHeader(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected partial revocation failure 502, got %d: %s", response.Code, response.Body.String())
+	}
+	if removeCalls != 1 || accessCalls != 1 || wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected every revocation once, got remove=%d access=%d wireguard=%d", removeCalls, accessCalls, wireGuard.reconcileCalls)
+	}
+	teams, err := store.ListAdminTeams(context.Background())
+	if err != nil {
+		t.Fatalf("list teams: %v", err)
+	}
+	if teams[0].ID != 101 || teams[0].Active {
+		t.Fatalf("expected team 101 to remain deactivated, got %+v", teams[0])
+	}
+	audit, err := store.ListAdminAuditLogs(context.Background(), adminAuditLogQuery{Action: "team.deactivate", Limit: 10})
+	if err != nil {
+		t.Fatalf("list audit logs: %v", err)
+	}
+	if audit.TotalCount != 1 {
+		t.Fatalf("expected deactivation audit despite reconciliation failure, got %+v", audit)
+	}
+}
+
+func TestAdminDeactivatePlayerAttemptsWireGuardAfterControllerFailure(t *testing.T) {
+	store := NewMemoryStore(101)
+	accessCalls := 0
+	wireGuard := &recordingWireGuardClient{}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps(
+		"dev-team-token",
+		"dev-admin-token",
+		101,
+		store,
+		testControllerClient{accessErr: errors.New("firewall unavailable"), accessReconcileCalls: &accessCalls},
+		wireGuard,
+	).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/players/1/deactivate", nil)
+	setTestAdminAuthHeader(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected partial revocation failure 502, got %d: %s", response.Code, response.Body.String())
+	}
+	if accessCalls != 1 || wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected both network planes once, got access=%d wireguard=%d", accessCalls, wireGuard.reconcileCalls)
+	}
+	if _, err := store.AuthenticatePlayer(context.Background(), "alpha.captain@example.com", "alpha-secret"); !errors.Is(err, ErrAccountDeactivated) {
+		t.Fatalf("expected player to remain deactivated, got %v", err)
+	}
+}
+
+func TestAdminDeletePlayerKeepsDeactivatedRecordUntilRevocationSucceeds(t *testing.T) {
+	store := NewMemoryStore(101)
+	wireGuard := &recordingWireGuardClient{}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps(
+		"dev-team-token",
+		"dev-admin-token",
+		101,
+		store,
+		testControllerClient{accessErr: errors.New("firewall unavailable")},
+		wireGuard,
+	).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/v2/admin/players/1", nil)
+	setTestAdminAuthHeader(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected revocation failure 502, got %d: %s", response.Code, response.Body.String())
+	}
+	if wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected WireGuard revocation attempt, got %d", wireGuard.reconcileCalls)
+	}
+	players, err := store.ListAdminPlayers(context.Background())
+	if err != nil {
+		t.Fatalf("list players: %v", err)
+	}
+	for _, player := range players {
+		if player.ID == 1 {
+			if player.Active {
+				t.Fatalf("expected retained player to be deactivated: %+v", player)
+			}
+			return
+		}
+	}
+	t.Fatal("expected player record to remain available for a safe retry")
+}
+
+func TestAdminCannotDeleteActiveMatchResources(t *testing.T) {
+	tests := []struct {
+		name  string
+		state string
+		path  string
+	}{
+		{name: "running team", state: "running", path: "/api/v2/admin/teams/101"},
+		{name: "paused team", state: "paused", path: "/api/v2/admin/teams/101"},
+		{name: "running challenge", state: "running", path: "/api/v2/admin/challenges/1"},
+		{name: "paused challenge", state: "paused", path: "/api/v2/admin/challenges/1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore(101)
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			NewWithDeps(
+				"dev-team-token",
+				"dev-admin-token",
+				101,
+				store,
+				testControllerClient{},
+				noopWireGuardClient{},
+				testGameCoreClient{match: GameMatchStatus{State: tc.state}},
+			).RegisterRoutes(mux)
+
+			request := httptest.NewRequest(http.MethodDelete, tc.path, nil)
+			setTestAdminAuthHeader(request)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusConflict {
+				t.Fatalf("expected active-match delete 409, got %d: %s", response.Code, response.Body.String())
+			}
+			assertAdminDeleteResourceExists(t, store, tc.path)
+		})
+	}
+}
+
+func TestAdminDeleteFailsClosedWhenMatchStatusUnavailable(t *testing.T) {
+	for _, path := range []string{
+		"/api/v2/admin/teams/101",
+		"/api/v2/admin/challenges/1",
+	} {
+		t.Run(path, func(t *testing.T) {
+			store := NewMemoryStore(101)
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			NewWithDeps(
+				"dev-team-token",
+				"dev-admin-token",
+				101,
+				store,
+				testControllerClient{},
+				noopWireGuardClient{},
+				testGameCoreClient{err: errors.New("game-core unavailable")},
+			).RegisterRoutes(mux)
+
+			request := httptest.NewRequest(http.MethodDelete, path, nil)
+			setTestAdminAuthHeader(request)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadGateway {
+				t.Fatalf("expected unavailable match status 502, got %d: %s", response.Code, response.Body.String())
+			}
+			assertAdminDeleteResourceExists(t, store, path)
+		})
+	}
+}
+
+func TestAdminDeletePreservesStateWhenRuntimeCleanupFails(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		controller testControllerClient
+	}{
+		{
+			name:       "team",
+			path:       "/api/v2/admin/teams/101",
+			controller: testControllerClient{removeTeamErr: errors.New("docker unavailable")},
+		},
+		{
+			name:       "challenge",
+			path:       "/api/v2/admin/challenges/1",
+			controller: testControllerClient{removeChallengeErr: errors.New("docker unavailable")},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore(101)
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			NewWithDeps(
+				"dev-team-token",
+				"dev-admin-token",
+				101,
+				store,
+				tc.controller,
+				noopWireGuardClient{},
+				testGameCoreClient{match: GameMatchStatus{State: "not_started"}},
+			).RegisterRoutes(mux)
+
+			request := httptest.NewRequest(http.MethodDelete, tc.path, nil)
+			setTestAdminAuthHeader(request)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadGateway {
+				t.Fatalf("expected cleanup failure 502, got %d: %s", response.Code, response.Body.String())
+			}
+			assertAdminDeleteResourceExists(t, store, tc.path)
+		})
+	}
+}
+
+func TestAdminDeleteCompletesAfterSuccessfulRuntimeCleanup(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		state string
+	}{
+		{name: "team before match", path: "/api/v2/admin/teams/101", state: "not_started"},
+		{name: "challenge after match", path: "/api/v2/admin/challenges/1", state: "finished"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore(101)
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			NewWithDeps(
+				"dev-team-token",
+				"dev-admin-token",
+				101,
+				store,
+				testControllerClient{accessErr: errors.New("access reconciliation unavailable")},
+				testWireGuardClient{err: errors.New("wireguard reconciliation unavailable")},
+				testGameCoreClient{match: GameMatchStatus{State: tc.state}},
+			).RegisterRoutes(mux)
+
+			request := httptest.NewRequest(http.MethodDelete, tc.path, nil)
+			setTestAdminAuthHeader(request)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusNoContent {
+				t.Fatalf("expected delete 204, got %d: %s", response.Code, response.Body.String())
+			}
+			assertAdminDeleteResourceMissing(t, store, tc.path)
+		})
+	}
+}
+
+func assertAdminDeleteResourceExists(t *testing.T, store Store, path string) {
+	t.Helper()
+	if strings.Contains(path, "/teams/") {
+		teams, err := store.ListAdminTeams(context.Background())
+		if err != nil {
+			t.Fatalf("list teams: %v", err)
+		}
+		for _, team := range teams {
+			if team.ID == 101 {
+				return
+			}
+		}
+		t.Fatal("expected team to remain after rejected deletion")
+	}
+
+	challenges, err := store.ListAdminChallenges(context.Background())
+	if err != nil {
+		t.Fatalf("list challenges: %v", err)
+	}
+	for _, challenge := range challenges {
+		if challenge.ID == 1 {
+			return
+		}
+	}
+	t.Fatal("expected challenge to remain after rejected deletion")
+}
+
+func assertAdminDeleteResourceMissing(t *testing.T, store Store, path string) {
+	t.Helper()
+	if strings.Contains(path, "/teams/") {
+		teams, err := store.ListAdminTeams(context.Background())
+		if err != nil {
+			t.Fatalf("list teams: %v", err)
+		}
+		for _, team := range teams {
+			if team.ID == 101 {
+				t.Fatal("expected team to be deleted")
+			}
+		}
+		return
+	}
+
+	challenges, err := store.ListAdminChallenges(context.Background())
+	if err != nil {
+		t.Fatalf("list challenges: %v", err)
+	}
+	for _, challenge := range challenges {
+		if challenge.ID == 1 {
+			t.Fatal("expected challenge to be deleted")
+		}
 	}
 }
 

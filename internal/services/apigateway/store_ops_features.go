@@ -9,32 +9,54 @@ import (
 	"time"
 )
 
-func (s *postgresStore) ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) error {
+func (s *postgresStore) ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) (int, error) {
+	if !validPassword(newPassword) {
+		return 0, ErrInvalidCredentials
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	var role string
 	var storedHash string
-	err := s.queryRowScan(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT role, password_hash
 		FROM players
 		WHERE id = $1
-	`, []any{playerID}, &role, &storedHash)
+		FOR UPDATE
+	`, playerID).Scan(&role, &storedHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrInvalidCredentials
+		return 0, ErrInvalidCredentials
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if strings.EqualFold(strings.TrimSpace(role), "organizer") {
-		return ErrInvalidCredentials
+		return 0, ErrInvalidCredentials
 	}
 	if !passwordMatches(storedHash, currentPassword) {
-		return ErrInvalidCredentials
+		return 0, ErrInvalidCredentials
 	}
 	hashed, err := hashPassword(newPassword)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE players SET password_hash = $2 WHERE id = $1`, playerID, hashed)
-	return err
+	var sessionVersion int
+	err = tx.QueryRowContext(ctx, `
+		UPDATE players
+		SET password_hash = $2, session_version = session_version + 1
+		WHERE id = $1
+		RETURNING session_version
+	`, playerID, hashed).Scan(&sessionVersion)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return sessionVersion, nil
 }
 
 func (s *postgresStore) ListAnnouncements(ctx context.Context) ([]matchAnnouncement, error) {
@@ -114,13 +136,13 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 		for playerIndex, playerInput := range teamInput.Players {
 			displayName := strings.TrimSpace(playerInput.DisplayName)
 			playerEmail := strings.TrimSpace(playerInput.Email)
-			password := strings.TrimSpace(playerInput.Password)
+			password := playerInput.Password
 			role := strings.TrimSpace(playerInput.Role)
 			if role == "" {
 				role = "member"
 			}
-			if displayName == "" || playerEmail == "" || password == "" {
-				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name, email, and password are required", index+1, playerIndex+1))
+			if displayName == "" || playerEmail == "" || !validPassword(password) {
+				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", index+1, playerIndex+1, minimumPasswordLength))
 				playerFailed = true
 				break
 			}
@@ -178,19 +200,23 @@ func (s *postgresStore) importOneTeam(
 	return team, created, nil
 }
 
-func (s *memoryStore) ChangeParticipantPassword(_ context.Context, playerID int, currentPassword, newPassword string) error {
+func (s *memoryStore) ChangeParticipantPassword(_ context.Context, playerID int, currentPassword, newPassword string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !validPassword(newPassword) {
+		return 0, ErrInvalidCredentials
+	}
 	record, ok := s.players[playerID]
 	if !ok || strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
-		return ErrInvalidCredentials
+		return 0, ErrInvalidCredentials
 	}
 	if !passwordMatches(record.PasswordHash, currentPassword) {
-		return ErrInvalidCredentials
+		return 0, ErrInvalidCredentials
 	}
 	record.PasswordHash = mustHashPassword(newPassword)
-	return nil
+	record.SessionVersion = max(record.SessionVersion, 1) + 1
+	return record.SessionVersion, nil
 }
 
 func (s *memoryStore) ListAnnouncements(_ context.Context) ([]matchAnnouncement, error) {
@@ -252,13 +278,13 @@ func (s *memoryStore) ImportAdminTeams(ctx context.Context, teams []adminBulkImp
 		for playerIndex, playerInput := range teamInput.Players {
 			displayName := strings.TrimSpace(playerInput.DisplayName)
 			playerEmail := strings.TrimSpace(playerInput.Email)
-			password := strings.TrimSpace(playerInput.Password)
+			password := playerInput.Password
 			role := strings.TrimSpace(playerInput.Role)
 			if role == "" {
 				role = "member"
 			}
-			if displayName == "" || playerEmail == "" || password == "" {
-				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name, email, and password are required", index+1, playerIndex+1))
+			if displayName == "" || playerEmail == "" || !validPassword(password) {
+				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", index+1, playerIndex+1, minimumPasswordLength))
 				playerFailed = true
 				break
 			}

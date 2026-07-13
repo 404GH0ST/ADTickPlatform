@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type stubMetricsSource struct{}
@@ -14,6 +15,16 @@ func (stubMetricsSource) WritePrometheusMetrics(w io.Writer) {
 	_, _ = io.WriteString(w, "# HELP adplatform_stub_metric Stub metric.\n")
 	_, _ = io.WriteString(w, "# TYPE adplatform_stub_metric gauge\n")
 	_, _ = io.WriteString(w, "adplatform_stub_metric 7\n")
+}
+
+func TestHTTPServerHasResourceTimeouts(t *testing.T) {
+	server := newHTTPServer(ServiceInfo{Name: "timeouts", Addr: ":0"}, http.NewServeMux())
+	if server.ReadHeaderTimeout != 5*time.Second || server.ReadTimeout != 15*time.Second || server.IdleTimeout != 120*time.Second {
+		t.Fatalf("unexpected server timeouts: header=%s read=%s idle=%s", server.ReadHeaderTimeout, server.ReadTimeout, server.IdleTimeout)
+	}
+	if server.MaxHeaderBytes != 1<<20 {
+		t.Fatalf("unexpected max header bytes: %d", server.MaxHeaderBytes)
+	}
 }
 
 func TestMetricsEndpointIncludesHTTPAndCustomMetrics(t *testing.T) {

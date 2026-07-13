@@ -54,20 +54,24 @@ func (s *Server) handleAdminDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	matchStatus, err := s.gameCore.MatchStatus(r.Context())
-	if err == nil && matchStatus.State == "running" {
-		writeProblem(w, http.StatusBadRequest, "Action forbidden", "cannot delete team while match is running.")
+	if !s.requireSafeResourceDeletion(w, r) {
+		return
+	}
+	if err := s.controller.RemoveTeamServices(r.Context(), teamID); err != nil {
+		writeProblem(w, http.StatusBadGateway, "Controller unavailable", "team runtime cleanup failed; the team was not deleted.")
 		return
 	}
 	if err := s.store.DeleteAdminTeam(r.Context(), teamID); err != nil {
-		writeStoreFailure(w, err)
+		if _, reconcileErr := s.controller.ReconcileDeployments(r.Context()); reconcileErr != nil {
+			log.Printf("critical: team %d deletion failed after runtime cleanup and compensation also failed: delete=%v reconcile=%v", teamID, err, reconcileErr)
+		}
+		writeDomainFailure(w, err)
 		return
 	}
-	// Try to remove services from controller, ignore error if controller is disabled
-	_ = s.controller.RemoveTeamServices(r.Context(), teamID)
-	// Refresh firewall rules
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-	_, _ = s.wireGuard.Reconcile(r.Context())
+	if _, err := s.controller.ReconcileAccessPolicies(r.Context()); err != nil {
+		log.Printf("controller access reconciliation after team %d deletion failed: %v", teamID, err)
+	}
+	s.reconcileWireGuardGatewayBestEffort(r.Context(), fmt.Sprintf("team %d deletion", teamID))
 
 	s.recordAdminAudit(r.Context(), "team.delete", "team", fmt.Sprintf("team:%d", teamID), "deleted team", map[string]any{
 		"team_id": teamID,
@@ -118,14 +122,29 @@ func (s *Server) handleAdminDeactivateTeam(w http.ResponseWriter, r *http.Reques
 		writeStoreFailure(w, err)
 		return
 	}
-	// Tear down the team's running instances and refresh firewall rules.
-	// Ignore controller errors if the controller is disabled.
-	_ = s.controller.RemoveTeamServices(r.Context(), teamID)
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-
-	s.recordAdminAudit(r.Context(), "team.deactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "deactivated team", map[string]any{
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "team.deactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "deactivated team", map[string]any{
 		"team_id": teamID,
 	})
+
+	// Runtime cleanup and the two access planes are independent. Always attempt
+	// every revocation so one unavailable service cannot prevent another healthy
+	// service from removing the team's access.
+	var reconciliationErrors []error
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		reconciliationErrors = append(reconciliationErrors, err)
+	}
+	runtimeContext, cancelRuntime := lifecycleStepContext(operationContext)
+	if err := s.controller.RemoveTeamServices(runtimeContext, teamID); err != nil {
+		reconciliationErrors = append(reconciliationErrors, fmt.Errorf("remove team runtime: %w", err))
+	}
+	cancelRuntime()
+	if err := errors.Join(reconciliationErrors...); err != nil {
+		log.Printf("team %d deactivation security reconciliation failed: %v", teamID, err)
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "team was deactivated, but one or more runtime or network revocations failed; retry the operation.")
+		return
+	}
 	writeData(w, http.StatusOK, team)
 }
 
@@ -147,14 +166,20 @@ func (s *Server) handleAdminReactivateTeam(w http.ResponseWriter, r *http.Reques
 		writeStoreFailure(w, err)
 		return
 	}
-	if err := s.store.RequeueTeamServices(r.Context(), teamID); err != nil {
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	if err := s.store.RequeueTeamServices(operationContext, teamID); err != nil {
 		writeStoreFailure(w, err)
 		return
 	}
 	// Apply NetworkClosed for deferred reactivation (and clear inactive drops).
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("team %d reactivation network reconciliation failed: %v", teamID, err)
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "team was reactivated, but one or more network controls failed to converge; retry the operation.")
+		return
+	}
 
-	s.recordAdminAudit(r.Context(), "team.reactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "reactivated team", map[string]any{
+	s.recordAdminAudit(operationContext, "team.reactivate", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "reactivated team", map[string]any{
 		"team_id":        teamID,
 		"play_from_tick": team.PlayFromTick,
 	})
@@ -178,7 +203,7 @@ func (s *Server) handleAdminCreatePlayer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req adminCreatePlayerRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil || req.TeamID < 0 || strings.TrimSpace(req.DisplayName) == "" || strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Password) == "" {
+	if err := httpapi.DecodeJSON(r, &req); err != nil || req.TeamID < 0 || strings.TrimSpace(req.DisplayName) == "" || strings.TrimSpace(req.Email) == "" || !validPassword(req.Password) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "player request is invalid.")
 		return
 	}
@@ -209,15 +234,27 @@ func (s *Server) handleAdminDeletePlayer(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteAdminPlayer(r.Context(), playerID); err != nil {
+	player, err := s.store.SetPlayerActive(r.Context(), playerID, false, s.now())
+	if err != nil {
 		writeStoreFailure(w, err)
 		return
 	}
-	// Refresh firewall rules
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-	_, _ = s.wireGuard.Reconcile(r.Context())
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "player.delete.prepare", "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), "deactivated player before deletion", map[string]any{
+		"player_id": playerID,
+	})
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("player %d deletion revocation failed: %v", playerID, err)
+		writeProblem(w, http.StatusBadGateway, "Access revocation failed", "player was deactivated but not deleted because network access could not be fully revoked; retry the operation.")
+		return
+	}
+	if err := s.store.DeleteAdminPlayer(operationContext, playerID); err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
 
-	s.recordAdminAudit(r.Context(), "player.delete", "player", fmt.Sprintf("player:%d", playerID), "deleted player", map[string]any{
+	s.recordAdminAudit(operationContext, "player.delete", "player", fmt.Sprintf("player:%d", playerID), "deleted player", map[string]any{
 		"player_id": playerID,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -267,16 +304,50 @@ func (s *Server) handleAdminSetPlayerActive(w http.ResponseWriter, r *http.Reque
 		writeStoreFailure(w, err)
 		return
 	}
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
 	action := "player.deactivate"
 	message := "deactivated player"
 	if active {
 		action = "player.reactivate"
 		message = "reactivated player"
 	}
-	s.recordAdminAudit(r.Context(), action, "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), message, map[string]any{
+	// Record the durable state mutation before external reconciliation so a
+	// gateway outage cannot erase the security-relevant audit event.
+	s.recordAdminAudit(operationContext, action, "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), message, map[string]any{
 		"player_id": playerID,
 	})
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("player %d state-change network reconciliation failed: %v", playerID, err)
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "player state changed, but one or more network controls failed to converge; retry the operation.")
+		return
+	}
 	writeData(w, http.StatusOK, player)
+}
+
+func (s *Server) reconcileParticipantNetworkAccess(ctx context.Context) error {
+	var reconciliationErrors []error
+	controllerContext, cancelController := lifecycleStepContext(ctx)
+	_, controllerErr := s.controller.ReconcileAccessPolicies(controllerContext)
+	cancelController()
+	if controllerErr != nil && !errors.Is(controllerErr, errControllerDisabled) {
+		reconciliationErrors = append(reconciliationErrors, fmt.Errorf("reconcile controller access: %w", controllerErr))
+	}
+	wireGuardContext, cancelWireGuard := lifecycleStepContext(ctx)
+	_, wireGuardErr := s.wireGuard.Reconcile(wireGuardContext)
+	cancelWireGuard()
+	if wireGuardErr != nil && !errors.Is(wireGuardErr, errWireGuardGatewayDisabled) {
+		reconciliationErrors = append(reconciliationErrors, fmt.Errorf("reconcile WireGuard gateway: %w", wireGuardErr))
+	}
+	return errors.Join(reconciliationErrors...)
+}
+
+func lifecycleOperationContext(requestContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(requestContext), 90*time.Second)
+}
+
+func lifecycleStepContext(operationContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(operationContext, 30*time.Second)
 }
 
 func (s *Server) handleAdminDeactivatePlayer(w http.ResponseWriter, r *http.Request) {
@@ -498,19 +569,46 @@ func (s *Server) handleAdminDeleteChallenge(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteAdminChallenge(r.Context(), challengeID); err != nil {
-		writeStoreFailure(w, err)
+	if !s.requireSafeResourceDeletion(w, r) {
 		return
 	}
-	// Try to remove services from controller, ignore error if controller is disabled
-	_ = s.controller.RemoveChallengeServices(r.Context(), challengeID)
-	// Refresh firewall rules
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
+	if err := s.controller.RemoveChallengeServices(r.Context(), challengeID); err != nil {
+		writeProblem(w, http.StatusBadGateway, "Controller unavailable", "challenge runtime cleanup failed; the challenge was not deleted.")
+		return
+	}
+	if err := s.store.DeleteAdminChallenge(r.Context(), challengeID); err != nil {
+		if _, reconcileErr := s.controller.ReconcileDeployments(r.Context()); reconcileErr != nil {
+			log.Printf("critical: challenge %d deletion failed after runtime cleanup and compensation also failed: delete=%v reconcile=%v", challengeID, err, reconcileErr)
+		}
+		writeDomainFailure(w, err)
+		return
+	}
+	if _, err := s.controller.ReconcileAccessPolicies(r.Context()); err != nil {
+		log.Printf("controller access reconciliation after challenge %d deletion failed: %v", challengeID, err)
+	}
 
 	s.recordAdminAudit(r.Context(), "challenge.delete", "challenge", fmt.Sprintf("challenge:%d", challengeID), "deleted challenge", map[string]any{
 		"challenge_id": challengeID,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) requireSafeResourceDeletion(w http.ResponseWriter, r *http.Request) bool {
+	matchStatus, err := s.gameCore.MatchStatus(r.Context())
+	if err != nil {
+		writeProblem(w, http.StatusBadGateway, "Game state unavailable", "match state could not be verified; destructive deletion was blocked.")
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(matchStatus.State)) {
+	case "not_started", "finished":
+		return true
+	case "running", "paused":
+		writeProblem(w, http.StatusConflict, "Action forbidden", "teams and challenges cannot be deleted while a match is active; use deactivation or maintenance instead.")
+		return false
+	default:
+		writeProblem(w, http.StatusBadGateway, "Game state unavailable", "match state is unknown; destructive deletion was blocked.")
+		return false
+	}
 }
 
 // handleAdminRotateChallengeUnlockProof bumps unlock_proof_epoch and clears
@@ -530,8 +628,8 @@ func (s *Server) handleAdminRotateChallengeUnlockProof(w http.ResponseWriter, r 
 		return
 	}
 	s.recordAdminAudit(r.Context(), "challenge.unlock_proof.rotate", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "rotated challenge unlock proof epoch", map[string]any{
-		"challenge_id":        challengeID,
-		"unlock_proof_epoch":  challenge.UnlockProofEpoch,
+		"challenge_id":       challengeID,
+		"unlock_proof_epoch": challenge.UnlockProofEpoch,
 	})
 	writeData(w, http.StatusOK, challenge)
 }

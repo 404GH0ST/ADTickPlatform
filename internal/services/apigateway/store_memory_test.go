@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,6 +48,80 @@ func TestMatchNotStartedHidesChallengesAndClosesNetwork(t *testing.T) {
 	}
 	if len(challenges) == 0 {
 		t.Fatal("expected challenges after match start")
+	}
+}
+
+func TestDeactivatedPlayerIsRemovedFromWireGuardGatewayPeers(t *testing.T) {
+	store := NewMemoryStore(101)
+	ctx := context.Background()
+	if _, err := store.SetPlayerActive(ctx, 1, false, time.Now()); err != nil {
+		t.Fatalf("deactivate player: %v", err)
+	}
+	peers, err := store.ListWireGuardGatewayPeers(ctx)
+	if err != nil {
+		t.Fatalf("list peers: %v", err)
+	}
+	for _, peer := range peers {
+		if peer.PlayerID == 1 {
+			t.Fatalf("deactivated player remained in gateway peers: %+v", peer)
+		}
+	}
+}
+
+func TestDeactivatedPlayerStillRequiresTheCorrectPassword(t *testing.T) {
+	store := NewMemoryStore(101)
+	ctx := context.Background()
+	if _, err := store.SetPlayerActive(ctx, 1, false, time.Now()); err != nil {
+		t.Fatalf("deactivate player: %v", err)
+	}
+	if _, err := store.AuthenticatePlayer(ctx, "alpha.captain@example.com", "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected wrong password to hide account state, got %v", err)
+	}
+	if _, err := store.AuthenticatePlayer(ctx, "alpha.captain@example.com", "alpha-secret"); !errors.Is(err, ErrAccountDeactivated) {
+		t.Fatalf("expected correct password to report deactivation, got %v", err)
+	}
+}
+
+func TestMemoryStoreReusesDeletedTeamNetworkID(t *testing.T) {
+	store := NewMemoryStore(101)
+	ctx := context.Background()
+	created, err := store.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: "Temporary Team", ContactEmail: "temporary@example.com"})
+	if err != nil {
+		t.Fatalf("create temporary team: %v", err)
+	}
+	if created.ID != 105 {
+		t.Fatalf("expected first free team network id 105, got %d", created.ID)
+	}
+	if err := store.DeleteAdminTeam(ctx, created.ID); err != nil {
+		t.Fatalf("delete temporary team: %v", err)
+	}
+	replacement, err := store.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: "Replacement Team", ContactEmail: "replacement@example.com"})
+	if err != nil {
+		t.Fatalf("create replacement team: %v", err)
+	}
+	if replacement.ID != created.ID {
+		t.Fatalf("expected deleted network id %d to be reused, got %d", created.ID, replacement.ID)
+	}
+}
+
+func TestMemoryStorePlayerIDDoesNotLimitWireGuardAddressAllocation(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	store.nextPlayerID = wireGuardPeerAddressPoolSize + 1
+	player, err := store.CreateAdminPlayer(context.Background(), adminCreatePlayerRequest{
+		TeamID:      101,
+		DisplayName: "High ID Player",
+		Email:       "high.id@example.com",
+		Password:    "high-id-secret",
+		Role:        "member",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("create high-id player: %v", err)
+	}
+	if player.ID != wireGuardPeerAddressPoolSize+1 {
+		t.Fatalf("unexpected player id %d", player.ID)
+	}
+	if !strings.HasPrefix(player.WireGuardAddress, "10.70.") {
+		t.Fatalf("expected independently allocated WireGuard address, got %q", player.WireGuardAddress)
 	}
 }
 

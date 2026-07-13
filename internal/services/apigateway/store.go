@@ -27,8 +27,8 @@ var (
 	ErrMatchNotStarted = errors.New("contest has not started yet")
 	// ErrMatchPaused is returned when participant play is requested while the
 	// match is temporarily paused (submissions, unlock, reset, SSH, source).
-	ErrMatchPaused = errors.New("contest is temporarily paused")
-	ErrDeploymentActive     = errors.New("deployment job is still active")
+	ErrMatchPaused           = errors.New("contest is temporarily paused")
+	ErrDeploymentActive      = errors.New("deployment job is still active")
 	ErrDeploymentNotFound    = errors.New("deployment job not found")
 	ErrServiceLocked         = errors.New("service locked")
 	ErrServiceUnavailable    = errors.New("service unavailable")
@@ -40,6 +40,8 @@ var (
 	ErrInvalidRuntimeConfig  = errors.New("invalid runtime config")
 	ErrSubmissionUnavailable = errors.New("authoritative submission backend unavailable")
 	ErrTeamMemberLimit       = errors.New("team member limit reached")
+	ErrTeamAddressPool       = errors.New("team network address pool exhausted")
+	ErrPlayerAddressPool     = errors.New("player network address pool exhausted")
 	ErrResourceNotFound      = errors.New("resource not found")
 )
 
@@ -51,14 +53,15 @@ type authenticatedPlayer struct {
 	DisplayName      string
 	Email            string
 	Role             string
+	SessionVersion   int
 }
 
 type Store interface {
 	AuthenticatePlayer(ctx context.Context, email, password string) (authenticatedPlayer, error)
 	RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error)
-	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string) (authenticatedPlayer, error)
+	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string, sessionVersion int) (authenticatedPlayer, error)
 	UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error)
-	ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) error
+	ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) (int, error)
 	ListAnnouncements(ctx context.Context) ([]matchAnnouncement, error)
 	CreateAnnouncement(ctx context.Context, body, createdBy string, now time.Time) (matchAnnouncement, error)
 	DeleteAnnouncement(ctx context.Context, id int) error
@@ -161,6 +164,12 @@ func ServiceIP(subnetOctet, teamID int) string {
 	return fmt.Sprintf("10.80.%d.%d", subnetOctet, teamServiceOctet(teamID))
 }
 
+const (
+	minimumTeamNetworkID         = 101
+	maximumTeamNetworkID         = 344
+	wireGuardPeerAddressPoolSize = 50800
+)
+
 func ServiceEndpointFor(subnetOctet, servicePort, teamID int) string {
 	return fmt.Sprintf("%s:%d", ServiceIP(subnetOctet, teamID), servicePort)
 }
@@ -242,7 +251,29 @@ const (
 	passwordHashIterations = 210000
 	passwordHashSaltBytes  = 16
 	passwordHashKeyBytes   = 32
+	minimumPasswordLength  = 8
 )
+
+var invalidCredentialsPasswordHash = mustHashPassword("invalid-credentials-dummy-password")
+
+func validPassword(value string) bool {
+	return len(value) >= minimumPasswordLength && strings.TrimSpace(value) != ""
+}
+
+func validatePlayerAuthentication(storedHash, password, role string, playerActive, teamActive bool) error {
+	if !passwordMatches(storedHash, password) {
+		return ErrInvalidCredentials
+	}
+	if !playerActive || (!strings.EqualFold(strings.TrimSpace(role), "organizer") && !teamActive) {
+		return ErrAccountDeactivated
+	}
+	return nil
+}
+
+func consumeUnknownPlayerPassword(password string) error {
+	_ = passwordMatches(invalidCredentialsPasswordHash, password)
+	return ErrInvalidCredentials
+}
 
 func hashPassword(value string) (string, error) {
 	salt := make([]byte, passwordHashSaltBytes)
@@ -390,10 +421,13 @@ func slugName(value string) string {
 }
 
 func teamServiceOctet(teamID int) int {
-	if teamID >= 101 {
+	if teamID >= minimumTeamNetworkID && teamID <= maximumTeamNetworkID {
 		return teamID - 90
 	}
-	return 11
+	if teamID == 0 {
+		return 1
+	}
+	return 0
 }
 
 func splitCSVList(value string) []string {
