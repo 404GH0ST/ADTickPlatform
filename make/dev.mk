@@ -35,8 +35,11 @@ build-linux-arm64:
 
 ci:
 	@mkdir -p $(GOCACHE)
+	GOCACHE=$(GOCACHE) go vet ./...
 	GOCACHE=$(GOCACHE) go test -race ./...
 	./scripts/audit-checker-contracts.sh
+	bun run web:lint
+	bun run web:test
 	bun run web:typecheck
 	bun run web:build
 

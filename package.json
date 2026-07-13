@@ -5,10 +5,15 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "postcss": "8.5.15"
+  },
   "scripts": {
     "release-notes": "./scripts/release-notes.sh",
     "web:dev": "cd apps/web && bun run dev",
     "web:build": "cd apps/web && bun run build",
+    "web:lint": "cd apps/web && bun run lint",
+    "web:test": "cd apps/web && bun run test",
     "web:typecheck": "cd apps/web && bun run typecheck",
     "web:e2e:smoke": "cd apps/web && bun run e2e:smoke",
     "web:e2e": "cd apps/web && bun run e2e"
