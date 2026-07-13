@@ -29,7 +29,7 @@ type wireGuardGatewayServer struct {
 	adminToken string
 	store      apigateway.Store
 	applier    wireGuardApplier
-	metrics    wireGuardGatewayMetrics
+	metrics    *wireGuardGatewayMetrics
 	now        func() time.Time
 
 	mu         sync.Mutex
@@ -142,8 +142,8 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 
 	paused, err := s.store.IsMatchPaused(r.Context())
 	if err != nil {
-		log.Printf("warning: could not determine match pause state, assuming false: %v", err)
-		paused = false
+		log.Printf("warning: could not determine match pause state, assuming paused: %v", err)
+		paused = true
 	}
 
 	snapshot, err := buildWireGuardGatewaySnapshot(peers, s.now())

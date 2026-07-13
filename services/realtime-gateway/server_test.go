@@ -144,6 +144,24 @@ func TestScoreboardStreamEmitsInitialAndUpdatedSnapshots(t *testing.T) {
 	<-done
 }
 
+func TestSubscriberLimitsAreReleasedOnUnsubscribe(t *testing.T) {
+	gateway := newRealtimeGateway(&testSnapshotClient{}, time.Second, "").withSubscriberLimits(2, 1, false)
+	_, _, unsubscribe, ok := gateway.subscribe(streamScoreboard, "192.0.2.1")
+	if !ok {
+		t.Fatal("expected first subscription to succeed")
+	}
+	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.1"); ok {
+		t.Fatal("expected per-client subscription limit to reject second stream")
+	}
+	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.2"); !ok {
+		t.Fatal("expected another client to use remaining global capacity")
+	}
+	unsubscribe()
+	if _, _, _, ok := gateway.subscribe(streamScoreboard, "192.0.2.3"); !ok {
+		t.Fatal("expected unsubscribe to release global capacity")
+	}
+}
+
 func TestAttackStreamEmitsInitialSnapshot(t *testing.T) {
 	client := &testSnapshotClient{
 		scoreboard: []apigateway.ScoreRowAlias{

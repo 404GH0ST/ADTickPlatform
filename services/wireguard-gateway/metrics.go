@@ -33,8 +33,8 @@ type wireGuardGatewayMetrics struct {
 	reconciledPeersTotal uint64
 }
 
-func newWireGuardGatewayMetrics() wireGuardGatewayMetrics {
-	metrics := wireGuardGatewayMetrics{
+func newWireGuardGatewayMetrics() *wireGuardGatewayMetrics {
+	metrics := &wireGuardGatewayMetrics{
 		operations: make(map[string]wireGuardOperationAggregate, len(wireGuardMetricOperations)),
 	}
 	for _, operation := range wireGuardMetricOperations {

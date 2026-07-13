@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -31,40 +32,64 @@ type realtimeGateway struct {
 	pollInterval time.Duration
 	adminToken   string
 
-	mu                 sync.RWMutex
-	scoreboard         []byte
-	scoreHash          [32]byte
-	adminScoreboard    []byte
-	adminScoreHash     [32]byte
-	attacks            []byte
-	attackHash         [32]byte
-	gameStatus         []byte
-	gameStatusHash     [32]byte
-	schedulerEvents    []byte
-	schedulerHash      [32]byte
-	checkerRuns        []byte
-	checkerRunsHash    [32]byte
-	subscribers        map[streamKind]map[int]chan []byte
-	nextSubscriberID   int
-	lastSyncAt         time.Time
-	lastSyncSuccessful bool
-	syncErrorsTotal    uint64
+	mu                  sync.RWMutex
+	scoreboard          []byte
+	scoreHash           [32]byte
+	adminScoreboard     []byte
+	adminScoreHash      [32]byte
+	attacks             []byte
+	attackHash          [32]byte
+	gameStatus          []byte
+	gameStatusHash      [32]byte
+	schedulerEvents     []byte
+	schedulerHash       [32]byte
+	checkerRuns         []byte
+	checkerRunsHash     [32]byte
+	subscribers         map[streamKind]map[int]realtimeSubscriber
+	nextSubscriberID    int
+	maxSubscribers      int
+	maxPerClient        int
+	trustProxyHeaders   bool
+	subscriberTotal     int
+	subscribersByClient map[string]int
+	lastSyncAt          time.Time
+	lastSyncSuccessful  bool
+	syncErrorsTotal     uint64
+}
+
+type realtimeSubscriber struct {
+	updates   chan []byte
+	clientKey string
 }
 
 func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration, adminToken string) *realtimeGateway {
 	return &realtimeGateway{
-		client:       client,
-		pollInterval: pollInterval,
-		adminToken:   strings.TrimSpace(adminToken),
-		subscribers: map[streamKind]map[int]chan []byte{
-			streamScoreboard:      make(map[int]chan []byte),
-			streamAdminScoreboard: make(map[int]chan []byte),
-			streamAttacks:         make(map[int]chan []byte),
-			streamGameStatus:      make(map[int]chan []byte),
-			streamSchedulerEvents: make(map[int]chan []byte),
-			streamCheckerRuns:     make(map[int]chan []byte),
+		client:              client,
+		pollInterval:        pollInterval,
+		adminToken:          strings.TrimSpace(adminToken),
+		maxSubscribers:      2000,
+		maxPerClient:        12,
+		subscribersByClient: make(map[string]int),
+		subscribers: map[streamKind]map[int]realtimeSubscriber{
+			streamScoreboard:      make(map[int]realtimeSubscriber),
+			streamAdminScoreboard: make(map[int]realtimeSubscriber),
+			streamAttacks:         make(map[int]realtimeSubscriber),
+			streamGameStatus:      make(map[int]realtimeSubscriber),
+			streamSchedulerEvents: make(map[int]realtimeSubscriber),
+			streamCheckerRuns:     make(map[int]realtimeSubscriber),
 		},
 	}
+}
+
+func (g *realtimeGateway) withSubscriberLimits(total, perClient int, trustProxyHeaders bool) *realtimeGateway {
+	if total > 0 {
+		g.maxSubscribers = total
+	}
+	if perClient > 0 {
+		g.maxPerClient = perClient
+	}
+	g.trustProxyHeaders = trustProxyHeaders
+	return g
 }
 
 func (g *realtimeGateway) RegisterRoutes(mux *http.ServeMux) {
@@ -176,6 +201,17 @@ func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, k
 		return
 	}
 
+	_, updates, unsubscribe, subscribed := g.subscribe(kind, g.clientKey(r))
+	if !subscribed {
+		w.Header().Set("Retry-After", "5")
+		httpapi.WriteProblem(w, http.StatusTooManyRequests, httpapi.ProblemDetails{
+			Title:  "Too many realtime connections",
+			Detail: "close an existing realtime stream before opening another.",
+		})
+		return
+	}
+	defer unsubscribe()
+
 	if len(g.current(kind)) == 0 {
 		_ = g.syncKind(r.Context(), kind)
 	}
@@ -185,9 +221,6 @@ func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, k
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	_, updates, unsubscribe := g.subscribe(kind)
-	defer unsubscribe()
 
 	if snapshot := g.current(kind); len(snapshot) > 0 {
 		if err := writeSSE(w, snapshot); err != nil {
@@ -274,7 +307,7 @@ func (g *realtimeGateway) publishIfChanged(kind streamKind, payload []byte) {
 
 	for _, subscriber := range g.subscribers[kind] {
 		select {
-		case subscriber <- append([]byte(nil), payload...):
+		case subscriber.updates <- append([]byte(nil), payload...):
 		default:
 		}
 	}
@@ -302,23 +335,46 @@ func (g *realtimeGateway) current(kind streamKind) []byte {
 	}
 }
 
-func (g *realtimeGateway) subscribe(kind streamKind) (int, <-chan []byte, func()) {
+func (g *realtimeGateway) subscribe(kind streamKind, clientKey string) (int, <-chan []byte, func(), bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.subscriberTotal >= g.maxSubscribers || g.subscribersByClient[clientKey] >= g.maxPerClient {
+		return 0, nil, func() {}, false
+	}
 
 	id := g.nextSubscriberID
 	g.nextSubscriberID++
 	ch := make(chan []byte, 8)
-	g.subscribers[kind][id] = ch
+	g.subscribers[kind][id] = realtimeSubscriber{updates: ch, clientKey: clientKey}
+	g.subscriberTotal++
+	g.subscribersByClient[clientKey]++
 
 	return id, ch, func() {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if subscriber, ok := g.subscribers[kind][id]; ok {
 			delete(g.subscribers[kind], id)
-			close(subscriber)
+			close(subscriber.updates)
+			g.subscriberTotal--
+			g.subscribersByClient[subscriber.clientKey]--
+			if g.subscribersByClient[subscriber.clientKey] == 0 {
+				delete(g.subscribersByClient, subscriber.clientKey)
+			}
+		}
+	}, true
+}
+
+func (g *realtimeGateway) clientKey(r *http.Request) string {
+	if g.trustProxyHeaders {
+		if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
+			return forwarded
 		}
 	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func (g *realtimeGateway) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {

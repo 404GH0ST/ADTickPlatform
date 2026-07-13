@@ -24,8 +24,8 @@ func restoreWireGuardState(ctx context.Context, store wireGuardStartupStore, ser
 	}
 	paused, err := store.IsMatchPaused(ctx)
 	if err != nil {
-		log.Printf("warning: could not determine match pause state on startup, assuming false: %v", err)
-		paused = false
+		log.Printf("warning: could not determine match pause state on startup, assuming paused: %v", err)
+		paused = true
 	}
 	snapshot, err := buildWireGuardGatewaySnapshot(peers, server.now())
 	if err != nil {

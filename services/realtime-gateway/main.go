@@ -20,6 +20,10 @@ func main() {
 		),
 		config.Duration("REALTIME_POLL_INTERVAL", 2*time.Second),
 		config.Secret("REALTIME_ADMIN_TOKEN", "ADMIN_API_TOKEN"),
+	).withSubscriberLimits(
+		config.Int("REALTIME_MAX_SUBSCRIBERS", 2000),
+		config.Int("REALTIME_MAX_SUBSCRIBERS_PER_CLIENT", 12),
+		config.Bool("REALTIME_TRUST_PROXY_HEADERS", false),
 	)
 	httpapi.RegisterMetricsSource(info.Name, gateway)
 

@@ -10,8 +10,9 @@ import (
 )
 
 type wireGuardStartupStoreStub struct {
-	peers []apigateway.WireGuardGatewayPeer
-	err   error
+	peers    []apigateway.WireGuardGatewayPeer
+	err      error
+	pauseErr error
 }
 
 func (s wireGuardStartupStoreStub) ListWireGuardGatewayPeers(context.Context) ([]apigateway.WireGuardGatewayPeer, error) {
@@ -19,13 +20,26 @@ func (s wireGuardStartupStoreStub) ListWireGuardGatewayPeers(context.Context) ([
 }
 
 func (s wireGuardStartupStoreStub) IsMatchPaused(context.Context) (bool, error) {
-	return false, nil
+	return false, s.pauseErr
+}
+
+func TestRestoreWireGuardStateFailsClosedWhenPauseStateUnavailable(t *testing.T) {
+	t.Setenv("WIREGUARD_GATEWAY_RECONCILE_ON_STARTUP", "true")
+	applier := &wireGuardApplierStub{}
+	server := newWireGuardGatewayServer("admin-token", nil, applier)
+
+	err := restoreWireGuardState(context.Background(), wireGuardStartupStoreStub{pauseErr: errors.New("database unavailable")}, server)
+	if err != nil {
+		t.Fatalf("expected fail-closed restore to apply, got %v", err)
+	}
+	if !applier.snapshot.MatchPaused {
+		t.Fatal("expected unavailable pause state to produce a paused snapshot")
+	}
 }
 
 func (s wireGuardStartupStoreStub) IsMatchStarted(context.Context) (bool, error) {
 	return true, nil
 }
-
 
 type wireGuardApplierStub struct {
 	status   apigateway.WireGuardGatewayStatus
