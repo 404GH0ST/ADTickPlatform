@@ -19,7 +19,7 @@ ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")
 
 POSTGRES_DB="${POSTGRES_DB:-adplatform}"
 POSTGRES_USER="${POSTGRES_USER:-adplatform}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-adplatform}"
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in ${PROD_ENV}}"
 EDGE_BASE_URL="$(derive_edge_base_url)"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUTPUT_DIR="${RESTORE_DRILL_OUTPUT_DIR:-.runtime/prod-db-restore-${TIMESTAMP}}"
