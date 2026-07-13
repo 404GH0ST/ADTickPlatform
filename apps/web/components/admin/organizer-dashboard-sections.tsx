@@ -5189,9 +5189,14 @@ function validatePlayerDraft(
     errors.push("Email must be a valid email address.");
   }
 
-  if (formMode === "create" && playerDraft.password.trim() === "") {
-    fieldErrors.password = "Enter a password.";
-    errors.push("Password is required.");
+  if (formMode === "create") {
+    if (playerDraft.password.trim() === "") {
+      fieldErrors.password = "Enter a password.";
+      errors.push("Password is required.");
+    } else if (playerDraft.password.length < 8) {
+      fieldErrors.password = "Use at least 8 characters.";
+      errors.push("Password must be at least 8 characters.");
+    }
   }
 
   if (playerDraft.role !== "member" && playerDraft.role !== "captain") {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { listAdminDeployments } from '@/lib/admin-api';
 
 export async function GET() {
@@ -8,7 +8,6 @@ export async function GET() {
     const data = await listAdminDeployments();
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'deployment list failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'deployment list failed', 'Upstream request failed');
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { updateAdminGameScheduler } from "@/lib/admin-api";
+import { upstreamErrorResponse } from "@/lib/api-handler";
 import { ProblemDetails } from "@/lib/api-utils";
 
 export async function PUT(request: NextRequest) {
@@ -22,15 +23,6 @@ export async function PUT(request: NextRequest) {
     const data = await updateAdminGameScheduler(intervalSeconds);
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "scheduler update failed";
-    return NextResponse.json(
-      {
-        title: "Upstream request failed",
-        status: 502,
-        detail: message,
-      } satisfies ProblemDetails,
-      { status: 502 },
-    );
+    return upstreamErrorResponse(error, "scheduler update failed");
   }
 }

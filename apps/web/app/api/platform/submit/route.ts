@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { problemResponse } from "@/lib/api-handler";
-import { PlatformAPIError, submitFlags } from "@/lib/platform-api";
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
+import { submitFlags } from "@/lib/platform-api";
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
@@ -18,14 +18,6 @@ export async function POST(request: Request) {
     const data = await submitFlags(flags);
     return NextResponse.json(data);
   } catch (error) {
-    if (error instanceof PlatformAPIError) {
-      return problemResponse(
-        error.status,
-        error.status >= 500 ? "Submit unavailable" : "Submit failed",
-        error.message,
-      );
-    }
-    const message = error instanceof Error ? error.message : "submit failed";
-    return problemResponse(502, "Submit unavailable", message);
+    return upstreamErrorResponse(error, "submit failed", "Submit unavailable");
   }
 }

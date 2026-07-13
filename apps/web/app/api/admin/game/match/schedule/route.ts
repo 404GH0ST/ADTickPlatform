@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { updateAdminGameMatchSchedule } from "@/lib/admin-api";
-import { ProblemDetails } from "@/lib/api-utils";
+import { upstreamErrorResponse } from "@/lib/api-handler";
 
 export async function PUT(request: Request) {
   try {
@@ -12,15 +12,10 @@ export async function PUT(request: Request) {
     const data = await updateAdminGameMatchSchedule(body);
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "game match schedule update failed";
-    return NextResponse.json(
-      {
-        title: "Upstream request failed",
-        status: 502,
-        detail: message,
-      } satisfies ProblemDetails,
-      { status: 502 },
+    return upstreamErrorResponse(
+      error,
+      "game match schedule update failed",
+      "Upstream request failed",
     );
   }
 }

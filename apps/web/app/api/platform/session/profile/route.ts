@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { updateCurrentParticipantProfile } from "@/lib/platform-api";
-
-function problemResponse(status: number, title: string, detail: string) {
-  return NextResponse.json(
-    { title, status, detail },
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
 
 export async function PUT(request: Request) {
   const profile = await readProfileUpdate(request);
@@ -26,15 +20,7 @@ export async function PUT(request: Request) {
     response.cookies.set(participantSessionCookie(token, 60 * 60 * 24));
     return response;
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "profile update failed";
-    const status =
-      message.includes("required") || message.includes("unique") ? 400 : 502;
-    return problemResponse(
-      status,
-      status === 502 ? "Profile update unavailable" : "Profile update failed",
-      message,
-    );
+    return upstreamErrorResponse(error, "profile update failed", "Profile update failed");
   }
 }
 

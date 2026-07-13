@@ -1,16 +1,5 @@
+import { upstreamErrorResponse } from "@/lib/api-handler";
 import { downloadParticipantWireGuard } from "@/lib/platform-api";
-
-function problemResponse(status: number, title: string, detail: string) {
-  return Response.json(
-    { title, status, detail },
-    {
-      status,
-      headers: {
-        "Content-Type": "application/problem+json",
-      },
-    },
-  );
-}
 
 function passthroughHeaders(headers: Headers): Headers {
   const next = new Headers();
@@ -36,14 +25,10 @@ export async function GET() {
       headers: passthroughHeaders(response.headers),
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "wireguard config download failed";
-    const status =
-      message === "participant session is not authenticated." ? 403 : 502;
-    return problemResponse(
-      status,
-      status === 403 ? "Authentication required" : "VPN config download failed",
-      message,
+    return upstreamErrorResponse(
+      error,
+      "wireguard config download failed",
+      "VPN config download failed",
     );
   }
 }

@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
 import { validateParticipantSessionWithAPI } from "@/lib/session-validation";
@@ -121,6 +121,7 @@ export type ServicesResponseData = Record<string, Record<string, string[]>>;
 import {
   authenticatedFetch,
   buildQueryString,
+  firstForwardedAddress,
   parseApiError,
   PlatformAPIError,
 } from "./api-utils";
@@ -176,6 +177,22 @@ function apiBaseUrl() {
   return trimBaseUrl(
     process.env.AD_PLATFORM_API_URL ?? "http://127.0.0.1:8080",
   );
+}
+
+async function platformRequestHeaders(initial?: HeadersInit): Promise<Headers> {
+  const result = new Headers(initial);
+  try {
+    const incoming = await headers();
+    const clientAddress = firstForwardedAddress(
+      incoming.get("x-forwarded-for"),
+    );
+    if (clientAddress) {
+      result.set("X-Forwarded-For", clientAddress);
+    }
+  } catch {
+    // Static generation and background calls do not have an incoming request.
+  }
+  return result;
 }
 
 export function participantApiBaseUrl() {
@@ -276,15 +293,19 @@ type AuthenticateResponse = {
 export async function authenticateParticipant(email: string, password: string) {
   const response = await fetch(`${apiBaseUrl()}/api/v2/authenticate`, {
     method: "POST",
-    headers: {
+    headers: await platformRequestHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({ email, password }),
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response, "/api/v2/authenticate"));
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/authenticate"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   const payload = (await response.json()) as AuthenticateResponse;
   return payload.token;
@@ -297,9 +318,9 @@ export async function registerParticipant(input: {
 }) {
   const response = await fetch(`${apiBaseUrl()}/api/v2/register`, {
     method: "POST",
-    headers: {
+    headers: await platformRequestHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({
       display_name: input.displayName,
       email: input.email,
@@ -309,7 +330,11 @@ export async function registerParticipant(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response, "/api/v2/register"));
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/register"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   const payload = (await response.json()) as AuthenticateResponse;
   return payload.token;
@@ -319,10 +344,10 @@ export async function joinCurrentParticipantTeam(teamKey: string) {
   const token = await getParticipantToken();
   const response = await fetch(`${apiBaseUrl()}/api/v2/me/team`, {
     method: "POST",
-    headers: {
+    headers: await platformRequestHeaders({
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-    },
+    }),
     body: JSON.stringify({
       team_key: teamKey,
     }),
@@ -330,7 +355,11 @@ export async function joinCurrentParticipantTeam(teamKey: string) {
   });
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response, "/api/v2/me/team"));
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/me/team"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   const payload = (await response.json()) as AuthenticateResponse;
   return payload.token;
@@ -345,10 +374,10 @@ export async function updateCurrentParticipantProfile(input: {
   const token = await getParticipantToken();
   const response = await fetch(`${apiBaseUrl()}/api/v2/me/profile`, {
     method: "PUT",
-    headers: {
+    headers: await platformRequestHeaders({
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-    },
+    }),
     body: JSON.stringify({
       display_name: input.displayName,
       email: input.email,
@@ -359,7 +388,11 @@ export async function updateCurrentParticipantProfile(input: {
   });
 
   if (!response.ok) {
-    throw new Error(await parseApiError(response, "/api/v2/me/profile"));
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/me/profile"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   const payload = (await response.json()) as AuthenticateResponse;
   return payload.token;
@@ -370,7 +403,10 @@ async function participantFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const token = await getParticipantToken();
-  return authenticatedFetch<T>(apiBaseUrl(), path, token, init);
+  return authenticatedFetch<T>(apiBaseUrl(), path, token, {
+    ...init,
+    headers: await platformRequestHeaders(init?.headers),
+  });
 }
 
 export async function participantFetchResponse(
@@ -378,22 +414,27 @@ export async function participantFetchResponse(
   init?: RequestInit,
 ): Promise<Response> {
   const token = await getParticipantToken();
+  const requestHeaders = await platformRequestHeaders(init?.headers);
+  requestHeaders.set("Authorization", `Bearer ${token}`);
   const response = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
+    headers: requestHeaders,
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(await parseApiError(response, path));
+    throw new PlatformAPIError(
+      await parseApiError(response, path),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   return response;
 }
 
 async function publicFetch<T>(path: string): Promise<T> {
-  return authenticatedFetch<T>(apiBaseUrl(), path, null);
+  return authenticatedFetch<T>(apiBaseUrl(), path, null, {
+    headers: await platformRequestHeaders(),
+  });
 }
 
 export async function listChallenges() {
@@ -505,7 +546,7 @@ export async function changeParticipantPassword(input: {
   currentPassword: string;
   newPassword: string;
 }) {
-  return participantFetch<{ updated: boolean }>("/api/v2/me/password", {
+  return participantFetch<{ updated: boolean; token: string; token_type: string }>("/api/v2/me/password", {
     method: "PUT",
     body: JSON.stringify({
       current_password: input.currentPassword,

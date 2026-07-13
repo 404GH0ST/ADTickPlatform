@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { bulkImportAdminTeams } from "@/lib/admin-api";
-import { problemResponse } from "@/lib/api-handler";
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
@@ -23,8 +23,6 @@ export async function POST(request: Request) {
     const { status, body: result } = await bulkImportAdminTeams(body.teams);
     return NextResponse.json(result, { status });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "bulk import failed";
-    return problemResponse(502, "Upstream request failed", message);
+    return upstreamErrorResponse(error, "bulk import failed");
   }
 }

@@ -38,6 +38,7 @@ import {
   authenticatedFetch,
   buildQueryString,
   parseApiError,
+  PlatformAPIError,
 } from "./api-utils";
 
 export type CreateTeamInput = {
@@ -890,7 +891,11 @@ export async function bulkImportAdminTeams(teams: Array<{
     cache: "no-store",
   });
   if (response.status !== 200 && response.status !== 422) {
-    throw new Error(await parseApiError(response, "/api/v2/admin/import/teams"));
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/admin/import/teams"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
   }
   const body = (await response.json()) as AdminBulkImportResult;
   return { status: response.status, body };

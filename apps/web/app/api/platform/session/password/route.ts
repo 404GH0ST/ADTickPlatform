@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { problemResponse } from "@/lib/api-handler";
-import {
-  changeParticipantPassword,
-  PlatformAPIError,
-} from "@/lib/platform-api";
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
+import { participantSessionCookie } from "@/lib/participant-session-cookie";
+import { changeParticipantPassword } from "@/lib/platform-api";
 
 export async function PUT(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     current_password?: string;
     new_password?: string;
   } | null;
-  const currentPassword = body?.current_password?.trim() ?? "";
-  const newPassword = body?.new_password?.trim() ?? "";
+  const currentPassword = body?.current_password ?? "";
+  const newPassword = body?.new_password ?? "";
   if (!currentPassword || !newPassword) {
     return problemResponse(
       400,
@@ -26,19 +24,14 @@ export async function PUT(request: Request) {
       currentPassword,
       newPassword,
     });
-    return NextResponse.json(data);
+    const response = NextResponse.json({ updated: data.updated });
+    response.cookies.set(participantSessionCookie(data.token, 60 * 60 * 24));
+    return response;
   } catch (error) {
-    if (error instanceof PlatformAPIError) {
-      return problemResponse(
-        error.status,
-        error.status >= 500
-          ? "Password change unavailable"
-          : "Password change failed",
-        error.message,
-      );
-    }
-    const message =
-      error instanceof Error ? error.message : "password change failed";
-    return problemResponse(502, "Password change unavailable", message);
+    return upstreamErrorResponse(
+      error,
+      "password change failed",
+      "Password change unavailable",
+    );
   }
 }

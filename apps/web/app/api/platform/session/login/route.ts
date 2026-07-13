@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { authenticateParticipant } from "@/lib/platform-api";
 
@@ -7,13 +8,6 @@ type LoginCredentials = {
   email: string;
   password: string;
 };
-
-function problemResponse(status: number, title: string, detail: string) {
-  return NextResponse.json(
-    { title, status, detail },
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
 
 export async function POST(request: Request) {
   const credentials = await readLoginCredentials(request);
@@ -59,14 +53,9 @@ function loginResponse(token: string) {
 }
 
 function loginErrorResponse(error: unknown) {
-  const message =
-    error instanceof Error
-      ? error.message
-      : "participant authentication failed";
-  const status = message === "email or password is wrong." ? 403 : 502;
-  return problemResponse(
-    status,
-    status === 403 ? "Authentication failed" : "Authentication unavailable",
-    message,
+  return upstreamErrorResponse(
+    error,
+    "participant authentication failed",
+    "Authentication failed",
   );
 }

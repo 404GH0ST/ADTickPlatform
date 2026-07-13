@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { listAdminGameSchedulerEvents } from '@/lib/admin-api';
 import {
   parseLowercaseTextFilter,
@@ -22,7 +22,6 @@ export async function GET(request: Request) {
     const data = await listAdminGameSchedulerEvents(query);
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'scheduler events failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'scheduler events failed', 'Upstream request failed');
   }
 }

@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { deleteAdminPlayer, updateAdminPlayer } from '@/lib/admin-api';
 
 export async function DELETE(
@@ -12,8 +12,7 @@ export async function DELETE(
     await deleteAdminPlayer(Number(playerId));
     return new Response(null, { status: 204 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'player delete failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'player delete failed', 'Upstream request failed');
   }
 }
 
@@ -33,7 +32,6 @@ export async function PUT(
     const data = await updateAdminPlayer(Number(playerId), { display_name: displayName, email, role });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'player update failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'player update failed', 'Upstream request failed');
   }
 }

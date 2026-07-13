@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { getAdminAccessStatus } from '@/lib/admin-api';
 
 export async function GET() {
@@ -8,7 +8,6 @@ export async function GET() {
     const status = await getAdminAccessStatus();
     return NextResponse.json(status);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'controller access status failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'controller access status failed', 'Upstream request failed');
   }
 }

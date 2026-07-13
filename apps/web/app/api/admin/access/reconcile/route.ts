@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { reconcileAdminAccess } from '@/lib/admin-api';
 
 export async function POST() {
@@ -8,7 +8,6 @@ export async function POST() {
     const status = await reconcileAdminAccess();
     return NextResponse.json(status);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'controller access reconcile failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'controller access reconcile failed', 'Upstream request failed');
   }
 }

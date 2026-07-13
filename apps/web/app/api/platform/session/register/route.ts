@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { registerParticipant } from "@/lib/platform-api";
 
@@ -8,13 +9,6 @@ type RegisterRequest = {
   email: string;
   password: string;
 };
-
-function problemResponse(status: number, title: string, detail: string) {
-  return NextResponse.json(
-    { title, status, detail },
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
 
 export async function POST(request: Request) {
   const registerRequest = await readRegisterRequest(request);
@@ -32,17 +26,7 @@ export async function POST(request: Request) {
     response.cookies.set(participantSessionCookie(token, 60 * 60 * 24));
     return response;
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "player registration failed";
-    const status =
-      message.includes("unique email") || message.includes("required")
-        ? 400
-        : 502;
-    return problemResponse(
-      status,
-      status === 502 ? "Registration unavailable" : "Registration failed",
-      message,
-    );
+    return upstreamErrorResponse(error, "player registration failed", "Registration failed");
   }
 }
 

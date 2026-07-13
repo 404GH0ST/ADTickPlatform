@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { deleteAdminTeam, updateAdminTeam } from '@/lib/admin-api';
 import { parseTeamBody } from '@/lib/api-utils';
 
@@ -13,8 +13,7 @@ export async function DELETE(
     await deleteAdminTeam(Number(teamId));
     return new Response(null, { status: 204 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'team delete failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'team delete failed', 'Upstream request failed');
   }
 }
 
@@ -31,7 +30,6 @@ export async function PUT(
     const data = await updateAdminTeam(Number(teamId), { name, contact_email: contactEmail });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'team update failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'team update failed', 'Upstream request failed');
   }
 }

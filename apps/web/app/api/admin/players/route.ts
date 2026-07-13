@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { createAdminPlayer } from '@/lib/admin-api';
 
 export async function POST(request: Request) {
@@ -12,7 +12,14 @@ export async function POST(request: Request) {
     role?: string;
   } | null;
 
-  if (!body?.team_id || !body.display_name?.trim() || !body.email?.trim() || !body.password?.trim()) {
+  if (
+    !body?.team_id ||
+    !body.display_name?.trim() ||
+    !body.email?.trim() ||
+    !body.password ||
+    body.password.length < 8 ||
+    !body.password.trim()
+  ) {
     return problemResponse(400, 'Invalid request', 'player request is invalid.');
   }
 
@@ -21,12 +28,11 @@ export async function POST(request: Request) {
       team_id: body.team_id,
       display_name: body.display_name.trim(),
       email: body.email.trim(),
-      password: body.password.trim(),
+      password: body.password,
       role: body.role?.trim() || 'member',
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'player create failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'player create failed', 'Upstream request failed');
   }
 }

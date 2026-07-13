@@ -9,12 +9,37 @@ export type ProblemDetails = {
 /** Upstream API failure that preserves HTTP status for proxy routes. */
 export class PlatformAPIError extends Error {
   status: number;
+  retryAfter?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfter?: string | null) {
     super(message);
     this.name = "PlatformAPIError";
     this.status = status;
+    this.retryAfter = retryAfter?.trim() || undefined;
   }
+}
+
+export type UpstreamErrorDetails = {
+  detail: string;
+  retryAfter?: string;
+  status: number;
+};
+
+export function upstreamErrorDetails(
+  error: unknown,
+  fallback: string,
+): UpstreamErrorDetails {
+  if (error instanceof PlatformAPIError) {
+    return {
+      detail: error.message,
+      retryAfter: error.retryAfter,
+      status: error.status,
+    };
+  }
+  return {
+    detail: error instanceof Error ? error.message : fallback,
+    status: 502,
+  };
 }
 
 export function buildQueryString(
@@ -31,6 +56,13 @@ export function buildQueryString(
   return encoded ? `?${encoded}` : "";
 }
 
+export function firstForwardedAddress(value: string | null): string | undefined {
+  return value
+    ?.split(",")
+    .map((entry) => entry.trim())
+    .find((entry) => entry !== "");
+}
+
 export async function parseTeamBody(request: Request) {
   const body = (await request.json().catch(() => null)) as { name?: string; contact_email?: string } | null;
   const name = body?.name?.trim();
@@ -44,13 +76,16 @@ export async function authenticatedFetch<T>(
   token: string | null,
   init?: RequestInit,
 ): Promise<T> {
+  const requestHeaders = new Headers(init?.headers);
+  if (token) {
+    requestHeaders.set("Authorization", `Bearer ${token}`);
+  }
+  if (!requestHeaders.has("Content-Type")) {
+    requestHeaders.set("Content-Type", "application/json");
+  }
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers: requestHeaders,
     cache: "no-store",
   });
 
@@ -65,6 +100,7 @@ export async function processApiResponse<T>(
     throw new PlatformAPIError(
       await parseApiError(response, path),
       response.status,
+      response.headers.get("retry-after"),
     );
   }
   if (response.status === 204) {

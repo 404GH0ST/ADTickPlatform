@@ -1,3 +1,5 @@
+import { firstForwardedAddress } from '@/lib/api-utils';
+
 const streamResponseHeaders = {
   'Content-Type': 'text/event-stream',
   'Cache-Control': 'no-cache, no-transform',
@@ -21,12 +23,12 @@ function adminToken() {
   return token;
 }
 
-export async function proxyPublicRealtimeStream(path: string, failureMessage: string) {
-  return proxyRealtimeStream(path, failureMessage);
+export async function proxyPublicRealtimeStream(path: string, failureMessage: string, request?: Request) {
+  return proxyRealtimeStream(path, failureMessage, request);
 }
 
-export async function proxyAdminRealtimeStream(path: string, failureMessage: string) {
-  return proxyRealtimeStream(path, failureMessage, {
+export async function proxyAdminRealtimeStream(path: string, failureMessage: string, request?: Request) {
+  return proxyRealtimeStream(path, failureMessage, request, {
     Authorization: `Bearer ${adminToken()}`,
   });
 }
@@ -34,17 +36,37 @@ export async function proxyAdminRealtimeStream(path: string, failureMessage: str
 async function proxyRealtimeStream(
   path: string,
   failureMessage: string,
+  request?: Request,
   headers: HeadersInit = {},
 ) {
+  const forwardedFor = firstForwardedAddress(request?.headers.get('x-forwarded-for') ?? null);
   const upstream = await fetch(`${realtimeBaseUrl()}${path}`, {
     headers: {
       Accept: 'text/event-stream',
+      ...(forwardedFor ? { 'X-Forwarded-For': forwardedFor } : {}),
       ...headers,
     },
     cache: 'no-store',
   });
 
-  if (!upstream.ok || !upstream.body) {
+  if (!upstream.ok) {
+    const responseHeaders = new Headers({
+      'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+    });
+    const retryAfter = upstream.headers.get('retry-after');
+    if (retryAfter) {
+      responseHeaders.set('Retry-After', retryAfter);
+    }
+    return new Response(
+      upstream.body ?? JSON.stringify({ status: 'failed', message: failureMessage }),
+      {
+        status: upstream.status,
+        headers: responseHeaders,
+      },
+    );
+  }
+
+  if (!upstream.body) {
     return new Response(JSON.stringify({ status: 'failed', message: failureMessage }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' },

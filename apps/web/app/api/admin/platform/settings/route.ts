@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import {
   getAdminPlatformSettings,
   updateAdminPlatformSettings,
@@ -11,8 +11,7 @@ export async function GET() {
     const data = await getAdminPlatformSettings();
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'platform settings fetch failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'platform settings fetch failed', 'Upstream request failed');
   }
 }
 
@@ -34,7 +33,6 @@ export async function PUT(request: NextRequest) {
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'platform settings update failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'platform settings update failed', 'Upstream request failed');
   }
 }

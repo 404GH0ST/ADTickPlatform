@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { createAdminChallenge } from '@/lib/admin-api';
 
 export async function POST(request: Request) {
@@ -28,7 +28,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'challenge create failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'challenge create failed', 'Upstream request failed');
   }
 }

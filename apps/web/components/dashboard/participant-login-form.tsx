@@ -126,7 +126,8 @@ export function ParticipantLoginForm() {
         <Input
           id="participant-password"
           type="password"
-          autoComplete="current-password"
+          autoComplete={mode === "register" ? "new-password" : "current-password"}
+          minLength={mode === "register" ? 8 : undefined}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           required

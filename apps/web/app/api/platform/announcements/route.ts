@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { problemResponse } from "@/lib/api-handler";
+import { upstreamErrorResponse } from "@/lib/api-handler";
 import { listAnnouncements } from "@/lib/platform-api";
 
 export async function GET() {
@@ -8,8 +8,10 @@ export async function GET() {
     const data = await listAnnouncements();
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "announcements unavailable";
-    return problemResponse(502, "Announcements unavailable", message);
+    return upstreamErrorResponse(
+      error,
+      "announcements unavailable",
+      "Announcements unavailable",
+    );
   }
 }

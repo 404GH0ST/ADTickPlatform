@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { deleteAdminAnnouncement } from "@/lib/admin-api";
-import { problemResponse } from "@/lib/api-handler";
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 
 type Params = { params: Promise<{ announcementId: string }> };
 
@@ -15,8 +15,6 @@ export async function DELETE(_request: Request, { params }: Params) {
     const data = await deleteAdminAnnouncement(id);
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "announcement delete failed";
-    return problemResponse(502, "Upstream request failed", message);
+    return upstreamErrorResponse(error, "announcement delete failed");
   }
 }

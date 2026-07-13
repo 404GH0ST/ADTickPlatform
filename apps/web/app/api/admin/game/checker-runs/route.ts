@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { listAdminCheckerRuns } from '@/lib/admin-api';
 import {
   parseLowercaseTextFilter,
@@ -23,7 +23,6 @@ export async function GET(request: NextRequest) {
     const data = await listAdminCheckerRuns(query);
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'checker runs failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'checker runs failed', 'Upstream request failed');
   }
 }

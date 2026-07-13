@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { upstreamErrorResponse } from '@/lib/api-handler';
 import { stopAdminGameMatch } from '@/lib/admin-api';
 
 export async function POST() {
@@ -8,7 +8,6 @@ export async function POST() {
     const data = await stopAdminGameMatch();
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'game match stop failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'game match stop failed', 'Upstream request failed');
   }
 }

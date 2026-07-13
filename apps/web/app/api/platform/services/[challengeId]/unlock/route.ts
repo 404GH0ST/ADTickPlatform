@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { unlockService } from '@/lib/platform-api';
-
-function problemResponse(status: number, title: string, detail: string) {
-  return NextResponse.json(
-    { title, status, detail },
-    { status, headers: { 'Content-Type': 'application/problem+json' } },
-  );
-}
 
 export async function POST(request: Request, context: { params: Promise<{ challengeId: string }> }) {
   const { challengeId } = await context.params;
@@ -26,8 +20,6 @@ export async function POST(request: Request, context: { params: Promise<{ challe
     const data = await unlockService(challengeID, proof);
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'unlock request failed';
-    const status = message === 'participant session is not authenticated.' ? 403 : 502;
-    return problemResponse(status, status === 403 ? 'Authentication required' : 'Unlock request failed', message);
+    return upstreamErrorResponse(error, 'unlock request failed', 'Unlock request failed');
   }
 }

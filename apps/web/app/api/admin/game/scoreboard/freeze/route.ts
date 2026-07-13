@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { problemResponse } from "@/lib/api-handler";
+import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import {
   getAdminScoreboardFreeze,
   setAdminScoreboardFreeze,
@@ -11,9 +11,7 @@ export async function GET() {
     const data = await getAdminScoreboardFreeze();
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "freeze status fetch failed";
-    return problemResponse(502, "Upstream request failed", message);
+    return upstreamErrorResponse(error, "freeze status fetch failed");
   }
 }
 
@@ -38,8 +36,6 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "freeze set failed";
-    return problemResponse(502, "Upstream request failed", message);
+    return upstreamErrorResponse(error, "freeze set failed");
   }
 }

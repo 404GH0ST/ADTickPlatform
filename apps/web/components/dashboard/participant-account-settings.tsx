@@ -49,6 +49,7 @@ export function ParticipantAccountSettings({
     confirmPassword: "",
   });
   const hasTeam = (overview.teamID ?? 0) > 0 && overview.role !== "organizer";
+  const canEditTeam = hasTeam && overview.role === "captain";
 
   useEffect(() => {
     if (open) {
@@ -76,8 +77,12 @@ export function ParticipantAccountSettings({
         body: JSON.stringify({
           display_name: draft.displayName,
           email: draft.email,
-          team_name: draft.teamName,
-          team_contact_email: draft.teamContactEmail,
+          ...(canEditTeam
+            ? {
+                team_name: draft.teamName,
+                team_contact_email: draft.teamContactEmail,
+              }
+            : {}),
         }),
       });
       if (!response.ok) {
@@ -149,7 +154,7 @@ export function ParticipantAccountSettings({
           <DialogHeader>
             <DialogTitle>Account settings</DialogTitle>
             <DialogDescription>
-              Update your player profile and current team information.
+              Update your player profile and account security.
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={submit}>
@@ -187,7 +192,7 @@ export function ParticipantAccountSettings({
               </Field>
             </section>
 
-            {hasTeam ? (
+            {canEditTeam ? (
               <section className="grid gap-3 border-t pt-4">
                 <div>
                   <p className="text-sm font-medium text-foreground">
@@ -222,6 +227,11 @@ export function ParticipantAccountSettings({
                   />
                 </Field>
               </section>
+            ) : hasTeam ? (
+              <StatusBanner
+                message="Only the team captain can edit the team name and contact email."
+                variant="warning"
+              />
             ) : (
               <StatusBanner
                 message="Join a team before editing team information."

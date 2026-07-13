@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { problemResponse } from '@/lib/api-handler';
+import { problemResponse, upstreamErrorResponse } from '@/lib/api-handler';
 import { deleteAdminChallenge, updateAdminChallenge } from '@/lib/admin-api';
 
 export async function DELETE(
@@ -12,8 +12,7 @@ export async function DELETE(
     await deleteAdminChallenge(Number(challengeId));
     return new Response(null, { status: 204 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'challenge delete failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'challenge delete failed', 'Upstream request failed');
   }
 }
 
@@ -36,7 +35,6 @@ export async function PUT(
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'challenge update failed';
-    return problemResponse(502, 'Upstream request failed', message);
+    return upstreamErrorResponse(error, 'challenge update failed', 'Upstream request failed');
   }
 }
