@@ -37,7 +37,7 @@ func newRuntimeExecutor() runtimeExecutor {
 			serviceSecurity: dockerRunSecurity{
 				capDrop:     csvConfig("CONTROLLER_SERVICE_CAP_DROP", "ALL"),
 				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE,SYS_CHROOT,AUDIT_WRITE"),
-				securityOpt: csvConfig("CONTROLLER_SERVICE_SECURITY_OPT", ""),
+				securityOpt: csvConfig("CONTROLLER_SERVICE_SECURITY_OPT", "no-new-privileges:true"),
 				pidsLimit:   stringConfig("CONTROLLER_SERVICE_PIDS_LIMIT", "256"),
 				memory:      stringConfig("CONTROLLER_SERVICE_MEMORY", "512m"),
 				cpus:        stringConfig("CONTROLLER_SERVICE_CPUS", "1.0"),

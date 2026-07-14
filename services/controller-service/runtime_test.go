@@ -21,11 +21,12 @@ type stubCheckerValidationClient struct {
 
 func testServiceSecurity() dockerRunSecurity {
 	return dockerRunSecurity{
-		capDrop:   []string{"ALL"},
-		capAdd:    []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE", "SYS_CHROOT", "AUDIT_WRITE"},
-		pidsLimit: "256",
-		memory:    "512m",
-		cpus:      "1.0",
+		capDrop:     []string{"ALL"},
+		capAdd:      []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE", "SYS_CHROOT", "AUDIT_WRITE"},
+		securityOpt: []string{"no-new-privileges:true"},
+		pidsLimit:   "256",
+		memory:      "512m",
+		cpus:        "1.0",
 	}
 }
 
@@ -84,6 +85,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		"--cap-add", "NET_BIND_SERVICE",
 		"--cap-add", "SYS_CHROOT",
 		"--cap-add", "AUDIT_WRITE",
+		"--security-opt", "no-new-privileges:true",
 		"--pids-limit", "256",
 		"--memory", "512m",
 		"--cpus", "1.0",
@@ -172,7 +174,7 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"run -d --init --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
+		"run -d --init --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --security-opt no-new-privileges:true --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
 		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3, 1),
 		"-e AD_CHECKER_TOKEN=checker-secret-101-3",
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
