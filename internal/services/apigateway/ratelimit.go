@@ -404,6 +404,7 @@ var (
 	authRateLimitPolicy              = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
 	registrationIPRateLimitPolicy    = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
 	registrationEmailRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 3600.0, failClosedOnError: true}
+	passwordChangeRateLimitPolicy    = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 900.0, failClosedOnError: true}
 	challengesRateLimitPolicy        = rateLimitPolicy{capacity: 4, refillPerSecond: 2, failClosedOnError: false}
 	servicesReadRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}
 	scoreboardRateLimitPolicy        = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}

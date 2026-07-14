@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -96,6 +97,48 @@ func TestChangeParticipantPasswordPreservesWhitespace(t *testing.T) {
 	}
 	if _, err := store.AuthenticatePlayer(context.Background(), registered.Email, "replacement password"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected trimmed password to fail, got %v", err)
+	}
+}
+
+func TestChangeParticipantPasswordUsesIndependentClientAndUserRateLimits(t *testing.T) {
+	limiter := &recordingRateLimiter{}
+	mux := newTestMuxWithLimiter(limiter)
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/me/password",
+		bytes.NewBufferString(`{"current_password":"wrong-password","new_password":"replacement-password"}`),
+	)
+	request.RemoteAddr = "198.51.100.24:44123"
+	request.Header.Set("Authorization", testTeamBearerToken(t, 101))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected wrong current password 403, got %d: %s", response.Code, response.Body.String())
+	}
+	wantKeys := []string{
+		"password-change:client:198.51.100.24",
+		"password-change:user:1",
+	}
+	if !slices.Equal(limiter.keys, wantKeys) {
+		t.Fatalf("expected password-change rate-limit keys %v, got %v", wantKeys, limiter.keys)
+	}
+}
+
+func TestChangeParticipantPasswordRateLimitFailsClosed(t *testing.T) {
+	mux := newTestMuxWithLimiter(unavailableRateLimiter{})
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/me/password",
+		bytes.NewBufferString(`{"current_password":"alpha-secret","new_password":"replacement-password"}`),
+	)
+	request.RemoteAddr = "198.51.100.25:44123"
+	request.Header.Set("Authorization", testTeamBearerToken(t, 101))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected unavailable limiter to reject password change with 429, got %d: %s", response.Code, response.Body.String())
 	}
 }
 

@@ -85,6 +85,16 @@ func (s *Server) handleChangeParticipantPassword(w http.ResponseWriter, r *http.
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "new_password must be at least 8 characters.")
 		return
 	}
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitClientKey("password-change", clientRateLimitKey(r)), passwordChangeRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	decision, allowed = s.allowRateLimit(r.Context(), rateLimitUserKey("password-change", player.PlayerID), passwordChangeRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
 
 	sessionVersion, err := s.store.ChangeParticipantPassword(r.Context(), player.PlayerID, current, next)
 	if err != nil {
