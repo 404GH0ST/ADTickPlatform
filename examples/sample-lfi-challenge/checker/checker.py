@@ -8,6 +8,14 @@ from urllib.request import Request, urlopen
 
 
 CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-lfi-checker-token")
+MAX_HTTP_RESPONSE_BYTES = 1 << 20
+
+
+def read_response_body(response) -> str:
+    data = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
+    if len(data) > MAX_HTTP_RESPONSE_BYTES:
+        raise ValueError("response body exceeds checker limit")
+    return data.decode("utf-8", errors="replace")
 
 
 def http_request(
@@ -25,7 +33,7 @@ def http_request(
         request_headers.update(headers)
     request = Request(url, data=data, headers=request_headers, method=method)
     with urlopen(request, timeout=5) as response:
-        return response.status, response.read().decode("utf-8", errors="replace")
+        return response.status, read_response_body(response)
 
 
 def parse_metadata(raw: str) -> dict:

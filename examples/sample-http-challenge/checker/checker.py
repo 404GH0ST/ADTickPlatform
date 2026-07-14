@@ -7,6 +7,16 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
+MAX_HTTP_RESPONSE_BYTES = 1 << 20
+
+
+def read_response_body(response) -> str:
+    data = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
+    if len(data) > MAX_HTTP_RESPONSE_BYTES:
+        raise ValueError("response body exceeds checker limit")
+    return data.decode("utf-8", errors="replace")
+
+
 def http_request(method: str, url: str, payload: dict | None = None) -> tuple[int, str]:
     data = None
     headers = {}
@@ -15,7 +25,7 @@ def http_request(method: str, url: str, payload: dict | None = None) -> tuple[in
         headers["Content-Type"] = "application/json"
     request = Request(url, data=data, headers=headers, method=method)
     with urlopen(request, timeout=5) as response:
-        return response.status, response.read().decode("utf-8", errors="replace")
+        return response.status, read_response_body(response)
 
 
 def main() -> int:
@@ -61,10 +71,17 @@ def main() -> int:
             print(body)
             return 0
     except HTTPError as exc:
-        print(exc.read().decode("utf-8", errors="replace"), file=sys.stderr)
+        try:
+            message = read_response_body(exc)
+        except ValueError as read_error:
+            message = str(read_error)
+        print(message, file=sys.stderr)
         return 1
     except URLError as exc:
         print(f"request failed: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"checker error: {exc}", file=sys.stderr)
         return 1
 
     print(f"unsupported phase: {phase}", file=sys.stderr)
