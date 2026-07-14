@@ -179,10 +179,18 @@ func (s *controllerServer) handleReconcileAccessPolicies(w http.ResponseWriter, 
 		return
 	}
 	// Converge WireGuard after policy apply so tick-opened (play_from_tick) services
-	// get host access + peer path together. Best-effort: access truth already applied.
+	// get host access + peer path together. The caller must not observe success until
+	// both enforcement layers report an applied state.
 	if requiresWireGuardConverge(status) {
-		if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
+		wireGuardStatus, wgErr := s.wireGuard.Reconcile(r.Context())
+		if wgErr == nil {
+			wgErr = validateWireGuardAppliedStatus(wireGuardStatus)
+		}
+		if wgErr != nil {
 			log.Printf("controller: wireguard reconcile after access apply failed: %v", wgErr)
+			s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), status.PoliciesTotal, true)
+			writeProblem(w, http.StatusBadGateway, "Access reconcile failed", controllerWireGuardTruthUnknownDetail)
+			return
 		}
 	}
 	s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), status.PoliciesTotal, false)

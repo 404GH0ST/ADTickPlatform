@@ -164,3 +164,57 @@ func TestControllerReconcileDeploymentsReturnsBadGatewayOnWireGuardFailure(t *te
 		t.Fatalf("unexpected problem %+v", problem)
 	}
 }
+
+func TestControllerReconcileAccessReturnsBadGatewayOnWireGuardFailure(t *testing.T) {
+	server := &controllerServer{
+		adminToken: "dev-admin-token",
+		store:      apigateway.NewMemoryStore(101),
+		executor:   &runtimeExecutorStub{},
+		access:     &serviceAccessExecutorStub{},
+		wireGuard:  &controllerWireGuardReconcilerStub{err: errors.New("wg sync failed")},
+		metrics:    newControllerServiceMetrics(),
+		now:        time.Now,
+	}
+	mux := newControllerReconcileTestMux(server)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/access/reconcile", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected reconcile 502, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var problem httpapi.ProblemDetails
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode problem: %v", err)
+	}
+	if problem.Title != "Access reconcile failed" || !strings.Contains(problem.Detail, controllerWireGuardTruthUnknownDetail) {
+		t.Fatalf("unexpected problem %+v", problem)
+	}
+}
+
+func TestControllerReconcileAccessRejectsNonAppliedWireGuardStatus(t *testing.T) {
+	server := &controllerServer{
+		adminToken: "dev-admin-token",
+		store:      apigateway.NewMemoryStore(101),
+		executor:   &runtimeExecutorStub{},
+		access:     &serviceAccessExecutorStub{},
+		wireGuard: &controllerWireGuardReconcilerStub{
+			status: apigateway.WireGuardGatewayStatus{State: "error", LastError: "peer apply incomplete"},
+		},
+		metrics: newControllerServiceMetrics(),
+		now:     time.Now,
+	}
+	mux := newControllerReconcileTestMux(server)
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/access/reconcile", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected reconcile 502, got %d: %s", response.Code, response.Body.String())
+	}
+}

@@ -232,11 +232,7 @@ func (r controllerTrustedReconciler) ReconcileWithOptions(ctx context.Context, o
 	if err != nil {
 		return result, wrapControllerReconcilePhaseError(http.StatusBadGateway, "Deployment reconcile failed", controllerWireGuardTruthUnknownDetail, err)
 	}
-	if wireGuardStatus.State != "applied" || strings.TrimSpace(wireGuardStatus.LastError) != "" {
-		wireGuardErr := errors.New("wireguard gateway did not report an applied state")
-		if trimmed := strings.TrimSpace(wireGuardStatus.LastError); trimmed != "" {
-			wireGuardErr = errors.New(trimmed)
-		}
+	if wireGuardErr := validateWireGuardAppliedStatus(wireGuardStatus); wireGuardErr != nil {
 		return result, wrapControllerReconcilePhaseError(http.StatusBadGateway, "Deployment reconcile failed", controllerWireGuardTruthUnknownDetail, wireGuardErr)
 	}
 
@@ -261,6 +257,16 @@ func wrapControllerReconcilePhaseError(statusCode int, title, detail string, cau
 
 func requiresWireGuardConverge(status apigateway.ControllerAccessStatus) bool {
 	return strings.EqualFold(strings.TrimSpace(status.Mode), "host")
+}
+
+func validateWireGuardAppliedStatus(status apigateway.WireGuardGatewayStatus) error {
+	if trimmed := strings.TrimSpace(status.LastError); trimmed != "" {
+		return errors.New(trimmed)
+	}
+	if !strings.EqualFold(strings.TrimSpace(status.State), "applied") {
+		return errors.New("wireguard gateway did not report an applied state")
+	}
+	return nil
 }
 
 func decodeControllerProblemBody(body io.Reader) (string, error) {
