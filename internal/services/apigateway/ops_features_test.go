@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -139,6 +140,35 @@ func TestChangeParticipantPasswordRateLimitFailsClosed(t *testing.T) {
 
 	if response.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected unavailable limiter to reject password change with 429, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPlatformSettingsUpdateDoesNotExposeAdminToken(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := http.NewServeMux()
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/admin/platform/settings",
+		bytes.NewBufferString(`{"flag_format_prefix":"PLAYIT","max_team_members":3}`),
+	)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected settings update 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var settings adminPlatformSettings
+	if err := json.Unmarshal(response.Body.Bytes(), &settings); err != nil {
+		t.Fatalf("decode platform settings: %v", err)
+	}
+	if settings.UpdatedBy != "organizer" {
+		t.Fatalf("expected safe settings actor, got %q", settings.UpdatedBy)
+	}
+	if strings.Contains(settings.UpdatedBy, "dev-admin-token") {
+		t.Fatalf("platform settings exposed the admin token as actor: %q", settings.UpdatedBy)
 	}
 }
 

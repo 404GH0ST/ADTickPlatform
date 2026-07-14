@@ -1309,8 +1309,7 @@ func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *htt
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag_format_prefix must not be empty and max_team_members must not be negative.")
 		return
 	}
-	actor := s.adminToken
-	settings, err := s.store.UpdatePlatformSettings(r.Context(), req, actor, time.Now().UTC())
+	settings, err := s.store.UpdatePlatformSettings(r.Context(), req, "organizer", time.Now().UTC())
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", err.Error())
 		return
