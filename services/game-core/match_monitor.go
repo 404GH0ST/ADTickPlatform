@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,8 +11,11 @@ import (
 )
 
 type matchWindowMonitor struct {
-	cancel     context.CancelFunc
-	autoTickWg sync.WaitGroup
+	cancel                context.CancelFunc
+	autoTickWg            sync.WaitGroup
+	pendingAccessState    string
+	reconciledAccessState string
+	lastAccessErrorLogAt  time.Time
 }
 
 func newMatchWindowMonitor(server *gameCoreServer, scheduler gameScheduler, interval time.Duration) *matchWindowMonitor {
@@ -31,8 +35,10 @@ func newMatchWindowMonitor(server *gameCoreServer, scheduler gameScheduler, inte
 
 			status, err := reconcileMatchWindowState(server, monitor)
 			if err != nil {
+				monitor.logAccessReconcileError(err)
 				continue
 			}
+			monitor.lastAccessErrorLogAt = time.Time{}
 
 			schedulerStatus := scheduler.Status()
 			switch {
@@ -74,6 +80,12 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 
 	switch {
 	case current.State == desired.State:
+		if shouldReconcileScheduledAccess(desired) && m.reconciledAccessState != desired.State {
+			m.pendingAccessState = desired.State
+		}
+		if err := m.reconcilePendingAccess(ctx, server, desired.State); err != nil {
+			return apigateway.GameMatchStatus{}, err
+		}
 	case desired.State == "running":
 		startAt := parseOptionalRFC3339(desired.StartedAt)
 		if startAt == nil {
@@ -104,6 +116,10 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 				}
 			}()
 		}
+		m.pendingAccessState = desired.State
+		if err := m.reconcilePendingAccess(ctx, server, desired.State); err != nil {
+			return apigateway.GameMatchStatus{}, err
+		}
 	case desired.State == "finished":
 		if current.State == "not_started" {
 			startAt := parseOptionalRFC3339(desired.StartedAt)
@@ -122,9 +138,42 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 		if _, err := server.store.StopMatch(ctx, endAt.UTC()); err != nil {
 			return apigateway.GameMatchStatus{}, err
 		}
+		m.pendingAccessState = desired.State
+		if err := m.reconcilePendingAccess(ctx, server, desired.State); err != nil {
+			return apigateway.GameMatchStatus{}, err
+		}
 	}
 
 	return server.matchStatus(ctx)
+}
+
+func (m *matchWindowMonitor) reconcilePendingAccess(ctx context.Context, server *gameCoreServer, state string) error {
+	if m.pendingAccessState == "" || m.pendingAccessState != state {
+		return nil
+	}
+	if server.accessReconcile == nil {
+		m.pendingAccessState = ""
+		m.reconciledAccessState = state
+		return nil
+	}
+	if err := server.accessReconcile.ReconcileAccess(ctx); err != nil {
+		return fmt.Errorf("reconcile access after scheduled match transition to %s: %w", state, err)
+	}
+	m.pendingAccessState = ""
+	m.reconciledAccessState = state
+	return nil
+}
+
+func shouldReconcileScheduledAccess(status apigateway.GameMatchStatus) bool {
+	return matchWindowConfigured(status) && (status.State == "running" || status.State == "finished")
+}
+
+func (m *matchWindowMonitor) logAccessReconcileError(err error) {
+	now := time.Now()
+	if m.lastAccessErrorLogAt.IsZero() || now.Sub(m.lastAccessErrorLogAt) >= 30*time.Second {
+		log.Printf("game-core: scheduled match reconciliation failed: %v", err)
+		m.lastAccessErrorLogAt = now
+	}
 }
 
 func (m *matchWindowMonitor) Close() error {

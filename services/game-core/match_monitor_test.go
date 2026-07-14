@@ -2,12 +2,26 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"adplatform/internal/services/apigateway"
 )
+
+type monitorAccessReconcileClient struct {
+	calls     int
+	failCalls int
+}
+
+func (c *monitorAccessReconcileClient) ReconcileAccess(context.Context) error {
+	c.calls++
+	if c.calls <= c.failCalls {
+		return errors.New("access controller unavailable")
+	}
+	return nil
+}
 
 type monitorTestScheduler struct {
 	mu     sync.Mutex
@@ -151,6 +165,76 @@ func TestMatchWindowMonitorDoesNotAutoStartWithoutConfiguredWindow(t *testing.T)
 	}
 	if scheduler.Status().State != "stopped" {
 		t.Fatalf("expected scheduler to remain stopped, got %+v", scheduler.Status())
+	}
+}
+
+func TestScheduledMatchStartReconcilesAccessAndRetriesFailures(t *testing.T) {
+	store := newMemoryGameStore()
+	scheduler := &monitorTestScheduler{}
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
+	server.autoTickOnMatchStart = false
+	access := &monitorAccessReconcileClient{failCalls: 1}
+	server.accessReconcile = access
+
+	base := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	start := base.Add(time.Minute)
+	server.matchStartAt = &start
+	server.now = func() time.Time { return start.Add(time.Second) }
+	monitor := &matchWindowMonitor{}
+
+	if _, err := reconcileMatchWindowState(server, monitor); err == nil {
+		t.Fatal("expected the first scheduled access reconcile to fail")
+	}
+	match, err := store.MatchStatus(context.Background())
+	if err != nil {
+		t.Fatalf("load match after scheduled start: %v", err)
+	}
+	if match.State != "running" {
+		t.Fatalf("expected scheduled state transition to persist, got %+v", match)
+	}
+	if _, err := reconcileMatchWindowState(server, monitor); err != nil {
+		t.Fatalf("expected pending access reconcile retry to succeed: %v", err)
+	}
+	if access.calls != 2 {
+		t.Fatalf("expected one initial reconcile and one retry, got %d", access.calls)
+	}
+	if _, err := reconcileMatchWindowState(server, monitor); err != nil {
+		t.Fatalf("unexpected steady-state reconcile error: %v", err)
+	}
+	if access.calls != 2 {
+		t.Fatalf("expected no repeated reconcile after convergence, got %d calls", access.calls)
+	}
+}
+
+func TestScheduledMatchAccessReconcileRecoversAfterMonitorRestart(t *testing.T) {
+	store := newMemoryGameStore()
+	scheduler := &monitorTestScheduler{}
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), scheduler, []string{"put", "get", "check"}, 15)
+	server.autoTickOnMatchStart = false
+	access := &monitorAccessReconcileClient{failCalls: 1}
+	server.accessReconcile = access
+
+	base := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	start := base.Add(time.Minute)
+	server.matchStartAt = &start
+	server.now = func() time.Time { return start.Add(time.Second) }
+
+	if _, err := reconcileMatchWindowState(server, &matchWindowMonitor{}); err == nil {
+		t.Fatal("expected the first scheduled access reconcile to fail")
+	}
+	match, err := store.MatchStatus(context.Background())
+	if err != nil {
+		t.Fatalf("load match after scheduled start: %v", err)
+	}
+	if match.State != "running" {
+		t.Fatalf("expected scheduled state transition to persist, got %+v", match)
+	}
+
+	if _, err := reconcileMatchWindowState(server, &matchWindowMonitor{}); err != nil {
+		t.Fatalf("expected a restarted monitor to reconcile persisted scheduled state: %v", err)
+	}
+	if access.calls != 2 {
+		t.Fatalf("expected access reconcile after monitor restart, got %d calls", access.calls)
 	}
 }
 
