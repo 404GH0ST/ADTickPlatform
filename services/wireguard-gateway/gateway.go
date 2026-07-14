@@ -567,6 +567,13 @@ func renderWireGuardGatewayConfig(settings wireGuardServerSettings, peers []apig
 }
 
 func renderNftablesRules(tableName, interfaceName, serverIP string, peers []apigateway.WireGuardGatewayPeer) string {
+	return renderNftablesRulesWithForwardCIDRs(tableName, interfaceName, serverIP, peers, wireGuardForwardAllowedCIDRs())
+}
+
+// renderNftablesRulesWithForwardCIDRs builds the WG nftables policy. Forward
+// traffic from active peers is restricted to forwardCIDRs so participants cannot
+// reach host-routable infra (e.g. docker-socket-proxy) by widening client AllowedIPs.
+func renderNftablesRulesWithForwardCIDRs(tableName, interfaceName, serverIP string, peers []apigateway.WireGuardGatewayPeer, forwardCIDRs []string) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
 	builder.WriteString("  set active_peers {\n")
@@ -595,10 +602,56 @@ func renderNftablesRules(tableName, interfaceName, serverIP string, peers []apig
 	builder.WriteString("  chain forward {\n")
 	builder.WriteString("    type filter hook forward priority filter;\n")
 	builder.WriteString("    policy accept;\n")
+	builder.WriteString("    ct state established,related accept\n")
 	builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip saddr != @active_peers drop\n", interfaceName))
+	if len(forwardCIDRs) > 0 {
+		builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip saddr @active_peers ip daddr { %s } accept\n", interfaceName, strings.Join(forwardCIDRs, ", ")))
+	}
+	// Default-deny remaining WireGuard ingress on the forward path (blocks
+	// docker-control, host LANs, and any destination not explicitly allowlisted).
+	builder.WriteString(fmt.Sprintf("    iifname \"%s\" drop\n", interfaceName))
 	builder.WriteString("  }\n")
 	builder.WriteString("}\n")
 	return builder.String()
+}
+
+// wireGuardForwardAllowedCIDRs is the destination allowlist for WG-forwarded
+// traffic. Prefer WIREGUARD_FORWARD_ALLOWED_CIDRS; otherwise reuse the client
+// AllowedIPs list (game + VPN nets), never host docker-control bridges.
+func wireGuardForwardAllowedCIDRs() []string {
+	raw := strings.TrimSpace(config.String("WIREGUARD_FORWARD_ALLOWED_CIDRS", ""))
+	if raw == "" {
+		raw = strings.TrimSpace(config.String("WIREGUARD_SERVER_ALLOWED_IPS", "10.70.0.0/16,10.80.0.0/16"))
+	}
+	return parseIPv4CIDRList(raw)
+}
+
+func parseIPv4CIDRList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	cidrs := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		// Accept bare IPv4 as /32 for convenience.
+		if ip := net.ParseIP(trimmed); ip != nil && ip.To4() != nil && !strings.Contains(trimmed, "/") {
+			trimmed = trimmed + "/32"
+		}
+		if _, network, err := net.ParseCIDR(trimmed); err != nil || network == nil || network.IP.To4() == nil {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		cidrs = append(cidrs, trimmed)
+	}
+	return cidrs
 }
 
 func wireGuardServerIP(addressCIDR string) string {

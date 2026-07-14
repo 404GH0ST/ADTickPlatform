@@ -79,10 +79,10 @@ func TestRenderWireGuardGatewayConfigSanitizesPeerCommentInjection(t *testing.T)
 }
 
 func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
-	rules := renderNftablesRules("adplatform_wireguard", "wg0", "10.70.0.1", activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
+	rules := renderNftablesRulesWithForwardCIDRs("adplatform_wireguard", "wg0", "10.70.0.1", activeWireGuardPeers([]apigateway.WireGuardGatewayPeer{
 		{WireGuardPeer: "team-101-player-1", Address: "10.70.11.20", Status: "active", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
 		{WireGuardPeer: "team-102-player-2", Address: "10.70.12.21", Status: "revoked", ClientPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
-	}))
+	}), []string{"10.70.0.0/16", "10.80.0.0/16"})
 
 	if !strings.Contains(rules, `iifname "wg0" ip saddr != @active_peers drop`) {
 		t.Fatalf("expected interface-scoped drop rule")
@@ -93,11 +93,25 @@ func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
 	if !strings.Contains(rules, `iifname "wg0" ip saddr @active_peers ip daddr 10.70.0.1 icmp type echo-request accept`) {
 		t.Fatalf("expected host icmp allow rule")
 	}
+	if !strings.Contains(rules, `iifname "wg0" ip saddr @active_peers ip daddr { 10.70.0.0/16, 10.80.0.0/16 } accept`) {
+		t.Fatalf("expected forward destination allowlist, got:\n%s", rules)
+	}
+	// Residual default-deny after allowlist (must not leave forward open).
+	if !strings.Contains(rules, `iifname "wg0" drop`) {
+		t.Fatalf("expected residual WG forward drop, got:\n%s", rules)
+	}
 	if !strings.Contains(rules, "10.70.11.20") {
 		t.Fatalf("expected active peer ip in rules")
 	}
 	if strings.Contains(rules, "10.70.12.21") {
 		t.Fatalf("expected revoked peer ip to be omitted")
+	}
+}
+
+func TestParseIPv4CIDRListRejectsNonIPv4(t *testing.T) {
+	got := parseIPv4CIDRList("10.80.0.0/16, not-a-cidr, 2001:db8::/32, 10.70.0.1")
+	if len(got) != 2 || got[0] != "10.80.0.0/16" || got[1] != "10.70.0.1/32" {
+		t.Fatalf("unexpected CIDR parse result: %#v", got)
 	}
 }
 
