@@ -187,7 +187,12 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitClientKey("auth", clientRateLimitKey(r)), authClientRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	decision, allowed = s.allowRateLimit(r.Context(), rateLimitAuthEmailKey(req.Email), authRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return

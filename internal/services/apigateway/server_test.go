@@ -1212,6 +1212,49 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
+func TestAuthenticateUsesIndependentClientAndEmailRateLimits(t *testing.T) {
+	limiter := &recordingRateLimiter{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/authenticate",
+		bytes.NewBufferString(`{"email":"alpha.captain@example.com","password":"alpha-secret"}`),
+	)
+	request.RemoteAddr = "198.51.100.20:44123"
+	response := httptest.NewRecorder()
+	newTestMuxWithLimiter(limiter).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected authentication 200, got %d: %s", response.Code, response.Body.String())
+	}
+	wantKeys := []string{
+		"auth:client:198.51.100.20",
+		"auth:email:alpha.captain@example.com",
+	}
+	if !slices.Equal(limiter.keys, wantKeys) {
+		t.Fatalf("expected independent authentication rate-limit keys %v, got %v", wantKeys, limiter.keys)
+	}
+}
+
+func TestAuthenticateClientLimitCannotBeBypassedByChangingEmail(t *testing.T) {
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			"auth:client:198.51.100.21": true,
+		},
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/authenticate",
+		bytes.NewBufferString(`{"email":"rotated-address@example.com","password":"wrong-password"}`),
+	)
+	request.RemoteAddr = "198.51.100.21:44123"
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected client-limited authentication 429, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestTeamBoundOrganizerReceivesUsableCanonicalSession(t *testing.T) {
 	store := NewMemoryStore(101)
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
@@ -1444,7 +1487,7 @@ func TestDeletedPlayerTokenIsRejected(t *testing.T) {
 func TestAuthenticateReturnsRateLimit429(t *testing.T) {
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{
-			rateLimitAuthKey("alpha.captain@example.com", "203.0.113.10"): true,
+			rateLimitAuthEmailKey("alpha.captain@example.com"): true,
 		},
 		retryAfter: 4 * time.Second,
 	})

@@ -44,7 +44,7 @@ func TestPublicReadRateLimitFailsOpenWhenBackendIsUnavailable(t *testing.T) {
 	if _, allowed := server.allowRateLimit(context.Background(), "challenges:client:198.51.100.1", challengesRateLimitPolicy); !allowed {
 		t.Fatal("expected public challenge reads to remain available during a rate-limit backend outage")
 	}
-	if _, allowed := server.allowRateLimit(context.Background(), "auth:email:user@example.com:ip:198.51.100.1", authRateLimitPolicy); allowed {
+	if _, allowed := server.allowRateLimit(context.Background(), "auth:client:198.51.100.1", authClientRateLimitPolicy); allowed {
 		t.Fatal("expected authentication to remain fail-closed during a rate-limit backend outage")
 	}
 	if _, allowed := server.allowRateLimit(context.Background(), "register:client:198.51.100.1", registrationIPRateLimitPolicy); allowed {

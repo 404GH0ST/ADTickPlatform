@@ -384,23 +384,28 @@ func rateLimitTeamChallengeKey(prefix string, teamID, challengeID int) string {
 }
 
 func rateLimitAuthKey(email, clientIP string) string {
-	normalizedEmail := strings.TrimSpace(strings.ToLower(email))
-	if normalizedEmail == "" {
-		normalizedEmail = "unknown"
-	}
-	return fmt.Sprintf("auth:email:%s:ip:%s", normalizedEmail, clientIP)
+	return fmt.Sprintf("auth:email:%s:ip:%s", normalizedRateLimitEmail(email), clientIP)
+}
+
+func rateLimitAuthEmailKey(email string) string {
+	return fmt.Sprintf("auth:email:%s", normalizedRateLimitEmail(email))
 }
 
 func rateLimitRegistrationEmailKey(email string) string {
+	return fmt.Sprintf("register:email:%s", normalizedRateLimitEmail(email))
+}
+
+func normalizedRateLimitEmail(email string) string {
 	normalizedEmail := strings.TrimSpace(strings.ToLower(email))
 	if normalizedEmail == "" {
 		normalizedEmail = "unknown"
 	}
-	return fmt.Sprintf("register:email:%s", normalizedEmail)
+	return normalizedEmail
 }
 
 var (
 	maxSubmitFlagsPerRequest         = 128
+	authClientRateLimitPolicy        = rateLimitPolicy{capacity: 30, refillPerSecond: 30.0 / 60.0, failClosedOnError: true}
 	authRateLimitPolicy              = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
 	registrationIPRateLimitPolicy    = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
 	registrationEmailRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 3600.0, failClosedOnError: true}
