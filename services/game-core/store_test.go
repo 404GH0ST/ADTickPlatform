@@ -215,12 +215,86 @@ func TestMemoryStoreReapRunningTicks(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreAcceptFlagSubmissionRejectsAfterPause(t *testing.T) {
+	store, ok := newMemoryGameStore().(*memoryGameStore)
+	if !ok {
+		t.Fatal("expected concrete memory game store")
+	}
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartMatch: %v", err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartNextTick: %v", err)
+	}
+	if _, err := store.PauseMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("PauseMatch: %v", err)
+	}
+	_, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
+		Flag:           "flag-paused",
+		SubmittingTeam: 101,
+		AttackerName:   "Team Alpha",
+		VictimName:     "Team Delta",
+		ChallengeName:  "banking",
+		SubmissionTick: 1,
+		ExpiresTick:    1,
+		SubmittedAt:    time.Now().UTC(),
+	})
+	if !errors.Is(err, errFlagNoLongerValid) {
+		t.Fatalf("expected errFlagNoLongerValid after pause, got %v", err)
+	}
+}
+
+func TestMemoryStoreAcceptFlagSubmissionRejectsAfterTickAdvancePastExpiry(t *testing.T) {
+	store, ok := newMemoryGameStore().(*memoryGameStore)
+	if !ok {
+		t.Fatal("expected concrete memory game store")
+	}
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartMatch: %v", err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartNextTick: %v", err)
+	}
+	// Complete tick 1 so StartNextTick can open tick 2.
+	if _, err := store.CompleteTick(ctx, apigateway.GameTickStatus{
+		ID:        1,
+		Status:    "completed",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("CompleteTick: %v", err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartNextTick 2: %v", err)
+	}
+	_, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
+		Flag:           "flag-expired",
+		SubmittingTeam: 101,
+		AttackerName:   "Team Alpha",
+		VictimName:     "Team Delta",
+		ChallengeName:  "banking",
+		SubmissionTick: 1,
+		ExpiresTick:    1, // only valid on tick 1; current is 2
+		SubmittedAt:    time.Now().UTC(),
+	})
+	if !errors.Is(err, errFlagNoLongerValid) {
+		t.Fatalf("expected errFlagNoLongerValid after tick advance, got %v", err)
+	}
+}
+
 func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 	store, ok := newMemoryGameStore().(*memoryGameStore)
 	if !ok {
 		t.Fatal("expected concrete memory game store")
 	}
 	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartMatch: %v", err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartNextTick: %v", err)
+	}
 	issued := issuedFlagRecord{
 		Flag:          "flag-1",
 		OwnerTeamID:   102,
@@ -240,6 +314,7 @@ func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 		VictimName:     issued.OwnerTeamName,
 		ChallengeName:  issued.ChallengeName,
 		SubmissionTick: 1,
+		ExpiresTick:    1,
 	})
 	if err != nil {
 		t.Fatalf("AcceptFlagSubmission: %v", err)

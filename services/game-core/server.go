@@ -883,6 +883,9 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		_, _ = s.store.CompleteTick(ctx, tick)
 		return apigateway.GameTickStatus{}, err
 	}
+	// Rotate target order by tick id so a hard timeout does not permanently
+	// prefer lower team/challenge ids from the SQL ORDER BY.
+	targets = rotateCheckerTargets(targets, tick.ID)
 
 	runCtx := ctx
 	if s.tickTimeout > 0 {
@@ -898,20 +901,33 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		_, _ = s.store.CompleteTick(ctx, tick)
 		return apigateway.GameTickStatus{}, err
 	}
+	coveredTargets := 0
 	for _, result := range results {
 		tick.TotalCheckerRuns += result.total
 		tick.SuccessfulCheckerRuns += result.success
 		tick.SkippedCheckerRuns += result.skipped
 		tick.FailedCheckerRuns += result.failed
+		if result.total > 0 {
+			coveredTargets++
+		}
 	}
 
 	tick.Status = "completed"
 	tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
-	tick.Message = fmt.Sprintf(
-		"advanced tick across %d targets and %d phases",
-		len(targets),
-		len(s.checkerPhases),
-	)
+	if s.tickTimeout > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		tick.Message = fmt.Sprintf(
+			"tick timed out after covering %d of %d targets (%d phases configured)",
+			coveredTargets,
+			len(targets),
+			len(s.checkerPhases),
+		)
+	} else {
+		tick.Message = fmt.Sprintf(
+			"advanced tick across %d targets and %d phases",
+			len(targets),
+			len(s.checkerPhases),
+		)
+	}
 	completed, err := s.store.CompleteTick(ctx, tick)
 	if err != nil {
 		return apigateway.GameTickStatus{}, err
@@ -1156,6 +1172,25 @@ type checkerTargetTickResult struct {
 	failed  int
 }
 
+// rotateCheckerTargets rotates the target list by tickID so hard timeouts do
+// not always starve the same high team/challenge ids from SQL ORDER BY.
+func rotateCheckerTargets(targets []checkerTarget, tickID int) []checkerTarget {
+	if len(targets) <= 1 {
+		return targets
+	}
+	offset := tickID % len(targets)
+	if offset < 0 {
+		offset = -offset
+	}
+	if offset == 0 {
+		return targets
+	}
+	rotated := make([]checkerTarget, 0, len(targets))
+	rotated = append(rotated, targets[offset:]...)
+	rotated = append(rotated, targets[:offset]...)
+	return rotated
+}
+
 func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targets []checkerTarget) ([]checkerTargetTickResult, error) {
 	parallelism := s.checkerParallelism
 	if parallelism <= 0 {
@@ -1394,9 +1429,14 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			VictimName:     issued.OwnerTeamName,
 			ChallengeName:  issued.ChallengeName,
 			SubmissionTick: currentTick,
+			ExpiresTick:    claims.ExpiresTick,
 			SubmittedAt:    s.now().UTC(),
 		})
 		if err != nil {
+			if errors.Is(err, errFlagNoLongerValid) {
+				results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "invalid", Detail: "flag is wrong or expired."})
+				continue
+			}
 			return nil, err
 		}
 		if !accepted {

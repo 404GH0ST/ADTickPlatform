@@ -23,6 +23,10 @@ var (
 	errContestNotStarted = errors.New("contest has not started yet.")
 	errContestPaused     = errors.New("contest is temporarily paused.")
 	errContestOver       = errors.New("contest is over.")
+	// errFlagNoLongerValid is returned when accept-time revalidation fails
+	// (match left running, or tick advanced past the flag expiry). Callers map
+	// it to a per-flag "invalid" verdict rather than failing the whole batch.
+	errFlagNoLongerValid = errors.New("flag is no longer valid")
 )
 
 // reapedTickMessage marks ticks that were left in the "running" state by a
@@ -81,7 +85,11 @@ type acceptedFlagSubmission struct {
 	VictimName     string
 	ChallengeName  string
 	SubmissionTick int
-	SubmittedAt    time.Time
+	// ExpiresTick is the last tick that may accept this flag. AcceptFlagSubmission
+	// re-reads the live current tick under its lock/transaction and rejects the
+	// flag when currentTick is 0 or greater than ExpiresTick.
+	ExpiresTick int
+	SubmittedAt time.Time
 }
 
 type schedulerEventRecord struct {
@@ -384,6 +392,21 @@ func (s *memoryGameStore) LookupIssuedFlag(_ context.Context, flag string) (issu
 func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acceptedFlagSubmission) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Re-check match + tick under the same lock that mutates accepted flags so
+	// a concurrent pause/stop/tick advance cannot race a successful insert.
+	if s.match.State != "running" || !s.match.AcceptingSubmissions {
+		return false, errFlagNoLongerValid
+	}
+	currentTick := 0
+	if len(s.ticks) > 0 {
+		currentTick = s.ticks[len(s.ticks)-1].ID
+	}
+	if currentTick == 0 || currentTick > submission.ExpiresTick {
+		return false, errFlagNoLongerValid
+	}
+	submission.SubmissionTick = currentTick
+
 	key := acceptedSubmissionKey(submission.Flag, submission.SubmittingTeam)
 	if _, ok := s.accepted[key]; ok {
 		return false, nil
@@ -1042,6 +1065,42 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 		return false, err
 	}
 	defer tx.Rollback()
+
+	// Same exclusive tick-table lock StartNextTick takes, so accept-time tick
+	// revalidation cannot race a concurrent tick advance.
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE game_ticks IN EXCLUSIVE MODE`); err != nil {
+		return false, err
+	}
+
+	// Serialize against match pause/stop/finish.
+	var matchState string
+	err = tx.QueryRowContext(ctx, `
+		SELECT state
+		FROM game_match_state
+		WHERE singleton = TRUE
+		FOR UPDATE
+	`).Scan(&matchState)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, errFlagNoLongerValid
+	case err != nil:
+		return false, err
+	}
+	if matchState != "running" {
+		return false, errFlagNoLongerValid
+	}
+
+	var currentTick int
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE((SELECT id FROM game_ticks ORDER BY id DESC LIMIT 1), 0)
+	`).Scan(&currentTick)
+	if err != nil {
+		return false, err
+	}
+	if currentTick == 0 || currentTick > submission.ExpiresTick {
+		return false, errFlagNoLongerValid
+	}
+	submission.SubmissionTick = currentTick
 
 	var inserted string
 	err = tx.QueryRowContext(ctx, `

@@ -502,6 +502,23 @@ func (c blockingCheckerClient) ExecuteBatch(ctx context.Context, request apigate
 	return executeBatchViaSingle(ctx, c.Execute, request)
 }
 
+func TestRotateCheckerTargetsShiftsByTickID(t *testing.T) {
+	targets := []checkerTarget{
+		{TeamID: 101, ChallengeID: 1},
+		{TeamID: 102, ChallengeID: 1},
+		{TeamID: 103, ChallengeID: 1},
+	}
+	rotated := rotateCheckerTargets(targets, 2)
+	if rotated[0].TeamID != 103 || rotated[1].TeamID != 101 || rotated[2].TeamID != 102 {
+		t.Fatalf("unexpected rotation for tick 2: %+v", rotated)
+	}
+	// tick multiples of len leave order unchanged
+	same := rotateCheckerTargets(targets, 3)
+	if same[0].TeamID != 101 || same[1].TeamID != 102 || same[2].TeamID != 103 {
+		t.Fatalf("unexpected identity rotation for tick 3: %+v", same)
+	}
+}
+
 func TestTickTimeoutBoundsStuckTick(t *testing.T) {
 	store := newMemoryGameStore()
 	srv := newGameCoreServer("dev-admin-token", store, blockingCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
