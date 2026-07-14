@@ -1428,6 +1428,7 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			AttackerName:   attackerName,
 			VictimName:     issued.OwnerTeamName,
 			ChallengeName:  issued.ChallengeName,
+			ChallengeID:    issued.ChallengeID,
 			SubmissionTick: currentTick,
 			ExpiresTick:    claims.ExpiresTick,
 			SubmittedAt:    s.now().UTC(),

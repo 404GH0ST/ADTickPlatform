@@ -84,6 +84,7 @@ type acceptedFlagSubmission struct {
 	AttackerName   string
 	VictimName     string
 	ChallengeName  string
+	ChallengeID    int
 	SubmissionTick int
 	// ExpiresTick is the last tick that may accept this flag. AcceptFlagSubmission
 	// re-reads the live current tick under its lock/transaction and rejects the
@@ -404,6 +405,16 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 	}
 	if currentTick == 0 || currentTick > submission.ExpiresTick {
 		return false, errFlagNoLongerValid
+	}
+	if submission.ChallengeID > 0 {
+		if challenge, ok := s.challenges[submission.ChallengeID]; ok {
+			if challenge.Maintenance {
+				return false, errFlagNoLongerValid
+			}
+			if challenge.PlayFromTick > 0 && challenge.PlayFromTick > currentTick {
+				return false, errFlagNoLongerValid
+			}
+		}
 	}
 	submission.SubmissionTick = currentTick
 
@@ -1099,6 +1110,25 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	}
 	if currentTick == 0 || currentTick > submission.ExpiresTick {
 		return false, errFlagNoLongerValid
+	}
+	if submission.ChallengeID > 0 {
+		var blocked bool
+		err = tx.QueryRowContext(ctx, `
+			SELECT c.maintenance
+			    OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > $2)
+			FROM challenges c
+			WHERE c.id = $1
+		`, submission.ChallengeID, currentTick).Scan(&blocked)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// Unknown challenge: treat as invalid at accept time.
+			return false, errFlagNoLongerValid
+		case err != nil:
+			return false, err
+		}
+		if blocked {
+			return false, errFlagNoLongerValid
+		}
 	}
 	submission.SubmissionTick = currentTick
 

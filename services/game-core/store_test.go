@@ -215,6 +215,35 @@ func TestMemoryStoreReapRunningTicks(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreAcceptFlagSubmissionRejectsUnderMaintenance(t *testing.T) {
+	store, ok := newMemoryGameStore().(*memoryGameStore)
+	if !ok {
+		t.Fatal("expected concrete memory game store")
+	}
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartMatch: %v", err)
+	}
+	if _, err := store.StartNextTick(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("StartNextTick: %v", err)
+	}
+	store.setChallengeMaintenanceForTest(1, true)
+	_, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
+		Flag:           "flag-maint",
+		SubmittingTeam: 101,
+		AttackerName:   "Team Alpha",
+		VictimName:     "Team Delta",
+		ChallengeName:  "banking",
+		ChallengeID:    1,
+		SubmissionTick: 1,
+		ExpiresTick:    1,
+		SubmittedAt:    time.Now().UTC(),
+	})
+	if !errors.Is(err, errFlagNoLongerValid) {
+		t.Fatalf("expected errFlagNoLongerValid under maintenance, got %v", err)
+	}
+}
+
 func TestMemoryStoreAcceptFlagSubmissionRejectsAfterPause(t *testing.T) {
 	store, ok := newMemoryGameStore().(*memoryGameStore)
 	if !ok {
@@ -313,6 +342,7 @@ func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 		AttackerName:   "Team Alpha",
 		VictimName:     issued.OwnerTeamName,
 		ChallengeName:  issued.ChallengeName,
+		ChallengeID:    issued.ChallengeID,
 		SubmissionTick: 1,
 		ExpiresTick:    1,
 	})
