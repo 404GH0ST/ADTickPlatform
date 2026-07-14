@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,15 @@ type testScoringClient struct {
 type testRateLimiter struct {
 	denyKeys   map[string]bool
 	retryAfter time.Duration
+}
+
+type recordingRateLimiter struct {
+	keys []string
+}
+
+func (l *recordingRateLimiter) Allow(_ context.Context, key string, _ rateLimitPolicy) (rateLimitDecision, error) {
+	l.keys = append(l.keys, key)
+	return rateLimitDecision{allowed: true}, nil
 }
 
 type recordingResetControllerClient struct {
@@ -1102,6 +1112,49 @@ func TestParticipantRegistrationRejectsShortPassword(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected short password registration 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestParticipantRegistrationUsesIndependentIPAndEmailRateLimits(t *testing.T) {
+	limiter := &recordingRateLimiter{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/register",
+		bytes.NewBufferString(`{"display_name":"Rate Limited Player","email":"rate-limited@example.com","password":"correct horse battery staple"}`),
+	)
+	request.RemoteAddr = "198.51.100.20:44123"
+	response := httptest.NewRecorder()
+	newTestMuxWithLimiter(limiter).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected registration 200, got %d: %s", response.Code, response.Body.String())
+	}
+	wantKeys := []string{
+		"register:client:198.51.100.20",
+		"register:email:rate-limited@example.com",
+	}
+	if !slices.Equal(limiter.keys, wantKeys) {
+		t.Fatalf("expected independent registration rate-limit keys %v, got %v", wantKeys, limiter.keys)
+	}
+}
+
+func TestParticipantRegistrationIPLimitCannotBeBypassedByChangingEmail(t *testing.T) {
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			"register:client:198.51.100.21": true,
+		},
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/register",
+		bytes.NewBufferString(`{"display_name":"Rotated Email","email":"another-address@example.com","password":"correct horse battery staple"}`),
+	)
+	request.RemoteAddr = "198.51.100.21:44123"
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected IP-limited registration 429, got %d: %s", response.Code, response.Body.String())
 	}
 }
 

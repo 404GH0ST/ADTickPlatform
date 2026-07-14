@@ -254,7 +254,12 @@ func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
+	decision, allowed := s.allowRateLimit(r.Context(), rateLimitClientKey("register", clientRateLimitKey(r)), registrationIPRateLimitPolicy)
+	if !allowed {
+		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	decision, allowed = s.allowRateLimit(r.Context(), rateLimitRegistrationEmailKey(req.Email), registrationEmailRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return

@@ -391,20 +391,30 @@ func rateLimitAuthKey(email, clientIP string) string {
 	return fmt.Sprintf("auth:email:%s:ip:%s", normalizedEmail, clientIP)
 }
 
+func rateLimitRegistrationEmailKey(email string) string {
+	normalizedEmail := strings.TrimSpace(strings.ToLower(email))
+	if normalizedEmail == "" {
+		normalizedEmail = "unknown"
+	}
+	return fmt.Sprintf("register:email:%s", normalizedEmail)
+}
+
 var (
-	maxSubmitFlagsPerRequest       = 128
-	authRateLimitPolicy            = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
-	challengesRateLimitPolicy      = rateLimitPolicy{capacity: 4, refillPerSecond: 2, failClosedOnError: true}
-	servicesReadRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
-	scoreboardRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
-	attacksReadRateLimitPolicy     = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
-	teamServicesRateLimitPolicy    = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: true}
-	challengeSourceRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 1, failClosedOnError: true}
-	submitRateLimitPolicy          = rateLimitPolicy{capacity: 45, refillPerSecond: 15, failClosedOnError: true}
-	submitUserRateLimitPolicy     = rateLimitPolicy{capacity: 15, refillPerSecond: 5, failClosedOnError: true}
-	unlockRateLimitPolicy          = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0, failClosedOnError: true}
-	sshSessionRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
-	factoryResetRateLimitPolicy    = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}
-	restartRateLimitPolicy         = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
-	defaultRateLimit429Message     = "no bruteforce needed, calm down a little bit."
+	maxSubmitFlagsPerRequest         = 128
+	authRateLimitPolicy              = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
+	registrationIPRateLimitPolicy    = rateLimitPolicy{capacity: 5, refillPerSecond: 5.0 / 60.0, failClosedOnError: true}
+	registrationEmailRateLimitPolicy = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 3600.0, failClosedOnError: true}
+	challengesRateLimitPolicy        = rateLimitPolicy{capacity: 4, refillPerSecond: 2, failClosedOnError: false}
+	servicesReadRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}
+	scoreboardRateLimitPolicy        = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}
+	attacksReadRateLimitPolicy       = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}
+	teamServicesRateLimitPolicy      = rateLimitPolicy{capacity: 6, refillPerSecond: 3, failClosedOnError: false}
+	challengeSourceRateLimitPolicy   = rateLimitPolicy{capacity: 3, refillPerSecond: 1, failClosedOnError: true}
+	submitRateLimitPolicy            = rateLimitPolicy{capacity: 45, refillPerSecond: 15, failClosedOnError: true}
+	submitUserRateLimitPolicy        = rateLimitPolicy{capacity: 15, refillPerSecond: 5, failClosedOnError: true}
+	unlockRateLimitPolicy            = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0, failClosedOnError: true}
+	sshSessionRateLimitPolicy        = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
+	factoryResetRateLimitPolicy      = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}
+	restartRateLimitPolicy           = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
+	defaultRateLimit429Message       = "no bruteforce needed, calm down a little bit."
 )
