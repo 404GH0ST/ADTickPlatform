@@ -44,6 +44,15 @@ Useful signals:
 
 ## Backup And Restore Smoke
 
+Migration `0039_rotate_join_keys_and_scrub_settings_actor.sql` rotates every
+existing team join key because older releases generated predictable values.
+After deploying a release that contains this migration, wait for migrations to
+finish, then securely redistribute the new keys from **Admin > Teams**. Do not
+deploy this migration during active registration without notifying organizers
+and participants. If an admin API token may have appeared in settings metadata
+before this upgrade, rotate `ADMIN_API_TOKEN` and restart the API and web
+services together.
+
 Before event day and after production data migrations:
 
 1. Run `make smoke-prod-db-restore`.
