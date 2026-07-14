@@ -2,6 +2,12 @@
 	{$EDGE_TLS_DIRECTIVE}
 
 	encode zstd gzip
+	header {
+		Content-Security-Policy "frame-ancestors 'none'"
+		X-Frame-Options "DENY"
+		-Server
+		-X-Powered-By
+	}
 
 	@api path /api/v2/* /healthz
 	handle @api {
