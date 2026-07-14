@@ -15,10 +15,17 @@ function realtimeBaseUrl() {
   return trimBaseUrl(process.env.AD_PLATFORM_REALTIME_URL ?? 'http://127.0.0.1:8086');
 }
 
-function adminToken() {
-  const token = process.env.ADMIN_API_TOKEN?.trim();
+function adminRealtimeToken() {
+  // Realtime-gateway authenticates admin streams with REALTIME_ADMIN_TOKEN
+  // (generated distinctly from ADMIN_API_TOKEN). Fall back for single-token
+  // local/dev setups where only ADMIN_API_TOKEN is configured.
+  const token =
+    process.env.REALTIME_ADMIN_TOKEN?.trim() ||
+    process.env.ADMIN_API_TOKEN?.trim();
   if (!token) {
-    throw new Error('ADMIN_API_TOKEN must be set for realtime admin proxy calls');
+    throw new Error(
+      'REALTIME_ADMIN_TOKEN or ADMIN_API_TOKEN must be set for realtime admin proxy calls',
+    );
   }
   return token;
 }
@@ -29,7 +36,7 @@ export async function proxyPublicRealtimeStream(path: string, failureMessage: st
 
 export async function proxyAdminRealtimeStream(path: string, failureMessage: string, request?: Request) {
   return proxyRealtimeStream(path, failureMessage, request, {
-    Authorization: `Bearer ${adminToken()}`,
+    Authorization: `Bearer ${adminRealtimeToken()}`,
   });
 }
 

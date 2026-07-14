@@ -1,7 +1,10 @@
 // @ts-expect-error Bun exposes its test module at runtime without bundled TypeScript types.
 import { expect, test } from "bun:test";
 
-import { proxyPublicRealtimeStream } from "./realtime-proxy";
+import {
+  proxyAdminRealtimeStream,
+  proxyPublicRealtimeStream,
+} from "./realtime-proxy";
 
 test("realtime proxy preserves upstream throttling metadata", async () => {
   const originalFetch = globalThis.fetch;
@@ -53,4 +56,42 @@ test("realtime proxy forwards only the original sanitized client address", async
   }
 
   expect(forwardedFor).toBe("198.51.100.7");
+});
+
+test("admin realtime proxy prefers REALTIME_ADMIN_TOKEN over ADMIN_API_TOKEN", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousRealtime = process.env.REALTIME_ADMIN_TOKEN;
+  const previousAdmin = process.env.ADMIN_API_TOKEN;
+  process.env.REALTIME_ADMIN_TOKEN = "realtime-stream-token";
+  process.env.ADMIN_API_TOKEN = "admin-api-token";
+
+  let authorization: string | null = null;
+  globalThis.fetch = async (_input, init) => {
+    authorization = new Headers(init?.headers).get("authorization");
+    return new Response("data: []\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+
+  try {
+    await proxyAdminRealtimeStream(
+      "/admin/v1/game/status/stream",
+      "admin stream unavailable",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousRealtime === undefined) {
+      delete process.env.REALTIME_ADMIN_TOKEN;
+    } else {
+      process.env.REALTIME_ADMIN_TOKEN = previousRealtime;
+    }
+    if (previousAdmin === undefined) {
+      delete process.env.ADMIN_API_TOKEN;
+    } else {
+      process.env.ADMIN_API_TOKEN = previousAdmin;
+    }
+  }
+
+  expect(authorization).toBe("Bearer realtime-stream-token");
 });
