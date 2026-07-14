@@ -13,6 +13,7 @@ require_bin ss
 
 PROD_ENV="${PROD_ENV:-deploy/compose/prod.env}"
 load_env_file "${PROD_ENV}"
+"${ROOT_DIR}/scripts/validate-prod-env.sh" "${PROD_ENV}"
 
 require_noninteractive_root
 
@@ -45,12 +46,6 @@ wireguard_endpoint_with_port() {
     return 0
   fi
   return 1
-}
-
-port_from_addr() {
-  local addr="$1"
-  addr="${addr##*:}"
-  printf '%s\n' "${addr}"
 }
 
 assert_port_free() {
@@ -95,13 +90,27 @@ if ! wireguard_endpoint_with_port "${WIREGUARD_SERVER_ENDPOINT}"; then
   exit 1
 fi
 
+DOCKER_BRIDGE_GATEWAY="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+HOST_CONTROL_BIND_ADDRESS="${HOST_CONTROL_BIND_ADDRESS:-}"
+case "${HOST_CONTROL_BIND_ADDRESS}" in
+  ""|0.0.0.0|::|\[::\])
+    echo "HOST_CONTROL_BIND_ADDRESS must be the private Docker bridge gateway, not a wildcard address" >&2
+    exit 1
+    ;;
+esac
+if [[ "${HOST_CONTROL_BIND_ADDRESS}" != "${DOCKER_BRIDGE_GATEWAY}" ]]; then
+  echo "HOST_CONTROL_BIND_ADDRESS must match Docker bridge gateway ${DOCKER_BRIDGE_GATEWAY}; got ${HOST_CONTROL_BIND_ADDRESS}" >&2
+  exit 1
+fi
+
 POSTGRES_LOOPBACK_PORT="${POSTGRES_LOOPBACK_PORT:-15432}"
 CHECKER_RUNNER_LOOPBACK_PORT="${CHECKER_RUNNER_LOOPBACK_PORT:-18083}"
-CONTROLLER_HOST_PORT="$(port_from_addr "${CONTROLLER_SERVICE_ADDR_HOST:-:18084}")"
-WIREGUARD_HOST_PORT="$(port_from_addr "${WIREGUARD_GATEWAY_ADDR_HOST:-:18087}")"
+CONTROLLER_HOST_PORT="${CONTROLLER_SERVICE_PORT:-18084}"
+WIREGUARD_HOST_PORT="${WIREGUARD_GATEWAY_PORT:-18087}"
 WIREGUARD_INTERFACE="${WIREGUARD_GATEWAY_INTERFACE:-wg0}"
 
 docker compose version >/dev/null
+"${ROOT_DIR}/scripts/validate-prod-compose-security.sh" "${PROD_ENV}"
 wg help >/dev/null
 nft --version >/dev/null
 
@@ -114,6 +123,7 @@ assert_port_free "${WIREGUARD_HOST_PORT}" "wireguard-gateway host"
 
 echo "host enforcement preflight passed:"
 echo "  interface: ${WIREGUARD_INTERFACE}"
+echo "  private control bind: ${HOST_CONTROL_BIND_ADDRESS}"
 echo "  postgres loopback port: ${POSTGRES_LOOPBACK_PORT}"
 echo "  checker-runner loopback port: ${CHECKER_RUNNER_LOOPBACK_PORT}"
 echo "  controller-service host port: ${CONTROLLER_HOST_PORT}"

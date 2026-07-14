@@ -122,8 +122,9 @@ The production deployment runs behind a Caddy reverse proxy with automated datab
 1. Configure production secrets and public addresses:
    ```bash
    make generate-prod-env CHALLENGE_SOURCE_HOST_PATH=/srv/adplatform/challenge-sources
-   make setup-prod-env DOMAIN=localhost SCHEME=http   # or your domain / https
+   make setup-prod-env DOMAIN=localhost SCHEME=https   # or your public domain
    # Creates deploy/compose/prod.env with random secrets + ADMIN_PASSWORD
+   # Public DNS uses Caddy ACME; localhost/IP uses a generated self-signed cert.
    make create-admin   # after the stack is up; uses ADMIN_* from prod.env
    ```
 

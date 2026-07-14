@@ -15,13 +15,6 @@ services:
     ports:
       - 127.0.0.1:${CHECKER_RUNNER_LOOPBACK_PORT:-18083}:8083
 
-  docker-socket-proxy:
-    ports:
-      - 127.0.0.1:${DOCKER_SOCKET_PROXY_LOOPBACK_PORT:-12375}:2375
-    networks:
-      - docker-control
-      - control
-
   api-gateway:
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -31,7 +24,7 @@ services:
 
   # game-core re-applies access after each tick (play_from_tick open after
   # maintenance resume). Controller runs on host network under this overlay, so
-  # Docker DNS name controller-service is unreachable — use the host loopback.
+  # Docker DNS name controller-service is unreachable — use the private host gateway.
   game-core:
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -44,8 +37,10 @@ services:
     network_mode: host
     cap_add:
       - NET_ADMIN
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$${CONTROLLER_SERVICE_ADDR}/healthz || exit 1"]
     environment:
-      CONTROLLER_SERVICE_ADDR: ${CONTROLLER_SERVICE_ADDR_HOST:-:18084}
+      CONTROLLER_SERVICE_ADDR: ${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:${CONTROLLER_SERVICE_PORT:-18084}
       POSTGRES_DSN: ${POSTGRES_DSN_HOST_ENFORCEMENT:-postgres://adplatform:change-this-postgres-password@127.0.0.1:15432/adplatform?sslmode=disable}
       CHECKER_RUNNER_INTERNAL_URL: ${CHECKER_RUNNER_INTERNAL_URL_HOST:-http://127.0.0.1:18083}
       CONTROLLER_ACCESS_MODE: ${CONTROLLER_ACCESS_MODE:-host}
@@ -57,17 +52,21 @@ services:
       CONTROLLER_ACCESS_RULES_PATH: /runtime/controller/access.nft
       CONTROLLER_ACCESS_STATUS_PATH: /runtime/controller/access-status.json
       CONTROLLER_ACCESS_TIMEOUT: ${CONTROLLER_ACCESS_TIMEOUT:-10s}
-      WIREGUARD_GATEWAY_INTERNAL_URL: ${CONTROLLER_WIREGUARD_GATEWAY_INTERNAL_URL_HOST:-http://127.0.0.1:18087}
+      WIREGUARD_GATEWAY_INTERNAL_URL: http://${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:${WIREGUARD_GATEWAY_PORT:-18087}
       WIREGUARD_GATEWAY_INTERNAL_TOKEN: ${WIREGUARD_GATEWAY_INTERNAL_TOKEN}
-      DOCKER_HOST: ${CONTROLLER_DOCKER_HOST:-tcp://127.0.0.1:12375}
+      # The host-network controller reaches the proxy on its isolated Docker
+      # bridge address. No Docker API port is published on the host or control LAN.
+      DOCKER_HOST: tcp://${DOCKER_CONTROL_PROXY_ADDRESS:-172.31.250.2}:2375
 
   wireguard-gateway:
     networks: !reset []
     network_mode: host
     cap_add:
       - NET_ADMIN
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$${WIREGUARD_GATEWAY_ADDR}/healthz || exit 1"]
     environment:
-      WIREGUARD_GATEWAY_ADDR: ${WIREGUARD_GATEWAY_ADDR_HOST:-:18087}
+      WIREGUARD_GATEWAY_ADDR: ${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:${WIREGUARD_GATEWAY_PORT:-18087}
       POSTGRES_DSN: ${POSTGRES_DSN_HOST_ENFORCEMENT:-postgres://adplatform:change-this-postgres-password@127.0.0.1:15432/adplatform?sslmode=disable}
       WIREGUARD_GATEWAY_MODE: ${WIREGUARD_GATEWAY_MODE:-host}
       WIREGUARD_GATEWAY_INTERFACE: ${WIREGUARD_GATEWAY_INTERFACE:-wg0}

@@ -138,5 +138,5 @@ if [[ "${AUTO_RECONCILE}" == "true" ]]; then
 fi
 
 echo "organizer account created successfully."
-echo "login at: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}/login"
+echo "login at: ${AD_PLATFORM_PUBLIC_BASE_URL:-https://localhost}/login"
 echo "wireguard config saved: ${WIREGUARD_CONFIG_PATH}"

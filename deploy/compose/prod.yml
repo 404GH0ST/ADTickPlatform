@@ -33,7 +33,9 @@ services:
       - control
 
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    # This container can mutate Docker host state; keep its reviewed image
+    # immutable instead of following a mutable release tag.
+    image: tecnativa/docker-socket-proxy@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
     restart: unless-stopped
     environment:
       CONTAINERS: 1
@@ -46,7 +48,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - docker-control
+      docker-control:
+        ipv4_address: ${DOCKER_CONTROL_PROXY_ADDRESS:-172.31.250.2}
 
   checker-runner:
     build:
@@ -388,7 +391,7 @@ services:
       TEAM_JWT_SECRET: ${TEAM_JWT_SECRET}
       UNLOCK_PROOF_SECRET: ${UNLOCK_PROOF_SECRET}
       SSH_CREDENTIAL_SECRET: ${SSH_CREDENTIAL_SECRET}
-      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
+      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-https://localhost}
       WIREGUARD_SERVER_ENDPOINT: ${WIREGUARD_SERVER_ENDPOINT}
       WIREGUARD_SERVER_LISTEN_PORT: ${WIREGUARD_SERVER_LISTEN_PORT}
       WIREGUARD_SERVER_ALLOWED_IPS: ${WIREGUARD_SERVER_ALLOWED_IPS}
@@ -424,7 +427,7 @@ services:
       realtime-gateway:
         condition: service_healthy
     environment:
-      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-http://localhost}
+      AD_PLATFORM_PUBLIC_BASE_URL: ${AD_PLATFORM_PUBLIC_BASE_URL:-https://localhost}
       AD_PLATFORM_API_URL: http://api-gateway:8080
       AD_PLATFORM_GAME_CORE_URL: http://game-core:8081
       AD_PLATFORM_SUBMISSION_SERVICE_URL: http://submission-service:8082
@@ -432,9 +435,6 @@ services:
       AD_PLATFORM_CONTROLLER_URL: http://controller-service:8084
       AD_PLATFORM_CONTROLLER_METRICS_URL: http://controller-service:8084
       AD_PLATFORM_WIREGUARD_GATEWAY_URL: http://wireguard-gateway:8087
-      AD_PLATFORM_EMAIL: ${AD_PLATFORM_EMAIL:-alpha.captain@example.com}
-      AD_PLATFORM_PASSWORD: ${AD_PLATFORM_PASSWORD:-alpha-secret}
-      AD_PLATFORM_TEAM_ID: ${AD_PLATFORM_TEAM_ID:-101}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
       TEAM_JWT_SECRET: ${TEAM_JWT_SECRET}
       PORT: 3000
@@ -456,8 +456,10 @@ services:
       - "${EDGE_HTTP_PUBLIC_PORT:-80}:80"
       - "${EDGE_HTTPS_PUBLIC_PORT:-443}:443"
     environment:
-      EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-http://localhost}
-      EDGE_TLS_DIRECTIVE: ${EDGE_TLS_DIRECTIVE:-}
+      EDGE_SITE_ADDRESS: ${EDGE_SITE_ADDRESS:-https://localhost}
+      # Preserve an explicitly empty value so public DNS names use Caddy's
+      # automatic ACME certificates. Only an unset variable gets the local default.
+      EDGE_TLS_DIRECTIVE: ${EDGE_TLS_DIRECTIVE-tls internal}
     volumes:
       - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../caddy/certs:/etc/caddy/certs:ro
@@ -525,3 +527,6 @@ networks:
   control:
   docker-control:
     internal: true
+    ipam:
+      config:
+        - subnet: ${DOCKER_CONTROL_SUBNET:-172.31.250.0/29}

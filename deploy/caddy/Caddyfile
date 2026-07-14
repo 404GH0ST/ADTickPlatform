@@ -1,19 +1,19 @@
-{$EDGE_SITE_ADDRESS:http://localhost} {
-  {$EDGE_TLS_DIRECTIVE}
+{$EDGE_SITE_ADDRESS:https://localhost} {
+	{$EDGE_TLS_DIRECTIVE}
 
-  encode zstd gzip
+	encode zstd gzip
 
-  @api path /api/v2/* /healthz
-  handle @api {
-    reverse_proxy api-gateway:8080
-  }
+	@api path /api/v2/* /healthz
+	handle @api {
+		reverse_proxy api-gateway:8080
+	}
 
-  @realtime path /public/v1/*
-  handle @realtime {
-    reverse_proxy realtime-gateway:8086
-  }
+	@realtime path /public/v1/*
+	handle @realtime {
+		reverse_proxy realtime-gateway:8086
+	}
 
-  handle {
-    reverse_proxy web:3000
-  }
+	handle {
+		reverse_proxy web:3000
+	}
 }

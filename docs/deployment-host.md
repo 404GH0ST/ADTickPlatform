@@ -97,12 +97,16 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    # Optional overrides: CHALLENGE_SOURCE_HOST_PATH, ADMIN_EMAIL, ADMIN_DISPLAY_NAME, ADMIN_PASSWORD
    make generate-prod-env CHALLENGE_SOURCE_HOST_PATH=/srv/adplatform/challenge-sources
    make setup-prod-env DOMAIN=ctf.example.com SCHEME=https WG_PORT=51820
-   # or localhost: make setup-prod-env DOMAIN=localhost SCHEME=http
+   # or localhost: make setup-prod-env DOMAIN=localhost SCHEME=https
    nano deploy/compose/prod.env   # review if needed
    ```
    `make generate-prod-env` writes `deploy/compose/prod.env` with strong random
    secrets (service tokens, DB password, WireGuard key, **organizer ADMIN_PASSWORD**,
    Grafana password) and refuses to overwrite unless `FORCE=true` is set.
+   Production setup rejects plain HTTP. For local development without TLS, use
+   the development stack instead of `prod.yml`. Public DNS names use Caddy's
+   automatic ACME certificates; localhost and IP literals use the generated
+   self-signed certificate.
    **Critical values**:
    - `EDGE_SITE_ADDRESS` / `AD_PLATFORM_PUBLIC_BASE_URL` / `WIREGUARD_SERVER_ENDPOINT`
      (set by `setup-prod-env` from DOMAIN/SCHEME/WG_PORT).
@@ -203,9 +207,9 @@ Every service now exposes a Prometheus-style `/metrics` endpoint. The highest-va
 ```bash
 curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_http_'
 curl -s http://127.0.0.1:8082/metrics | rg 'adplatform_submission_service_|adplatform_http_'
-curl -s http://127.0.0.1:18084/metrics | rg 'adplatform_controller_service_|adplatform_http_'
+curl -s http://${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:18084/metrics | rg 'adplatform_controller_service_|adplatform_http_'
 curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
-curl -s http://127.0.0.1:18087/metrics | rg 'adplatform_wireguard_gateway_|adplatform_http_'
+curl -s http://${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:18087/metrics | rg 'adplatform_wireguard_gateway_|adplatform_http_'
 ```
 `game-core` exposes match, tick, checker-run, and scheduler gauges. `submission-service` exposes flag-submit counts, verdict classes, and attack-feed request metrics. `controller-service` exposes reconcile, SSH credential, and runtime action counters plus live access-policy status gauges. `realtime-gateway` exposes subscriber counts, cached snapshot sizes, and sync-health counters. `wireguard-gateway` exposes reconcile activity and current peer counts in addition to the shared HTTP request metrics.
 

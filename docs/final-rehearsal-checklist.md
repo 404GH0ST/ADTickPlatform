@@ -110,9 +110,14 @@ What it does:
 Organizer/API checks:
 
 ```bash
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/status | jq
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/checker-runs | jq '.data.items[:10]'
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/scoreboard | jq
+PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-https://localhost}"
+CURL_TLS_ARGS=()
+if [[ "${EDGE_TLS_DIRECTIVE:-}" == *adplatform-selfsigned.crt* ]]; then
+  CURL_TLS_ARGS=(--cacert deploy/caddy/certs/adplatform-selfsigned.crt)
+fi
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/status" | jq
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/checker-runs" | jq '.data.items[:10]'
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/scoreboard" | jq
 ```
 
 Pass criteria:

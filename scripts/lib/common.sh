@@ -352,7 +352,7 @@ http_ready() {
 }
 
 derive_edge_base_url() {
-  local base_url="${AD_PLATFORM_PUBLIC_BASE_URL:-${EDGE_SITE_ADDRESS:-http://localhost}}"
+  local base_url="${AD_PLATFORM_PUBLIC_BASE_URL:-${EDGE_SITE_ADDRESS:-https://localhost}}"
   local scheme authority default_port configured_port
 
   base_url="${base_url%/}"

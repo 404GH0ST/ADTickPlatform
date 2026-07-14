@@ -130,6 +130,6 @@ if [[ -n "${challenge_source_host_path}" ]]; then
 fi
 echo
 echo "Next:"
-echo "  make setup-prod-env DOMAIN=localhost SCHEME=http   # or your public host"
+echo "  make setup-prod-env DOMAIN=localhost SCHEME=https   # or your public host"
 echo "  make up-prod-host && make create-admin"
 echo "Review WireGuard endpoint and public URLs before going live."

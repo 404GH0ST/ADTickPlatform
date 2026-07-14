@@ -150,19 +150,24 @@ make capture-prod-host-baseline
 Quick organizer status:
 
 ```bash
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/status | jq
+PUBLIC_URL="${AD_PLATFORM_PUBLIC_BASE_URL:-https://localhost}"
+CURL_TLS_ARGS=()
+if [[ "${EDGE_TLS_DIRECTIVE:-}" == *adplatform-selfsigned.crt* ]]; then
+  CURL_TLS_ARGS=(--cacert deploy/caddy/certs/adplatform-selfsigned.crt)
+fi
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/status" | jq
 ```
 
 Recent checker runs:
 
 ```bash
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/checker-runs | jq '.data.items[:10]'
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/checker-runs" | jq '.data.items[:10]'
 ```
 
 Authoritative scoreboard:
 
 ```bash
-curl -s -H "Authorization: Bearer $ADMIN_API_TOKEN" http://localhost/api/v2/admin/game/scoreboard | jq
+curl "${CURL_TLS_ARGS[@]}" -s -H "Authorization: Bearer $ADMIN_API_TOKEN" "$PUBLIC_URL/api/v2/admin/game/scoreboard" | jq
 ```
 
 Metrics snapshots:
@@ -170,9 +175,9 @@ Metrics snapshots:
 ```bash
 curl -s http://127.0.0.1:8081/metrics | rg 'adplatform_game_core_|adplatform_http_'
 curl -s http://127.0.0.1:8082/metrics | rg 'adplatform_submission_service_|adplatform_http_'
-curl -s http://127.0.0.1:18084/metrics | rg 'adplatform_controller_service_|adplatform_http_'
+curl -s http://${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:18084/metrics | rg 'adplatform_controller_service_|adplatform_http_'
 curl -s http://127.0.0.1:8086/metrics | rg 'adplatform_realtime_gateway_|adplatform_http_'
-curl -s http://127.0.0.1:18087/metrics | rg 'adplatform_wireguard_gateway_|adplatform_http_'
+curl -s http://${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:18087/metrics | rg 'adplatform_wireguard_gateway_|adplatform_http_'
 ```
 
 Backfill metrics snapshots into an existing go-live artifact directory:
