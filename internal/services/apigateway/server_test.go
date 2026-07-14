@@ -32,6 +32,7 @@ type testControllerClient struct {
 	accessErr             error
 	accessReconcileCalls  *int
 	removeTeamCalls       *int
+	removeChallengeCalls  *int
 }
 
 type storeBackedControllerClient struct {
@@ -101,6 +102,26 @@ type recordingResetControllerClient struct {
 	store Store
 	token string
 	err   error
+}
+
+type requeueFailingStore struct {
+	Store
+	maintenanceObserved bool
+	err                 error
+}
+
+func (s *requeueFailingStore) RequeueChallengeServices(ctx context.Context, challengeID int) error {
+	challenges, err := s.Store.ListAdminChallenges(ctx)
+	if err != nil {
+		return err
+	}
+	for _, challenge := range challenges {
+		if challenge.ID == challengeID {
+			s.maintenanceObserved = challenge.Maintenance
+			break
+		}
+	}
+	return s.err
 }
 
 func (l testRateLimiter) Allow(_ context.Context, key string, _ rateLimitPolicy) (rateLimitDecision, error) {
@@ -339,6 +360,9 @@ func (c testControllerClient) RemoveTeamServices(_ context.Context, _ int) error
 }
 
 func (c testControllerClient) RemoveChallengeServices(_ context.Context, _ int) error {
+	if c.removeChallengeCalls != nil {
+		(*c.removeChallengeCalls)++
+	}
 	return c.removeChallengeErr
 }
 
@@ -3295,6 +3319,90 @@ func TestAdminChallengeMaintenanceToggle(t *testing.T) {
 	resumed := decodeCompat[adminChallenge](t, resumeResponse.Body.Bytes())
 	if resumed.Maintenance || resumed.MaintenanceAt != "" {
 		t.Fatalf("expected cleared maintenance, got %+v", resumed)
+	}
+}
+
+func TestAdminChallengeMaintenanceAttemptsEveryRevocationAndReportsFailure(t *testing.T) {
+	store := NewMemoryStore(101)
+	removeCalls := 0
+	accessCalls := 0
+	controller := testControllerClient{
+		removeChallengeErr:   errors.New("runtime unavailable"),
+		removeChallengeCalls: &removeCalls,
+		accessErr:            errors.New("firewall unavailable"),
+		accessReconcileCalls: &accessCalls,
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/1/maintenance", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected maintenance reconciliation failure 502, got %d body=%s", response.Code, response.Body.String())
+	}
+	if removeCalls != 1 || accessCalls != 1 {
+		t.Fatalf("expected runtime and access revocation attempts, remove=%d access=%d", removeCalls, accessCalls)
+	}
+	challenges, err := store.ListAdminChallenges(context.Background())
+	if err != nil {
+		t.Fatalf("list challenges: %v", err)
+	}
+	if len(challenges) == 0 || !challenges[0].Maintenance {
+		t.Fatalf("expected challenge to remain safely under maintenance, got %+v", challenges)
+	}
+}
+
+func TestAdminChallengeResumeKeepsMaintenanceUntilRequeueSucceeds(t *testing.T) {
+	baseStore := NewMemoryStore(101)
+	if _, err := baseStore.SetChallengeMaintenance(context.Background(), 1, true, time.Now()); err != nil {
+		t.Fatalf("set maintenance: %v", err)
+	}
+	store := &requeueFailingStore{Store: baseStore, err: errors.New("requeue unavailable")}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/challenges/1/resume", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected resume failure 500, got %d body=%s", response.Code, response.Body.String())
+	}
+	if !store.maintenanceObserved {
+		t.Fatal("expected requeue to run while maintenance was still enabled")
+	}
+	challenges, err := baseStore.ListAdminChallenges(context.Background())
+	if err != nil {
+		t.Fatalf("list challenges: %v", err)
+	}
+	if len(challenges) == 0 || !challenges[0].Maintenance {
+		t.Fatalf("expected failed resume to remain under maintenance, got %+v", challenges)
+	}
+}
+
+func TestAdminPauseMatchReportsNetworkConvergenceFailure(t *testing.T) {
+	accessCalls := 0
+	controller := testControllerClient{
+		accessErr:            errors.New("firewall unavailable"),
+		accessReconcileCalls: &accessCalls,
+	}
+	wireGuard := &recordingWireGuardClient{err: errors.New("wireguard unavailable")}
+	mux := newTestMuxWithOps(testGameCoreClient{match: GameMatchStatus{State: "running"}}, controller, wireGuard)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/game/match/pause", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("expected pause convergence failure 502, got %d body=%s", response.Code, response.Body.String())
+	}
+	if accessCalls != 1 || wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected both network planes to be attempted, access=%d wireguard=%d", accessCalls, wireGuard.reconcileCalls)
 	}
 }
 

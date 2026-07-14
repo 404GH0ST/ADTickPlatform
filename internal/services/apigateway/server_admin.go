@@ -650,12 +650,32 @@ func (s *Server) handleAdminChallengeMaintenance(w http.ResponseWriter, r *http.
 		writeDomainFailure(w, err)
 		return
 	}
-	_ = s.controller.RemoveChallengeServices(r.Context(), challengeID)
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-
-	s.recordAdminAudit(r.Context(), "challenge.maintenance", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "put challenge under maintenance", map[string]any{
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "challenge.maintenance", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "put challenge under maintenance", map[string]any{
 		"challenge_id": challengeID,
 	})
+
+	// Runtime teardown and firewall convergence are independent revocation
+	// planes. Attempt both after the durable maintenance flag is set, even when
+	// one service is unavailable or the initiating browser disconnects.
+	var reconciliationErrors []error
+	runtimeContext, cancelRuntime := lifecycleStepContext(operationContext)
+	if err := s.controller.RemoveChallengeServices(runtimeContext, challengeID); err != nil && !errors.Is(err, errControllerDisabled) {
+		reconciliationErrors = append(reconciliationErrors, fmt.Errorf("remove challenge runtime: %w", err))
+	}
+	cancelRuntime()
+	accessContext, cancelAccess := lifecycleStepContext(operationContext)
+	_, accessErr := s.controller.ReconcileAccessPolicies(accessContext)
+	cancelAccess()
+	if accessErr != nil && !errors.Is(accessErr, errControllerDisabled) {
+		reconciliationErrors = append(reconciliationErrors, fmt.Errorf("reconcile challenge access: %w", accessErr))
+	}
+	if err := errors.Join(reconciliationErrors...); err != nil {
+		log.Printf("challenge %d maintenance security reconciliation failed: %s", challengeID, strconv.Quote(err.Error())) // #nosec G706 -- strconv.Quote escapes log control characters.
+		writeProblem(w, http.StatusBadGateway, "Maintenance reconciliation failed", "challenge is under maintenance, but one or more runtime or network revocations failed; retry the operation.")
+		return
+	}
 	writeData(w, http.StatusOK, challenge)
 }
 
@@ -669,18 +689,29 @@ func (s *Server) handleAdminChallengeResume(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	challenge, err := s.store.SetChallengeMaintenance(r.Context(), challengeID, false, s.now())
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	// Queue the replacement runtimes while maintenance still blocks participant
+	// actions. If queuing fails, the challenge remains safely closed.
+	if err := s.store.RequeueChallengeServices(operationContext, challengeID); err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	challenge, err := s.store.SetChallengeMaintenance(operationContext, challengeID, false, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
-	if err := s.store.RequeueChallengeServices(r.Context(), challengeID); err != nil {
-		writeStoreFailure(w, err)
+	accessContext, cancelAccess := lifecycleStepContext(operationContext)
+	_, accessErr := s.controller.ReconcileAccessPolicies(accessContext)
+	cancelAccess()
+	if accessErr != nil && !errors.Is(accessErr, errControllerDisabled) {
+		log.Printf("challenge %d resume access reconciliation failed: %s", challengeID, strconv.Quote(accessErr.Error())) // #nosec G706 -- strconv.Quote escapes log control characters.
+		writeProblem(w, http.StatusBadGateway, "Resume reconciliation failed", "challenge was resumed, but network access did not converge; retry the operation.")
 		return
 	}
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
 
-	s.recordAdminAudit(r.Context(), "challenge.resume", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "resumed challenge after maintenance", map[string]any{
+	s.recordAdminAudit(operationContext, "challenge.resume", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "resumed challenge after maintenance", map[string]any{
 		"challenge_id": challengeID,
 	})
 	writeData(w, http.StatusOK, challenge)
@@ -892,12 +923,18 @@ func (s *Server) handleAdminStartGameMatch(w http.ResponseWriter, r *http.Reques
 		writeGameCoreFailure(w, err, "game-core match start failed.")
 		return
 	}
-	// Open network for warm-deployed services now that the match is live.
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-	s.recordAdminAudit(r.Context(), "match.start", "match", "primary-match", "started match", map[string]any{
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "match.start", "match", "primary-match", "started match", map[string]any{
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
+	// Open both access planes for warm-deployed services now that the match is live.
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("match start network reconciliation failed: %s", strconv.Quote(err.Error()))
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "match started, but participant network access did not converge; retry the operation.")
+		return
+	}
 	writeData(w, http.StatusOK, status)
 }
 
@@ -926,15 +963,18 @@ func (s *Server) handleAdminPauseGameMatch(w http.ResponseWriter, r *http.Reques
 		writeGameCoreFailure(w, err, "game-core match pause failed.")
 		return
 	}
-	s.recordAdminAudit(r.Context(), "match.pause", "match", "primary-match", "paused match", map[string]any{
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "match.pause", "match", "primary-match", "paused match", map[string]any{
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
 
-	// Close participant network while paused (organizer WG still allowlisted).
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
-		log.Printf("warning: automatic wireguard reconcile on match pause failed: %v", wgErr)
+	// Close participant network while paused (organizer WG remains allowlisted).
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("match pause network reconciliation failed: %s", strconv.Quote(err.Error()))
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "match paused, but participant network revocation did not fully converge; retry the operation.")
+		return
 	}
 
 	writeData(w, http.StatusOK, status)
@@ -949,15 +989,18 @@ func (s *Server) handleAdminResumeGameMatch(w http.ResponseWriter, r *http.Reque
 		writeGameCoreFailure(w, err, "game-core match resume failed.")
 		return
 	}
-	s.recordAdminAudit(r.Context(), "match.resume", "match", "primary-match", "resumed match", map[string]any{
+	operationContext, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	s.recordAdminAudit(operationContext, "match.resume", "match", "primary-match", "resumed match", map[string]any{
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
 
 	// Re-open participant network after pause.
-	_, _ = s.controller.ReconcileAccessPolicies(r.Context())
-	if _, wgErr := s.wireGuard.Reconcile(r.Context()); wgErr != nil {
-		log.Printf("warning: automatic wireguard reconcile on match resume failed: %v", wgErr)
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("match resume network reconciliation failed: %s", strconv.Quote(err.Error()))
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "match resumed, but participant network access did not converge; retry the operation.")
+		return
 	}
 
 	writeData(w, http.StatusOK, status)
