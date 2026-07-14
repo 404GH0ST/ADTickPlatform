@@ -2600,6 +2600,50 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 	t.Fatal("expected service state for challenge 1")
 }
 
+func TestSanitizePublicGameStatusStripsWarmupFailures(t *testing.T) {
+	status := GameStatus{
+		Match: &GameMatchStatus{
+			State: "running",
+			Warmup: &GameWarmupResult{
+				Status:      "failed",
+				PutFailed:   2,
+				PutSuccess:  1,
+				TotalTargets: 3,
+				Message:     "put phase did not succeed: status=failed message=docker run -e AD_FLAG=PLAYIT{x} -e AD_CHECKER_TOKEN=tok",
+				Failures: []GameWarmupFailure{
+					{TeamID: 101, ChallengeID: 1, ChallengeName: "http", Error: "docker run -e AD_FLAG=PLAYIT{x} -e AD_CHECKER_TOKEN=tok failed"},
+				},
+			},
+		},
+	}
+	public := sanitizePublicGameStatus(status)
+	if public.Match == nil || public.Match.Warmup == nil {
+		t.Fatal("expected public warmup summary to remain")
+	}
+	if len(public.Match.Warmup.Failures) != 0 {
+		t.Fatalf("expected warmup failures stripped, got %+v", public.Match.Warmup.Failures)
+	}
+	if strings.Contains(public.Match.Warmup.Message, "AD_FLAG") || strings.Contains(public.Match.Warmup.Message, "AD_CHECKER_TOKEN") {
+		t.Fatalf("public warmup message leaked secrets: %q", public.Match.Warmup.Message)
+	}
+	if public.Match.Warmup.PutFailed != 2 || public.Match.Warmup.Status != "failed" {
+		t.Fatalf("expected summary counters preserved, got %+v", public.Match.Warmup)
+	}
+	// Organizer view keeps original failures.
+	if len(status.Match.Warmup.Failures) != 1 {
+		t.Fatalf("sanitizePublicGameStatus mutated the original status")
+	}
+}
+
+func TestContainsSensitiveCheckerDetailUsesCustomFlagPrefix(t *testing.T) {
+	if containsSensitiveCheckerDetail("leak CTF{abc.def}") {
+		t.Fatal("default markers should not treat CTF{ as sensitive")
+	}
+	if !containsSensitiveCheckerDetail("leak CTF{abc.def}", "ctf{") {
+		t.Fatal("custom flag prefix marker should be treated as sensitive")
+	}
+}
+
 func TestTeamServicesRedactsSensitiveSLADetails(t *testing.T) {
 	leakedMessage := `docker run --rm -e AD_FLAG=PLAYIT{payload.mac} -e AD_CHECKER_TOKEN=checker-secret --entrypoint /bin/sh checker-image failed: signal: killed`
 	mux := newTestMuxWithGameCore(testGameCoreClient{

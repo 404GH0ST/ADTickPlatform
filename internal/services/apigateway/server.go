@@ -505,7 +505,31 @@ func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
 		writeGameCoreFailure(w, err, "game-core status could not be read.")
 		return
 	}
-	writeData(w, http.StatusOK, status)
+	// Public surface must not expose per-target warmup errors: those strings can
+	// include checker argv material (flags / checker tokens) from failed puts.
+	writeData(w, http.StatusOK, sanitizePublicGameStatus(status))
+}
+
+// sanitizePublicGameStatus strips diagnostics that belong only on organizer
+// endpoints. Summary counters stay so participants can see match readiness.
+func sanitizePublicGameStatus(status GameStatus) GameStatus {
+	if status.Match == nil || status.Match.Warmup == nil {
+		return status
+	}
+	public := status
+	matchCopy := *status.Match
+	warmupCopy := *status.Match.Warmup
+	warmupCopy.Failures = nil
+	if containsSensitiveCheckerDetail(warmupCopy.Message) {
+		if strings.EqualFold(strings.TrimSpace(warmupCopy.Status), "failed") {
+			warmupCopy.Message = "warmup put phase failed for one or more targets"
+		} else {
+			warmupCopy.Message = ""
+		}
+	}
+	matchCopy.Warmup = &warmupCopy
+	public.Match = &matchCopy
+	return public
 }
 
 func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
@@ -658,7 +682,7 @@ func (s *Server) handleTeamServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	states = s.enrichServiceStatesWithSLADetails(r.Context(), teamID, states)
-	sanitizeParticipantServiceStates(states)
+	s.sanitizeParticipantServiceStates(r.Context(), states)
 	writeData(w, http.StatusOK, states)
 }
 
@@ -821,7 +845,7 @@ func (s *Server) enrichServiceStatesWithSLADetails(ctx context.Context, teamID i
 	return states
 }
 
-func applySLASummary(states []serviceState, challengeID int, summary GameServiceStateSummary) {
+func applySLASummary(states []serviceState, challengeID int, summary GameServiceStateSummary, extraMarkers ...string) {
 	for i := range states {
 		if states[i].ChallengeID != challengeID {
 			continue
@@ -829,7 +853,7 @@ func applySLASummary(states []serviceState, challengeID int, summary GameService
 		states[i].SLAStatus = summary.Status
 		states[i].SLAPhase = summary.Phase
 		states[i].SLATickID = summary.TickID
-		states[i].SLAMessage = sanitizeParticipantSLAMessage(summary)
+		states[i].SLAMessage = sanitizeParticipantSLAMessage(summary, extraMarkers...)
 
 		switch strings.ToLower(strings.TrimSpace(summary.Status)) {
 		case "ok", "recovering":
@@ -892,9 +916,10 @@ func fallbackSLAMessage(checker string) string {
 	return "checker passing; service state detail unavailable"
 }
 
-func sanitizeParticipantServiceStates(states []serviceState) {
+func (s *Server) sanitizeParticipantServiceStates(ctx context.Context, states []serviceState) {
+	markers := s.sensitiveCheckerMarkers(ctx)
 	for i := range states {
-		if !containsSensitiveCheckerDetail(states[i].SLAMessage) {
+		if !containsSensitiveCheckerDetail(states[i].SLAMessage, markers...) {
 			continue
 		}
 		states[i].SLAMessage = sanitizeParticipantSLAMessage(GameServiceStateSummary{
@@ -902,13 +927,13 @@ func sanitizeParticipantServiceStates(states []serviceState) {
 			Phase:   states[i].SLAPhase,
 			TickID:  states[i].SLATickID,
 			Message: states[i].SLAMessage,
-		})
+		}, markers...)
 	}
 }
 
-func sanitizeParticipantSLAMessage(summary GameServiceStateSummary) string {
+func sanitizeParticipantSLAMessage(summary GameServiceStateSummary, extraMarkers ...string) string {
 	message := strings.TrimSpace(summary.Message)
-	if message != "" && !containsSensitiveCheckerDetail(message) {
+	if message != "" && !containsSensitiveCheckerDetail(message, extraMarkers...) {
 		return message
 	}
 	switch strings.ToLower(strings.TrimSpace(summary.Phase)) {
@@ -934,9 +959,28 @@ func sanitizeParticipantSLAMessage(summary GameServiceStateSummary) string {
 	return "service state detail unavailable"
 }
 
-func containsSensitiveCheckerDetail(message string) bool {
+func (s *Server) sensitiveCheckerMarkers(ctx context.Context) []string {
+	markers := []string{}
+	if s == nil || s.store == nil {
+		return markers
+	}
+	settings, err := s.store.GetPlatformSettings(ctx)
+	if err != nil {
+		return markers
+	}
+	active := strings.ToLower(strings.TrimSpace(settings.FlagFormatActive))
+	if active == "" {
+		active = strings.ToLower(strings.TrimSpace(settings.FlagFormatPrefix))
+	}
+	if active != "" && active != "playit" {
+		markers = append(markers, active+"{")
+	}
+	return markers
+}
+
+func containsSensitiveCheckerDetail(message string, extraMarkers ...string) bool {
 	lowered := strings.ToLower(message)
-	for _, marker := range []string{
+	markers := []string{
 		"ad_flag=",
 		"ad_checker_token=",
 		"ad_metadata=",
@@ -944,7 +988,14 @@ func containsSensitiveCheckerDetail(message string) bool {
 		"playit{",
 		"--entrypoint",
 		"checker_token",
-	} {
+	}
+	for _, marker := range extraMarkers {
+		trimmed := strings.ToLower(strings.TrimSpace(marker))
+		if trimmed != "" {
+			markers = append(markers, trimmed)
+		}
+	}
+	for _, marker := range markers {
 		if strings.Contains(lowered, marker) {
 			return true
 		}
