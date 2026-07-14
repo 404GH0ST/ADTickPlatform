@@ -42,6 +42,19 @@ func TestRenderControllerAccessRulesEnforcesPublicServiceAndSSHAllowlist(t *test
 	if !strings.Contains(rules, `ip daddr 10.80.1.12 tcp dport 22 drop`) {
 		t.Fatalf("expected locked ssh fallback drop rule")
 	}
+	// Residual default-deny for other WG destinations on open service IPs.
+	if !strings.Contains(rules, `iifname "wg0" ip daddr 10.80.1.11 drop`) {
+		t.Fatalf("expected residual WG drop for open service 10.80.1.11, got:\n%s", rules)
+	}
+	if !strings.Contains(rules, `iifname "wg0" ip daddr 10.80.1.12 drop`) {
+		t.Fatalf("expected residual WG drop for open service 10.80.1.12, got:\n%s", rules)
+	}
+	// Residual drop must come after service-port accept.
+	acceptIdx := strings.Index(rules, `iifname "wg0" ip daddr 10.80.1.11 tcp dport 10001 accept`)
+	dropIdx := strings.Index(rules, `iifname "wg0" ip daddr 10.80.1.11 drop`)
+	if acceptIdx < 0 || dropIdx < 0 || acceptIdx > dropIdx {
+		t.Fatalf("expected service accept before residual drop, got:\n%s", rules)
+	}
 	if strings.Contains(rules, "flush table inet") {
 		t.Fatalf("expected rules to omit flush table directive")
 	}
@@ -206,6 +219,9 @@ func TestHostServiceAccessExecutorRunsNft(t *testing.T) {
 	}
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP") {
 		t.Fatalf("expected ssh fallback drop command %#v", runner.commands)
+	}
+	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -j DROP") {
+		t.Fatalf("expected residual WG default-deny for open service %#v", runner.commands)
 	}
 	if status.Mode != "host" || status.FirewallBackend != "nftables" {
 		t.Fatalf("unexpected status %+v", status)

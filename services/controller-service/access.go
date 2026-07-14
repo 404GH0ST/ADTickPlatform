@@ -418,6 +418,12 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
 			return err
 		}
+		// Residual default-deny on the WG path for non-service ports.
+		if strings.TrimSpace(e.interfaceName) != "" {
+			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -611,6 +617,13 @@ func appendControllerAccessPolicyRules(
 				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
 			}
 			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))
+		}
+		// Residual default-deny for open services: after service-port accept and
+		// SSH allowlist/drop, block other WireGuard destinations on this IP.
+		// Scope to the WG interface so host-local operator probes (OUTPUT / no
+		// iif) keep working.
+		if chainKind == "forward" && ingressPrefix != "" {
+			builder.WriteString(fmt.Sprintf("    %sip daddr %s drop\n", ingressPrefix, policy.ServiceIP))
 		}
 	}
 }
