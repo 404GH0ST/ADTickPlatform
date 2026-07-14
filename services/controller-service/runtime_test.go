@@ -111,6 +111,42 @@ func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
 	}
 }
 
+func TestDockerCommandErrorRedactsSensitiveArgumentsAndOutput(t *testing.T) {
+	binPath := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"printf 'daemon rejected: %s\\n' \"$*\" >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+
+	executor := &dockerCLIExecutor{binary: binPath}
+	_, err := executor.execDocker(
+		context.Background(),
+		"run",
+		"-e", "AD_PLATFORM_UNLOCK_PROOF=unlock-proof-secret",
+		"-e", "AD_CHECKER_TOKEN=checker-token-secret",
+		"-e", "AD_PLATFORM_ROOT_PASSWORD=root-password-secret",
+	)
+	if err == nil {
+		t.Fatal("expected docker command failure")
+	}
+
+	message := err.Error()
+	for _, secret := range []string{
+		"unlock-proof-secret",
+		"checker-token-secret",
+		"root-password-secret",
+	} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("docker error exposed secret %q: %s", secret, message)
+		}
+	}
+	if !strings.Contains(message, "run failed") || !strings.Contains(message, "daemon rejected") {
+		t.Fatalf("docker error lost safe diagnostic context: %s", message)
+	}
+}
+
 func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "docker.log")
 	binPath := filepath.Join(t.TempDir(), "docker")

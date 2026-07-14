@@ -533,9 +533,36 @@ func (e *dockerCLIExecutor) execDocker(ctx context.Context, args ...string) ([]b
 	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("%s %s failed: %w: %s", e.binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		operation := "command"
+		if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+			operation = strings.TrimSpace(args[0])
+		}
+		detail := strings.TrimSpace(redactControllerDockerSecrets(string(output), args))
+		if detail == "" {
+			return nil, fmt.Errorf("%s %s failed: %w", e.binary, operation, err)
+		}
+		return nil, fmt.Errorf("%s %s failed: %w: %s", e.binary, operation, err, detail)
 	}
 	return output, nil
+}
+
+func redactControllerDockerSecrets(message string, args []string) string {
+	for _, arg := range args {
+		for _, prefix := range []string{
+			"AD_PLATFORM_UNLOCK_PROOF=",
+			"AD_CHECKER_TOKEN=",
+			"AD_PLATFORM_ROOT_PASSWORD=",
+		} {
+			if !strings.HasPrefix(arg, prefix) {
+				continue
+			}
+			secret := strings.TrimPrefix(arg, prefix)
+			if secret != "" {
+				message = strings.ReplaceAll(message, secret, "[redacted]")
+			}
+		}
+	}
+	return message
 }
 
 func (e *dockerCLIExecutor) removeVolumeIfExists(ctx context.Context, volumeName string) error {
