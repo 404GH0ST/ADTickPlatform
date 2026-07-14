@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,25 @@ import (
 	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
+
+func TestCommandFailureMessageNeverReturnsSecretArgv(t *testing.T) {
+	secretErr := errors.New(`docker run -e AD_FLAG=PLAYIT{secret} -e AD_CHECKER_TOKEN=tok failed: signal: killed`)
+	msg := commandFailureMessage(secretErr, nil, -1)
+	if strings.Contains(msg, "AD_FLAG") || strings.Contains(msg, "AD_CHECKER_TOKEN") || strings.Contains(msg, "PLAYIT{") {
+		t.Fatalf("failure message leaked secrets: %q", msg)
+	}
+	if msg != "checker command failed" {
+		t.Fatalf("unexpected generic failure message %q", msg)
+	}
+
+	redacted := commandFailureMessage(nil, []byte("put failed AD_FLAG=PLAYIT{x} AD_CHECKER_TOKEN=abc"), 1)
+	if strings.Contains(redacted, "PLAYIT{x}") || strings.Contains(redacted, "abc") {
+		t.Fatalf("expected redacted output, got %q", redacted)
+	}
+	if !strings.Contains(redacted, "AD_FLAG=[redacted]") || !strings.Contains(redacted, "AD_CHECKER_TOKEN=[redacted]") {
+		t.Fatalf("expected redaction markers, got %q", redacted)
+	}
+}
 
 func TestCheckerRunnerRoutesRequireAdminAuth(t *testing.T) {
 	server := newCheckerRunnerServer("dev-admin-token", dryRunCheckerExecutor{})

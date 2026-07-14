@@ -484,7 +484,13 @@ func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) 
 	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
-	return output, exitCode, fmt.Errorf("%s %s failed: %w", e.binary, strings.Join(args, " "), err)
+	// Never join argv into the error: docker run args include AD_FLAG and
+	// AD_CHECKER_TOKEN, and those strings flow into warmup/SLA surfaces.
+	op := "run"
+	if len(args) > 0 {
+		op = args[0]
+	}
+	return output, exitCode, fmt.Errorf("%s %s failed: %w", e.binary, op, err)
 }
 
 func buildDockerCheckerValidationArgs(security checkerDockerSecurity, request apigateway.CheckerValidationRequest) []string {
@@ -772,12 +778,56 @@ func allValidCheckerPhases(phases []string) bool {
 func commandFailureMessage(err error, output []byte, exitCode int) string {
 	trimmed := strings.TrimSpace(string(output))
 	if trimmed != "" {
-		return trimmed
+		return redactCheckerSecretMaterial(trimmed)
 	}
 	if exitCode >= 0 {
 		return fmt.Sprintf("checker command exited with status %d", exitCode)
 	}
-	return err.Error()
+	// Avoid returning err.Error(): older code paths embedded docker argv
+	// (including secrets) in the wrapped error text.
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return "checker command timed out"
+	}
+	if err != nil && errors.Is(err, context.Canceled) {
+		return "checker command canceled"
+	}
+	return "checker command failed"
+}
+
+// redactCheckerSecretMaterial strips known secret-bearing fragments from
+// checker stdout/stderr before it is stored or returned to callers.
+func redactCheckerSecretMaterial(message string) string {
+	if message == "" {
+		return message
+	}
+	redacted := message
+	// Case-insensitive scan; keep a single canonical marker per secret family so
+	// later lowercase variants do not re-process already-redacted tokens.
+	for _, marker := range []string{
+		"AD_FLAG=",
+		"AD_CHECKER_TOKEN=",
+		"AD_METADATA=",
+	} {
+		lowerMarker := strings.ToLower(marker)
+		searchFrom := 0
+		for {
+			lowered := strings.ToLower(redacted)
+			rel := strings.Index(lowered[searchFrom:], lowerMarker)
+			if rel < 0 {
+				break
+			}
+			idx := searchFrom + rel
+			// Replace from marker through the next whitespace (env-style tokens).
+			end := idx + len(marker)
+			for end < len(redacted) && redacted[end] != ' ' && redacted[end] != '\n' && redacted[end] != '\t' && redacted[end] != '\r' {
+				end++
+			}
+			replacement := marker + "[redacted]"
+			redacted = redacted[:idx] + replacement + redacted[end:]
+			searchFrom = idx + len(replacement)
+		}
+	}
+	return redacted
 }
 
 type checkerReportedServiceState struct {
