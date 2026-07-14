@@ -104,6 +104,18 @@ func TestRenderControllerAccessRulesDropsTrafficWhenNetworkClosed(t *testing.T) 
 	}
 }
 
+func TestRenderControllerAccessRulesKeepsEgressDisabledWhenNetworkClosed(t *testing.T) {
+	rules := renderControllerAccessRules("adplatform_service_access", "wg0", "eth0", []apigateway.ControllerServiceAccessPolicy{{
+		TeamID: 101, ChallengeID: 7, ChallengeName: "airgapped",
+		ServiceIP: "10.80.7.11", ServicePort: 10007, SSHPort: 22,
+		EgressEnabled: false, NetworkClosed: true,
+	}})
+
+	if !strings.Contains(rules, `oifname "eth0" ip saddr 10.80.7.11 drop`) {
+		t.Fatalf("expected egress drop for closed airgapped service, got:\n%s", rules)
+	}
+}
+
 func TestFileServiceAccessExecutorWritesArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	executor := &fileServiceAccessExecutor{
@@ -375,10 +387,11 @@ func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
 	}
 	executor := &hostServiceAccessExecutor{
 		fileServiceAccessExecutor: fileServiceAccessExecutor{
-			mode:            "host",
-			interfaceName:   "wg0",
-			firewallBackend: "iptables",
-			firewallTable:   "adplatform_service_access",
+			mode:              "host",
+			interfaceName:     "wg0",
+			internetInterface: "eth0",
+			firewallBackend:   "iptables",
+			firewallTable:     "adplatform_service_access",
 			paths: controllerAccessArtifactPaths{
 				rulesPath:  filepath.Join(tmpDir, "access.nft"),
 				statusPath: filepath.Join(tmpDir, "access-status.json"),
@@ -393,7 +406,7 @@ func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
 	_, err := executor.Apply(context.Background(), []apigateway.ControllerServiceAccessPolicy{{
 		TeamID: 101, ChallengeID: 1, ChallengeName: "sealbroker",
 		ServiceIP: "10.80.1.12", ServicePort: 8160, SSHPort: 22,
-		SSHUnlocked: true, EgressEnabled: true,
+		SSHUnlocked: true, EgressEnabled: false,
 		AllowedPeerAddresses: []string{"10.70.0.2"}, // organizer WG
 		NetworkClosed:        true,
 	}}, time.Date(2026, time.March, 10, 8, 0, 0, 0, time.UTC))
@@ -405,6 +418,9 @@ func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
 	}
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.12/32 -j DROP") {
 		t.Fatalf("expected WG-interface drop while closed, got %#v", runner.commands)
+	}
+	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.1.12/32 -j DROP") {
+		t.Fatalf("expected egress drop while closed, got %#v", runner.commands)
 	}
 	// Full dest DROP would block host paths that hairpin through FORWARD.
 	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -j DROP") {

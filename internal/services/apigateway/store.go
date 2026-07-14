@@ -381,6 +381,15 @@ func normalizedRole(role string) string {
 	return "member"
 }
 
+func canonicalSessionPlayer(player authenticatedPlayer) authenticatedPlayer {
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") {
+		player.TeamID = 0
+		player.TeamName = "Organizer"
+		player.TeamContactEmail = ""
+	}
+	return player
+}
+
 func defaultChallengeImages(name string) (string, string) {
 	slug := slugName(name)
 	return fmt.Sprintf("registry.local/%s:baseline", slug), fmt.Sprintf("registry.local/%s-checker:latest", slug)

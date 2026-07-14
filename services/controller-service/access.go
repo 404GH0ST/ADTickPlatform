@@ -373,17 +373,17 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		if !isValidIP(policy.ServiceIP) {
 			continue
 		}
-		if policy.NetworkClosed {
-			continue
-		}
 		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
-		servicePort := fmt.Sprintf("%d", policy.ServicePort)
-		sshPort := fmt.Sprintf("%d", policy.SSHPort)
 		if !policy.EgressEnabled && strings.TrimSpace(e.internetInterface) != "" {
 			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.internetInterface, "-s", serviceCIDR, "-j", "DROP"); err != nil {
 				return err
 			}
 		}
+		if policy.NetworkClosed {
+			continue
+		}
+		servicePort := fmt.Sprintf("%d", policy.ServicePort)
+		sshPort := fmt.Sprintf("%d", policy.SSHPort)
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
 			return err
 		}
@@ -571,7 +571,13 @@ func appendControllerAccessPolicyRules(
 	chainKind string,
 ) {
 	for _, policy := range policies {
-		if !isValidIP(policy.ServiceIP) || policy.NetworkClosed {
+		if !isValidIP(policy.ServiceIP) {
+			continue
+		}
+		if !policy.EgressEnabled && strings.TrimSpace(internetInterface) != "" && chainKind == "forward" {
+			builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip saddr %s drop\n", internetInterface, policy.ServiceIP))
+		}
+		if policy.NetworkClosed {
 			continue
 		}
 		ingressPrefix := ""
@@ -579,9 +585,6 @@ func appendControllerAccessPolicyRules(
 		if chainKind == "forward" && strings.TrimSpace(interfaceName) != "" {
 			ingressPrefix = fmt.Sprintf("iifname \"%s\" ", interfaceName)
 			egressPrefix = fmt.Sprintf("oifname \"%s\" ", interfaceName)
-		}
-		if !policy.EgressEnabled && strings.TrimSpace(internetInterface) != "" && chainKind == "forward" {
-			builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip saddr %s drop\n", internetInterface, policy.ServiceIP))
 		}
 		if policy.ServicePort > 0 {
 			if ingressPrefix != "" {

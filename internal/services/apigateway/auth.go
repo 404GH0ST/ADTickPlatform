@@ -30,6 +30,7 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 	if strings.TrimSpace(secret) == "" {
 		return "", fmt.Errorf("team token secret is empty")
 	}
+	player = canonicalSessionPlayer(player)
 
 	headerJSON, err := json.Marshal(map[string]string{
 		"alg": "HS256",

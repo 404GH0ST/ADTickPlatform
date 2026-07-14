@@ -429,8 +429,12 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 	// when the window first became active. Organizers keep hitting the live board
 	// via the admin endpoint, which never consults the freeze window.
 	now := s.now()
-	freeze, freezeErr := s.store.GetScoreboardFreeze(r.Context())
-	frozen := freezeErr == nil && freeze.activeAt(now)
+	freeze, err := s.store.GetScoreboardFreeze(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	frozen := freeze.activeAt(now)
 	if frozen && freeze.Snapshot != nil {
 		writeData(w, http.StatusOK, freeze.Snapshot)
 		return
@@ -444,9 +448,16 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		// First read after freeze_at: capture the live board as the snapshot.
 		// SaveFrozenScoreboardSnapshot only writes when none exists yet, so
 		// concurrent first-reads converge on one snapshot.
-		if saved, err := s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, now); err == nil && saved.Snapshot != nil {
-			rows = saved.Snapshot
+		saved, err := s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, now)
+		if err != nil {
+			writeStoreFailure(w, err)
+			return
 		}
+		if saved.Snapshot == nil {
+			writeStoreFailure(w, errors.New("scoreboard freeze snapshot was not persisted"))
+			return
+		}
+		rows = saved.Snapshot
 	}
 	writeData(w, http.StatusOK, rows)
 }

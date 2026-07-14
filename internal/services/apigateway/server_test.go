@@ -110,6 +110,30 @@ type requeueFailingStore struct {
 	err                 error
 }
 
+type scoreboardFailingStore struct {
+	Store
+	getErr       error
+	saveErr      error
+	omitSnapshot bool
+}
+
+func (s *scoreboardFailingStore) GetScoreboardFreeze(ctx context.Context) (scoreboardFreezeWindow, error) {
+	if s.getErr != nil {
+		return scoreboardFreezeWindow{}, s.getErr
+	}
+	return s.Store.GetScoreboardFreeze(ctx)
+}
+
+func (s *scoreboardFailingStore) SaveFrozenScoreboardSnapshot(ctx context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error) {
+	if s.saveErr != nil {
+		return scoreboardFreezeWindow{}, s.saveErr
+	}
+	if s.omitSnapshot {
+		return s.Store.GetScoreboardFreeze(ctx)
+	}
+	return s.Store.SaveFrozenScoreboardSnapshot(ctx, rows, takenAt)
+}
+
 func (s *requeueFailingStore) RequeueChallengeServices(ctx context.Context, challengeID int) error {
 	challenges, err := s.Store.ListAdminChallenges(ctx)
 	if err != nil {
@@ -1013,6 +1037,69 @@ func TestScoreboardFreezeServesSnapshotToParticipantsButLiveToOrganizers(t *test
 	}
 }
 
+func TestScoreboardFreezeNeverFallsBackToLiveRowsOnStoreFailure(t *testing.T) {
+	tests := []struct {
+		name         string
+		getErr       error
+		saveErr      error
+		omitSnapshot bool
+	}{
+		{name: "freeze state read fails", getErr: errors.New("freeze read failed")},
+		{name: "snapshot write fails", saveErr: errors.New("snapshot write failed")},
+		{name: "snapshot is not persisted", omitSnapshot: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			baseStore := NewMemoryStore(101)
+			past := time.Now().Add(-time.Minute).UTC()
+			if _, err := baseStore.SetScoreboardFreezeWindow(context.Background(), &past, nil, time.Now()); err != nil {
+				t.Fatalf("SetScoreboardFreezeWindow: %v", err)
+			}
+			store := &scoreboardFailingStore{
+				Store: baseStore, getErr: tc.getErr, saveErr: tc.saveErr, omitSnapshot: tc.omitSnapshot,
+			}
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			server := NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{})
+			server.WithScoringClient(testScoringClient{scores: []ScoreRowAlias{{Rank: 1, Team: "Live Secret", Total: 99}}})
+			server.RegisterRoutes(mux)
+
+			request := httptest.NewRequest(http.MethodGet, "/api/v2/scoreboard", nil)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusInternalServerError {
+				t.Fatalf("expected 500, got %d: %s", response.Code, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "Live Secret") {
+				t.Fatalf("live scoreboard leaked during freeze failure: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestScoreboardFreezeCanPersistAnEmptySnapshot(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	store.scoreboard = []scoreRow{}
+	past := time.Now().Add(-time.Minute).UTC()
+	if _, err := store.SetScoreboardFreezeWindow(context.Background(), &past, nil, time.Now()); err != nil {
+		t.Fatalf("SetScoreboardFreezeWindow: %v", err)
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/scoreboard", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 for empty frozen scoreboard, got %d: %s", response.Code, response.Body.String())
+	}
+	if got := decodeCompat[[]scoreRow](t, response.Body.Bytes()); len(got) != 0 {
+		t.Fatalf("expected empty frozen scoreboard, got %+v", got)
+	}
+}
+
 func newTestMuxWithLimiter(limiter rateLimiter) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	server := NewWithDeps("dev-team-token", "dev-admin-token", 101, NewMemoryStore(101), testControllerClient{}, noopWireGuardClient{})
@@ -1122,6 +1209,48 @@ func TestAuthenticate(t *testing.T) {
 	}
 	if payload.Token == "" || bytes.Count([]byte(payload.Token), []byte(".")) != 2 {
 		t.Fatalf("expected jwt-like token, got %q", payload.Token)
+	}
+}
+
+func TestTeamBoundOrganizerReceivesUsableCanonicalSession(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/admin/players",
+		bytes.NewBufferString(`{"team_id":101,"display_name":"Team Organizer","email":"team.organizer@example.com","password":"organizer-secret","role":"organizer"}`),
+	)
+	setTestAdminAuthHeader(createRequest)
+	createResponse := httptest.NewRecorder()
+	mux.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusOK {
+		t.Fatalf("expected organizer creation 200, got %d: %s", createResponse.Code, createResponse.Body.String())
+	}
+
+	loginRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/authenticate",
+		bytes.NewBufferString(`{"email":"team.organizer@example.com","password":"organizer-secret"}`),
+	)
+	loginResponse := httptest.NewRecorder()
+	mux.ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("expected organizer login 200, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	}
+	auth := decodeCompat[authenticateResponse](t, loginResponse.Body.Bytes())
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	sessionRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	sessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected organizer session 200, got %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	session := decodeCompat[map[string]any](t, sessionResponse.Body.Bytes())
+	if session["team_id"] != float64(0) || session["team_name"] != "Organizer" || session["role"] != "organizer" {
+		t.Fatalf("expected canonical organizer session, got %#v", session)
 	}
 }
 

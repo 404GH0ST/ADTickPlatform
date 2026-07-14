@@ -264,12 +264,10 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 	// A deactivated player is always refused so that deactivation revokes
 	// in-flight sessions (re-validated per request) as well as new logins. The
 	// team cascade gates team members but never organizers, who run the platform
-	// and may sit on a team that gets disabled.
+	// and may sit on a team that gets disabled. Organizer sessions always use the
+	// canonical teamless identity even when the admin record retains a team.
 	if s.deactivatedPlayers[playerID] {
 		return authenticatedPlayer{}, ErrAccountDeactivated
-	}
-	if record.Player.TeamID != teamID {
-		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	if strings.TrimSpace(record.Player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
@@ -277,18 +275,25 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 	if sessionVersion != max(record.SessionVersion, 1) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	if !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") &&
-		s.deactivatedTeams[record.Player.TeamID] {
+	organizer := strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer")
+	if organizer {
+		if teamID != 0 {
+			return authenticatedPlayer{}, ErrInvalidCredentials
+		}
+	} else if record.Player.TeamID != teamID {
+		return authenticatedPlayer{}, ErrInvalidCredentials
+	}
+	if !organizer && s.deactivatedTeams[record.Player.TeamID] {
 		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
 	teamContactEmail := ""
-	if record.Player.TeamID == 0 && !strings.EqualFold(record.Player.Role, "organizer") {
+	if record.Player.TeamID == 0 && !organizer {
 		teamName = ""
 	} else if team := s.teams[record.Player.TeamID]; team != nil {
 		teamContactEmail = team.ContactEmail
 	}
-	return authenticatedPlayer{
+	return canonicalSessionPlayer(authenticatedPlayer{
 		PlayerID:         record.Player.ID,
 		TeamID:           record.Player.TeamID,
 		TeamName:         teamName,
@@ -297,7 +302,7 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 		Email:            record.Player.Email,
 		Role:             record.Player.Role,
 		SessionVersion:   max(record.SessionVersion, 1),
-	}, nil
+	}), nil
 }
 
 func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error) {
@@ -492,7 +497,7 @@ func (s *memoryStore) SaveFrozenScoreboardSnapshot(_ context.Context, rows []sco
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.freeze.Snapshot == nil {
-		s.freeze.Snapshot = append([]scoreRow(nil), rows...)
+		s.freeze.Snapshot = append([]scoreRow{}, rows...)
 		t := takenAt.UTC()
 		s.freeze.SnapshotTakenAt = &t
 	}
@@ -500,11 +505,15 @@ func (s *memoryStore) SaveFrozenScoreboardSnapshot(_ context.Context, rows []sco
 }
 
 func (s *memoryStore) cloneFreezeLocked() scoreboardFreezeWindow {
+	var snapshot []scoreRow
+	if s.freeze.Snapshot != nil {
+		snapshot = append([]scoreRow{}, s.freeze.Snapshot...)
+	}
 	return scoreboardFreezeWindow{
 		FreezeAt:        cloneTime(s.freeze.FreezeAt),
 		UnfreezeAt:      cloneTime(s.freeze.UnfreezeAt),
 		SnapshotTakenAt: cloneTime(s.freeze.SnapshotTakenAt),
-		Snapshot:        append([]scoreRow(nil), s.freeze.Snapshot...),
+		Snapshot:        snapshot,
 	}
 }
 

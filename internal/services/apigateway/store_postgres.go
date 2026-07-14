@@ -214,9 +214,7 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 		if teamID != 0 {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
-		player.TeamID = 0
-		player.TeamName = "Organizer"
-		return player, nil
+		return canonicalSessionPlayer(player), nil
 	}
 
 	if !currentTeamID.Valid {
