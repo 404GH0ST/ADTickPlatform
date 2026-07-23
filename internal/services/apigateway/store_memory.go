@@ -899,7 +899,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 	}
 	s.scoreboard = append(s.scoreboard, scoreRow{Rank: len(s.scoreboard) + 1, Team: name, Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "new"})
 
-	return adminTeam{ID: id, Name: name, ContactEmail: contactEmail, PlayerCount: 0, DeployedChallenges: len(s.teamStates[id])}, nil
+	return adminTeam{ID: id, Name: name, ContactEmail: contactEmail, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: len(s.teamStates[id]), Active: true}, nil
 }
 
 func (s *memoryStore) ListAdminPlayers(_ context.Context) ([]adminPlayer, error) {
@@ -964,6 +964,11 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 	} else if role == "organizer" {
 		teamName = "Organizer"
 	}
+	// Keep every populated team captained: promote a plain member added to a team
+	// that has no active captain (matches JoinExistingPlayerTeam).
+	if input.TeamID != 0 && role != "organizer" && role != "captain" && !s.teamHasActiveCaptainLocked(input.TeamID) {
+		role = "captain"
+	}
 
 	player := adminPlayer{
 		ID:            id,
@@ -1022,6 +1027,15 @@ func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, te
 		return authenticatedPlayer{}, ErrTeamMemberLimit
 	}
 
+	// Promote the joining player to captain when the team has no active captain
+	// (empty team, or the previous captain was deactivated), so every populated
+	// team keeps exactly one captain. The store lock serializes concurrent joins.
+	role := record.Player.Role
+	if !s.teamHasActiveCaptainLocked(team.ID) && !strings.EqualFold(strings.TrimSpace(role), "organizer") {
+		role = "captain"
+		record.Player.Role = role
+	}
+
 	wireGuardPeer := wireguardPeerName(team.ID, playerID)
 	address, err := s.allocateWireGuardPeerAddressLocked()
 	if err != nil {
@@ -1047,8 +1061,102 @@ func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, te
 		TeamContactEmail: team.ContactEmail,
 		DisplayName:      record.Player.DisplayName,
 		Email:            record.Player.Email,
-		Role:             record.Player.Role,
+		Role:             role,
 		SessionVersion:   max(record.SessionVersion, 1),
+	}, nil
+}
+
+func (s *memoryStore) ListTeamMembers(_ context.Context, teamID int) ([]teamMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if teamID <= 0 {
+		return nil, ErrTeamNotFound
+	}
+	if _, ok := s.teams[teamID]; !ok {
+		return nil, ErrTeamNotFound
+	}
+
+	members := make([]teamMember, 0)
+	for _, record := range s.players {
+		if record.Player.TeamID != teamID {
+			continue
+		}
+		if s.deactivatedPlayers[record.Player.ID] {
+			continue
+		}
+		members = append(members, teamMember{
+			PlayerID:    record.Player.ID,
+			DisplayName: record.Player.DisplayName,
+			Email:       record.Player.Email,
+			Role:        record.Player.Role,
+		})
+	}
+	slices.SortFunc(members, func(a, b teamMember) int {
+		if a.PlayerID == b.PlayerID {
+			return 0
+		}
+		if a.PlayerID < b.PlayerID {
+			return -1
+		}
+		return 1
+	})
+	return members, nil
+}
+
+func (s *memoryStore) TransferTeamCaptain(_ context.Context, captainPlayerID, targetPlayerID int) (authenticatedPlayer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	captain, ok := s.players[captainPlayerID]
+	if !ok {
+		return authenticatedPlayer{}, ErrPlayerNotFound
+	}
+	if !strings.EqualFold(strings.TrimSpace(captain.Player.Role), "captain") || captain.Player.TeamID <= 0 {
+		return authenticatedPlayer{}, ErrNotTeamCaptain
+	}
+	if s.deactivatedPlayers[captainPlayerID] {
+		return authenticatedPlayer{}, ErrAccountDeactivated
+	}
+	if targetPlayerID == captainPlayerID {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+
+	target, ok := s.players[targetPlayerID]
+	if !ok {
+		return authenticatedPlayer{}, ErrPlayerNotFound
+	}
+	if target.Player.TeamID != captain.Player.TeamID {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+	if s.deactivatedPlayers[targetPlayerID] {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+	if strings.EqualFold(strings.TrimSpace(target.Player.Role), "organizer") {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+
+	captain.Player.Role = "member"
+	captain.SessionVersion = max(captain.SessionVersion, 1) + 1
+	target.Player.Role = "captain"
+	target.SessionVersion = max(target.SessionVersion, 1) + 1
+
+	teamContactEmail := ""
+	teamName := captain.Player.TeamName
+	if team := s.teams[captain.Player.TeamID]; team != nil {
+		teamContactEmail = team.ContactEmail
+		teamName = team.Name
+	}
+
+	return authenticatedPlayer{
+		PlayerID:         captain.Player.ID,
+		TeamID:           captain.Player.TeamID,
+		TeamName:         teamName,
+		TeamContactEmail: teamContactEmail,
+		DisplayName:      captain.Player.DisplayName,
+		Email:            captain.Player.Email,
+		Role:             captain.Player.Role,
+		SessionVersion:   max(captain.SessionVersion, 1),
 	}, nil
 }
 
@@ -1064,6 +1172,13 @@ func (s *memoryStore) teamMemberLimitReachedLocked(teamID int) bool {
 		}
 	}
 	return count >= limit
+}
+
+// teamHasActiveCaptainLocked reports whether the team currently has at least one
+// active (non-deactivated) captain. Callers must hold s.mu.
+func (s *memoryStore) teamHasActiveCaptainLocked(teamID int) bool {
+	// Player IDs are always positive, so -1 excludes nobody.
+	return s.teamHasOtherActiveCaptainLocked(teamID, -1)
 }
 
 func (s *memoryStore) GetAdminPlayerWireGuardConfig(_ context.Context, playerID int) (adminWireGuardPeer, error) {
@@ -2104,11 +2219,40 @@ func (s *memoryStore) SetPlayerActive(_ context.Context, playerID int, active bo
 		delete(s.deactivatedPlayers, playerID)
 		clone.Active = true
 		clone.DeactivatedAt = ""
+		// Reactivating a former captain must not create a second captain: if the
+		// team gained an active captain while this player was deactivated, demote
+		// the reactivated player to member so the single-captain invariant holds.
+		if strings.EqualFold(strings.TrimSpace(clone.Role), "captain") && clone.TeamID > 0 &&
+			s.teamHasOtherActiveCaptainLocked(clone.TeamID, playerID) {
+			record.Player.Role = "member"
+			record.SessionVersion = max(record.SessionVersion, 1) + 1
+			clone.Role = "member"
+		}
 	} else {
 		s.deactivatedPlayers[playerID] = true
 		clone.Active = false
 	}
 	return clone, nil
+}
+
+// teamHasOtherActiveCaptainLocked reports whether the team has an active captain
+// other than excludePlayerID. Callers must hold s.mu.
+func (s *memoryStore) teamHasOtherActiveCaptainLocked(teamID, excludePlayerID int) bool {
+	if teamID <= 0 {
+		return false
+	}
+	for _, record := range s.players {
+		if record.Player.ID == excludePlayerID || record.Player.TeamID != teamID {
+			continue
+		}
+		if s.deactivatedPlayers[record.Player.ID] {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(record.Player.Role), "captain") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error) {

@@ -1200,12 +1200,34 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	defer tx.Rollback()
 
 	if input.TeamID > 0 {
+		// Lock the team row for the rest of the transaction so concurrent admin
+		// adds serialize their member-limit checks and captain backfill (mirrors
+		// JoinExistingPlayerTeam). Without this, two adds can both read the same
+		// pre-insert count and overshoot MaxTeamMembers.
+		var lockedTeamID int
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM teams WHERE id = $1 FOR UPDATE`, input.TeamID).Scan(&lockedTeamID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return adminPlayer{}, ErrTeamNotFound
+			}
+			return adminPlayer{}, err
+		}
 		limited, err := teamMemberLimitReachedTx(ctx, tx, input.TeamID)
 		if err != nil {
 			return adminPlayer{}, err
 		}
 		if limited {
 			return adminPlayer{}, ErrTeamMemberLimit
+		}
+		// Keep every populated team captained: if this add would otherwise create
+		// a plain member on a team with no active captain, promote them instead.
+		if role != "organizer" && role != "captain" {
+			hasCaptain, err := teamHasActiveCaptainTx(ctx, tx, input.TeamID)
+			if err != nil {
+				return adminPlayer{}, err
+			}
+			if !hasCaptain {
+				role = "captain"
+			}
 		}
 	}
 
@@ -1298,10 +1320,13 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	var teamID int
 	var teamName string
 	var teamContactEmail string
+	// Lock the team row for the rest of the transaction so concurrent joins
+	// serialize member-limit checks and first-join captain promotion.
 	if err := tx.QueryRowContext(ctx, `
 		SELECT id, name, email
 		FROM teams
 		WHERE join_key = $1
+		FOR UPDATE
 	`, key).Scan(&teamID, &teamName, &teamContactEmail); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return authenticatedPlayer{}, ErrInvalidCredentials
@@ -1316,12 +1341,25 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 		return authenticatedPlayer{}, ErrTeamMemberLimit
 	}
 
+	// Promote the joining player to captain when the team has no active captain
+	// (empty team, or the previous captain was deactivated), so every populated
+	// team keeps exactly one captain. The team row is locked above, so this and
+	// the member-limit check serialize against concurrent joins.
+	hasCaptain, err := teamHasActiveCaptainTx(ctx, tx, teamID)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	role := player.Role
+	if !hasCaptain && !strings.EqualFold(strings.TrimSpace(role), "organizer") {
+		role = "captain"
+	}
+
 	wireGuardPeer := wireguardPeerName(teamID, playerID)
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE players
-		SET team_id = $2, wireguard_peer = $3
+		SET team_id = $2, wireguard_peer = $3, role = $4
 		WHERE id = $1
-	`, playerID, teamID, wireGuardPeer); err != nil {
+	`, playerID, teamID, wireGuardPeer, role); err != nil {
 		return authenticatedPlayer{}, err
 	}
 
@@ -1343,6 +1381,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	player.TeamID = teamID
 	player.TeamName = teamName
 	player.TeamContactEmail = teamContactEmail
+	player.Role = role
 	return player, nil
 }
 
@@ -1364,12 +1403,8 @@ func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool
 	if limit <= 0 {
 		return false, nil
 	}
-	// Lock the team row so concurrent joins to the same team serialize.
-	// Without this, two transactions can each read the same pre-join count
-	// under READ COMMITTED and both pass the check, overshooting the limit.
-	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM teams WHERE id = $1 FOR UPDATE`, teamID); err != nil {
-		return false, err
-	}
+	// Caller must already hold a lock on the team row (see JoinExistingPlayerTeam).
+	// We still re-check under that lock so concurrent joiners cannot overshoot.
 	var count int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1379,6 +1414,173 @@ func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool
 		return false, err
 	}
 	return count >= limit, nil
+}
+
+// teamHasActiveCaptainTx reports whether the team currently has at least one
+// active captain. Callers should hold a lock on the team row so the result
+// stays stable while they decide whether to promote a joining/added player.
+func teamHasActiveCaptainTx(ctx context.Context, tx *sql.Tx, teamID int) (bool, error) {
+	if teamID <= 0 {
+		return false, nil
+	}
+	var hasCaptain bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM players
+			WHERE team_id = $1
+			  AND active = TRUE
+			  AND role = 'captain'
+		)
+	`, teamID).Scan(&hasCaptain); err != nil {
+		return false, err
+	}
+	return hasCaptain, nil
+}
+
+func (s *postgresStore) ListTeamMembers(ctx context.Context, teamID int) ([]teamMember, error) {
+	if teamID <= 0 {
+		return nil, ErrTeamNotFound
+	}
+	exists, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1)`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrTeamNotFound
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, display_name, email, role
+		FROM players
+		WHERE team_id = $1
+		  AND active = TRUE
+		ORDER BY id
+	`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]teamMember, 0)
+	for rows.Next() {
+		var member teamMember
+		if err := rows.Scan(&member.PlayerID, &member.DisplayName, &member.Email, &member.Role); err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	return members, rows.Err()
+}
+
+func (s *postgresStore) TransferTeamCaptain(ctx context.Context, captainPlayerID, targetPlayerID int) (authenticatedPlayer, error) {
+	if captainPlayerID <= 0 || targetPlayerID <= 0 {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+	if captainPlayerID == targetPlayerID {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return authenticatedPlayer{}, err
+	}
+	defer tx.Rollback()
+
+	var captain authenticatedPlayer
+	var captainActive bool
+	var captainTeamID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id, team_id, display_name, email, role, session_version, active
+		FROM players
+		WHERE id = $1
+		FOR UPDATE
+	`, captainPlayerID).Scan(
+		&captain.PlayerID,
+		&captainTeamID,
+		&captain.DisplayName,
+		&captain.Email,
+		&captain.Role,
+		&captain.SessionVersion,
+		&captainActive,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrPlayerNotFound
+		}
+		return authenticatedPlayer{}, err
+	}
+	if !captainActive {
+		return authenticatedPlayer{}, ErrAccountDeactivated
+	}
+	if !captainTeamID.Valid || captainTeamID.Int64 <= 0 || !strings.EqualFold(strings.TrimSpace(captain.Role), "captain") {
+		return authenticatedPlayer{}, ErrNotTeamCaptain
+	}
+	teamID := int(captainTeamID.Int64)
+
+	var targetTeamID sql.NullInt64
+	var targetRole string
+	var targetActive bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT team_id, role, active
+		FROM players
+		WHERE id = $1
+		FOR UPDATE
+	`, targetPlayerID).Scan(&targetTeamID, &targetRole, &targetActive); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authenticatedPlayer{}, ErrPlayerNotFound
+		}
+		return authenticatedPlayer{}, err
+	}
+	if !targetActive || !targetTeamID.Valid || int(targetTeamID.Int64) != teamID {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+	if strings.EqualFold(strings.TrimSpace(targetRole), "organizer") {
+		return authenticatedPlayer{}, ErrInvalidCaptainTransfer
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE players
+		SET role = 'member', session_version = session_version + 1
+		WHERE id = $1
+	`, captainPlayerID); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE players
+		SET role = 'captain', session_version = session_version + 1
+		WHERE id = $1
+	`, targetPlayerID); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	var teamName string
+	var teamContactEmail string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT name, email
+		FROM teams
+		WHERE id = $1
+	`, teamID).Scan(&teamName, &teamContactEmail); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	var sessionVersion int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT session_version
+		FROM players
+		WHERE id = $1
+	`, captainPlayerID).Scan(&sessionVersion); err != nil {
+		return authenticatedPlayer{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return authenticatedPlayer{}, err
+	}
+
+	captain.TeamID = teamID
+	captain.TeamName = teamName
+	captain.TeamContactEmail = teamContactEmail
+	captain.Role = "member"
+	captain.SessionVersion = sessionVersion
+	return captain, nil
 }
 
 func (s *postgresStore) GetAdminPlayerWireGuardConfig(ctx context.Context, playerID int) (adminWireGuardPeer, error) {
@@ -2047,15 +2249,31 @@ func (s *postgresStore) UpdateAdminPlayer(ctx context.Context, playerID int, inp
 }
 
 func (s *postgresStore) SetPlayerActive(ctx context.Context, playerID int, active bool, now time.Time) (adminPlayer, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return adminPlayer{}, err
+	}
+	defer tx.Rollback()
+
 	if active {
-		if _, err := s.db.ExecContext(ctx, `UPDATE players SET active = TRUE, deactivated_at = NULL WHERE id = $1`, playerID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE players SET active = TRUE, deactivated_at = NULL WHERE id = $1`, playerID); err != nil {
 			return adminPlayer{}, fmt.Errorf("reactivate player: %w", err)
 		}
+		// Reactivating a former captain must not create a second captain: if the
+		// team gained an active captain while this player was deactivated, demote
+		// the reactivated player to member so the single-captain invariant holds.
+		if err := demoteReactivatedDuplicateCaptainTx(ctx, tx, playerID); err != nil {
+			return adminPlayer{}, err
+		}
 	} else {
-		if _, err := s.db.ExecContext(ctx, `UPDATE players SET active = FALSE, deactivated_at = $2 WHERE id = $1`, playerID, now.UTC()); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE players SET active = FALSE, deactivated_at = $2 WHERE id = $1`, playerID, now.UTC()); err != nil {
 			return adminPlayer{}, fmt.Errorf("deactivate player: %w", err)
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		return adminPlayer{}, err
+	}
+
 	players, err := s.ListAdminPlayers(ctx)
 	if err != nil {
 		return adminPlayer{}, err
@@ -2066,6 +2284,57 @@ func (s *postgresStore) SetPlayerActive(ctx context.Context, playerID int, activ
 		}
 	}
 	return adminPlayer{}, ErrPlayerNotFound
+}
+
+// demoteReactivatedDuplicateCaptainTx preserves the single-captain invariant
+// after a player is reactivated. If the player is a captain whose team already
+// has another active captain (promoted while they were deactivated), it demotes
+// the reactivated player to member and bumps session_version so any pre-existing
+// captain token stops validating. The player row is already write-locked by the
+// caller's UPDATE; the team row is locked to serialize concurrent joins/adds.
+func demoteReactivatedDuplicateCaptainTx(ctx context.Context, tx *sql.Tx, playerID int) error {
+	var role string
+	var teamID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT role, team_id
+		FROM players
+		WHERE id = $1
+	`, playerID).Scan(&role, &teamID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrPlayerNotFound
+		}
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(role), "captain") || !teamID.Valid || teamID.Int64 <= 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM teams WHERE id = $1 FOR UPDATE`, teamID.Int64); err != nil {
+		return err
+	}
+	var otherCaptain bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM players
+			WHERE team_id = $1
+			  AND id != $2
+			  AND active = TRUE
+			  AND role = 'captain'
+		)
+	`, teamID.Int64, playerID).Scan(&otherCaptain); err != nil {
+		return err
+	}
+	if !otherCaptain {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE players
+		SET role = 'member', session_version = session_version + 1
+		WHERE id = $1
+	`, playerID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID int, input adminUpdateChallengeRequest) (adminChallenge, error) {

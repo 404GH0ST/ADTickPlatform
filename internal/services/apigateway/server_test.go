@@ -1958,6 +1958,205 @@ func TestParticipantJoinRespectsMaxTeamMembers(t *testing.T) {
 	}
 }
 
+func TestFirstJoinerOfEmptyTeamBecomesCaptain(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	createTeamRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/teams", bytes.NewBufferString(`{"name":"Fresh Team","contact_email":"fresh@example.com"}`))
+	setTestAdminAuthHeader(createTeamRequest)
+	createTeamResponse := httptest.NewRecorder()
+	mux.ServeHTTP(createTeamResponse, createTeamRequest)
+	if createTeamResponse.Code != http.StatusOK {
+		t.Fatalf("expected team create 200, got %d: %s", createTeamResponse.Code, createTeamResponse.Body.String())
+	}
+	team := decodeCompat[adminTeam](t, createTeamResponse.Body.Bytes())
+	if strings.TrimSpace(team.JoinKey) == "" {
+		t.Fatalf("expected join key for fresh team, got %+v", team)
+	}
+
+	registerBody := `{"display_name":"First Joiner","email":"first.joiner@example.com","password":"member-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(registerBody))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(fmt.Sprintf(`{"team_key":%q}`, team.JoinKey)))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	sessionRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	sessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected session 200, got %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	session := decodeCompat[map[string]any](t, sessionResponse.Body.Bytes())
+	if session["role"] != "captain" {
+		t.Fatalf("expected first joiner to become captain, got %#v", session)
+	}
+	if session["team_id"] != float64(team.ID) {
+		t.Fatalf("expected team id %d, got %#v", team.ID, session)
+	}
+}
+
+func TestLaterJoinerStaysMemberWhenTeamAlreadyHasPlayers(t *testing.T) {
+	mux := newTestMux()
+
+	body := `{"display_name":"Later Joiner","email":"later.joiner@example.com","password":"member-secret"}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(body))
+	registerResponse := httptest.NewRecorder()
+	mux.ServeHTTP(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusOK {
+		t.Fatalf("expected register 200, got %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+	joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(`{"team_key":"TEAM-ALPHA-JOIN"}`))
+	joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+	joinResponse := httptest.NewRecorder()
+	mux.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("expected join 200, got %d: %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	sessionRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+	sessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected session 200, got %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	session := decodeCompat[map[string]any](t, sessionResponse.Body.Bytes())
+	if session["role"] != "member" {
+		t.Fatalf("expected later joiner to stay member, got %#v", session)
+	}
+}
+
+func TestCaptainCanTransferCaptainshipToTeammate(t *testing.T) {
+	store := NewMemoryStore(101)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+
+	createTeamRequest := httptest.NewRequest(http.MethodPost, "/api/v2/admin/teams", bytes.NewBufferString(`{"name":"Transfer Team","contact_email":"transfer@example.com"}`))
+	setTestAdminAuthHeader(createTeamRequest)
+	createTeamResponse := httptest.NewRecorder()
+	mux.ServeHTTP(createTeamResponse, createTeamRequest)
+	if createTeamResponse.Code != http.StatusOK {
+		t.Fatalf("expected team create 200, got %d: %s", createTeamResponse.Code, createTeamResponse.Body.String())
+	}
+	team := decodeCompat[adminTeam](t, createTeamResponse.Body.Bytes())
+
+	registerAndJoin := func(displayName, email string) (token string, playerID int) {
+		t.Helper()
+		registerRequest := httptest.NewRequest(http.MethodPost, "/api/v2/register", bytes.NewBufferString(fmt.Sprintf(
+			`{"display_name":%q,"email":%q,"password":"member-secret"}`,
+			displayName,
+			email,
+		)))
+		registerResponse := httptest.NewRecorder()
+		mux.ServeHTTP(registerResponse, registerRequest)
+		if registerResponse.Code != http.StatusOK {
+			t.Fatalf("expected register 200 for %s, got %d: %s", email, registerResponse.Code, registerResponse.Body.String())
+		}
+		registerPayload := decodeCompat[authenticateResponse](t, registerResponse.Body.Bytes())
+
+		joinRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team", bytes.NewBufferString(fmt.Sprintf(`{"team_key":%q}`, team.JoinKey)))
+		joinRequest.Header.Set("Authorization", "Bearer "+registerPayload.Token)
+		joinResponse := httptest.NewRecorder()
+		mux.ServeHTTP(joinResponse, joinRequest)
+		if joinResponse.Code != http.StatusOK {
+			t.Fatalf("expected join 200 for %s, got %d: %s", email, joinResponse.Code, joinResponse.Body.String())
+		}
+		joinPayload := decodeCompat[authenticateResponse](t, joinResponse.Body.Bytes())
+
+		sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+		sessionRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
+		sessionResponse := httptest.NewRecorder()
+		mux.ServeHTTP(sessionResponse, sessionRequest)
+		if sessionResponse.Code != http.StatusOK {
+			t.Fatalf("expected session 200 for %s, got %d: %s", email, sessionResponse.Code, sessionResponse.Body.String())
+		}
+		session := decodeCompat[map[string]any](t, sessionResponse.Body.Bytes())
+		return joinPayload.Token, int(session["player_id"].(float64))
+	}
+
+	captainToken, _ := registerAndJoin("Captain One", "captain.one@example.com")
+	_, memberID := registerAndJoin("Member Two", "member.two@example.com")
+
+	membersRequest := httptest.NewRequest(http.MethodGet, "/api/v2/me/team/members", nil)
+	membersRequest.Header.Set("Authorization", "Bearer "+captainToken)
+	membersResponse := httptest.NewRecorder()
+	mux.ServeHTTP(membersResponse, membersRequest)
+	if membersResponse.Code != http.StatusOK {
+		t.Fatalf("expected members 200, got %d: %s", membersResponse.Code, membersResponse.Body.String())
+	}
+	members := decodeCompat[[]teamMember](t, membersResponse.Body.Bytes())
+	if len(members) != 2 {
+		t.Fatalf("expected 2 team members, got %+v", members)
+	}
+
+	transferRequest := httptest.NewRequest(http.MethodPost, "/api/v2/me/team/captain", bytes.NewBufferString(fmt.Sprintf(`{"player_id":%d}`, memberID)))
+	transferRequest.Header.Set("Authorization", "Bearer "+captainToken)
+	transferResponse := httptest.NewRecorder()
+	mux.ServeHTTP(transferResponse, transferRequest)
+	if transferResponse.Code != http.StatusOK {
+		t.Fatalf("expected transfer 200, got %d: %s", transferResponse.Code, transferResponse.Body.String())
+	}
+	transferPayload := decodeCompat[authenticateResponse](t, transferResponse.Body.Bytes())
+
+	oldCaptainSessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	oldCaptainSessionRequest.Header.Set("Authorization", "Bearer "+transferPayload.Token)
+	oldCaptainSessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(oldCaptainSessionResponse, oldCaptainSessionRequest)
+	if oldCaptainSessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected old captain session 200, got %d: %s", oldCaptainSessionResponse.Code, oldCaptainSessionResponse.Body.String())
+	}
+	oldCaptainSession := decodeCompat[map[string]any](t, oldCaptainSessionResponse.Body.Bytes())
+	if oldCaptainSession["role"] != "member" {
+		t.Fatalf("expected former captain to become member, got %#v", oldCaptainSession)
+	}
+
+	// Old pre-transfer token must be revoked via session_version bump.
+	staleSessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	staleSessionRequest.Header.Set("Authorization", "Bearer "+captainToken)
+	staleSessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(staleSessionResponse, staleSessionRequest)
+	if staleSessionResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected old captain token revoked, got %d: %s", staleSessionResponse.Code, staleSessionResponse.Body.String())
+	}
+
+	// Target should now be captain after re-auth via password-less path: list members with a fresh login.
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v2/authenticate", bytes.NewBufferString(`{"email":"member.two@example.com","password":"member-secret"}`))
+	loginResponse := httptest.NewRecorder()
+	mux.ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("expected new captain login 200, got %d: %s", loginResponse.Code, loginResponse.Body.String())
+	}
+	loginPayload := decodeCompat[authenticateResponse](t, loginResponse.Body.Bytes())
+	newCaptainSessionRequest := httptest.NewRequest(http.MethodGet, "/api/v2/session", nil)
+	newCaptainSessionRequest.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+	newCaptainSessionResponse := httptest.NewRecorder()
+	mux.ServeHTTP(newCaptainSessionResponse, newCaptainSessionRequest)
+	if newCaptainSessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected new captain session 200, got %d: %s", newCaptainSessionResponse.Code, newCaptainSessionResponse.Body.String())
+	}
+	newCaptainSession := decodeCompat[map[string]any](t, newCaptainSessionResponse.Body.Bytes())
+	if newCaptainSession["role"] != "captain" {
+		t.Fatalf("expected transferred captain role, got %#v", newCaptainSession)
+	}
+}
+
 func TestAllAdminRoutesRejectUnauthenticatedAndParticipantCallers(t *testing.T) {
 	mux := newTestMux()
 	cases := []struct {
@@ -2777,11 +2976,11 @@ func TestSanitizePublicGameStatusStripsWarmupFailures(t *testing.T) {
 		Match: &GameMatchStatus{
 			State: "running",
 			Warmup: &GameWarmupResult{
-				Status:      "failed",
-				PutFailed:   2,
-				PutSuccess:  1,
+				Status:       "failed",
+				PutFailed:    2,
+				PutSuccess:   1,
 				TotalTargets: 3,
-				Message:     "put phase did not succeed: status=failed message=docker run -e AD_FLAG=PLAYIT{x} -e AD_CHECKER_TOKEN=tok",
+				Message:      "put phase did not succeed: status=failed message=docker run -e AD_FLAG=PLAYIT{x} -e AD_CHECKER_TOKEN=tok",
 				Failures: []GameWarmupFailure{
 					{TeamID: 101, ChallengeID: 1, ChallengeName: "http", Error: "docker run -e AD_FLAG=PLAYIT{x} -e AD_CHECKER_TOKEN=tok failed"},
 				},

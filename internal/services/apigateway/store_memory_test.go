@@ -82,6 +82,70 @@ func TestDeactivatedPlayerStillRequiresTheCorrectPassword(t *testing.T) {
 	}
 }
 
+func TestReactivatedCaptainIsDemotedWhenTeamAlreadyHasCaptain(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	ctx := context.Background()
+
+	// Deactivate the seeded captain of team 101, leaving it captain-less.
+	if _, err := store.SetPlayerActive(ctx, 1, false, time.Now()); err != nil {
+		t.Fatalf("deactivate captain: %v", err)
+	}
+
+	// Adding a plain member to a captain-less team backfills the captaincy.
+	promoted, err := store.CreateAdminPlayer(ctx, adminCreatePlayerRequest{
+		TeamID:      101,
+		DisplayName: "Backfill Captain",
+		Email:       "backfill@example.com",
+		Password:    "backfill-secret",
+		Role:        "member",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("create backfill player: %v", err)
+	}
+	if promoted.Role != "captain" {
+		t.Fatalf("expected backfill member promoted to captain, got %q", promoted.Role)
+	}
+
+	// Reactivating the original captain must not create a second captain.
+	reactivated, err := store.SetPlayerActive(ctx, 1, true, time.Now())
+	if err != nil {
+		t.Fatalf("reactivate original captain: %v", err)
+	}
+	if reactivated.Role != "member" {
+		t.Fatalf("expected reactivated captain demoted to member, got %q", reactivated.Role)
+	}
+
+	members, err := store.ListTeamMembers(ctx, 101)
+	if err != nil {
+		t.Fatalf("list team members: %v", err)
+	}
+	captains := 0
+	for _, m := range members {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "captain") {
+			captains++
+		}
+	}
+	if captains != 1 {
+		t.Fatalf("expected exactly one captain on team 101, got %d (%+v)", captains, members)
+	}
+}
+
+func TestReactivatedCaptainKeepsRoleWhenNoOtherCaptain(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	ctx := context.Background()
+
+	if _, err := store.SetPlayerActive(ctx, 1, false, time.Now()); err != nil {
+		t.Fatalf("deactivate captain: %v", err)
+	}
+	reactivated, err := store.SetPlayerActive(ctx, 1, true, time.Now())
+	if err != nil {
+		t.Fatalf("reactivate captain: %v", err)
+	}
+	if reactivated.Role != "captain" {
+		t.Fatalf("expected sole captain to remain captain after reactivation, got %q", reactivated.Role)
+	}
+}
+
 func TestMemoryStoreReusesDeletedTeamNetworkID(t *testing.T) {
 	store := NewMemoryStore(101)
 	ctx := context.Background()

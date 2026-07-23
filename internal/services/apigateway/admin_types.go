@@ -92,6 +92,17 @@ type participantUpdateProfileRequest struct {
 	TeamContactEmail string `json:"team_contact_email"`
 }
 
+type teamMember struct {
+	PlayerID    int    `json:"player_id"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Role        string `json:"role"`
+}
+
+type transferTeamCaptainRequest struct {
+	PlayerID int `json:"player_id"`
+}
+
 type adminWireGuardPeer struct {
 	PlayerID        int    `json:"player_id"`
 	TeamID          int    `json:"team_id"`
@@ -142,30 +153,30 @@ type WireGuardGatewayStatus struct {
 }
 
 type adminChallenge struct {
-	ID                 int                        `json:"id"`
-	Name               string                     `json:"name"`
-	BaselineImage      string                     `json:"baseline_image"`
-	CheckerImage       string                     `json:"checker_image"`
-	SourceBundlePath   string                     `json:"source_bundle_path"`
-	ServicePort        int                        `json:"service_port"`
-	ServiceSubnetOctet int                        `json:"service_subnet_octet"`
-	EgressEnabled      bool                       `json:"egress_enabled"`
-	Published          bool                       `json:"published"`
-	Maintenance        bool                       `json:"maintenance"`
-	MaintenanceAt      string                     `json:"maintenance_at,omitempty"`
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	BaselineImage      string `json:"baseline_image"`
+	CheckerImage       string `json:"checker_image"`
+	SourceBundlePath   string `json:"source_bundle_path"`
+	ServicePort        int    `json:"service_port"`
+	ServiceSubnetOctet int    `json:"service_subnet_octet"`
+	EgressEnabled      bool   `json:"egress_enabled"`
+	Published          bool   `json:"published"`
+	Maintenance        bool   `json:"maintenance"`
+	MaintenanceAt      string `json:"maintenance_at,omitempty"`
 	// PlayFromTick, when set, defers checker/scoring/participant access until
 	// that tick id exists (set on maintenance resume to "next tick").
 	PlayFromTick int `json:"play_from_tick,omitempty"`
 	// UnlockProofEpoch is mixed into unlock proofs. Bumped on maintenance (and
 	// via explicit rotate) so stolen proofs stop working after a security fix.
-	UnlockProofEpoch int `json:"unlock_proof_epoch"`
-	DeployedTeams    int `json:"deployed_teams"`
-	TotalTeams         int                        `json:"total_teams"`
-	RuntimeStatus      string                     `json:"runtime_status"`
-	QueuedTeams        int                        `json:"queued_teams"`
-	ReadyTeams         int                        `json:"ready_teams"`
-	CreatedAt          string                     `json:"created_at"`
-	LastValidation     *ChallengeValidationResult `json:"last_validation,omitempty"`
+	UnlockProofEpoch int                        `json:"unlock_proof_epoch"`
+	DeployedTeams    int                        `json:"deployed_teams"`
+	TotalTeams       int                        `json:"total_teams"`
+	RuntimeStatus    string                     `json:"runtime_status"`
+	QueuedTeams      int                        `json:"queued_teams"`
+	ReadyTeams       int                        `json:"ready_teams"`
+	CreatedAt        string                     `json:"created_at"`
+	LastValidation   *ChallengeValidationResult `json:"last_validation,omitempty"`
 }
 
 type adminDeployment struct {

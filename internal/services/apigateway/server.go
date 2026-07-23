@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -102,6 +103,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/authenticate", s.handleAuthenticate)
 	mux.HandleFunc("POST /api/v2/register", s.handleRegisterPlayer)
 	mux.HandleFunc("POST /api/v2/me/team", s.handleJoinExistingTeam)
+	mux.HandleFunc("GET /api/v2/me/team/members", s.handleListTeamMembers)
+	mux.HandleFunc("POST /api/v2/me/team/captain", s.handleTransferTeamCaptain)
 	mux.HandleFunc("PUT /api/v2/me/profile", s.handleUpdateParticipantProfile)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
 	s.registerOpsFeatureRoutes(mux)
@@ -329,6 +332,59 @@ func (s *Server) handleJoinExistingTeam(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
+}
+
+func (s *Server) handleListTeamMembers(w http.ResponseWriter, r *http.Request) {
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before listing team members.")
+	if !ok {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(player.Role), "organizer") || player.TeamID <= 0 {
+		writeProblem(w, http.StatusForbidden, "Team membership required", "please join a team before listing team members.")
+		return
+	}
+	members, err := s.store.ListTeamMembers(r.Context(), player.TeamID)
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, members)
+}
+
+func (s *Server) handleTransferTeamCaptain(w http.ResponseWriter, r *http.Request) {
+	player, ok := s.requirePlayerAuth(w, r, "please authenticate before transferring captain.")
+	if !ok {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(player.Role), "captain") || player.TeamID <= 0 {
+		writeProblem(w, http.StatusForbidden, "Captain required", "only the team captain can transfer captainship.")
+		return
+	}
+	var req transferTeamCaptainRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil || req.PlayerID <= 0 {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "player_id is required.")
+		return
+	}
+	updatedPlayer, err := s.store.TransferTeamCaptain(r.Context(), player.PlayerID, req.PlayerID)
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	s.recordTeamAudit(r.Context(), player.TeamID, "team.captain.transfer", "player", fmt.Sprintf("player:%d", req.PlayerID), "transferred team captainship", map[string]any{
+		"from_player_id": player.PlayerID,
+		"to_player_id":   req.PlayerID,
+		"team_id":        player.TeamID,
+	})
+	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	if err != nil {
+		// The transfer already committed and invalidated the caller's previous
+		// token, so this is not a failed transfer. Report it honestly so the
+		// former captain re-authenticates instead of assuming nothing happened.
+		log.Printf("captain transfer committed but token issuance failed: %v", err)
+		writeProblem(w, http.StatusInternalServerError, "Session renewal required", "captainship was transferred, but your session could not be refreshed. please sign in again.")
+		return
+	}
 	writeData(w, http.StatusOK, authenticateResponse{Token: token, TokenType: "Bearer"})
 }
 
@@ -1327,6 +1383,10 @@ func writeDomainFailure(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusConflict, "Duplicate resource", "resource already exists.")
 	case errors.Is(err, ErrTeamMemberLimit):
 		writeProblem(w, http.StatusBadRequest, "Request rejected", "team has reached the maximum member count.")
+	case errors.Is(err, ErrNotTeamCaptain):
+		writeProblem(w, http.StatusForbidden, "Captain required", "only the team captain can perform this action.")
+	case errors.Is(err, ErrInvalidCaptainTransfer):
+		writeProblem(w, http.StatusBadRequest, "Captain transfer rejected", "captainship can only be transferred to another active teammate.")
 	case errors.Is(err, ErrTeamAddressPool), errors.Is(err, ErrPlayerAddressPool):
 		writeProblem(w, http.StatusConflict, "Address pool exhausted", "the configured private network address pool has no remaining capacity.")
 	case errors.Is(err, ErrInvalidRuntimeConfig):
