@@ -19,6 +19,12 @@ import { StatusBanner } from "@/components/ui/status-banner";
 import type { PlatformOverview } from "@/lib/dashboard-types";
 import { parseApiError } from "@/lib/api-utils";
 
+type TeamMember = {
+  player_id: number;
+  display_name: string;
+  email: string;
+  role: string;
+};
 type Draft = {
   displayName: string;
   email: string;
@@ -48,21 +54,85 @@ export function ParticipantAccountSettings({
     newPassword: "",
     confirmPassword: "",
   });
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [transferPlayerID, setTransferPlayerID] = useState<number | "">("");
   const hasTeam = (overview.teamID ?? 0) > 0 && overview.role !== "organizer";
   const canEditTeam = hasTeam && overview.role === "captain";
+  // Exclude the current captain (role "captain") so the list is correct even
+  // when overview.playerID is undefined, plus organizers who can never captain.
+  const transferableMembers = members.filter(
+    (member) =>
+      member.role !== "organizer" &&
+      member.role !== "captain" &&
+      member.player_id !== overview.playerID,
+  );
 
+  // Reset the form only when the dialog transitions to open — not on every
+  // overview refresh — so a success banner survives the router.refresh() that
+  // follows a save or captain transfer.
   useEffect(() => {
-    if (open) {
-      setDraft(draftFromOverview(overview));
-      setPasswordDraft({
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      });
-      setMessage(null);
-      setError(null);
+    if (!open) {
+      return;
     }
-  }, [open, overview]);
+    setDraft(draftFromOverview(overview));
+    setPasswordDraft({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+    setMessage(null);
+    setError(null);
+    setTransferPlayerID("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Load team members for captains while the dialog is open.
+  useEffect(() => {
+    if (!open || !canEditTeam) {
+      setMembers([]);
+      return;
+    }
+
+    let cancelled = false;
+    setMembersLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/platform/session/team/members", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response,
+              "/api/platform/session/team/members",
+            ),
+          );
+        }
+        const payload = (await response.json()) as TeamMember[];
+        if (!cancelled) {
+          setMembers(Array.isArray(payload) ? payload : []);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setMembers([]);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "failed to load team members",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setMembersLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, canEditTeam]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,6 +203,40 @@ export function ParticipantAccountSettings({
         updateError instanceof Error
           ? updateError.message
           : "profile update failed",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function transferCaptain() {
+    if (transferPlayerID === "" || transferPlayerID <= 0) {
+      setError("choose a teammate to receive captainship");
+      return;
+    }
+    setPending(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await fetch("/api/platform/session/team/captain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player_id: transferPlayerID }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await parseApiError(response, "/api/platform/session/team/captain"),
+        );
+      }
+      // Keep the dialog open so the success banner is visible; router.refresh()
+      // re-renders this section as a former captain (a plain team member).
+      setMessage("Captainship transferred. You are now a team member.");
+      router.refresh();
+    } catch (transferError) {
+      setError(
+        transferError instanceof Error
+          ? transferError.message
+          : "captain transfer failed",
       );
     } finally {
       setPending(false);
@@ -226,6 +330,68 @@ export function ParticipantAccountSettings({
                     required
                   />
                 </Field>
+                <div className="grid gap-2 border-t pt-4">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      Transfer captain
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Give captainship to another teammate. You become a member.
+                    </p>
+                  </div>
+                  {membersLoading ? (
+                    <p className="text-sm text-muted-foreground">
+                      Loading teammates...
+                    </p>
+                  ) : transferableMembers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No other teammates available yet.
+                    </p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                      <Field
+                        label="Teammate"
+                        htmlFor="participant-transfer-captain"
+                      >
+                        <select
+                          id="participant-transfer-captain"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={
+                            transferPlayerID === ""
+                              ? ""
+                              : String(transferPlayerID)
+                          }
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setTransferPlayerID(
+                              value === "" ? "" : Number(value),
+                            );
+                          }}
+                        >
+                          <option value="">Select teammate</option>
+                          {transferableMembers.map((member) => (
+                            <option
+                              key={member.player_id}
+                              value={member.player_id}
+                            >
+                              {member.display_name} ({member.email})
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={pending || transferPlayerID === ""}
+                        onClick={() => {
+                          void transferCaptain();
+                        }}
+                      >
+                        Transfer
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </section>
             ) : hasTeam ? (
               <StatusBanner

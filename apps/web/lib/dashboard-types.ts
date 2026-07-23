@@ -64,6 +64,7 @@ export type PlatformOverview = {
   message?: string;
   authenticated: boolean;
   teamID?: number;
+  playerID?: number;
   teamName?: string;
   teamContactEmail?: string;
   displayName?: string;

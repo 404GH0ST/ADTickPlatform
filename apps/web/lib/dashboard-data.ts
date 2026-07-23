@@ -255,6 +255,7 @@ function buildPlatformOverview(
     message: dashboardMessage(session, source),
     authenticated: session.authenticated,
     teamID: session.teamID,
+    playerID: session.playerID,
     teamName: session.teamName,
     teamContactEmail: session.teamContactEmail,
     displayName: session.displayName,
