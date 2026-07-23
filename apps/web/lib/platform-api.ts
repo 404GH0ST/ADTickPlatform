@@ -365,6 +365,42 @@ export async function joinCurrentParticipantTeam(teamKey: string) {
   return payload.token;
 }
 
+export type TeamMember = {
+  player_id: number;
+  display_name: string;
+  email: string;
+  role: string;
+};
+
+export async function listCurrentTeamMembers() {
+  return participantFetch<TeamMember[]>("/api/v2/me/team/members");
+}
+
+export async function transferCurrentTeamCaptain(playerID: number) {
+  const token = await getParticipantToken();
+  const response = await fetch(`${apiBaseUrl()}/api/v2/me/team/captain`, {
+    method: "POST",
+    headers: await platformRequestHeaders({
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    }),
+    body: JSON.stringify({
+      player_id: playerID,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new PlatformAPIError(
+      await parseApiError(response, "/api/v2/me/team/captain"),
+      response.status,
+      response.headers.get("retry-after"),
+    );
+  }
+  const payload = (await response.json()) as AuthenticateResponse;
+  return payload.token;
+}
+
 export async function updateCurrentParticipantProfile(input: {
   displayName: string;
   email: string;
