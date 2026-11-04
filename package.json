@@ -1,12 +1,12 @@
 {
   "name": "ad-platform",
   "private": true,
-  "packageManager": "bun@1.3.10",
+  "packageManager": "bun@1.4.4",
   "workspaces": [
     "apps/*"
   ],
   "overrides": {
-    "postcss": "8.5.15"
+    "postcss": "8.5.32"
   },
   "scripts": {
     "release-notes": "./scripts/release-notes.sh",
@@ -19,7 +19,7 @@
     "web:e2e": "cd apps/web && bun run e2e"
   },
   "devDependencies": {
-    "conventional-changelog-angular": "^8.3.1",
+    "conventional-changelog-angular": "^9.4.0",
     "conventional-changelog-cli": "^5.0.0"
   }
 }
