@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION}-alpine AS builder
 
@@ -17,7 +17,7 @@ COPY services ./services
 RUN test -n "${SERVICE_PATH}"
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -o /out/service "./services/${SERVICE_PATH}"
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 ARG EXTRA_APK=""
 ARG APK_RETRIES=5
