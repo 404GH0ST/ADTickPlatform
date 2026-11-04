@@ -98,13 +98,26 @@ export function splitCsvLine(line: string): string[] {
   return cells;
 }
 
+// Spreadsheet apps run a cell as a formula when it starts with one of these.
+// Team and player names are participant-controlled, so exported text must not
+// be able to start a formula (CSV/formula injection).
+const formulaTriggerPattern = /^\s*[=+\-@\t\r]/;
+const plainNumberPattern = /^[+-]?\d+(\.\d+)?$/;
+
+function neutralizeFormula(value: string): string {
+  if (plainNumberPattern.test(value) || !formulaTriggerPattern.test(value)) {
+    return value;
+  }
+  return `'${value}`;
+}
+
 export function toCsv(rows: string[][]): string {
   return rows
     .map((row) =>
       row
         .map((cell) => {
-          const value = String(cell ?? "");
-          if (/[",\n]/.test(value)) {
+          const value = neutralizeFormula(String(cell ?? ""));
+          if (/[",\r\n]/.test(value)) {
             return `"${value.replaceAll('"', '""')}"`;
           }
           return value;
