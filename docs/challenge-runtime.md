@@ -316,7 +316,12 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 set -eu
 
 mkdir -p /run/sshd /opt/ad/state
-echo "root:bootstrap" | chpasswd
+
+# Do NOT ship a known root password. The platform provisions a per-team root
+# credential (via chpasswd) only when a team unlocks SSH. Lock the account so
+# password auth cannot succeed before provisioning; a hardcoded password would
+# let any team that can reach the SSH port log in as root.
+passwd -l root >/dev/null 2>&1 || true
 
 /usr/sbin/sshd
 exec python3 /app/service.py
