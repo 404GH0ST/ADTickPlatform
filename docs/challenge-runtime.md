@@ -382,3 +382,13 @@ Checker expectations:
 - print `ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}` during `validate`
 - reach the target through `AD_TARGET_HOST` and `AD_TARGET_PORT`
 - treat `AD_FLAG` as the authoritative flag value for the current tick
+
+Reporting service state safely:
+
+- Emit the `ADPLATFORM_SERVICE_STATE=` line **before** echoing any
+  target-derived output. Checker stdout and stderr are merged, so a malicious
+  service can print its own `ADPLATFORM_SERVICE_STATE=` marker in its response;
+  the runner honors only the first such line, so a verdict you print first wins.
+- Do not blindly relay the target's raw response to stdout after your verdict if
+  it could contain a crafted marker. If you must, strip lines beginning with
+  `ADPLATFORM_SERVICE_STATE=` from target output before printing them.

@@ -922,8 +922,22 @@ func parseCheckerServiceStateOutput(output []byte, allowReportedState bool) (str
 			continue
 		}
 
-		reportedStatus = normalized
-		reportedMessage = strings.TrimSpace(payload.Message)
+		// Honor only the FIRST reported-state line. This hardens the documented
+		// checker pattern (emit the verdict line, then echo target output): a
+		// malicious service echoing an ADPLATFORM_SERVICE_STATE= marker later in
+		// the merged stdout/stderr stream can no longer override a verdict the
+		// checker already printed.
+		//
+		// NOTE: this is ordering-dependent, not a hard trust boundary. A checker
+		// that prints target-derived output BEFORE its own verdict could still be
+		// spoofed, because checker and service text share one stream. The robust
+		// fix is to bind the marker to the run — e.g. require the per-run
+		// AD_CHECKER_TOKEN (which the target never sees) in the marker, or emit
+		// state on a dedicated fd/file. See docs/challenge-runtime.md.
+		if reportedStatus == "" {
+			reportedStatus = normalized
+			reportedMessage = strings.TrimSpace(payload.Message)
+		}
 	}
 
 	return strings.TrimSpace(strings.Join(filtered, "\n")), reportedStatus, reportedMessage
