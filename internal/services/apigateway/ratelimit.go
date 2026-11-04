@@ -387,10 +387,6 @@ func rateLimitAuthKey(email, clientIP string) string {
 	return fmt.Sprintf("auth:email:%s:ip:%s", normalizedRateLimitEmail(email), clientIP)
 }
 
-func rateLimitAuthEmailKey(email string) string {
-	return fmt.Sprintf("auth:email:%s", normalizedRateLimitEmail(email))
-}
-
 func rateLimitRegistrationEmailKey(email string) string {
 	return fmt.Sprintf("register:email:%s", normalizedRateLimitEmail(email))
 }
