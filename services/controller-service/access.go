@@ -393,9 +393,12 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-p", "tcp", "--sport", servicePort, "-j", "ACCEPT"); err != nil {
 			return err
 		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", serviceCIDR, "-p", "tcp", "--sport", servicePort, "-j", "ACCEPT"); err != nil {
-			return err
-		}
+		// No interface-agnostic source-port accept here. Reply traffic is already
+		// covered by the global ESTABLISHED,RELATED accept at the top of this
+		// chain, so a bare `-s serviceIP --sport servicePort` accept would only
+		// ever add NEW packets the service originates itself (e.g. to another
+		// team's SSH port with a spoofed source port), bypassing the SSH DROP
+		// rules below. It is therefore omitted entirely.
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
 			return err
 		}
@@ -595,7 +598,12 @@ func appendControllerAccessPolicyRules(
 				if egressPrefix != "" {
 					builder.WriteString(fmt.Sprintf("    %sip saddr %s tcp sport %d accept\n", egressPrefix, policy.ServiceIP, policy.ServicePort))
 				}
-				builder.WriteString(fmt.Sprintf("    ip saddr %s tcp sport %d accept\n", policy.ServiceIP, policy.ServicePort))
+				// No interface-agnostic source-port accept here: reply traffic is
+				// already covered by the global `ct state established,related accept`
+				// at the top of the forward chain. A bare `ip saddr serviceIP tcp
+				// sport servicePort accept` would only add NEW packets the service
+				// originates itself (e.g. to another team's SSH port with a spoofed
+				// source port), bypassing the SSH drop below, so it is omitted.
 				if egressPrefix != "" {
 					builder.WriteString(fmt.Sprintf("    %sip saddr %s ct state established,related accept\n", egressPrefix, policy.ServiceIP))
 				}

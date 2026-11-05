@@ -195,7 +195,14 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
-	decision, allowed = s.allowRateLimit(r.Context(), rateLimitAuthEmailKey(req.Email), authRateLimitPolicy)
+	// Per-(email, client) throttle, enforced before the password is checked so a
+	// throttled request never reveals whether the password was right. Keying on
+	// the client as well as the email means an attacker flooding a victim's
+	// email with bad guesses only exhausts their own (email, their-IP) bucket and
+	// cannot lock the victim out from a different address, while still bounding
+	// guesses per source. The per-IP limiter above bounds volume regardless of
+	// email.
+	decision, allowed = s.allowRateLimit(r.Context(), rateLimitAuthKey(req.Email, clientRateLimitKey(r)), authRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return

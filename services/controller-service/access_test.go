@@ -30,8 +30,14 @@ func TestRenderControllerAccessRulesEnforcesPublicServiceAndSSHAllowlist(t *test
 	if !strings.Contains(rules, `oifname "wg0" ip saddr 10.80.1.11 tcp sport 10001 accept`) {
 		t.Fatalf("expected reverse service port rule")
 	}
-	if !strings.Contains(rules, `ip saddr 10.80.1.11 tcp sport 10001 accept`) {
-		t.Fatalf("expected reverse service fallback rule")
+	// The interface-agnostic source-port accept must NOT be emitted: replies are
+	// covered by the global established/related accept, and a bare version would
+	// let a service originate NEW packets (e.g. to another team's SSH) past the
+	// SSH drop. Only the oifname-scoped reverse rule above is allowed; guard
+	// against an unscoped variant (a line beginning `ip saddr ... sport`) being
+	// reintroduced.
+	if strings.Contains(rules, "\n    ip saddr 10.80.1.11 tcp sport 10001") {
+		t.Fatalf("interface-agnostic reverse service-port accept must not be emitted")
 	}
 	if !strings.Contains(rules, `oifname "wg0" ip saddr 10.80.1.11 ct state established,related accept`) {
 		t.Fatalf("expected reverse service rule")
@@ -220,8 +226,12 @@ func TestHostServiceAccessExecutorRunsNft(t *testing.T) {
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") {
 		t.Fatalf("expected reverse service port accept command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") {
-		t.Fatalf("expected reverse service fallback accept command %#v", runner.commands)
+	// The interface-agnostic source-port accept must not be emitted (replies are
+	// covered by the global ESTABLISHED,RELATED accept; a bare version would let
+	// a service originate NEW packets past the SSH drop).
+	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") ||
+		containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
+		t.Fatalf("interface-agnostic reverse service-port accept must not be emitted %#v", runner.commands)
 	}
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
 		t.Fatalf("expected reverse accept command %#v", runner.commands)

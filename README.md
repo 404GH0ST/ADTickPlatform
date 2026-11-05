@@ -2,7 +2,7 @@
 
 A comprehensive, production-ready Attack-Defense Tick Capture The Flag (CTF) platform.
 
-[![Go Version](https://img.shields.io/badge/Go-1.26-blue.svg?style=flat-squared&logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.27-blue.svg?style=flat-squared&logo=go)](https://go.dev)
 [![TypeScript Version](https://img.shields.io/badge/TypeScript-5.x-blue.svg?style=flat-squared&logo=typescript)](https://www.typescriptlang.org)
 [![Docker Support](https://img.shields.io/badge/Containerized-Docker%20Compose-blue.svg?style=flat-squared&logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-squared)](LICENSE)

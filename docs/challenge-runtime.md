@@ -316,7 +316,12 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 set -eu
 
 mkdir -p /run/sshd /opt/ad/state
-echo "root:bootstrap" | chpasswd
+
+# Do NOT ship a known root password. The platform provisions a per-team root
+# credential (via chpasswd) only when a team unlocks SSH. Lock the account so
+# password auth cannot succeed before provisioning; a hardcoded password would
+# let any team that can reach the SSH port log in as root.
+passwd -l root >/dev/null 2>&1 || true
 
 /usr/sbin/sshd
 exec python3 /app/service.py
@@ -377,3 +382,13 @@ Checker expectations:
 - print `ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}` during `validate`
 - reach the target through `AD_TARGET_HOST` and `AD_TARGET_PORT`
 - treat `AD_FLAG` as the authoritative flag value for the current tick
+
+Reporting service state safely:
+
+- Emit the `ADPLATFORM_SERVICE_STATE=` line **before** echoing any
+  target-derived output. Checker stdout and stderr are merged, so a malicious
+  service can print its own `ADPLATFORM_SERVICE_STATE=` marker in its response;
+  the runner honors only the first such line, so a verdict you print first wins.
+- Do not blindly relay the target's raw response to stdout after your verdict if
+  it could contain a crafted marker. If you must, strip lines beginning with
+  `ADPLATFORM_SERVICE_STATE=` from target output before printing them.

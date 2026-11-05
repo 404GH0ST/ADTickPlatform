@@ -35,7 +35,7 @@ services:
   docker-socket-proxy:
     # This container can mutate Docker host state; keep its reviewed image
     # immutable instead of following a mutable release tag.
-    image: tecnativa/docker-socket-proxy@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
+    image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459 # v0.5.0
     restart: unless-stopped
     environment:
       CONTAINERS: 1
@@ -479,7 +479,7 @@ services:
   # in prod every service runs inside the "control" network.
 
   prometheus:
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:v3.15.1
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -497,7 +497,7 @@ services:
       - control
 
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:13.3.0
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}

@@ -22,6 +22,17 @@ export type AttackSfxPreferences = {
   volume: number;
 };
 
+// The server has no localStorage or media query, so it always renders with these
+// values. The client's first (hydration) render must use the exact same object so
+// the server HTML and client tree match; the mount effect below then syncs the real
+// stored preference. Reading localStorage in the useState initializer instead would
+// desync hydration: React keeps the server attributes, and a follow-up setState to
+// the already-current value bails out, leaving the control stuck on the SSR default.
+const SERVER_DEFAULT_PREFERENCES: AttackSfxPreferences = {
+  enabled: true,
+  volume: ATTACK_SFX_DEFAULT_VOLUME,
+};
+
 export function useAttackSfxPreview() {
   const audioContextRef = useRef<BrowserAudioContext | null>(null);
   const preferencesRef = useRef<AttackSfxPreferences>(readAttackSfxPreferences());
@@ -72,8 +83,8 @@ export function useAttackSfxPreview() {
 }
 
 export function useAttackSfxPreferences() {
-  const [preferences, setPreferences] = useState<AttackSfxPreferences>(() =>
-    readAttackSfxPreferences(),
+  const [preferences, setPreferences] = useState<AttackSfxPreferences>(
+    SERVER_DEFAULT_PREFERENCES,
   );
 
   useEffect(() => {

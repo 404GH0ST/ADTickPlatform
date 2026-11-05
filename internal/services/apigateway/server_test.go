@@ -1228,7 +1228,7 @@ func TestAuthenticateUsesIndependentClientAndEmailRateLimits(t *testing.T) {
 	}
 	wantKeys := []string{
 		"auth:client:198.51.100.20",
-		"auth:email:alpha.captain@example.com",
+		"auth:email:alpha.captain@example.com:ip:198.51.100.20",
 	}
 	if !slices.Equal(limiter.keys, wantKeys) {
 		t.Fatalf("expected independent authentication rate-limit keys %v, got %v", wantKeys, limiter.keys)
@@ -1485,9 +1485,12 @@ func TestDeletedPlayerTokenIsRejected(t *testing.T) {
 }
 
 func TestAuthenticateReturnsRateLimit429(t *testing.T) {
+	// The per-(email, client) bucket is enforced before the password is checked,
+	// so a throttled request returns 429 and never reveals whether the password
+	// was right. A correct password from the same throttled client is still 429.
 	mux := newTestMuxWithLimiter(testRateLimiter{
 		denyKeys: map[string]bool{
-			rateLimitAuthEmailKey("alpha.captain@example.com"): true,
+			rateLimitAuthKey("alpha.captain@example.com", "203.0.113.10"): true,
 		},
 		retryAfter: 4 * time.Second,
 	})
@@ -1514,6 +1517,41 @@ func TestAuthenticateReturnsRateLimit429(t *testing.T) {
 	}
 	if payload.Detail != defaultRateLimit429Message {
 		t.Fatalf("unexpected rate-limit message %q", payload.Detail)
+	}
+}
+
+// TestAuthenticateEmailRateLimitDoesNotLockOutValidLogin guards the fix for the
+// account-lockout DoS: because the per-email auth bucket is keyed on the client
+// too, an attacker exhausting a victim's email bucket from the attacker's own
+// address must not stop the victim from logging in from a different address.
+func TestAuthenticateEmailRateLimitDoesNotLockOutValidLogin(t *testing.T) {
+	// Attacker at 198.51.100.9 has burned the (victim-email, attacker-IP) bucket.
+	mux := newTestMuxWithLimiter(testRateLimiter{
+		denyKeys: map[string]bool{
+			rateLimitAuthKey("alpha.captain@example.com", "198.51.100.9"): true,
+		},
+		retryAfter: 4 * time.Second,
+	})
+	// Victim logs in from their own address with the correct password.
+	body := bytes.NewBufferString(`{"email":"alpha.captain@example.com","password":"alpha-secret"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/authenticate", body)
+	request.RemoteAddr = "203.0.113.10:51234"
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 for the victim from a different address, got %d", response.Code)
+	}
+	var payload struct {
+		Token     string `json:"token"`
+		TokenType string `json:"token_type"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	if strings.TrimSpace(payload.Token) == "" {
+		t.Fatalf("expected a token to be issued on valid login")
 	}
 }
 

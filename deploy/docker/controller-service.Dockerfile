@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION}-alpine AS builder
 
@@ -15,9 +15,9 @@ COPY services ./services
 
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -o /out/service ./services/controller-service
 
-FROM docker:28-cli AS dockercli
+FROM docker:29-cli AS dockercli
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
