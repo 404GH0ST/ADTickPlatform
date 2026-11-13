@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -40,6 +41,39 @@ func exchange(op, nonce string) (message, error) {
 		err = fmt.Errorf("startup gate rejected request")
 	}
 	return reply, err
+}
+
+// A container-root process may rebind the fixed abstract socket after the
+// gate execs the application. Docker init is PID 1; its single direct child
+// is the entrypoint. Only that child may report readiness or release the gate.
+func verifyGateLeader() error {
+	children, err := os.ReadFile("/proc/1/task/1/children")
+	if err != nil {
+		return err
+	}
+	pids := strings.Fields(string(children))
+	if len(pids) != 1 {
+		return fmt.Errorf("capture startup gate is not the sole Docker init child")
+	}
+	leader, err := os.Stat(filepath.Join("/proc", pids[0], "exe"))
+	if err != nil {
+		return err
+	}
+	self, err := os.Stat("/proc/self/exe")
+	if err != nil {
+		return err
+	}
+	if os.SameFile(leader, self) {
+		return nil
+	}
+	// The one-shot bootstrap initializer atomically replaces this read-only
+	// volume file during upgrades. A gate already waiting on its old inode is
+	// still trusted; only the immutable volume path can produce this link.
+	path, err := os.Readlink(filepath.Join("/proc", pids[0], "exe"))
+	if err != nil || path != "/opt/adplatform-capture/start (deleted)" {
+		return fmt.Errorf("container entrypoint is not the capture startup gate")
+	}
+	return nil
 }
 func gate(args []string) error {
 	if len(args) == 0 {
@@ -114,16 +148,24 @@ func main() {
 		}
 	case len(os.Args) == 2 && os.Args[1] == "probe":
 		var reply message
-		reply, err = exchange("probe", "")
+		err = verifyGateLeader()
+		if err == nil {
+			reply, err = exchange("probe", "")
+		}
 		if err == nil {
 			fmt.Println(reply.Nonce)
 		}
 	case len(os.Args) == 3 && os.Args[1] == "release":
-		_, err = exchange("release", os.Args[2])
+		err = verifyGateLeader()
+		if err == nil {
+			_, err = exchange("release", os.Args[2])
+		}
+	case len(os.Args) == 2 && os.Args[1] == "status":
+		err = verifyGateLeader()
 	case len(os.Args) >= 3 && os.Args[1] == "run":
 		err = gate(os.Args[2:])
 	default:
-		err = fmt.Errorf("expected install, probe, release, or run COMMAND")
+		err = fmt.Errorf("expected install, status, probe, release, or run COMMAND")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "capture startup gate:", err)

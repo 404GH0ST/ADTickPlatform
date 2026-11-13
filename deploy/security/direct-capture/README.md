@@ -133,6 +133,10 @@ programs, XDP program, frozen address map, interface count, instance identity,
 and read-only mount before releasing that boot. It then execs the original
 image entrypoint and arguments. No capture process remains. Image healthchecks
 are disabled to prevent executing image code before guard attachment.
+The immutable probe also checks that the gate is Docker init's sole entrypoint
+child, so a participant process cannot impersonate it by rebinding the socket.
+Controller Docker command output is bounded to prevent a process in the
+challenge container from flooding the control plane through a probe.
 
 This covers fresh deploys, ordinary restarts, factory resets, and external Docker
 restarts. The controller polls every two seconds for changed boot generations,

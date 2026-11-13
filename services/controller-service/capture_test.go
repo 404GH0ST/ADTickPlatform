@@ -163,6 +163,10 @@ else:raise AssertionError('packet injection allowed')`)
 	if _, err = e.execDocker(ctx, "exec", task.ContainerName, "test", "-e", "/opt/ad/state/boots"); err == nil {
 		t.Fatal("application ran before guard recovery")
 	}
+	// Simulate the deployment initializer replacing the gate binary while an
+	// old gate is still waiting. The old trusted executable has a deleted inode.
+	docker("run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--no-healthcheck", "--mount", "type=volume,src="+e.captureVolume+",dst=/capture", "--entrypoint", "/bin/sh", task.BaselineImage, "-c", "cp /capture/start /capture/.start-upgrade && mv /capture/.start-upgrade /capture/start")
+	docker("exec", task.ContainerName, captureGate, "status")
 	if err = e.sweepCapture(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -183,6 +187,49 @@ else:raise AssertionError('packet injection allowed')`)
 		t.Fatal(err)
 	}
 	t.Log("ordinary tcpdump captured live incoming traffic")
+	// A compromised application can bind the gate's abstract socket after the
+	// real gate execs away. Policy repair must restart the container despite a
+	// forged successful probe response from the running application.
+	docker("exec", "-d", task.ContainerName, "python3", "-c", `import json,socket,time
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+s.bind('\0adplatform-capture-start-v1')
+s.listen(8)
+while True:
+ c,_=s.accept();c.recv(512);c.sendall(json.dumps({'ok':True,'nonce':'a'*64}).encode());c.close()`)
+	for attempt := 0; attempt < 20; attempt++ {
+		if output, probeErr := e.execDocker(ctx, "exec", task.ContainerName, "python3", "-c", `import socket
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.connect('\0adplatform-capture-start-v1');s.sendall(b'{"op":"probe"}\n');print(s.recv(512).decode())`); probeErr == nil && strings.Contains(string(output), strings.Repeat("a", 64)) {
+			break
+		} else if attempt == 19 {
+			t.Fatal("forged gate socket did not become available")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err = e.execDocker(ctx, "exec", task.ContainerName, captureGate, "probe"); err == nil || (!strings.Contains(err.Error(), "entrypoint is not") && !strings.Contains(err.Error(), "not the sole Docker init child")) {
+		t.Fatalf("immutable gate probe accepted forged socket: %v", err)
+	}
+	beforeRepair, err := e.inspectCapture(ctx, task.ContainerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, _, err = e.capturePaths(beforeRepair, task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.capturePolicy(ctx, "detach", group); err != nil {
+		t.Fatal(err)
+	}
+	e.captureSeen = nil
+	if err = e.sweepCapture(ctx); err != nil {
+		t.Fatal(err)
+	}
+	afterRepair, err := e.inspectCapture(ctx, task.ContainerName)
+	if err != nil || afterRepair.State.StartedAt == beforeRepair.State.StartedAt {
+		t.Fatalf("forged probe kept application running during policy replacement: %v", err)
+	}
+	if _, err = e.execDocker(ctx, "exec", task.ContainerName, captureGate, "probe"); err == nil {
+		t.Fatal("forged gate socket survived guarded restart")
+	}
 	// Remove policies as the trusted operator and deliberately break the loader:
 	// recovery must restart into the gate and keep application code blocked.
 	info, err = e.inspectCapture(ctx, task.ContainerName)

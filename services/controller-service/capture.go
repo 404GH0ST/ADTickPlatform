@@ -44,6 +44,7 @@ type captureInspect struct {
 		CapDrop     []string
 		SecurityOpt []string
 		Privileged  bool
+		Init        bool
 		PidMode     string
 		NetworkMode string
 	}
@@ -171,8 +172,8 @@ func (e *dockerCLIExecutor) capturePaths(info captureInspect, task apigateway.Co
 	if info.Config.Labels["adplatform.capture"] != "guarded" || info.Config.Labels["adplatform.capture_owner"] != e.captureVolume || info.Config.Labels["adplatform.team_id"] != strconv.Itoa(task.TeamID) || info.Config.Labels["adplatform.challenge_id"] != strconv.Itoa(task.ChallengeID) {
 		return "", "", fmt.Errorf("capture instance identity mismatch")
 	}
-	if info.HostConfig.Privileged || (info.HostConfig.PidMode != "" && info.HostConfig.PidMode != "private") || info.HostConfig.NetworkMode == "host" || len(info.NetworkSettings.Networks) != 1 {
-		return "", "", fmt.Errorf("guarded capture requires private PID/network namespaces and one game interface")
+	if info.HostConfig.Privileged || !info.HostConfig.Init || (info.HostConfig.PidMode != "" && info.HostConfig.PidMode != "private") || info.HostConfig.NetworkMode == "host" || len(info.NetworkSettings.Networks) != 1 {
+		return "", "", fmt.Errorf("guarded capture requires Docker init, private PID/network namespaces, and one game interface")
 	}
 	if len(info.HostConfig.CapDrop) != 1 || !strings.EqualFold(info.HostConfig.CapDrop[0], "ALL") {
 		return "", "", fmt.Errorf("unsafe capture capability bounds")
@@ -229,6 +230,13 @@ func (e *dockerCLIExecutor) capturePaths(info captureInspect, task apigateway.Co
 	}
 	return filepath.Join("/sys/fs/cgroup", group), filepath.Join(e.captureNetnsRoot, filepath.Base(key)), nil
 }
+
+// The immutable binary checks Docker init's entrypoint child. A forged socket
+// response cannot make its status command exit successfully.
+func (e *dockerCLIExecutor) captureGateProcess(ctx context.Context, name string) error {
+	_, err := e.execDocker(ctx, "exec", name, captureGate, "status")
+	return err
+}
 func (e *dockerCLIExecutor) reconcileCapturedService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
 	info, err := e.inspectCapture(ctx, task.ContainerName)
 	if err != nil {
@@ -247,34 +255,10 @@ func (e *dockerCLIExecutor) reconcileCapturedService(ctx context.Context, task a
 	if err != nil {
 		return err
 	}
-	// The gate's nonce exists only in process memory. No participant-writable
-	// readiness file can release a new boot, including automatic Docker restarts.
-	var nonce string
-	deadline := time.Now().Add(e.timeout)
-	probeGrace := time.Now().Add(time.Second)
-	for {
-		output, probeErr := e.execDocker(ctx, "exec", task.ContainerName, captureGate, "probe")
-		if probeErr == nil {
-			nonce = strings.TrimSpace(string(output))
-			break
-		}
-		// An already-running application must still have both exact policies.
-		if e.capturePolicy(ctx, "check", group, e.captureObject) == nil && e.capturePolicy(ctx, "rx-check", namespace, "eth0", task.SSHHost, e.captureObject) == nil {
-			e.rememberCapture(info)
-			return nil
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("capture gate not ready or guard missing; application must remain stopped")
-		}
-		if time.Now().Before(probeGrace) {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(50 * time.Millisecond):
-				continue
-			}
-		}
-		// Do not leave unguarded application code running while repairing a policy.
+	guardReady := e.capturePolicy(ctx, "check", group, e.captureObject) == nil && e.capturePolicy(ctx, "rx-check", namespace, "eth0", task.SSHHost, e.captureObject) == nil
+	if !guardReady {
+		// Even a genuine gate could have surviving application children.
+		// A Docker restart kills the old process tree before any policy changes.
 		if _, err = e.execDocker(ctx, "restart", task.ContainerName); err != nil {
 			return err
 		}
@@ -282,22 +266,46 @@ func (e *dockerCLIExecutor) reconcileCapturedService(ctx context.Context, task a
 		if err != nil {
 			return err
 		}
-		probeGrace = time.Now().Add(time.Second)
 		group, namespace, err = e.capturePaths(info, task)
 		if err != nil {
 			return err
 		}
+	}
+	gateErr := e.captureGateProcess(ctx, task.ContainerName)
+	if gateErr != nil {
+		if !guardReady {
+			return fmt.Errorf("capture policy repair requires a fresh immutable startup gate: %w", gateErr)
+		}
+		e.rememberCapture(info)
+		return nil
+	}
+	// The gate's nonce exists only in process memory. No participant-writable
+	// readiness file can release a new boot, including automatic Docker restarts.
+	var nonce string
+	deadline := time.Now().Add(e.timeout)
+	for {
+		output, probeErr := e.execDocker(ctx, "exec", task.ContainerName, captureGate, "probe")
+		if probeErr == nil {
+			nonce = strings.TrimSpace(string(output))
+			break
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("capture gate not ready or guard missing; application must remain stopped")
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	if len(nonce) != 64 {
 		return fmt.Errorf("invalid startup gate nonce")
 	}
+	if err = e.captureGateProcess(ctx, task.ContainerName); err != nil {
+		return fmt.Errorf("capture startup gate changed before policy attachment: %w", err)
+	}
 	if e.capturePolicy(ctx, "check", group, e.captureObject) != nil {
-		// Only the trusted gate is running here, so policy replacement is safe.
+		// The previous application process tree was killed by Docker restart.
 		if err = e.capturePolicy(ctx, "detach", group); err != nil {
 			return err
 		}
