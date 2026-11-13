@@ -982,7 +982,7 @@ function ServiceActionBar({
 function ResetWarningBlock(): ReactElement {
   return (
     <StatusBanner
-      message="Unlock remains preserved for this team and service during the same match."
+      message="Factory reset deletes stored flags. If a flag is outstanding, its tick SLA is forfeited and a severe defense penalty applies. SSH unlock remains preserved."
       variant="warning"
     />
   );

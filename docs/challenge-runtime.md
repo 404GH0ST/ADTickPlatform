@@ -67,7 +67,7 @@ Current default:
 Semantics:
 
 - `restart`: preserves that volume
-- `factory reset`: removes that volume and recreates the container from the organizer baseline image
+- `factory reset`: removes that volume and recreates the container from the organizer baseline image; a participant reset that discards an outstanding issued flag forfeits that tick's SLA and incurs the severe flag-loss defense deduction
 
 ## Checker Container
 

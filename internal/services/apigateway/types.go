@@ -55,10 +55,11 @@ type sshSessionData struct {
 }
 
 type resetData struct {
-	ChallengeID     int    `json:"challenge_id"`
-	TeamID          int    `json:"team_id"`
-	Action          string `json:"action"`
-	UnlockPreserved bool   `json:"unlock_preserved,omitempty"`
+	ChallengeID     int     `json:"challenge_id"`
+	TeamID          int     `json:"team_id"`
+	Action          string  `json:"action"`
+	UnlockPreserved bool    `json:"unlock_preserved,omitempty"`
+	PenaltyPoints   float64 `json:"penalty_points,omitempty"`
 }
 
 type serviceState struct {

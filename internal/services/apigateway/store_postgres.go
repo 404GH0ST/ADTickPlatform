@@ -866,8 +866,13 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 }
 
 func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return resetData{}, err
+	}
+	defer tx.Rollback()
 	var unlocked bool
-	if err := s.db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		UPDATE team_service_states
 		SET status = 'warming',
 		    checker = 'warning',
@@ -882,7 +887,56 @@ func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID,
 		}
 		return resetData{}, err
 	}
-	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked}, nil
+	// A successful participant reset deletes the state volume. The last issued
+	// flag with the pre-reset checker token is therefore known to be lost, even
+	// though a normal retention probe must skip its now-stale token. Charge the
+	// same sticky loss as a checker-confirmed replacement, once per flag/tick.
+	var flag string
+	var issuedTick int
+	err = tx.QueryRowContext(ctx, `
+		SELECT f.flag, f.issued_tick
+		FROM issued_flags f
+		JOIN service_instances si ON si.team_id = f.owner_team_id AND si.challenge_id = f.challenge_id
+		JOIN game_match_state m ON m.singleton = TRUE AND (
+			m.state IN ('running', 'paused')
+			OR (m.state = 'finished' AND m.ended_at IS NOT NULL AND si.updated_at < m.ended_at)
+		)
+		WHERE f.owner_team_id = $1 AND f.challenge_id = $2
+		  AND f.checker_token_snapshot <> ''
+		  AND f.checker_token_snapshot <> si.checker_token
+		  AND (m.started_at IS NULL OR f.created_at >= m.started_at)
+		ORDER BY f.issued_tick DESC LIMIT 1
+	`, teamID, challengeID).Scan(&flag, &issuedTick)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return resetData{}, err
+	}
+	var penalty float64
+	if err == nil {
+		err = tx.QueryRowContext(ctx, `
+			WITH opponents AS (
+				SELECT COUNT(*)::double precision AS n FROM teams
+				WHERE id <> $1 AND active = TRUE
+				  AND (play_from_tick IS NULL OR play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			)
+			INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at)
+			SELECT $3,$1,$2,$4,TRUE,CEIL(GREATEST(10.0,2*n+POWER(n,0.75)+1)),NOW() FROM opponents
+			ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET
+				penalty_points = CASE WHEN flag_retention_failures.confirmed_missing THEN flag_retention_failures.penalty_points ELSE EXCLUDED.penalty_points END,
+				confirmed_missing = TRUE,
+				checked_at = EXCLUDED.checked_at
+			RETURNING penalty_points
+		`, teamID, challengeID, issuedTick, flag).Scan(&penalty)
+		if err != nil {
+			return resetData{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE team_service_states SET last_event=$3 WHERE team_id=$1 AND challenge_id=$2`, teamID, challengeID, fmt.Sprintf("factory reset discarded stored flag; tick SLA forfeited and %.0f-point defense penalty", penalty)); err != nil {
+			return resetData{}, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return resetData{}, err
+	}
+	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked, PenaltyPoints: penalty}, nil
 }
 
 func (s *postgresStore) MarkFactoryResetFailure(ctx context.Context, teamID, challengeID int) error {

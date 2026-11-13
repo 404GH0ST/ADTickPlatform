@@ -151,6 +151,7 @@ type FactoryResetResponseData = {
   team_id: number;
   action: "factory_reset";
   unlock_preserved: true;
+  penalty_points?: number;
 };
 
 type RestartResponseData = {

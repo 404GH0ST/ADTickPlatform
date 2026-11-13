@@ -1273,6 +1273,7 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 	s.recordTeamAudit(r.Context(), teamID, "service.factory_reset", "service", auditServiceTarget(teamID, challengeID), "triggered factory reset", map[string]any{
 		"challenge_id":     challengeID,
 		"unlock_preserved": prepared.UnlockPreserved,
+		"penalty_points":   data.PenaltyPoints,
 	})
 	writeData(w, http.StatusOK, data)
 }

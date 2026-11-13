@@ -412,9 +412,15 @@ missing flag or returned a value different from the originally issued value.
 Transport failures and ordinary checker errors still lose the tick's SLA but do
 not receive this additional confirmed-loss deduction. All bundled checkers support
 this distinction; custom checker images must implement the exit-code contract.
-Organizer resets rotate the per-instance checker token, invalidating outstanding
-retention snapshots. Maintenance, inactive/deferred instances, and stale snapshots
-are excluded from penalty recording.
+Participant factory resets delete the state volume. If one contains an outstanding
+issued flag, successful reset completion forfeits that flag's tick SLA and records
+the same severe defense deduction, even though the reset rotates the checker token.
+The deduction is recorded once per flag; failed runtime resets are not charged.
+The reset response includes `penalty_points`, and the service's last event explains
+the loss. Organizer resets rotate the per-instance checker token, invalidating
+outstanding retention snapshots without this participant-reset deduction.
+Maintenance, inactive/deferred instances, and stale checker snapshots are excluded
+from checker-based penalty recording.
 
 Submission truth remains the signed, issued flag in the platform database. A
 replacement value never becomes authoritative, and a previously stolen genuine

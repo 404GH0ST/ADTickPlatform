@@ -821,6 +821,7 @@ paths:
                     team_id: 101
                     action: factory_reset
                     unlock_preserved: true
+                    penalty_points: 10
         '403':
           description: Authentication required
           content:
@@ -1398,6 +1399,10 @@ components:
         unlock_preserved:
           type: boolean
           const: true
+        penalty_points:
+          type: number
+          minimum: 0
+          description: Sticky defense deduction for an outstanding flag discarded by the reset; omitted when no flag loss is recorded.
     RestartData:
       type: object
       additionalProperties: false

@@ -332,7 +332,7 @@ export function useControlCenter({
       const response = await fetch(`/api/platform/services/${resetTarget.challengeId}/reset/factory`, {
         method: 'POST',
       });
-      const payload = await processApiResponse<{ unlock_preserved: boolean }>(response, 'factory reset request');
+      const payload = await processApiResponse<{ unlock_preserved: boolean; penalty_points?: number }>(response, 'factory reset request');
 
       setRows((current) =>
         current.map((row) =>
@@ -345,7 +345,9 @@ export function useControlCenter({
                 sshHint: payload.unlock_preserved
                   ? 'unlock preserved; open SSH Access to reapply the team credential'
                   : row.sshHint,
-                lastEvent: 'factory reset triggered via participant API',
+                lastEvent: payload.penalty_points
+                  ? `factory reset discarded stored flag; tick SLA forfeited and ${payload.penalty_points}-point defense penalty`
+                  : 'factory reset triggered via participant API',
                 resetCooldown: 'cooldown: 90s',
               }
             : row,
