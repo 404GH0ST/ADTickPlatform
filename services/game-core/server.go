@@ -1206,6 +1206,9 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 	if parallelism <= 0 {
 		parallelism = 1
 	}
+	if limit := s.store.CheckerTargetConcurrencyLimit(); limit > 0 && parallelism > limit {
+		parallelism = limit
+	}
 	if parallelism > len(targets) && len(targets) > 0 {
 		parallelism = len(targets)
 	}
@@ -1260,6 +1263,42 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 	var counts checkerTargetTickResult
 	unlock := s.lockRetentionTarget(target)
 	defer unlock()
+	unlockDatabase, err := s.store.LockCheckerTarget(ctx, target.TeamID, target.ChallengeID)
+	if err != nil {
+		return counts, err
+	}
+	defer unlockDatabase()
+	current, err := s.store.CheckerTargetCurrent(ctx, target)
+	if err != nil {
+		return counts, err
+	}
+	if !current {
+		// A reset or runtime change may have happened after target selection.
+		// Record the missed phases so it cannot evade tick SLA accounting.
+		for index, phase := range s.checkerPhases {
+			run := checkerRunRecord{
+				TickID: tickID, TeamID: target.TeamID, TeamName: target.TeamName,
+				ChallengeID: target.ChallengeID, ChallengeName: target.ChallengeName,
+				Phase: phase, Target: target.Target, CheckerImage: target.CheckerImage,
+				CheckedAt: s.now().UTC(), ExitCode: -1,
+				Status: "skipped", Message: "phase skipped after checker target changed",
+			}
+			if index == 0 {
+				run.Status = "failed"
+				run.Message = "checker target changed or unavailable during tick"
+			}
+			if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
+				return counts, err
+			}
+			counts.total++
+			if index == 0 {
+				counts.failed++
+			} else {
+				counts.skipped++
+			}
+		}
+		return counts, nil
+	}
 	if slices.Contains(s.checkerPhases, "put") {
 		previous, err := s.store.LatestIssuedFlag(ctx, target.TeamID, target.ChallengeID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

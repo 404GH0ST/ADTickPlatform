@@ -113,6 +113,9 @@ type checkerRunGroupKey struct {
 
 type gameStore interface {
 	ListCheckerTargets(ctx context.Context) ([]checkerTarget, error)
+	LockCheckerTarget(ctx context.Context, teamID, challengeID int) (func(), error)
+	CheckerTargetCurrent(ctx context.Context, target checkerTarget) (bool, error)
+	CheckerTargetConcurrencyLimit() int
 	IsChallengeInMaintenance(ctx context.Context, challengeID int) (bool, error)
 	LookupTeamName(ctx context.Context, teamID int) (string, error)
 	StartNextTick(ctx context.Context, now time.Time) (apigateway.GameTickStatus, error)
@@ -282,6 +285,16 @@ func (s *memoryGameStore) ListCheckerTargets(_ context.Context) ([]checkerTarget
 	})
 	return result, nil
 }
+
+func (s *memoryGameStore) LockCheckerTarget(context.Context, int, int) (func(), error) {
+	return func() {}, nil
+}
+
+func (s *memoryGameStore) CheckerTargetCurrent(context.Context, checkerTarget) (bool, error) {
+	return true, nil
+}
+
+func (s *memoryGameStore) CheckerTargetConcurrencyLimit() int { return 0 }
 
 func (s *memoryGameStore) IsChallengeInMaintenance(_ context.Context, challengeID int) (bool, error) {
 	s.mu.Lock()
@@ -968,6 +981,47 @@ func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTa
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (s *postgresGameStore) LockCheckerTarget(ctx context.Context, teamID, challengeID int) (func(), error) {
+	// The API reset holds the same two-key advisory lock while it snapshots the
+	// outstanding flag and rotates the token. Keep it until IssueFlag commits.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::integer, $2::integer)`, teamID, challengeID); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	return func() { _ = tx.Rollback() }, nil
+}
+
+func (s *postgresGameStore) CheckerTargetCurrent(ctx context.Context, target checkerTarget) (bool, error) {
+	var current bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT tss.status <> 'resetting' AND si.runtime_status = 'ready' AND COALESCE(si.checker_token, '') = $3
+		FROM team_service_states tss
+		JOIN service_instances si ON si.team_id = tss.team_id AND si.challenge_id = tss.challenge_id
+		WHERE tss.team_id = $1 AND tss.challenge_id = $2
+	`, target.TeamID, target.ChallengeID, target.CheckerToken).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return current, err
+}
+
+func (s *postgresGameStore) CheckerTargetConcurrencyLimit() int {
+	// Each locked checker also writes through another pooled connection.
+	// Reserve at least half the pool for those writes and other game traffic.
+	maxOpen := s.db.Stats().MaxOpenConnections
+	if maxOpen <= 0 {
+		return 12
+	}
+	if maxOpen < 3 {
+		return 1
+	}
+	return (maxOpen - 1) / 2
 }
 
 func (s *postgresGameStore) IsChallengeInMaintenance(ctx context.Context, challengeID int) (bool, error) {

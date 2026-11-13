@@ -25,6 +25,12 @@ type capturingCheckerClient struct {
 	requests []apigateway.CheckerExecutionRequest
 }
 
+type staleCheckerTargetStore struct{ gameStore }
+
+func (s staleCheckerTargetStore) CheckerTargetCurrent(context.Context, checkerTarget) (bool, error) {
+	return false, nil
+}
+
 type explicitStateCheckerClient struct {
 	state   string
 	message string
@@ -312,6 +318,29 @@ func TestAdvanceTickPassesStructuredCheckerTargetMetadata(t *testing.T) {
 	}
 	if first.CheckerToken != "dev-checker-token-101-1" {
 		t.Fatalf("expected per-instance checker token, got %q", first.CheckerToken)
+	}
+}
+
+func TestChangedCheckerTargetStillLosesTickSLA(t *testing.T) {
+	memory := newMemoryGameStore().(*memoryGameStore)
+	store := staleCheckerTargetStore{gameStore: memory}
+	checker := &capturingCheckerClient{}
+	server := newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15)
+	targets, err := store.ListCheckerTargets(context.Background())
+	if err != nil || len(targets) == 0 {
+		t.Fatalf("checker targets: %d %v", len(targets), err)
+	}
+	counts, err := server.runCheckerTarget(context.Background(), 1, targets[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.total != 3 || counts.failed != 1 || counts.skipped != 2 || len(checker.requests) != 0 {
+		t.Fatalf("reset target escaped SLA accounting: counts=%+v checker calls=%d", counts, len(checker.requests))
+	}
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	if len(memory.runs) != 3 || memory.runs[2].Status != "failed" || len(memory.flags) != 0 {
+		t.Fatalf("wrong checker evidence after target change: runs=%+v flags=%d", memory.runs, len(memory.flags))
 	}
 }
 

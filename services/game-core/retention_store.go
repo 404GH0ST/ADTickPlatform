@@ -73,7 +73,7 @@ func (s *memoryGameStore) LatestIssuedFlag(_ context.Context, team, challenge in
 	return s.latestFlagLocked(team, challenge)
 }
 func (s *postgresGameStore) LatestIssuedFlag(ctx context.Context, team, challenge int) (issuedFlagRecord, error) {
-	return scanRetentionFlag(s.db.QueryRowContext(ctx, `SELECT `+retentionFlagColumns+` FROM issued_flags WHERE owner_team_id=$1 AND challenge_id=$2 ORDER BY issued_tick DESC LIMIT 1`, team, challenge))
+	return scanRetentionFlag(s.db.QueryRowContext(ctx, `SELECT `+retentionFlagColumns+` FROM issued_flags WHERE owner_team_id=$1 AND challenge_id=$2 ORDER BY issued_tick DESC, created_at DESC, flag DESC LIMIT 1`, team, challenge))
 }
 func (s *memoryGameStore) ScheduleRetentionCheck(_ context.Context, flag string, next time.Time) error {
 	s.mu.Lock()
@@ -182,7 +182,7 @@ func (s *postgresGameStore) RecordRetentionCheck(ctx context.Context, f issuedFl
 		return false, nil
 	}
 	var latest string
-	if err = tx.QueryRowContext(ctx, `SELECT flag FROM issued_flags WHERE owner_team_id=$1 AND challenge_id=$2 ORDER BY issued_tick DESC LIMIT 1`, f.OwnerTeamID, f.ChallengeID).Scan(&latest); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT flag FROM issued_flags WHERE owner_team_id=$1 AND challenge_id=$2 ORDER BY issued_tick DESC, created_at DESC, flag DESC LIMIT 1`, f.OwnerTeamID, f.ChallengeID).Scan(&latest); err != nil {
 		return false, err
 	}
 	if latest != f.Flag {

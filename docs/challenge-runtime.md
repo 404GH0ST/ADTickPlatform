@@ -267,7 +267,7 @@ For organizers:
 
 Relevant production knobs:
 
-- `GAME_CORE_CHECKER_PARALLELISM`: maximum checker targets processed concurrently per tick.
+- `GAME_CORE_CHECKER_PARALLELISM`: maximum checker targets processed concurrently per tick; the game core also caps this at roughly half its PostgreSQL connection pool so locked checker batches leave connections for flag persistence and other traffic.
 - `GAME_CORE_SCORING_DEBOUNCE`: delay used to batch scoreboard recomputes after accepted submissions.
 - `GAME_CORE_SCORING_RETRY_DELAY`: retry delay after a failed asynchronous scoreboard recompute.
 - `CONTROLLER_SERVICE_MEMORY`, `CONTROLLER_SERVICE_CPUS`, `CONTROLLER_SERVICE_PIDS_LIMIT`: service container resource limits.
