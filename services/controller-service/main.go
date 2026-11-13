@@ -44,9 +44,19 @@ func main() {
 		metrics:    newControllerServiceMetrics(),
 		now:        time.Now,
 	}
+	if docker, ok := server.executor.(*dockerCLIExecutor); ok {
+		if err := docker.validateCaptureConfig(); err != nil {
+			log.Fatal(err)
+		}
+	}
 	httpapi.RegisterMetricsSource(info.Name, server)
 	if err := restoreControllerState(ctx, controllerReconcileStoreAdapter{store: store}, server.executor, server.access, server.wireGuard, server.now); err != nil {
 		log.Fatal(err)
+	}
+
+	if docker, ok := server.executor.(*dockerCLIExecutor); ok {
+		stopCapture := docker.startCaptureMonitor()
+		defer stopCapture()
 	}
 
 	mux := httpapi.NewBaseMux(info)

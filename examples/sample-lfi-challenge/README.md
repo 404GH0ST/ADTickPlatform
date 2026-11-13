@@ -4,7 +4,7 @@ This package is a simple Local File Inclusion (LFI) challenge example for AD tic
 
 It demonstrates three platform-critical behaviors:
 
-- unlock proof exposure through an LFI path traversal
+- enemy flag capture through an LFI path traversal
 - flag storage and retrieval across checker `put/get`
 - SLA checks using only valid, normal user inputs
 
@@ -17,19 +17,18 @@ The service image:
 - listens on `PORT` (`AD_PLATFORM_SERVICE_PORT`)
 - stores the current flag at `/opt/ad/state/flag.txt`
 - stores message state under `/opt/ad/state/messages`
-- writes unlock proof to `/opt/ad/state/secret/unlock-proof.txt`
 - provides a vulnerable template renderer (`/v1/render`) with path traversal/LFI
 
 Endpoints:
 
 - `GET /v1/health`
 - `POST /v1/flag` with `X-Checker-Token`
-- `GET /v1/flag?value=...`
+- `GET /v1/flag` with `X-Checker-Token`
 - `POST /v1/messages`
 - `GET /v1/messages/<slot>?token=...`
 - `GET /v1/render?template=...` (intentionally vulnerable)
 
-There is no direct unlock endpoint. Teams are expected to recover unlock proof via LFI.
+Teams recover another team’s current flag via LFI and submit it to the platform.
 
 ## Checker Behavior
 
@@ -103,6 +102,57 @@ curl -sS http://<target-host>:<target-port>/v1/health
 Example vulnerable request pattern (for demonstration):
 
 ```bash
-curl -sS "http://<target-host>:<target-port>/v1/render?template=../../state/secret/unlock-proof.txt"
 curl -sS "http://<target-host>:<target-port>/v1/render?template=../../state/flag.txt"
 ```
+
+## Capture and SSH Access
+
+Attack **another team's** service for this challenge and submit its current flag to
+`POST /api/v2/submit` with your participant bearer token and `{"flags":["<captured flag>"]}`.
+One accepted enemy flag automatically unlocks SSH on **your own** service for the same
+challenge. Open **SSH Access** in the dashboard to retrieve the stable team credential.
+Own-team, expired, invalid, and duplicate flags do not create an access grant. Factory
+reset preserves access; organizer maintenance clears it. No unlock proof is required.
+
+Run the bundled exploit against an enemy endpoint after the checker has stored a flag:
+
+```bash
+export PLATFORM_URL=http://localhost:8080
+export EMAIL=alpha.captain@example.com
+export PASSWORD=alpha-secret
+python3 exploit.py <enemy-host> <enemy-port> <challenge-id>
+```
+
+The script supports the configured flag prefix, reads the API's `token` and
+`results[].status` fields, and exits with an error if no capture is accepted.
+
+See [the example verification guide](../README.md#verify-all-packages-in-isolation) to check all packages in disposable containers.
+
+## Packet analysis
+
+`tcpdump` is installed. After SSH access opens, guarded production instances can
+capture incoming traffic directly:
+
+```bash
+tcpdump -p -Q in -i eth0 -nn
+tcpdump -p -Q in -i eth0 -w /tmp/incoming.pcap
+tcpdump -nn -r /tmp/incoming.pcap
+```
+
+Enable `CONTROLLER_CAPTURE_MODE=guarded` through `make setup-prod-env` and deploy
+with `make up-prod-host`. The controller verifies kernel send restrictions and
+the per-instance receive boundary before starting challenge code. Raw packet
+injection is denied even for container root. The profile supports static IPv4
+and one external interface. In `disabled` mode, only saved PCAP analysis works.
+See [deployment requirements and first-rollout migration](../../deploy/security/direct-capture/README.md).
+Rebuild the image and recreate legacy containers to install the package.
+
+## Flag retention
+
+The checker retrieves the actual stored flag without sending the expected value
+in its request. A missing or different stored value returns checker exit code
+**42**. Game-core verifies retention during the tick and before replacement;
+confirmed loss forfeits that tick's SLA and applies the
+[scaled defense penalty](../../docs/game-rules.md#flag-retention-and-replacement-penalties).
+This remains true if the instance's checker token was used to overwrite the flag.
+Rebuild service and checker images together for this token-authenticated read API.

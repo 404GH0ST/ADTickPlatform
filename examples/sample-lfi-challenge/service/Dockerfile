@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssh-server python3 \
+  && apt-get install -y --no-install-recommends openssh-server python3 tcpdump \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /run/sshd /opt/ad/state /opt/ad/content/templates

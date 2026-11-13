@@ -271,10 +271,11 @@ Relevant production knobs:
 - `GAME_CORE_SCORING_DEBOUNCE`: delay used to batch scoreboard recomputes after accepted submissions.
 - `GAME_CORE_SCORING_RETRY_DELAY`: retry delay after a failed asynchronous scoreboard recompute.
 - `CONTROLLER_SERVICE_MEMORY`, `CONTROLLER_SERVICE_CPUS`, `CONTROLLER_SERVICE_PIDS_LIMIT`: service container resource limits.
-- `CONTROLLER_SERVICE_CAP_DROP`, `CONTROLLER_SERVICE_CAP_ADD`, `CONTROLLER_SERVICE_SECURITY_OPT`: service container capability and security profile. The default keeps SSH-compatible capabilities after dropping all others.
+- `CONTROLLER_SERVICE_CAP_DROP`, `CONTROLLER_SERVICE_CAP_ADD`, `CONTROLLER_SERVICE_SECURITY_OPT`: service container capability and security profile. Guarded capture requires `ALL` dropped, the limited SSH capabilities, `no-new-privileges:true`, and Docker's default seccomp policy. `NET_ADMIN` remains absent.
+- `CONTROLLER_CAPTURE_MODE=guarded`: enables direct live `tcpdump` with kernel send restrictions and an XDP receive boundary. The controller grants `NET_RAW` only behind a read-only startup gate and verifies both policies before releasing challenge code at each boot. Requires `make up-prod-host`, local rootful Docker, BPF LSM, BTF, and cgroup v2. `disabled` permits PCAP reading only. See [guarded capture deployment and migration](../deploy/security/direct-capture/README.md).
 - `CHECKER_RUNNER_MEMORY`, `CHECKER_RUNNER_CPUS`, `CHECKER_RUNNER_PIDS_LIMIT`: checker container resource limits.
 - `CHECKER_RUNNER_CAP_DROP`, `CHECKER_RUNNER_CAP_ADD`, `CHECKER_RUNNER_SECURITY_OPT`: checker container capability and security profile.
-  Set Docker limit, capability, or security options to `none` or `disabled` to omit the Docker option entirely.
+  Set Docker limit, capability, or security options to `none` or `disabled` to omit the Docker option entirely, subject to the capture safety checks: disabled capture must still drop `ALL` or `NET_RAW`, and guarded capture requires its full restricted profile.
 
 For an end-to-end Docker-mode reference run:
 

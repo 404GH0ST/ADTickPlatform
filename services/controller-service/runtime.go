@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"adplatform/internal/platform/config"
@@ -42,10 +43,17 @@ func newRuntimeExecutor() runtimeExecutor {
 				memory:      stringConfig("CONTROLLER_SERVICE_MEMORY", "512m"),
 				cpus:        stringConfig("CONTROLLER_SERVICE_CPUS", "1.0"),
 			},
-			sshApplyMode:     strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_PASSWORD_APPLY_MODE", "docker-exec"))),
-			sshContractMode:  strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_CONTRACT_MODE", "verify"))),
-			checkerValidator: newCheckerValidationClient(),
-			timeout:          config.Duration("CONTROLLER_RUNTIME_TIMEOUT", 15*time.Second),
+			sshApplyMode:         strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_PASSWORD_APPLY_MODE", "docker-exec"))),
+			sshContractMode:      strings.ToLower(strings.TrimSpace(config.String("CONTROLLER_SSH_CONTRACT_MODE", "verify"))),
+			checkerValidator:     newCheckerValidationClient(),
+			captureMode:          strings.ToLower(config.String("CONTROLLER_CAPTURE_MODE", "disabled")),
+			captureVolume:        config.String("CONTROLLER_CAPTURE_BOOTSTRAP_VOLUME", "adplatform_prod_capture_bootstrap"),
+			captureTool:          config.String("CONTROLLER_CAPTURE_POLICY_BINARY", "/usr/local/bin/adplatform-capture-policy"),
+			captureObject:        config.String("CONTROLLER_CAPTURE_POLICY_OBJECT", "/usr/local/share/adplatform/capture.bpf.o"),
+			captureProcRoot:      config.String("CONTROLLER_CAPTURE_PROC_ROOT", "/host/proc"),
+			captureNetnsRoot:     config.String("CONTROLLER_CAPTURE_NETNS_ROOT", "/host/docker-netns"),
+			captureNetnsHostRoot: config.String("CAPTURE_NETNS_HOST_PATH", "/var/run/docker/netns"),
+			timeout:              config.Duration("CONTROLLER_RUNTIME_TIMEOUT", 15*time.Second),
 		}
 	default:
 		return dryRunExecutor{}
@@ -108,6 +116,16 @@ type dockerCLIExecutor struct {
 	sshContractMode   string
 	checkerValidator  checkerValidationClient
 	timeout           time.Duration
+
+	captureMode          string
+	captureVolume        string
+	captureTool          string
+	captureObject        string
+	captureProcRoot      string
+	captureNetnsRoot     string
+	captureNetnsHostRoot string
+	captureMu            sync.Mutex
+	captureSeen          map[string]captureStamp
 }
 
 type dockerRunSecurity struct {
@@ -182,6 +200,14 @@ func defaultProbeSecurity() dockerRunSecurity {
 }
 
 func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
+	if err := e.validateCaptureConfig(); err != nil {
+		return err
+	}
+	if e.captureEnabled() {
+		e.captureMu.Lock()
+		defer e.captureMu.Unlock()
+	}
+
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
 	}
@@ -194,6 +220,20 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 	exists, err := e.containerExists(overallCtx, task.ContainerName)
 	if err != nil {
 		return err
+	}
+
+	if exists && e.captureEnabled() {
+		info, err := e.inspectCapture(overallCtx, task.ContainerName)
+		if err != nil {
+			return err
+		}
+		if len(info.Config.Entrypoint) == 1 && info.Config.Entrypoint[0] == captureGate {
+			if err = e.reconcileCapturedService(overallCtx, task); err != nil {
+				e.stopCapturedService(task.ContainerName)
+				return err
+			}
+			return e.verifySSHContract(overallCtx, task)
+		}
 	}
 	if exists {
 		if err := e.removeContainerIfExists(overallCtx, task.ContainerName); err != nil {
@@ -210,6 +250,14 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 }
 
 func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
+	if err := e.validateCaptureConfig(); err != nil {
+		return err
+	}
+	if e.captureEnabled() {
+		e.captureMu.Lock()
+		defer e.captureMu.Unlock()
+	}
+
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
 	}
@@ -230,6 +278,14 @@ func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigat
 }
 
 func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
+	if err := e.validateCaptureConfig(); err != nil {
+		return err
+	}
+	if e.captureEnabled() {
+		e.captureMu.Lock()
+		defer e.captureMu.Unlock()
+	}
+
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
 	}
@@ -248,13 +304,35 @@ func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.
 		return e.verifySSHContract(runCtx, task)
 	}
 
+	if e.captureEnabled() {
+		info, err := e.inspectCapture(runCtx, task.ContainerName)
+		if err != nil {
+			return err
+		}
+		if len(info.Config.Entrypoint) != 1 || info.Config.Entrypoint[0] != captureGate {
+			return fmt.Errorf("legacy instance requires deployment reconciliation before guarded restart")
+		}
+	}
+
 	if _, err := e.execDocker(runCtx, "restart", task.ContainerName); err != nil {
 		return err
+	}
+	if e.captureEnabled() {
+		if err := e.reconcileCapturedService(runCtx, task); err != nil {
+			return err
+		}
 	}
 	return e.verifySSHContract(runCtx, task)
 }
 
 func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigateway.ControllerRuntimeTask, credential apigateway.ControllerSSHCredential) error {
+	if err := e.validateCaptureConfig(); err != nil {
+		return err
+	}
+	if e.captureEnabled() {
+		e.captureMu.Lock()
+		defer e.captureMu.Unlock()
+	}
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
 	}
@@ -271,6 +349,12 @@ func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigate
 	}
 	if !exists {
 		if err := e.runFreshContainer(runCtx, task); err != nil {
+			return err
+		}
+	}
+	if e.captureEnabled() {
+		if err := e.reconcileCapturedService(runCtx, task); err != nil {
+			e.stopCapturedService(task.ContainerName)
 			return err
 		}
 	}
@@ -478,10 +562,24 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 	if err := e.ensureNetwork(ctx, plan); err != nil {
 		return err
 	}
+	var guardedArgs []string
+	if e.captureEnabled() {
+		guardedArgs, err = e.capturedRunArgs(ctx, plan.Name, task)
+		if err != nil {
+			return err
+		}
+	}
 	var runErr error
 	for attempts := 0; attempts < 3; attempts++ {
-		_, runErr = e.execDocker(ctx, buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)...)
+		args := guardedArgs
+		if !e.captureEnabled() {
+			args = buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)
+		}
+		_, runErr = e.execDocker(ctx, args...)
 		if runErr == nil {
+			if e.captureEnabled() {
+				return e.reconcileCapturedService(ctx, task)
+			}
 			return nil
 		}
 		if !strings.Contains(strings.ToLower(runErr.Error()), "conflict") {

@@ -371,6 +371,7 @@ func TestDockerEnsureServiceVerifiesSSHContractAfterRun(t *testing.T) {
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -430,6 +431,7 @@ func TestDockerEnsureServiceRecreatesExistingContainer(t *testing.T) {
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -497,6 +499,7 @@ func TestDockerEnsureServiceFallsBackToLocalImageWhenPullFails(t *testing.T) {
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -566,6 +569,7 @@ func TestDockerEnsureServiceRetriesSSHContractWhileContainerRestarts(t *testing.
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -619,6 +623,7 @@ func TestDockerEnsureServiceTimesOutWhenContainerKeepsRestarting(t *testing.T) {
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -659,6 +664,7 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 		SSHHost:       "10.80.1.11",
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity: testServiceSecurity(),
 		binary:          binPath,
 		network:         "adplatform_game",
 		networkLayout:   "per-service",
@@ -703,8 +709,9 @@ func TestDockerValidateChallengeRuntimeRunsEphemeralImageProbe(t *testing.T) {
 	}
 
 	executor := &dockerCLIExecutor{
-		binary:  binPath,
-		timeout: 5 * time.Second,
+		serviceSecurity: testServiceSecurity(),
+		binary:          binPath,
+		timeout:         5 * time.Second,
 	}
 	t.Setenv("DOCKER_LOG", logPath)
 
@@ -773,6 +780,7 @@ func TestDockerValidateChallengeRuntimeUsesCheckerRunnerClientWhenConfigured(t *
 		},
 	}
 	executor := &dockerCLIExecutor{
+		serviceSecurity:  testServiceSecurity(),
 		binary:           binPath,
 		checkerValidator: checkerClient,
 		timeout:          5 * time.Second,
