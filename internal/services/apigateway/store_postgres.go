@@ -822,10 +822,37 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 	if err != nil {
 		return resetData{}, err
 	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return resetData{}, err
+	}
+	defer tx.Rollback()
+	// A checker holds this lock through the put batch and IssueFlag commit.
+	// This snapshot therefore includes any put that started before the reset.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::integer, $2::integer)`, teamID, challengeID); err != nil {
+		return resetData{}, err
+	}
+	var previousToken, stateStatus string
+	var resetRecent bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(si.checker_token, ''), tss.status, si.updated_at > NOW() - INTERVAL '5 minutes'
+		FROM service_instances si
+		JOIN team_service_states tss ON tss.team_id=si.team_id AND tss.challenge_id=si.challenge_id
+		WHERE si.team_id=$1 AND si.challenge_id=$2
+		FOR UPDATE OF si,tss
+	`, teamID, challengeID).Scan(&previousToken, &stateStatus, &resetRecent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return resetData{}, ErrChallengeNotFound
+		}
+		return resetData{}, err
+	}
+	if stateStatus == "resetting" && resetRecent {
+		return resetData{}, ErrServiceUnavailable
+	}
 	var unlocked bool
 	// PostgreSQL UPDATE … FROM cannot reference the target alias (si) inside a
 	// JOIN … ON of from_item; use a comma FROM list + WHERE instead.
-	if err := s.db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		WITH updated_instance AS (
 			UPDATE service_instances si
 			SET checker_token = $3,
@@ -862,51 +889,21 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 		}
 		return resetData{}, err
 	}
-	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked}, nil
-}
-
-func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return resetData{}, err
-	}
-	defer tx.Rollback()
-	var unlocked bool
-	if err := tx.QueryRowContext(ctx, `
-		UPDATE team_service_states
-		SET status = 'warming',
-		    checker = 'warning',
-		    last_event = 'factory reset completed; waiting for checker verification',
-		    reset_cooldown = 'cooldown: 90s',
-		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; open SSH Access to reapply the team credential' ELSE ssh_hint END
-		WHERE team_id = $1 AND challenge_id = $2
-		RETURNING unlocked
-	`, teamID, challengeID).Scan(&unlocked); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return resetData{}, ErrChallengeNotFound
-		}
-		return resetData{}, err
-	}
-	// A successful participant reset deletes the state volume. The last issued
-	// flag with the pre-reset checker token is therefore known to be lost, even
-	// though a normal retention probe must skip its now-stale token. Charge the
-	// same sticky loss as a checker-confirmed replacement, once per flag/tick.
+	// The token has been rotated in this transaction. Charge the current flag
+	// before any runtime operation can delete its volume or the request can be
+	// cancelled. A reset forfeits that flag even if runtime recovery then fails.
 	var flag string
 	var issuedTick int
 	err = tx.QueryRowContext(ctx, `
 		SELECT f.flag, f.issued_tick
 		FROM issued_flags f
-		JOIN service_instances si ON si.team_id = f.owner_team_id AND si.challenge_id = f.challenge_id
-		JOIN game_match_state m ON m.singleton = TRUE AND (
-			m.state IN ('running', 'paused')
-			OR (m.state = 'finished' AND m.ended_at IS NOT NULL AND si.updated_at < m.ended_at)
-		)
+		JOIN game_match_state m ON m.singleton = TRUE AND m.state IN ('running', 'paused')
 		WHERE f.owner_team_id = $1 AND f.challenge_id = $2
 		  AND f.checker_token_snapshot <> ''
-		  AND f.checker_token_snapshot <> si.checker_token
+		  AND f.checker_token_snapshot = $3
 		  AND (m.started_at IS NULL OR f.created_at >= m.started_at)
-		ORDER BY f.issued_tick DESC LIMIT 1
-	`, teamID, challengeID).Scan(&flag, &issuedTick)
+		ORDER BY f.issued_tick DESC, f.created_at DESC, f.flag DESC LIMIT 1
+	`, teamID, challengeID, previousToken).Scan(&flag, &issuedTick)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return resetData{}, err
 	}
@@ -939,12 +936,34 @@ func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID,
 	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked, PenaltyPoints: penalty}, nil
 }
 
+func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
+	var unlocked bool
+	if err := s.db.QueryRowContext(ctx, `
+		UPDATE team_service_states
+		SET status = 'warming',
+		    checker = 'warning',
+		    last_event = CASE WHEN last_event LIKE 'factory reset discarded stored flag%'
+		        THEN last_event ELSE 'factory reset completed; waiting for checker verification' END,
+		    reset_cooldown = 'cooldown: 90s',
+		    ssh_hint = CASE WHEN unlocked THEN 'unlock preserved; open SSH Access to reapply the team credential' ELSE ssh_hint END
+		WHERE team_id = $1 AND challenge_id = $2
+		RETURNING unlocked
+	`, teamID, challengeID).Scan(&unlocked); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return resetData{}, ErrChallengeNotFound
+		}
+		return resetData{}, err
+	}
+	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked}, nil
+}
+
 func (s *postgresStore) MarkFactoryResetFailure(ctx context.Context, teamID, challengeID int) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE team_service_states
 		SET status = 'degraded',
 		    checker = 'warning',
-		    last_event = 'factory reset runtime failed',
+		    last_event = CASE WHEN last_event LIKE 'factory reset discarded stored flag%'
+		        THEN last_event || '; runtime recovery failed' ELSE 'factory reset runtime failed' END,
 		    reset_cooldown = 'ready'
 		WHERE team_id = $1 AND challenge_id = $2
 	`, teamID, challengeID)

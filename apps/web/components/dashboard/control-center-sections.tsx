@@ -982,7 +982,7 @@ function ServiceActionBar({
 function ResetWarningBlock(): ReactElement {
   return (
     <StatusBanner
-      message="Factory reset deletes stored flags. If a flag is outstanding, its tick SLA is forfeited and a severe defense penalty applies. SSH unlock remains preserved."
+      message="Factory reset deletes stored flags. If a flag is outstanding when reset starts, its tick SLA is forfeited and a severe defense penalty applies even if recovery fails. SSH unlock remains preserved."
       variant="warning"
     />
   );

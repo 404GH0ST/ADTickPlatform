@@ -1256,8 +1256,14 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeDomainFailure(w, err)
 		return
 	}
-	if err := s.controller.FactoryResetService(r.Context(), teamID, challengeID); err != nil {
-		_ = s.store.MarkFactoryResetFailure(r.Context(), teamID, challengeID)
+	// Preparation has committed the token rotation and any flag loss. Finish
+	// recovery even if the participant closes the HTTP connection.
+	resetCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 4*time.Minute)
+	defer cancel()
+	if err := s.controller.FactoryResetService(resetCtx, teamID, challengeID); err != nil {
+		failureCtx, failureCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+		defer failureCancel()
+		_ = s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID)
 		if errors.Is(err, ErrChallengeNotFound) {
 			writeDomainFailure(w, err)
 			return
@@ -1265,12 +1271,13 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadGateway, "Reset unavailable", "factory reset runtime failed.")
 		return
 	}
-	data, err := s.store.CompleteFactoryResetService(r.Context(), teamID, challengeID)
+	data, err := s.store.CompleteFactoryResetService(resetCtx, teamID, challengeID)
 	if err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
-	s.recordTeamAudit(r.Context(), teamID, "service.factory_reset", "service", auditServiceTarget(teamID, challengeID), "triggered factory reset", map[string]any{
+	data.PenaltyPoints = prepared.PenaltyPoints
+	s.recordTeamAudit(resetCtx, teamID, "service.factory_reset", "service", auditServiceTarget(teamID, challengeID), "triggered factory reset", map[string]any{
 		"challenge_id":     challengeID,
 		"unlock_preserved": prepared.UnlockPreserved,
 		"penalty_points":   data.PenaltyPoints,
