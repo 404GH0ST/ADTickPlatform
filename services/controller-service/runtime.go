@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -628,20 +629,57 @@ func (e *dockerCLIExecutor) networkPlan(task apigateway.ControllerRuntimeTask) (
 }
 
 func (e *dockerCLIExecutor) execDocker(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
-	output, err := cmd.CombinedOutput()
+	commandCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
+	output := &boundedDockerOutput{limit: maxDockerCommandOutput, cancel: cancel}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
+	buffer, overflow := output.result()
+	if overflow {
+		return nil, fmt.Errorf("docker command output exceeded %d bytes", maxDockerCommandOutput)
+	}
 	if err != nil {
 		operation := "command"
 		if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
 			operation = strings.TrimSpace(args[0])
 		}
-		detail := strings.TrimSpace(redactControllerDockerSecrets(string(output), args))
+		detail := strings.TrimSpace(redactControllerDockerSecrets(string(buffer), args))
 		if detail == "" {
 			return nil, fmt.Errorf("%s %s failed: %w", e.binary, operation, err)
 		}
 		return nil, fmt.Errorf("%s %s failed: %w: %s", e.binary, operation, err, detail)
 	}
-	return output, nil
+	return buffer, nil
+}
+
+const maxDockerCommandOutput = 4 << 20
+
+type boundedDockerOutput struct {
+	mu       sync.Mutex
+	buffer   bytes.Buffer
+	limit    int
+	cancel   context.CancelFunc
+	overflow bool
+}
+
+func (o *boundedDockerOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	remaining := o.limit - o.buffer.Len()
+	if len(p) > remaining {
+		o.buffer.Write(p[:remaining])
+		o.overflow = true
+		o.cancel()
+		return remaining, fmt.Errorf("docker command output limit reached")
+	}
+	return o.buffer.Write(p)
+}
+
+func (o *boundedDockerOutput) result() ([]byte, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return bytes.Clone(o.buffer.Bytes()), o.overflow
 }
 
 func redactControllerDockerSecrets(message string, args []string) string {

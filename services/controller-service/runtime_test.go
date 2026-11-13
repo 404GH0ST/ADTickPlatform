@@ -30,6 +30,18 @@ func testServiceSecurity() dockerRunSecurity {
 	}
 }
 
+func TestExecDockerBoundsCommandOutput(t *testing.T) {
+	e := &dockerCLIExecutor{binary: "sh"}
+	output, err := e.execDocker(context.Background(), "-c", "printf ok")
+	if err != nil || string(output) != "ok" {
+		t.Fatalf("small command output: %q, %v", output, err)
+	}
+	output, err = e.execDocker(context.Background(), "-c", "head -c 5242880 /dev/zero")
+	if err == nil || !strings.Contains(err.Error(), "output exceeded") || len(output) != 0 {
+		t.Fatalf("unbounded command output accepted: %d bytes, %v", len(output), err)
+	}
+}
+
 func (c *stubCheckerValidationClient) Validate(_ context.Context, _ apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
 	c.called = true
 	return c.result, c.err
