@@ -9,6 +9,39 @@ import (
 	"adplatform/internal/platform/database"
 )
 
+func TestPostgresCheckerRecoversStaleResetGate(t *testing.T) {
+	db := isolatedSubmissionDB(t)
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO teams(id,name,email,join_key) VALUES(101,'Team Alpha','a@test.local','a');
+		INSERT INTO challenges(id,name,published) VALUES(1,'stale-reset',TRUE);
+		INSERT INTO service_instances(team_id,challenge_id,runtime_kind,runtime_status,container_name,baseline_image,checker_image,endpoint,ssh_host,checker_token)
+		VALUES(101,1,'docker','ready','stale-reset','test','checker','10.80.1.11:8080','10.80.1.11','new-token');
+		INSERT INTO team_service_states(team_id,challenge_id,endpoint,status,checker,unlocked,ssh_hint,last_event,reset_cooldown)
+		VALUES(101,1,'10.80.1.11:8080','resetting','warning',FALSE,'','factory reset started via participant API','resetting');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	store := &postgresGameStore{db: db}
+	target := checkerTarget{TeamID: 101, ChallengeID: 1, CheckerToken: "new-token"}
+	if current, err := store.CheckerTargetCurrent(ctx, target); err != nil || current {
+		t.Fatalf("active reset gate opened early: current=%v err=%v", current, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE service_instances SET updated_at=NOW()-INTERVAL '6 minutes' WHERE team_id=101 AND challenge_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := store.CheckerTargetCurrent(ctx, target); err != nil || !current {
+		t.Fatalf("stale reset gate remained closed: current=%v err=%v", current, err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM team_service_states WHERE team_id=101 AND challenge_id=1`).Scan(&status); err != nil || status != "degraded" {
+		t.Fatalf("stale reset state not recovered: %q %v", status, err)
+	}
+}
+
 func TestPostgresRetentionPenaltySurvivesRecoveryAndReload(t *testing.T) {
 	db := isolatedSubmissionDB(t)
 	ctx := context.Background()

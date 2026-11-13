@@ -998,6 +998,22 @@ func (s *postgresGameStore) LockCheckerTarget(ctx context.Context, teamID, chall
 }
 
 func (s *postgresGameStore) CheckerTargetCurrent(ctx context.Context, target checkerTarget) (bool, error) {
+	// The API bounds an active reset to four minutes. If it died after
+	// preparation, release the stale gate after five minutes and let the
+	// checker report the actual runtime state instead of synthetic failures.
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE team_service_states tss
+		SET status='degraded',checker='warning',reset_cooldown='ready',
+		    last_event=CASE WHEN tss.last_event LIKE 'factory reset discarded stored flag%'
+		        THEN tss.last_event || '; reset finalization interrupted'
+		        ELSE 'factory reset finalization interrupted' END
+		FROM service_instances si
+		WHERE tss.team_id=$1 AND tss.challenge_id=$2
+		  AND si.team_id=tss.team_id AND si.challenge_id=tss.challenge_id
+		  AND tss.status='resetting' AND si.updated_at <= NOW()-INTERVAL '5 minutes'
+	`, target.TeamID, target.ChallengeID); err != nil {
+		return false, err
+	}
 	var current bool
 	err := s.db.QueryRowContext(ctx, `
 		SELECT tss.status <> 'resetting' AND si.runtime_status = 'ready' AND COALESCE(si.checker_token, '') = $3
