@@ -1173,7 +1173,11 @@ components:
         - service
         - tick
         - verdict
+        - first_blood
       properties:
+        first_blood:
+          type: boolean
+          description: True only for the first accepted attack on this challenge across the match.
         id:
           type: string
         attacker:
@@ -1198,6 +1202,10 @@ components:
         - has_prev
         - has_next
       properties:
+        revision:
+          type: integer
+          minimum: 0
+          description: Changes when an organizer removes a capture; reload the full attack slice when it changes.
         items:
           type: array
           items:

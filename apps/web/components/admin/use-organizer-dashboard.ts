@@ -547,9 +547,10 @@ export function useOrganizerDashboard({
       currentPage: () => attackPageRef.current,
       limitStr: attackFilters.limit,
       setPage: setAttackPageState,
-      scheduleHighlights: (ids) => {
-        scheduleAttackHighlights(ids);
-        playAttackSfx(ids);
+      onInvalidate: () => { void refreshAttacks(true, attackFilters, true); },
+      scheduleHighlights: (ids, firstBloodIds) => {
+        scheduleAttackHighlights([...new Set([...ids, ...firstBloodIds])]);
+        playAttackSfx(ids, firstBloodIds);
       },
     });
 
@@ -1985,6 +1986,7 @@ export function useOrganizerDashboard({
   async function refreshAttacks(
     silent = false,
     filters: AttackFilters = attackFilters,
+    preserveHighlights = false,
   ): Promise<void> {
     return refreshPagedFeed<AdminAttackFeedPage>({
       silent,
@@ -1992,7 +1994,7 @@ export function useOrganizerDashboard({
       url: `/api/admin/game/attacks${buildAttackQueryString(filters)}`,
       errorLabel: "attack feed fetch failed",
       setPage: setAttackPageState,
-      beforeSet: clearAttackHighlights,
+      beforeSet: preserveHighlights ? undefined : clearAttackHighlights,
       formatNote: (page) =>
         `Loaded ${page.items.length} accepted attack row(s) (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
     });

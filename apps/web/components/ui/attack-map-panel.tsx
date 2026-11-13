@@ -28,13 +28,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { EmptyStateText } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 import { CyberAttackMap } from './cyber-attack-map';
 
 export type AttackMapEvent = {
+  first_blood?: boolean;
   id: string;
   attacker: string;
   attackerLocation?: {
@@ -381,7 +381,7 @@ export function AttackMapPanel({
           lines={[
             { label: 'Tick', value: `#${inspectedAttack.tick}` },
             { label: 'Service', value: inspectedAttack.service },
-            { label: 'Verdict', value: inspectedAttack.verdict },
+            { label: 'Verdict', value: inspectedAttack.first_blood ? 'First blood' : inspectedAttack.verdict },
           ]}
         >
           {inspectingAutoFeature ? (
@@ -493,6 +493,7 @@ export function AttackMapPanel({
           className={expandedView ? 'aspect-auto h-full min-h-[36rem]' : 'min-h-[27rem]'}
           focusedTeams={focusedTeams}
           highlightedAttackIDs={activeHighlightIDs}
+          liveAttackIDs={highlightedAttackIDs}
           placementScopeTeams={allTeams}
           selectedAttackId={selectedAttackId}
           selectedTeamId={selectedTeamId}
@@ -546,57 +547,53 @@ export function AttackMapPanel({
           <Badge data-testid="attack-map-visible-services" variant="secondary">
             {visibleServiceCount} services
           </Badge>
-          {attackRows.length > 0 ? (
-            <>
-              <div
-                className="flex h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
-                data-testid="attack-sfx-control"
-              >
-                <Button
-                  aria-label={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
-                  aria-pressed={attackSfx.enabled}
-                  className="h-7 px-2 text-xs"
-                  size="sm"
-                  title={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
-                  variant="ghost"
-                  onClick={toggleEnabled}
-                >
-                  {attackSfx.enabled ? (
-                    <Volume2 className="h-4 w-4" />
-                  ) : (
-                    <VolumeX className="h-4 w-4" />
-                  )}
-                  SFX
-                </Button>
-                <input
-                  aria-label="Attack sound volume"
-                  className="hidden h-7 w-20 accent-primary disabled:opacity-40 sm:block"
-                  disabled={!attackSfx.enabled}
-                  max="1"
-                  min="0"
-                  step="0.05"
-                  type="range"
-                  value={attackSfx.volume}
-                  onChange={(event) => setVolume(Number(event.target.value))}
-                />
-                <Button
-                  aria-label="Test attack sound"
-                  className="hidden h-7 px-2 text-xs sm:inline-flex"
-                  disabled={!attackSfx.enabled}
-                  size="sm"
-                  title="Test attack sound"
-                  variant="ghost"
-                  onClick={previewAttackSfx}
-                >
-                  Test
-                </Button>
-              </div>
-              <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
-                <Expand className="h-4 w-4" />
-                Maximize
-              </Button>
-            </>
-          ) : null}
+          <div
+            className="flex h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
+            data-testid="attack-sfx-control"
+          >
+            <Button
+              aria-label={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
+              aria-pressed={attackSfx.enabled}
+              className="h-7 px-2 text-xs"
+              size="sm"
+              title={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
+              variant="ghost"
+              onClick={toggleEnabled}
+            >
+              {attackSfx.enabled ? (
+                <Volume2 className="h-4 w-4" />
+              ) : (
+                <VolumeX className="h-4 w-4" />
+              )}
+              SFX
+            </Button>
+            <input
+              aria-label="Attack sound volume"
+              className="hidden h-7 w-20 accent-primary disabled:opacity-40 sm:block"
+              disabled={!attackSfx.enabled}
+              max="1"
+              min="0"
+              step="0.05"
+              type="range"
+              value={attackSfx.volume}
+              onChange={(event) => setVolume(Number(event.target.value))}
+            />
+            <Button
+              aria-label="Test attack sound"
+              className="hidden h-7 px-2 text-xs sm:inline-flex"
+              disabled={!attackSfx.enabled}
+              size="sm"
+              title="Test attack sound"
+              variant="ghost"
+              onClick={previewAttackSfx}
+            >
+              Test
+            </Button>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
+            <Expand className="h-4 w-4" />
+            Maximize
+          </Button>
         </div>
       </div>
 
@@ -724,11 +721,7 @@ export function AttackMapPanel({
         </div>
       ) : null}
 
-      {attackRows.length === 0 ? (
-        <EmptyStateText message="No accepted attacks are available to plot in this view. Reset the parent attack filters or wait for the next accepted submission." />
-      ) : (
-        renderMapSurface(false)
-      )}
+      {expanded ? null : renderMapSurface(false)}
 
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <DialogContent

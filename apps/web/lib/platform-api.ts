@@ -39,6 +39,7 @@ type ScoreRow = {
 };
 
 type AttackEvent = {
+  first_blood?: boolean;
   id: string;
   attacker: string;
   victim: string;
@@ -58,6 +59,7 @@ type AttackFeedQuery = {
 };
 
 type AttackFeedPage = {
+  revision?: number;
   items: AttackEvent[];
   limit: number;
   offset: number;

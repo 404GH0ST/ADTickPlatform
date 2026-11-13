@@ -4,13 +4,23 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactElement,
+  CSSProperties,
 } from 'react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import {
+  FIRST_BLOOD_FOCUS_MS, FIRST_BLOOD_CHARGE_MS, FIRST_BLOOD_INTRO_MS,
+  FIRST_BLOOD_FLIGHT_MS, FIRST_BLOOD_IMPACT_MS, FIRST_BLOOD_RECOVER_MS,
+  FIRST_BLOOD_BANNER_HOLD_MS, FIRST_BLOOD_BANNER_EXIT_MS, FIRST_BLOOD_TOTAL_MS,
+  type FirstBloodStage,
+} from '@/lib/first-blood';
+import { useAttackSfx } from '@/components/hooks/use-attack-sfx';
 import globeJson from '@/data/globe.json';
+import { FirstBloodBanner } from './first-blood-banner';
 import { cn } from '@/lib/utils';
 
 export type CyberAttackEvent = {
+  first_blood?: boolean;
   id: string;
   attacker: string;
   victim: string;
@@ -19,6 +29,9 @@ export type CyberAttackEvent = {
   attackerLocation?: GeoPoint;
   victimLocation?: GeoPoint;
 };
+
+type FirstBloodSequence = { attack: CyberAttackEvent; stage: FirstBloodStage };
+type GlobeCamera = { rotation: GlobeRotation; zoom: number; x: number; y: number };
 
 type GlobeRotation = {
   lat: number;
@@ -80,6 +93,9 @@ type ArcPoint = ProjectedPoint & {
 };
 
 type AttackArc = {
+  firstBlood: boolean;
+  celebrating: boolean;
+  intro: boolean;
   attackIds: string[];
   id: string;
   domId: string;
@@ -174,6 +190,7 @@ const COUNTRY_RINGS = parseCountryRings(globeJson as GlobeFeatureCollection);
 export function CyberAttackMap({
   attacks,
   highlightedAttackIDs = [],
+  liveAttackIDs = [],
   focusedTeams = [],
   placementScopeTeams,
   selectedAttackId = null,
@@ -187,6 +204,7 @@ export function CyberAttackMap({
 }: {
   attacks: CyberAttackEvent[];
   highlightedAttackIDs?: string[];
+  liveAttackIDs?: string[];
   focusedTeams?: string[];
   placementScopeTeams?: string[];
   selectedAttackId?: string | null;
@@ -198,11 +216,27 @@ export function CyberAttackMap({
   presentation?: boolean;
   teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
+  const [compactSurface, setCompactSurface] = useState(false);
+  const [surfaceActive, setSurfaceActive] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
+  const [cameraCenter, setCameraCenter] = useState({ x: CENTER_X, y: CENTER_Y });
+  const [firstBloodSequence, setFirstBloodSequence] = useState<FirstBloodSequence | null>(null);
+  const [closingFirstBlood, setClosingFirstBlood] = useState<{ attack: CyberAttackEvent; leaving: boolean } | null>(null);
+  const firstBloodPresentationActive = firstBloodSequence !== null || closingFirstBlood !== null;
+  const sequenceRef = useRef<FirstBloodSequence | null>(null);
+  const sequenceBusyRef = useRef(false);
+  const sequenceQueueRef = useRef<CyberAttackEvent[]>([]);
+  const sequenceTimersRef = useRef<Set<number>>(new Set());
+  const cinematicFrameRef = useRef<number | null>(null);
+  const cameraRef = useRef<GlobeCamera>({ rotation, zoom, ...cameraCenter });
+  const savedCameraRef = useRef<GlobeCamera | null>(null);
+  const sequenceAudioRef = useRef<AbortController | null>(null);
+  const playFirstBloodSfx = useAttackSfx({ firstBloodOnly: true });
   const mapRootRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -213,6 +247,8 @@ export function CyberAttackMap({
   const previousAttackIdsRef = useRef<Set<string> | null>(null);
   const freshAttackTimersRef = useRef<Map<string, number>>(new Map());
   const freshFrameTimeoutRef = useRef<number | null>(null);
+  const [introAttackIds, setIntroAttackIds] = useState<Set<string>>(() => new Set());
+  const [celebratingAttackIds, setCelebratingAttackIds] = useState<Set<string>>(() => new Set());
   const [freshAttackIds, setFreshAttackIds] = useState<Set<string>>(() => new Set());
   const idleTimeoutRef = useRef<number | null>(null);
   const lastActivityRef = useRef(0);
@@ -231,16 +267,21 @@ export function CyberAttackMap({
     highlightedAttackIDs.length > 0 ||
     focusedTeams.length > 0;
   const featuredQueue = useMemo(() => buildFeaturedAttackQueue(attacks), [attacks]);
-  const { arcs, featuredAttack, nodes, services } = useMemo(() => {
+  const scene = useMemo(() => {
     const attackTeamNames = listAttackTeams(attacks);
     const placementTeamNames = listPlacementTeams(attackTeamNames, placementScopeTeams);
     const teamStats = buildTeamStats(attacks, attackTeamNames);
     const landmarksByTeam = getLandmarkPlacements(placementTeamNames, attacks, teamLocations);
-    const highlightedSet = new Set(highlightedAttackIDs);
     const serviceNames = listAttackServices(attacks);
     const serviceColors = buildServiceColors(serviceNames);
     const tickRange = getAttackTickRange(attacks);
     const routeBundles = bundleAttackRoutes(attacks);
+
+    return { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles };
+  }, [attacks, placementScopeTeams, teamLocations]);
+  const { arcs, featuredAttack, nodes, services } = useMemo(() => {
+    const { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles } = scene;
+    const highlightedSet = new Set(highlightedAttackIDs);
 
     const nodesByName: Record<string, TeamNode> = {};
     attackTeamNames.forEach((name) => {
@@ -289,6 +330,9 @@ export function CyberAttackMap({
       const arcEndpoints = getArcEndpoints(start, end, rotation);
 
       return {
+        firstBlood: attack.first_blood === true,
+        celebrating: celebratingAttackIds.has(attack.id),
+        intro: introAttackIds.has(attack.id) || sequenceQueueRef.current.some((queued) => queued.id === attack.id),
         id: attack.id,
         attackIds: attack.attackIds,
         domId: `${mapId}-arc-${index}`,
@@ -297,7 +341,7 @@ export function CyberAttackMap({
         service: attack.service,
         tick: attack.tick,
         count: attack.count,
-        color: serviceColors[attack.service],
+        color: celebratingAttackIds.has(attack.id) ? 'var(--signal-negative)' : serviceColors[attack.service],
         endX: arcEndpoints.end.x,
         endY: arcEndpoints.end.y,
         highlighted,
@@ -326,10 +370,13 @@ export function CyberAttackMap({
       })),
     };
   }, [
+    scene,
     attacks,
     focusedTeamSet,
     featuredAttackId,
     freshAttackIds,
+    celebratingAttackIds,
+    introAttackIds,
     highlightedAttackIDs,
     mapId,
     placementScopeTeams,
@@ -340,11 +387,48 @@ export function CyberAttackMap({
   ]);
   const showDefaultLabels = !hasFocus && nodes.length > 0 && nodes.length <= DEFAULT_LABEL_LIMIT;
   const denseKeyboardMode = arcs.length + nodes.length > DENSE_KEYBOARD_ITEM_LIMIT;
-  const motionEnabled = attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
+  const motionEnabled = surfaceActive && !reducedMotion && attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+  const compactSurfaceRef = useRef(compactSurface);
+  compactSurfaceRef.current = compactSurface;
+  const introAttacks = attacks.filter((attack) => introAttackIds.has(attack.id));
+  const firstBloodAnnouncement = attacks.find((attack) => celebratingAttackIds.has(attack.id));
+
+  useEffect(() => {
+    const root = mapRootRef.current;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let intersecting = true;
+    const sync = () => {
+      setSurfaceActive(intersecting && !document.hidden);
+      setReducedMotion(media.matches);
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      intersecting = entry.isIntersecting;
+      sync();
+    });
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      setCompactSurface(entry.contentRect.width < 520);
+    });
+    if (root) {
+      observer.observe(root);
+      resizeObserver.observe(root);
+    }
+    document.addEventListener('visibilitychange', sync);
+    media.addEventListener('change', sync);
+    sync();
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+      document.removeEventListener('visibilitychange', sync);
+      media.removeEventListener('change', sync);
+    };
+  }, []);
 
   useEffect(() => {
     rotationRef.current = rotation;
-  }, [rotation]);
+    cameraRef.current = { rotation, zoom, ...cameraCenter };
+  }, [rotation, zoom, cameraCenter]);
 
   useEffect(() => {
     featuredAttackIdRef.current = featuredAttackId;
@@ -354,12 +438,13 @@ export function CyberAttackMap({
   useEffect(() => {
     startAutoRotationFromIdle();
     return clearAutoRotationTimers;
-  }, [attacks, featuredQueue, placementScopeTeams]);
+  }, [attacks, featuredQueue, placementScopeTeams, surfaceActive, firstBloodPresentationActive]);
 
   useEffect(() => {
     const nextAttackIds = new Set(attacks.map((attack) => attack.id));
     const previousAttackIds = previousAttackIdsRef.current;
-    previousAttackIdsRef.current = nextAttackIds;
+    // Keep history across filters so revisiting a capture cannot replay its arrival.
+    previousAttackIdsRef.current = new Set([...(previousAttackIds ?? []), ...nextAttackIds]);
     if (previousAttackIds === null) {
       return undefined;
     }
@@ -377,34 +462,35 @@ export function CyberAttackMap({
       freshIds.forEach((id) => next.add(id));
       return next;
     });
-    freshIds.forEach((id) => {
-      const existing = timers.get(id);
-      if (existing !== undefined) {
-        window.clearTimeout(existing);
-      }
-      timers.set(
-        id,
-        window.setTimeout(() => {
-          timers.delete(id);
-          setFreshAttackIds((current) => {
-            if (!current.has(id)) {
-              return current;
-            }
-            const next = new Set(current);
-            next.delete(id);
-            return next;
-          });
-        }, FRESH_ATTACK_FLY_MS),
-      );
-    });
+    // Expire a whole arrival batch with one timer and one React update.
+    const batchKey = freshIds.join('\u0000');
+    const freshSet = new Set(freshIds);
+    const liveSet = new Set(liveAttackIDs);
+    const milestoneIds = attacks
+      .filter((attack) => attack.first_blood && freshSet.has(attack.id) && liveSet.has(attack.id))
+      .map((attack) => attack.id);
+    const milestone = milestoneIds.length > 0;
+    if (milestone) {
+      sequenceQueueRef.current.push(...attacks.filter((attack) => milestoneIds.includes(attack.id)));
+      if (!sequenceBusyRef.current) startNextFirstBlood();
+    }
+    // Milestones live until their own queued sequence ends; normal captures
+    // retain the short arrival animation even when a cinematic is running.
+    const ordinaryIds = freshIds.filter((id) => !milestoneIds.includes(id));
+    if (ordinaryIds.length > 0) {
+      timers.set(batchKey, window.setTimeout(() => {
+        timers.delete(batchKey);
+        setFreshAttackIds((current) => new Set([...current].filter((id) => !ordinaryIds.includes(id))));
+      }, FRESH_ATTACK_FLY_MS));
+    }
 
-    const latestFreshId = freshIds[freshIds.length - 1];
+    const latestFreshId = milestoneIds[0] ?? freshIds[0];
     if (freshFrameTimeoutRef.current !== null) {
       window.clearTimeout(freshFrameTimeoutRef.current);
     }
     freshFrameTimeoutRef.current = window.setTimeout(() => {
       freshFrameTimeoutRef.current = null;
-      if (featuredAttackIntervalRef.current === null || dragRef.current !== null) {
+      if (sequenceRef.current !== null || milestone || !surfaceActive || document.hidden || featuredAttackIntervalRef.current === null || dragRef.current !== null || featuredAttackPausedRef.current) {
         return;
       }
       const target = attacks.find((attack) => attack.id === latestFreshId);
@@ -412,7 +498,7 @@ export function CyberAttackMap({
         return;
       }
       featureAttack(target, true);
-      window.clearInterval(featuredAttackIntervalRef.current);
+      if (featuredAttackIntervalRef.current !== null) window.clearInterval(featuredAttackIntervalRef.current);
       featuredAttackIntervalRef.current = window.setInterval(
         featureNextAttack,
         FEATURED_ATTACK_STEP_MS,
@@ -420,19 +506,46 @@ export function CyberAttackMap({
     }, FRESH_FRAME_DEBOUNCE_MS);
 
     return undefined;
-  }, [attacks]);
+  }, [attacks, liveAttackIDs]);
 
   useEffect(() => {
     const timers = freshAttackTimersRef.current;
     return () => {
       timers.forEach((handle) => window.clearTimeout(handle));
       timers.clear();
+      sequenceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      sequenceAudioRef.current?.abort();
+      if (cinematicFrameRef.current !== null) window.cancelAnimationFrame(cinematicFrameRef.current);
       if (freshFrameTimeoutRef.current !== null) {
         window.clearTimeout(freshFrameTimeoutRef.current);
         freshFrameTimeoutRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    const ids = new Set(attacks.map((attack) => attack.id));
+    sequenceQueueRef.current = sequenceQueueRef.current.filter((attack) => ids.has(attack.id));
+    const activeId = sequenceRef.current?.attack.id ?? closingFirstBlood?.attack.id;
+    if (activeId && !ids.has(activeId)) {
+      // A deletion and its replacement first blood may share one SSE frame.
+      // Cancel the withdrawn award while preserving valid arrivals in the queue.
+      const queued = sequenceQueueRef.current;
+      interruptFirstBlood();
+      sequenceQueueRef.current = queued;
+      if (queued.length > 0) {
+        setFreshAttackIds((current) => new Set([...current, ...queued.map((attack) => attack.id)]));
+        startNextFirstBlood();
+      }
+    }
+  }, [attacks, closingFirstBlood?.attack.id]);
+
+  useEffect(() => {
+    if (!surfaceActive && cinematicFrameRef.current !== null) {
+      window.cancelAnimationFrame(cinematicFrameRef.current);
+      cinematicFrameRef.current = null;
+    }
+  }, [surfaceActive]);
 
   useEffect(() => {
     const root = mapRootRef.current;
@@ -500,7 +613,159 @@ export function CyberAttackMap({
       window.removeEventListener('ad-platform:resume-featured-attacks', handleResumeFeaturedAttacks);
       window.removeEventListener('ad-platform:feature-next-attack', handleFeatureNextAttack);
     };
-  }, [attacks, featuredQueue, placementScopeTeams]);
+  }, [attacks, featuredQueue, placementScopeTeams, surfaceActive]);
+
+  function animateCinematicCamera(target: GlobeCamera, duration: number): void {
+    if (cinematicFrameRef.current !== null) window.cancelAnimationFrame(cinematicFrameRef.current);
+    const start = cameraRef.current;
+    const started = performance.now();
+    const deltaLon = normalizeLongitude(target.rotation.lon - start.rotation.lon);
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    function frame(now: number): void {
+      const still = media.matches;
+      const hidden = document.hidden || mapRootRef.current?.dataset.surfaceActive === 'false';
+      const progress = still || hidden ? 1 : clamp((now - started) / duration, 0, 1);
+      const ease = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+      const next = {
+        rotation: {
+          lat: start.rotation.lat + (target.rotation.lat - start.rotation.lat) * ease,
+          lon: normalizeLongitude(start.rotation.lon + deltaLon * ease),
+        },
+        zoom: still && sequenceRef.current?.stage !== 'recover' ? start.zoom : start.zoom + (target.zoom - start.zoom) * ease,
+        x: still ? CENTER_X : start.x + (target.x - start.x) * ease,
+        y: still ? CENTER_Y : start.y + (target.y - start.y) * ease,
+      };
+      cameraRef.current = next;
+      rotationRef.current = next.rotation;
+      setRotation(next.rotation);
+      setZoom(next.zoom);
+      setCameraCenter({ x: next.x, y: next.y });
+      cinematicFrameRef.current = progress < 1 ? requestAnimationFrame(frame) : null;
+    }
+    frame(started);
+  }
+
+  function setFirstBloodStage(stage: FirstBloodStage): void {
+    if (!sequenceRef.current) return;
+    const next = { ...sequenceRef.current, stage };
+    sequenceRef.current = next;
+    setFirstBloodSequence(next);
+  }
+
+  function scheduleSequence(callback: () => void, delay: number): void {
+    const timer = window.setTimeout(() => {
+      sequenceTimersRef.current.delete(timer);
+      callback();
+    }, delay);
+    sequenceTimersRef.current.add(timer);
+  }
+
+  function startNextFirstBlood(): void {
+    const attack = sequenceQueueRef.current.shift();
+    if (!attack) return;
+    sequenceBusyRef.current = true;
+    clearAutoRotationTimers(false);
+    savedCameraRef.current = { ...cameraRef.current };
+    sequenceRef.current = { attack, stage: 'focus' };
+    setFirstBloodSequence(sequenceRef.current);
+    setIntroAttackIds(new Set([attack.id]));
+    setCelebratingAttackIds(new Set());
+    setFeaturedAttackId(attack.id);
+    featuredAttackIdRef.current = attack.id;
+    const { landmarksByTeam } = sceneRef.current;
+    const attacker = landmarksByTeam[attack.attacker];
+    const victim = landmarksByTeam[attack.victim];
+    const target = getFeaturedAttackRotation(attacker, victim);
+    if (target && attacker && victim) {
+      const start = projectGlobePoint(attacker, target);
+      const end = projectGlobePoint(victim, target);
+      const width = compactSurfaceRef.current ? 600 : MAP_WIDTH;
+      // Frame both endpoints and their burst/labels. Never zoom one team out
+      // of shot, including wide routes and the narrow mobile surface.
+      const fitZoom = clamp(Math.min(
+        compactSurfaceRef.current ? 1.5 : 1.85,
+        width / (Math.abs(start.x - end.x) + 210),
+        MAP_HEIGHT / (Math.abs(start.y - end.y) + 340),
+      ), ZOOM_MIN, ZOOM_MAX);
+      animateCinematicCamera({
+        rotation: target, zoom: fitZoom,
+        x: (start.x + end.x) / 2,
+        y: (start.y + end.y) / 2 + 38,
+      }, FIRST_BLOOD_FOCUS_MS);
+    }
+    sequenceAudioRef.current = new AbortController();
+    const projectedAttacker = attacker && target ? projectGlobePoint(attacker, target) : null;
+    const projectedVictim = victim && target ? projectGlobePoint(victim, target) : null;
+    const sequenceAudio = sequenceAudioRef.current;
+    const sound = playFirstBloodSfx([attack.id], [attack.id], sequenceAudio.signal, {
+      attackerPan: projectedAttacker ? (projectedAttacker.x - CENTER_X) / GLOBE_RADIUS : -0.5,
+      victimPan: projectedVictim ? (projectedVictim.x - CENTER_X) / GLOBE_RADIUS : 0.5,
+    });
+    scheduleSequence(() => setFirstBloodStage('charge'), FIRST_BLOOD_FOCUS_MS);
+    scheduleSequence(() => {
+      setIntroAttackIds(new Set());
+      setCelebratingAttackIds(new Set([attack.id]));
+      setFirstBloodStage('flight');
+    }, FIRST_BLOOD_INTRO_MS);
+    scheduleSequence(() => setFirstBloodStage('impact'), FIRST_BLOOD_INTRO_MS + FIRST_BLOOD_FLIGHT_MS);
+    scheduleSequence(() => {
+      setFirstBloodStage('recover');
+      const saved = savedCameraRef.current;
+      if (saved) animateCinematicCamera(saved, FIRST_BLOOD_RECOVER_MS);
+    }, FIRST_BLOOD_INTRO_MS + FIRST_BLOOD_FLIGHT_MS + FIRST_BLOOD_IMPACT_MS);
+    scheduleSequence(() => {
+      sequenceRef.current = null;
+      savedCameraRef.current = null;
+      setFirstBloodSequence(null);
+      setCelebratingAttackIds(new Set());
+      setFreshAttackIds((current) => new Set([...current].filter((id) => id !== attack.id)));
+      setClosingFirstBlood({ attack, leaving: false });
+      let minimumHoldDone = false;
+      let audioDone = !sound;
+      let leaving = false;
+      const release = () => {
+        if (sequenceAudio.signal.aborted || !minimumHoldDone || !audioDone || leaving) return;
+        leaving = true;
+        setClosingFirstBlood({ attack, leaving: true });
+        scheduleSequence(() => {
+          if (sequenceAudio.signal.aborted) return;
+          setClosingFirstBlood(null);
+          sequenceBusyRef.current = false;
+          if (sequenceQueueRef.current.length > 0) startNextFirstBlood();
+        }, FIRST_BLOOD_BANNER_EXIT_MS);
+      };
+      scheduleSequence(() => {
+        minimumHoldDone = true;
+        release();
+      }, FIRST_BLOOD_BANNER_HOLD_MS);
+      // Keep the result up through the full announcer, including slow decoding.
+      if (sound) void sound.finished.then(() => { audioDone = true; release(); });
+    }, FIRST_BLOOD_TOTAL_MS);
+  }
+
+  function interruptFirstBlood(): void {
+    if (!sequenceRef.current && !sequenceBusyRef.current) return;
+    sequenceBusyRef.current = false;
+    setClosingFirstBlood(null);
+    sequenceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    sequenceTimersRef.current.clear();
+    const interruptedIds = new Set([...(sequenceRef.current ? [sequenceRef.current.attack.id] : closingFirstBlood ? [closingFirstBlood.attack.id] : []), ...sequenceQueueRef.current.map((attack) => attack.id)]);
+    setFreshAttackIds((current) => new Set([...current].filter((id) => !interruptedIds.has(id))));
+    sequenceQueueRef.current = [];
+    sequenceAudioRef.current?.abort();
+    if (cinematicFrameRef.current !== null) window.cancelAnimationFrame(cinematicFrameRef.current);
+    cinematicFrameRef.current = null;
+    sequenceRef.current = null;
+    setFirstBloodSequence(null);
+    setIntroAttackIds(new Set());
+    setCelebratingAttackIds(new Set());
+    const saved = savedCameraRef.current;
+    savedCameraRef.current = null;
+    if (saved) {
+      setZoom(saved.zoom);
+      setCameraCenter({ x: saved.x, y: saved.y });
+    }
+  }
 
   function clearAutoRotationTimers(clearFeatured = true): void {
     if (idleTimeoutRef.current !== null) {
@@ -511,7 +776,7 @@ export function CyberAttackMap({
       window.clearInterval(featuredAttackIntervalRef.current);
       featuredAttackIntervalRef.current = null;
     }
-    if (clearFeatured && featuredAttackIdRef.current !== null) {
+    if (clearFeatured && !sequenceBusyRef.current && featuredAttackIdRef.current !== null) {
       featuredAttackIdRef.current = null;
       setFeaturedAttackId(null);
     }
@@ -526,6 +791,8 @@ export function CyberAttackMap({
   }
 
   function markUserActivity(): void {
+    // Passing the cursor over the globe must not cancel its live focal moment.
+    if (sequenceBusyRef.current) return;
     const now = window.performance.now();
     if (featuredAttackIdRef.current === null && now - lastActivityRef.current < 250) {
       return;
@@ -537,7 +804,7 @@ export function CyberAttackMap({
   }
 
   function featureNextAttack(): void {
-    if (attacks.length === 0) {
+    if (sequenceBusyRef.current || !surfaceActive || document.hidden || attacks.length === 0) {
       return;
     }
     const queue = featuredQueue.length > 0 ? featuredQueue : attacks;
@@ -550,6 +817,7 @@ export function CyberAttackMap({
     attack: CyberAttackEvent,
     animate: boolean,
     rotate = true,
+    duration?: number,
   ): void {
     setFeaturedAttackId(attack.id);
     if (!rotate) {
@@ -563,14 +831,14 @@ export function CyberAttackMap({
     const victim = landmarksByTeam[attack.victim];
     const target = getFeaturedAttackRotation(attacker, victim);
     if (target && animate) {
-      animateRotationTo(target);
+      animateRotationTo(target, duration);
     } else if (target) {
       rotationRef.current = target;
       setRotation(target);
     }
   }
 
-  function animateRotationTo(target: GlobeRotation): void {
+  function animateRotationTo(target: GlobeRotation, duration = 2800): void {
     cancelRotationAnimation();
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       rotationRef.current = target;
@@ -579,7 +847,6 @@ export function CyberAttackMap({
     }
     const start = rotationRef.current;
     const startTime = window.performance.now();
-    const duration = 2800;
     const deltaLon = normalizeLongitude(target.lon - start.lon);
     const deltaLat = target.lat - start.lat;
 
@@ -604,7 +871,7 @@ export function CyberAttackMap({
 
   function startAutoRotationFromIdle(): void {
     clearAutoRotationTimers(false);
-    if (attacks.length === 0 || featuredAttackPausedRef.current) {
+    if (sequenceBusyRef.current || attacks.length === 0 || featuredAttackPausedRef.current || !surfaceActive) {
       return;
     }
     idleTimeoutRef.current = window.setTimeout(() => {
@@ -624,6 +891,7 @@ export function CyberAttackMap({
     if (event.button !== 0 || isInteractivePointerTarget(event.target)) {
       return;
     }
+    interruptFirstBlood();
     markUserActivity();
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -669,6 +937,7 @@ export function CyberAttackMap({
   }
 
   function zoomBy(delta: number): void {
+    interruptFirstBlood();
     setZoom((current) =>
       Math.round(clamp(current + delta, ZOOM_MIN, ZOOM_MAX) * 100) / 100,
     );
@@ -676,16 +945,21 @@ export function CyberAttackMap({
 
   // Zoom by shrinking the SVG viewBox around the globe centre. Purely visual,
   // so projection/rotation math is untouched; HTML chrome stays unscaled.
-  const viewWidth = MAP_WIDTH / zoom;
+  const viewWidth = (compactSurface ? 600 : MAP_WIDTH) / zoom;
   const viewHeight = MAP_HEIGHT / zoom;
-  const viewBox = `${CENTER_X - viewWidth / 2} ${CENTER_Y - viewHeight / 2} ${viewWidth} ${viewHeight}`;
+  const viewBox = `${cameraCenter.x - viewWidth / 2} ${cameraCenter.y - viewHeight / 2} ${viewWidth} ${viewHeight}`;
 
   return (
     <div
       ref={mapRootRef}
       data-testid="cyber-attack-map"
       data-featured-attack-id={featuredAttackId ?? undefined}
+      data-first-blood-phase={introAttacks.length > 0 ? 'intro' : celebratingAttackIds.size > 0 ? 'attack' : undefined}
+      data-first-blood-stage={firstBloodSequence?.stage}
+      data-first-blood-closing={closingFirstBlood ? 'true' : undefined}
+      data-zoom={zoom.toFixed(3)}
       data-keyboard-mode={denseKeyboardMode ? 'jump' : 'direct'}
+      data-surface-active={surfaceActive ? 'true' : 'false'}
       data-motion-enabled={motionEnabled ? 'true' : 'false'}
       data-rotation-lat={rotation.lat.toFixed(2)}
       data-rotation-lon={rotation.lon.toFixed(2)}
@@ -720,7 +994,7 @@ export function CyberAttackMap({
       <svg
         viewBox={viewBox}
         preserveAspectRatio="xMidYMid meet"
-        className="absolute inset-0 h-full w-full"
+        className={cn('absolute inset-0 h-full w-full', firstBloodSequence?.stage === 'impact' && surfaceActive && !reducedMotion ? `${flyClassName}-recoil` : '')}
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
@@ -744,7 +1018,9 @@ export function CyberAttackMap({
           </marker>
         </defs>
 
-        <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
+        <g opacity={firstBloodSequence && firstBloodSequence.stage !== 'recover' ? 0.48 : closingFirstBlood ? 0.65 : 1} style={{ transition: `opacity ${FIRST_BLOOD_RECOVER_MS}ms ease` }}>
+          <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
+        </g>
 
         <g clipPath={`url(#${clipId})`}>
           {arcs.map((arc) => (
@@ -752,7 +1028,7 @@ export function CyberAttackMap({
               key={arc.id}
               arc={arc}
               beamClassName={beamClassName}
-              dimmed={hasFocus && !arc.active}
+              dimmed={closingFirstBlood ? true : firstBloodSequence ? arc.id !== firstBloodSequence.attack.id : hasFocus && !arc.active}
               flyClassName={flyClassName}
               haloClassName={haloClassName}
               markerId={markerId}
@@ -765,14 +1041,27 @@ export function CyberAttackMap({
 
         {nodes.map((node) => {
           const featured = isFeaturedTeam(node, featuredAttack);
-          const showLabel =
-            showDefaultLabels ||
-            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
-            featured;
+          const focal = firstBloodSequence && (node.id === firstBloodSequence.attack.attacker || node.id === firstBloodSequence.attack.victim);
+          const showLabel = closingFirstBlood ? false : firstBloodSequence ? Boolean(focal) : (
+            showDefaultLabels || shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) || featured
+          );
+          const insetLabel = compactSurface && focal;
+          const labelOnLeft = node.x > cameraCenter.x;
+          const labelScale = insetLabel ? 1.5 : 1;
+          const labelWidth = getTeamLabelWidth(node) * labelScale;
+          const labelNode: TeamNode = insetLabel ? {
+            ...node,
+            labelX: labelOnLeft
+              ? clamp(node.x - 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + labelWidth + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - 10)
+              : clamp(node.x + 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - labelWidth - 10),
+            labelY: node.y + 48,
+            labelAnchor: labelOnLeft ? 'end' : 'start',
+          } : node;
           return (
             <TeamNodeLabel
               key={`${node.id}-label`}
-              node={node}
+              node={labelNode}
+              scale={labelScale}
               showLabel={showLabel}
             />
           );
@@ -784,21 +1073,53 @@ export function CyberAttackMap({
             showDefaultLabels ||
             shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
             featured;
+          const unrelated = firstBloodSequence && firstBloodSequence.stage !== 'recover' && node.id !== firstBloodSequence.attack.attacker && node.id !== firstBloodSequence.attack.victim;
+          const struck = firstBloodSequence?.attack.victim === node.id && firstBloodSequence.stage === 'impact' && !reducedMotion;
           return (
-            <TeamNodeDot
-              key={node.id}
-              node={node}
-              haloClassName={haloClassName}
-              showLabel={showLabel}
-              onHoverChange={setHoveredTeamId}
-              onSelectTeam={onSelectTeam}
-              tabReachable={!denseKeyboardMode}
-            />
+            <g key={node.id} opacity={closingFirstBlood ? 0.4 : unrelated ? 0.2 : struck ? 0.12 : 1} style={{ transition: 'opacity 400ms ease' }}>
+              <TeamNodeDot
+                node={node}
+                haloClassName={haloClassName}
+                showLabel={showLabel}
+                onHoverChange={setHoveredTeamId}
+                onSelectTeam={onSelectTeam}
+                tabReachable={!denseKeyboardMode}
+              />
+            </g>
           );
         })}
 
+        {firstBloodSequence ? (
+          <FirstBloodChoreography
+            sequence={firstBloodSequence}
+            arc={arcs.find((arc) => arc.id === firstBloodSequence.attack.id)}
+            nodes={nodes}
+            className={flyClassName}
+            motion={surfaceActive && !reducedMotion}
+          />
+        ) : null}
       </svg>
 
+      {introAttacks.length > 0 || firstBloodAnnouncement ? (
+        <FirstBloodNotice
+          attacks={introAttacks.length > 0 ? introAttacks : firstBloodAnnouncement ? [firstBloodAnnouncement] : []}
+          intro={introAttacks.length > 0}
+          stage={firstBloodSequence?.stage ?? 'focus'}
+          motionClass={surfaceActive && !reducedMotion ? `${flyClassName}-notice` : undefined}
+        />
+      ) : null}
+      {closingFirstBlood ? (
+        <FirstBloodBanner
+          attack={closingFirstBlood.attack}
+          leaving={closingFirstBlood.leaving}
+          reducedMotion={reducedMotion || !surfaceActive}
+        />
+      ) : null}
+      {attacks.length === 0 ? (
+        <p data-testid="attack-map-waiting" className="pointer-events-none absolute inset-x-6 bottom-12 text-center text-sm" style={{ color: 'var(--attack-map-node-label)' }}>
+          Waiting for the first capture
+        </p>
+      ) : null}
       <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
         {services.map((service) => (
           <div
@@ -821,7 +1142,7 @@ export function CyberAttackMap({
       </div>
 
       {presentation ? null : (
-        <div className="absolute right-3 top-3 flex flex-wrap justify-end gap-1.5">
+        <div className="absolute right-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-1.5">
           {[
             { label: 'Americas', value: { lat: -6, lon: -82 } },
             { label: 'EMEA', value: { lat: -6, lon: 34 } },
@@ -833,6 +1154,7 @@ export function CyberAttackMap({
               className="min-h-9 rounded-sm border px-3 py-1.5 text-[11px] font-semibold sm:min-h-0 sm:px-2 sm:py-1 sm:text-[10px]"
               onClick={(event) => {
                 event.stopPropagation();
+                interruptFirstBlood();
                 markUserActivity();
                 animateRotationTo(preset.value);
               }}
@@ -849,7 +1171,7 @@ export function CyberAttackMap({
         </div>
       )}
 
-      <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
+      <div className={cn('absolute bottom-3 right-3 flex gap-1.5', firstBloodPresentationActive ? 'flex-row' : 'flex-col')}>
         {[
           { label: '+', delta: ZOOM_STEP, aria: 'Zoom in', disabled: zoom >= ZOOM_MAX },
           { label: '−', delta: -ZOOM_STEP, aria: 'Zoom out', disabled: zoom <= ZOOM_MIN },
@@ -975,6 +1297,83 @@ export function CyberAttackMap({
         .${beamClassName} {
           animation: ${beamClassName}-keyframes 4.8s linear infinite;
         }
+        @keyframes ${flyClassName}-lock {
+          0% { opacity: 0; transform: scale(1.8); }
+          25%, 85% { opacity: 0.9; transform: scale(1); }
+          100% { opacity: 0.3; transform: scale(0.9); }
+        }
+        .${flyClassName}-lock {
+          transform-box: fill-box;
+          transform-origin: center;
+          animation: ${flyClassName}-lock ${FIRST_BLOOD_INTRO_MS}ms cubic-bezier(0.16, 1, 0.3, 1) 1 both;
+        }
+        @keyframes ${flyClassName}-notice-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .${flyClassName}-notice { animation: ${flyClassName}-notice-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-settle {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+        .${flyClassName}-notice[data-first-blood-notice-stage="recover"] {
+          animation: ${flyClassName}-settle 400ms ease 600ms both;
+        }
+        .${flyClassName}-settle { animation: ${flyClassName}-settle 700ms ease both; }
+        @keyframes ${flyClassName}-charge-ring {
+          from { stroke-dashoffset: 1; transform: rotate(-90deg) scale(1.35); opacity: 0.2; }
+          to { stroke-dashoffset: 0; transform: rotate(270deg) scale(0.65); opacity: 1; }
+        }
+        .${flyClassName}-charge-ring {
+          animation: ${flyClassName}-charge-ring ${FIRST_BLOOD_CHARGE_MS}ms cubic-bezier(0.7, 0, 0.84, 0) both;
+        }
+        @keyframes ${flyClassName}-charge-core {
+          from { transform: scale(0.45); stroke-width: 1; opacity: 0.2; }
+          to { transform: scale(1.2); stroke-width: 9; opacity: 0.85; }
+        }
+        .${flyClassName}-charge-core { animation: ${flyClassName}-charge-core ${FIRST_BLOOD_CHARGE_MS}ms ease-in both; }
+        @keyframes ${flyClassName}-charge-in {
+          0% { transform: translateY(-12px); opacity: 0; }
+          25% { opacity: 0.85; }
+          100% { transform: translateY(42px); opacity: 0; }
+        }
+        .${flyClassName}-charge-in { animation: ${flyClassName}-charge-in 850ms ease-in 1 both; }
+        @keyframes ${flyClassName}-launch {
+          from { transform: scale(0.6); opacity: 1; }
+          to { transform: scale(2.3); opacity: 0; }
+        }
+        .${flyClassName}-launch { animation: ${flyClassName}-launch 750ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-strike {
+          0% { stroke-dashoffset: 0.23; opacity: 0; }
+          8%, 96% { opacity: 1; }
+          100% { stroke-dashoffset: -1; opacity: 0; }
+        }
+        .${flyClassName}-strike { animation: ${flyClassName}-strike ${FIRST_BLOOD_FLIGHT_MS}ms cubic-bezier(0.7, 0, 0.84, 0) both; }
+        @keyframes ${flyClassName}-shock {
+          0% { transform: scale(0.4); opacity: 1; }
+          100% { transform: scale(4); opacity: 0; }
+        }
+        .${flyClassName}-shock { animation: ${flyClassName}-shock 1100ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-shard {
+          from { transform: translateY(0) rotate(0); opacity: 1; }
+          65% { opacity: 0.8; }
+          to { transform: translateY(calc(-1 * var(--shard-distance))) rotate(var(--shard-turn)); opacity: 0; }
+        }
+        .${flyClassName}-shard { animation: ${flyClassName}-shard 1250ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-reform {
+          from { transform: scale(2); opacity: 0; stroke-dasharray: 2 12; }
+          to { transform: scale(1); opacity: 0.65; stroke-dasharray: 14 0; }
+        }
+        .${flyClassName}-reform { animation: ${flyClassName}-reform 800ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-recoil {
+          0%, 100% { transform: translate(0, 0); }
+          10% { transform: translate(-3px, 1.5px); }
+          25% { transform: translate(2px, -1px); }
+          45% { transform: translate(-1px, 0.5px); }
+          70% { transform: translate(0.5px, 0); }
+        }
+        .${flyClassName}-recoil { animation: ${flyClassName}-recoil 450ms ease-out both; }
+        [data-surface-active="false"] * { animation-play-state: paused !important; }
         .${flyClassName}-bolt {
           animation: ${flyClassName}-bolt 1.05s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
         }
@@ -1013,6 +1412,7 @@ export function CyberAttackMap({
           stroke-width: 2.6;
         }
         @media (prefers-reduced-motion: reduce) {
+          .${flyClassName}-lock,
           .${beamClassName},
           .${haloClassName},
           .${haloClassName}-fresh,
@@ -1029,7 +1429,127 @@ export function CyberAttackMap({
   );
 }
 
-function GlobeSurface({
+function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
+  sequence: FirstBloodSequence;
+  arc?: AttackArc;
+  nodes: TeamNode[];
+  className: string;
+  motion: boolean;
+}): ReactElement | null {
+  if (!arc) return null;
+  const attacker = nodes.find((node) => node.id === sequence.attack.attacker);
+  const victim = nodes.find((node) => node.id === sequence.attack.victim);
+  const { stage } = sequence;
+  const intro = stage === 'focus' || stage === 'charge';
+  const hit = stage === 'impact';
+  return (
+    <g pointerEvents="none" fill="none" stroke="var(--signal-negative)"
+      data-first-blood-effect={intro ? undefined : 'true'}
+      className={motion && stage === 'recover' ? `${className}-settle` : undefined}>
+      {attacker?.visible ? (
+        <g data-first-blood-endpoint="attacker" transform={`translate(${arc.startX} ${arc.startY})`}>
+          <title>First blood submitted by {sequence.attack.attacker}</title>
+          {intro ? (
+            <>
+              <path d="M -10 -24 H -24 V -10 M 10 -24 H 24 V -10 M -24 10 V 24 H -10 M 24 10 V 24 H 10"
+                strokeWidth="2" className={motion ? `${className}-lock` : undefined} />
+              {stage === 'charge' ? (
+                <g data-first-blood-charge="true">
+                  <circle r="44" strokeWidth="2.5" pathLength="1" strokeDasharray="1"
+                    className={motion ? `${className}-charge-ring` : undefined} />
+                  <circle r="17" strokeWidth="5" strokeOpacity="0.35"
+                    className={motion ? `${className}-charge-core` : undefined} />
+                  <circle r="7" fill="var(--signal-negative)" stroke="none" />
+                  {Array.from({ length: 8 }, (_, index) => (
+                    <g key={index} transform={`rotate(${index * 45})`}>
+                      <path d="M 0 -78 V -55" strokeWidth="2"
+                        className={motion ? `${className}-charge-in` : undefined}
+                        style={{ animationDelay: `${index * 70}ms` }} />
+                    </g>
+                  ))}
+                </g>
+              ) : null}
+            </>
+          ) : (
+            <circle r="28" strokeWidth="3" className={motion && stage === 'flight' ? `${className}-launch` : undefined} opacity={stage === 'flight' ? 1 : 0.35} />
+          )}
+        </g>
+      ) : null}
+      {stage === 'flight' ? (
+        <g data-first-blood-strike="true">
+          <path d={arc.path} strokeWidth="18" strokeOpacity="0.13" />
+          <path d={arc.path} strokeWidth="3" strokeOpacity="0.45" />
+          <path d={arc.path} pathLength="1" strokeDasharray="0.22 1" strokeLinecap="round" strokeWidth="8"
+            className={motion ? `${className}-strike` : undefined} />
+          {motion ? <path d={arc.path} pathLength="1" strokeDasharray="0.008 1" strokeLinecap="round" strokeWidth="4"
+            stroke="var(--attack-map-node-label)" className={`${className}-strike`} /> : null}
+        </g>
+      ) : null}
+      {victim?.visible ? (
+        <g data-first-blood-endpoint="victim" transform={`translate(${arc.endX} ${arc.endY})`}>
+          <title>First blood captured from {sequence.attack.victim}</title>
+          <path d="M -10 -24 H -24 V -10 M 10 -24 H 24 V -10 M -24 10 V 24 H -10 M 24 10 V 24 H 10"
+            strokeWidth="1.6" opacity={hit ? 0.2 : 0.8} />
+          {hit ? (
+            <g data-first-blood-impact="true">
+              <circle r="24" strokeWidth="3" className={motion ? `${className}-shock` : undefined} />
+              {motion ? <>
+                <circle r="20" strokeWidth="1.5" className={`${className}-shock`} style={{ animationDelay: '130ms' }} />
+                {Array.from({ length: 12 }, (_, index) => {
+                  const distance = 48 + (index % 3) * 13;
+                  return (
+                    <g key={index} transform={`rotate(${index * 30})`}>
+                      <path d={index % 3 === 0 ? 'M -9 -24 H -24 V -9' : 'M -4 -24 H 4'} strokeWidth={index % 3 === 0 ? 2 : 1.5}
+                        data-first-blood-shard="true" className={`${className}-shard`}
+                        style={{ '--shard-distance': `${distance}px`, '--shard-turn': `${index % 2 ? -38 : 28}deg` } as CSSProperties} />
+                    </g>
+                  );
+                })}
+              </> : null}
+              <path d="M -7 -7 L 7 7 M 7 -7 L -7 7" strokeWidth="3" />
+            </g>
+          ) : null}
+          {stage === 'recover' ? <circle r="17" strokeWidth="2" className={motion ? `${className}-reform` : undefined} /> : null}
+        </g>
+      ) : null}
+    </g>
+  );
+}
+
+function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
+  attacks: CyberAttackEvent[];
+  intro: boolean;
+  stage: FirstBloodStage;
+  motionClass?: string;
+}): ReactElement {
+  return (
+    <div role="status" data-testid={intro ? 'first-blood-intro' : 'first-blood-announcement'}
+      className={cn('pointer-events-none absolute inset-x-4 bottom-14 z-10 sm:inset-x-6', motionClass)}
+      data-first-blood-notice-stage={stage}
+      style={{ color: 'var(--attack-map-node-label)' }}>
+      <div className="space-y-3 border-t py-3"
+        style={{ backgroundColor: 'var(--attack-map-background)', borderColor: 'var(--attack-map-legend-border)' }}>
+        {attacks.map((attack) => (
+          <div key={attack.id}>
+            <h3 className="grid grid-cols-[minmax(0,1fr)_1.75rem_minmax(0,1fr)] items-center gap-2 text-[clamp(1.05rem,2vw,1.65rem)] leading-tight sm:gap-4">
+              <span className="min-w-0 break-words font-semibold">{attack.attacker}</span>
+              <svg aria-hidden="true" viewBox="0 0 28 12" className="h-3 w-7" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M 0 6 H 26 M 20 1 L 26 6 L 20 11" />
+              </svg>
+              <span className="min-w-0 break-words text-right font-normal">{attack.victim}</span>
+            </h3>
+            <div className="mt-2 flex items-start justify-between gap-3 text-xs">
+              <p className="min-w-0 break-words" style={{ color: 'var(--signal-negative)' }}>First blood · {attack.service}</p>
+              <p className="shrink-0 text-[11px]">{stage === 'charge' ? 'Charging' : stage === 'flight' ? 'Incoming' : stage === 'impact' || stage === 'recover' ? 'Flag captured' : `Tick #${attack.tick}`}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const GlobeSurface = memo(function GlobeSurface({
   clipId,
   mapId,
   rotation,
@@ -1112,7 +1632,7 @@ function GlobeSurface({
       />
     </g>
   );
-}
+});
 
 function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactElement {
   return (
@@ -1172,10 +1692,11 @@ function AttackArcPath({
   onSelectAttack?: (attackId: string | null) => void;
   tabReachable: boolean;
 }): ReactElement | null {
-  if (!arc.visible) {
+  if (!arc.visible || arc.intro) {
     return null;
   }
-  const emphasized = arc.selected || arc.highlighted || arc.active;
+  const signalColor = arc.celebrating ? arc.color : 'var(--attack-map-node-highlight)';
+  const emphasized = arc.celebrating || arc.selected || arc.highlighted || arc.active;
   const serviceStyle = getServiceRouteStyle(arc.service);
   const depthOpacity = clamp(0.36 + arc.visibility * 0.64, 0.24, 1);
   const bundleWeight = clamp(Math.log2(arc.count + 1) * 0.22, 0, 0.72);
@@ -1188,7 +1709,7 @@ function AttackArcPath({
     arc.visibility > 0.16 &&
     (arc.featured || arc.selected || arc.highlighted || arc.recency > 0.86);
   const flyEnabled =
-    motionEnabled && !dimmed && arc.fresh && arc.visible && arc.visibility > 0.05;
+    motionEnabled && !arc.celebrating && !dimmed && arc.fresh && arc.visible && arc.visibility > 0.05;
   const opacity = dimmed
     ? 0.035
     : arc.fresh
@@ -1204,7 +1725,7 @@ function AttackArcPath({
         : emphasized
           ? 0.78 * depthOpacity * trafficWeight
           : 0.2 * depthOpacity * trafficWeight;
-  const strokeWidth = arc.partial
+  const strokeWidth = arc.celebrating ? '2' : arc.partial
     ? arc.featured
       ? '4.4'
       : String(1 + arc.recency * 0.85 + bundleWeight)
@@ -1218,7 +1739,7 @@ function AttackArcPath({
 
   return (
     <g>
-      {arc.featured && !dimmed ? (
+      {arc.featured && !arc.celebrating && !dimmed ? (
         <path
           d={arc.path}
           fill="none"
@@ -1231,6 +1752,7 @@ function AttackArcPath({
       <path
         id={arc.domId}
         data-attack-arc="true"
+        data-first-blood={arc.firstBlood ? 'true' : 'false'}
         data-attack-count={String(arc.count)}
         data-attack-id={arc.id}
         data-featured={arc.featured ? 'true' : 'false'}
@@ -1239,19 +1761,19 @@ function AttackArcPath({
         data-selected={arc.selected ? 'true' : 'false'}
         d={arc.path}
         fill="none"
-        markerEnd={emphasized && !arc.partial ? `url(#${markerId})` : undefined}
+        markerEnd={emphasized && !arc.partial && !arc.celebrating ? `url(#${markerId})` : undefined}
         stroke={arc.color}
         strokeLinecap="round"
         strokeDasharray={arc.partial && !arc.featured ? serviceStyle.partialDash : undefined}
         strokeOpacity={opacity}
         strokeWidth={strokeWidth}
       />
-      {arc.fresh && !dimmed && !flyEnabled ? (
+      {arc.fresh && !arc.celebrating && !dimmed && !flyEnabled ? (
         <path
           d={arc.path}
           fill="none"
           pointerEvents="none"
-          stroke="var(--attack-map-node-highlight)"
+          stroke={signalColor}
           strokeLinecap="round"
           strokeOpacity="0.78"
           strokeWidth="7"
@@ -1264,7 +1786,7 @@ function AttackArcPath({
             d={arc.path}
             fill="none"
             pointerEvents="none"
-            stroke="var(--attack-map-node-highlight)"
+            stroke={signalColor}
             strokeLinecap="round"
             strokeOpacity="0.22"
             strokeWidth="1.5"
@@ -1273,7 +1795,7 @@ function AttackArcPath({
             d={arc.path}
             fill="none"
             pointerEvents="none"
-            stroke="var(--attack-map-node-highlight)"
+            stroke={signalColor}
             strokeLinecap="round"
             strokeWidth="3.6"
             pathLength={1}
@@ -1284,7 +1806,7 @@ function AttackArcPath({
             d={arc.path}
             fill="none"
             pointerEvents="none"
-            stroke="var(--attack-map-node-highlight)"
+            stroke={signalColor}
             strokeLinecap="round"
             strokeWidth="6"
             pathLength={1}
@@ -1297,7 +1819,7 @@ function AttackArcPath({
             r="6"
             fill="none"
             pointerEvents="none"
-            stroke="var(--attack-map-node-highlight)"
+            stroke={signalColor}
             strokeWidth="2.4"
             className={`${flyClassName}-impact`}
           />
@@ -1309,21 +1831,21 @@ function AttackArcPath({
             d={arc.path}
             fill="none"
             pointerEvents="none"
-            stroke={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color}
+            stroke={arc.featured ? signalColor : arc.color}
             strokeDasharray={arc.featured ? '54 706' : emphasized ? serviceStyle.activeDash : serviceStyle.idleDash}
             strokeLinecap="round"
             strokeOpacity={arc.featured ? '1' : emphasized ? '0.95' : '0.48'}
             strokeWidth={arc.featured ? '5.1' : emphasized ? serviceStyle.activeWidth : serviceStyle.idleWidth}
             className={beamClassName}
           />
-          <circle pointerEvents="none" r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? 'var(--attack-map-node-highlight)' : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
+          <circle pointerEvents="none" r={arc.featured ? '6.4' : emphasized ? '4.5' : '3.1'} fill={arc.featured ? signalColor : arc.color} opacity={emphasized ? '0.95' : '0.62'}>
             <animateMotion dur={arc.featured ? serviceStyle.featuredDuration : emphasized ? serviceStyle.activeDuration : `${serviceStyle.idleDuration - arc.recency * 0.55}s`} begin={arc.delay} repeatCount="indefinite">
               <mpath href={`#${arc.domId}`} />
             </animateMotion>
           </circle>
         </>
       ) : null}
-      {arc.featured && !dimmed ? (
+      {arc.featured && !arc.celebrating && !dimmed ? (
         <FeaturedTransmissionEndpoints arc={arc} haloClassName={haloClassName} />
       ) : null}
       <path
@@ -1406,9 +1928,11 @@ function FeaturedTransmissionEndpoints({
 function TeamNodeLabel({
   node,
   showLabel,
+  scale = 1,
 }: {
   node: TeamNode;
   showLabel: boolean;
+  scale?: number;
 }): ReactElement | null {
   if (!node.visible || !showLabel) {
     return null;
@@ -1428,6 +1952,7 @@ function TeamNodeLabel({
         stroke="var(--attack-map-node-label)"
         strokeOpacity={node.selected ? '0.9' : '0.52'}
       />
+      <g transform={`translate(${node.labelX} ${node.labelY}) scale(${scale}) translate(${-node.labelX} ${-node.labelY})`}>
       <TeamLabelPlate node={node} />
       <text
         x={node.labelX}
@@ -1455,6 +1980,7 @@ function TeamNodeLabel({
       >
         {node.outgoing} out
       </text>
+      </g>
     </g>
   );
 }
@@ -2093,7 +2619,7 @@ function getAttackRecency(
 function bundleAttackRoutes(attacks: CyberAttackEvent[]): AttackRoute[] {
   const routes = new Map<string, AttackRoute>();
   attacks.forEach((attack) => {
-    const key = `${attack.attacker}\u0000${attack.victim}\u0000${attack.service}`;
+    const key = `${attack.attacker}\u0000${attack.victim}\u0000${attack.service}${attack.first_blood ? `\u0000${attack.id}` : ''}`;
     const existing = routes.get(key);
     if (!existing) {
       routes.set(key, {

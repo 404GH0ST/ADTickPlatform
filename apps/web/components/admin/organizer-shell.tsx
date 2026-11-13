@@ -10,6 +10,7 @@ const navItems = [
   { href: '/admin/game', label: 'Game' },
   { href: '/admin/scoreboard', label: 'Scoreboard' },
   { href: '/admin/attacks', label: 'Attacks' },
+  { href: '/admin/submissions', label: 'Submissions' },
 ] as const;
 
 const secondaryNavItems = [

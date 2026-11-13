@@ -61,6 +61,7 @@ type recordingCredentialControllerClient struct {
 }
 
 type testGameCoreClient struct {
+	noopGameCoreClient
 	status    GameStatus
 	tick      GameTickStatus
 	runs      []GameCheckerRun

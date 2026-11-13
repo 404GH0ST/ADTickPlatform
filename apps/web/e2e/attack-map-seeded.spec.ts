@@ -116,6 +116,8 @@ async function expectFeaturedRouteInsideGlobe(globe: Locator) {
 }
 
 async function featureAttack(globe: Locator, attackId: string) {
+  await globe.scrollIntoViewIfNeeded();
+  await expect(globe).toHaveAttribute('data-surface-active', 'true');
   await globe.evaluate((element, selectedAttackId) => {
     element.dispatchEvent(
       new CustomEvent("ad-platform:feature-attack", {
@@ -159,6 +161,7 @@ test("seeded dense attack globe keeps idle featured routes solid", async ({
   await expect(globe).toBeVisible();
   await expect(globe.locator('[data-attack-arc="true"]').first()).toBeVisible();
 
+  await globe.scrollIntoViewIfNeeded();
   const featuredArc = globe.locator('[data-attack-arc="true"][data-featured="true"]');
   await expect(featuredArc).toHaveCount(1, { timeout: 12_500 });
   await expect(panel.getByText("Featured transmission")).toBeVisible();

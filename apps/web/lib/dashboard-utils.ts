@@ -1,4 +1,5 @@
 type BaseAttackFeedPage<T extends { id: string }> = {
+  revision?: number;
   items: T[];
   limit: number;
   offset: number;
@@ -83,27 +84,34 @@ export function buildAttackFilterOptions(
  * Create an SSE `onmessage` handler for attack feed events.
  * Shared between organizer and participant dashboard hooks.
  */
-export function handleRealtimeAttackMessage<T extends { id: string }>(opts: {
+export function handleRealtimeAttackMessage<T extends { id: string; first_blood?: boolean }>(opts: {
   isLive: () => boolean;
   currentPage: () => BaseAttackFeedPage<T>;
   limitStr: string;
   setPage: (page: BaseAttackFeedPage<T>) => void;
-  scheduleHighlights: (ids: string[]) => void;
+  scheduleHighlights: (ids: string[], firstBloodIds: string[]) => void;
+  onInvalidate?: () => void;
 }): (event: MessageEvent) => void {
   return (event: MessageEvent) => {
     if (!opts.isLive()) return;
     try {
       const nextPage = JSON.parse(event.data) as BaseAttackFeedPage<T>;
-      const mergedPage = mergeRealtimeAttackPage(
-        opts.currentPage(),
-        nextPage,
-        opts.limitStr,
+      const invalidated = (nextPage.revision ?? 0) !== (opts.currentPage().revision ?? 0);
+      // A deletion may affect retained rows beyond the short SSE snapshot.
+      // New captures in the same frame must still receive their live effects.
+      const mergedPage = invalidated ? nextPage : mergeRealtimeAttackPage(
+        opts.currentPage(), nextPage, opts.limitStr,
       );
       const nextHighlights = collectNewAttackIDs(opts.currentPage(), mergedPage);
-      opts.setPage(mergedPage);
       if (nextHighlights.length > 0) {
-        opts.scheduleHighlights(nextHighlights);
+        const knownIds = new Set(opts.currentPage().items.map((item) => item.id));
+        const firstBloodIds = mergedPage.items
+          .filter((item) => item.first_blood && !knownIds.has(item.id))
+          .map((item) => item.id);
+        opts.scheduleHighlights(nextHighlights, firstBloodIds);
       }
+      opts.setPage(mergedPage);
+      if (invalidated) opts.onInvalidate?.();
     } catch {
       // Keep the last good snapshot if one frame is malformed.
     }

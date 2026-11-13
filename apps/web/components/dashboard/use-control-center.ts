@@ -172,9 +172,10 @@ export function useControlCenter({
       currentPage: () => attackPageRef.current,
       limitStr: attackFilters.limit,
       setPage: setAttackPageState,
-      scheduleHighlights: (ids) => {
-        scheduleAttackHighlights(ids);
-        playAttackSfx(ids);
+      onInvalidate: () => { void refreshAttackFeed(true, attackFilters, true); },
+      scheduleHighlights: (ids, firstBloodIds) => {
+        scheduleAttackHighlights([...new Set([...ids, ...firstBloodIds])]);
+        playAttackSfx(ids, firstBloodIds);
       },
     });
 
@@ -241,6 +242,7 @@ export function useControlCenter({
   async function refreshAttackFeed(
     silent = false,
     filters: AttackFilters = attackFilters,
+    preserveHighlights = false,
   ): Promise<void> {
     if (!silent) {
       setPendingAction('attacks:refresh');
@@ -251,7 +253,7 @@ export function useControlCenter({
       const response = await fetch(`/api/platform/attacks${buildAttackQuery(filters)}`);
       const payload = await processApiResponse<AttackFeedPage>(response, '/api/platform/attacks');
 
-      clearAttackHighlights();
+      if (!preserveHighlights) clearAttackHighlights();
       setAttackPageState(payload);
     } catch (error) {
       if (!silent) {

@@ -216,6 +216,7 @@ type GameTabProps = {
   accessStatus: AdminControllerAccessStatus | null;
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
+  highlightedAttackIDs?: string[];
   checkerRunPage: AdminCheckerRunPage;
   checkerRunsLiveMode: boolean;
   deploymentRows: AdminDeploymentJob[];
@@ -1482,6 +1483,7 @@ export function GameTab({
   accessStatus,
   attackPage,
   attacksLiveMode,
+  highlightedAttackIDs = [],
   checkerRunPage,
   checkerRunsLiveMode,
   deploymentRows,
@@ -1547,6 +1549,7 @@ export function GameTab({
       <GameAttacksCard
         attackPage={attackPage}
         attacksLiveMode={attacksLiveMode}
+        highlightedAttackIDs={highlightedAttackIDs}
         filters={filters.attack}
         pendingAction={pendingAction}
         serviceOptions={serviceOptions}
@@ -4194,6 +4197,7 @@ function ScoreboardSnapshotCard({
 export function GameAttacksCard({
   attackPage,
   attacksLiveMode,
+  highlightedAttackIDs = [],
   filters,
   pendingAction,
   serviceOptions = [],
@@ -4206,6 +4210,7 @@ export function GameAttacksCard({
 }: {
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
+  highlightedAttackIDs?: string[];
   filters: GameFilters["attack"];
   pendingAction: string | null;
   serviceOptions?: string[];
@@ -4368,6 +4373,7 @@ export function GameAttacksCard({
         <AttackSliceSummaryGrid rows={attackRows} />
         <AttackMapPanel
           attackRows={attackRows}
+          highlightedAttackIDs={highlightedAttackIDs}
           description="Accepted submissions rendered as directional team flow for the current organizer slice."
           title="Attack flow"
         />

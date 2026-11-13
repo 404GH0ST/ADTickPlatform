@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
+import { playFirstBloodScore, type FirstBloodSound } from '@/lib/first-blood-audio';
+
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
@@ -121,10 +123,12 @@ export function useAttackSfxPreferences() {
   return { preferences, setEnabled, setVolume, toggleEnabled };
 }
 
-export function useAttackSfx() {
+export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: boolean } = {}) {
   const armedRef = useRef(false);
   const audioContextRef = useRef<BrowserAudioContext | null>(null);
   const lastPlayedAtRef = useRef(0);
+  const celebratedIdsRef = useRef(new Set<string>());
+  const playingMilestoneRef = useRef<FirstBloodSound | null>(null);
   const preferencesRef = useRef<AttackSfxPreferences>(readAttackSfxPreferences());
 
   const getAudioContext = useCallback(() => {
@@ -134,7 +138,14 @@ export function useAttackSfx() {
   useEffect(() => {
     function syncPreferences() {
       preferencesRef.current = readAttackSfxPreferences();
+      if (!preferencesRef.current.enabled || preferencesRef.current.volume <= 0) {
+        playingMilestoneRef.current?.stop();
+      } else playingMilestoneRef.current?.setVolume(preferencesRef.current.volume);
     }
+    function stopHiddenSound() {
+      if (document.hidden) playingMilestoneRef.current?.stop();
+    }
+    document.addEventListener('visibilitychange', stopHiddenSound);
 
     const mediaQuery =
       typeof window === 'undefined' || !window.matchMedia
@@ -150,6 +161,7 @@ export function useAttackSfx() {
       window.removeEventListener('storage', syncPreferences);
       window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
       mediaQuery?.removeEventListener('change', syncPreferences);
+      document.removeEventListener('visibilitychange', stopHiddenSound);
     };
   }, []);
 
@@ -157,6 +169,9 @@ export function useAttackSfx() {
     function armAudio() {
       armedRef.current = true;
       const context = getAudioContext();
+      if (firstBloodOnly && context && preferencesRef.current.enabled) {
+        void getFirstBloodAnnouncerBuffer(context).catch(() => {});
+      }
       if (context?.state === 'suspended') {
         void context.resume().catch(() => {
           // Browser autoplay policy can still reject this; future attacks stay silent.
@@ -170,9 +185,10 @@ export function useAttackSfx() {
       window.removeEventListener('pointerdown', armAudio);
       window.removeEventListener('keydown', armAudio);
     };
-  }, [getAudioContext]);
+  }, [getAudioContext, firstBloodOnly]);
 
   useEffect(() => () => {
+    playingMilestoneRef.current?.stop();
     const context = audioContextRef.current;
     audioContextRef.current = null;
     if (context && context.state !== 'closed') {
@@ -182,8 +198,12 @@ export function useAttackSfx() {
     }
   }, []);
 
-  return useCallback((attackIds: string[]) => {
-    if (attackIds.length === 0 || !armedRef.current) {
+  return useCallback((attackIds: string[], firstBloodIds: string[] = [], signal?: AbortSignal, spatial?: { attackerPan: number; victimPan: number }) => {
+    // Milestone sound belongs to the globe's actual sequence. The feed handles
+    // ordinary arrivals, so neither remounts nor queued captures double the audio.
+    const firstBloodSet = new Set(firstBloodIds);
+    const audibleIds = firstBloodOnly ? firstBloodIds : attackIds.filter((id) => !firstBloodSet.has(id));
+    if (audibleIds.length === 0 || !armedRef.current || signal?.aborted) {
       return;
     }
 
@@ -193,7 +213,9 @@ export function useAttackSfx() {
     }
 
     const now = window.performance.now();
-    if (now - lastPlayedAtRef.current < ATTACK_SFX_THROTTLE_MS) {
+    const milestones = (firstBloodOnly ? firstBloodIds : []).filter((id) => !celebratedIdsRef.current.has(id));
+    if (firstBloodOnly && milestones.length === 0) return;
+    if (milestones.length === 0 && now - lastPlayedAtRef.current < ATTACK_SFX_THROTTLE_MS) {
       return;
     }
     lastPlayedAtRef.current = now;
@@ -203,24 +225,60 @@ export function useAttackSfx() {
       return;
     }
 
-    const blipCount = Math.min(attackIds.length, ATTACK_SFX_MAX_BLIPS);
+    if (milestones.length > 0) {
+      milestones.forEach((id) => celebratedIdsRef.current.add(id));
+      playingMilestoneRef.current?.stop();
+      playingMilestoneRef.current = playFirstBloodScore(context, {
+        volume: preferences.volume,
+        signal,
+        announcer: getFirstBloodAnnouncerBuffer(context),
+        ...spatial,
+      });
+      return playingMilestoneRef.current;
+    }
+    const blipCount = Math.min(audibleIds.length, ATTACK_SFX_MAX_BLIPS);
     const startTime = context.currentTime + 0.015;
     for (let index = 0; index < blipCount; index += 1) {
       playAttackBlip(context, startTime + index * 0.072, index, preferences.volume);
     }
-  }, [getAudioContext]);
+  }, [getAudioContext, firstBloodOnly]);
 }
 
-let cachedAudioBuffer: AudioBuffer | null = null;
+// Share the in-flight decode as well as the result across burst arrivals.
+let attackAudioBufferPromise: Promise<AudioBuffer> | null = null;
 
-async function getAttackAudioBuffer(context: BrowserAudioContext): Promise<AudioBuffer> {
-  if (cachedAudioBuffer) {
-    return cachedAudioBuffer;
+let firstBloodAnnouncerPromise: Promise<AudioBuffer> | null = null;
+
+function getFirstBloodAnnouncerBuffer(context: BrowserAudioContext): Promise<AudioBuffer> {
+  if (!firstBloodAnnouncerPromise) {
+    firstBloodAnnouncerPromise = fetch('/lol-first-blood.mp3')
+      .then((response) => {
+        if (!response.ok) throw new Error('First blood announcer unavailable');
+        return response.arrayBuffer();
+      })
+      .then((data) => context.decodeAudioData(data))
+      .catch((error) => {
+        firstBloodAnnouncerPromise = null;
+        throw error;
+      });
   }
-  const response = await fetch('/laser-gun.mp3');
-  const arrayBuffer = await response.arrayBuffer();
-  cachedAudioBuffer = await context.decodeAudioData(arrayBuffer);
-  return cachedAudioBuffer;
+  return firstBloodAnnouncerPromise;
+}
+
+function getAttackAudioBuffer(context: BrowserAudioContext): Promise<AudioBuffer> {
+  if (!attackAudioBufferPromise) {
+    attackAudioBufferPromise = fetch('/laser-gun.mp3')
+      .then((response) => {
+        if (!response.ok) throw new Error('Attack audio unavailable');
+        return response.arrayBuffer();
+      })
+      .then((data) => context.decodeAudioData(data))
+      .catch((error) => {
+        attackAudioBufferPromise = null;
+        throw error;
+      });
+  }
+  return attackAudioBufferPromise;
 }
 
 function playAttackBlip(
@@ -241,7 +299,8 @@ function playAttackBlip(
 
       source.connect(gainNode);
       gainNode.connect(context.destination);
-      source.start(startTime);
+      source.onended = () => { source.disconnect(); gainNode.disconnect(); };
+      source.start(Math.max(startTime, context.currentTime));
     })
     .catch(() => {
       // Audio is decorative; never let an SFX failure affect live attack updates.

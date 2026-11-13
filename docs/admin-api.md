@@ -674,3 +674,13 @@ Not implemented yet:
 - automated target-host validation still depends on running the provided host smoke on the real machine
 - checker execution wired into authoritative tick scheduling and SLA persistence
 - challenge undeploy, edit, or delete flows
+
+
+## Submission history
+
+Use **Organizer → Submissions** to inspect every recorded flag attempt and delete
+an individual entry. The organizer API exposes `GET /api/v2/admin/submissions`
+and `DELETE /api/v2/admin/submissions/{id}`. Deleting an accepted first-blood
+capture clears the award for the next accepted capture, without promoting an
+older capture. See [Organizer submission history](organizer-submissions.md) for
+filters, response fields, deletion effects, and historical data coverage.

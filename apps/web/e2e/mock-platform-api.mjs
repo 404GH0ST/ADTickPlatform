@@ -969,10 +969,22 @@ function createStateForScenario(scenario = "default") {
     ];
   }
 
-  if (scenario === "realtime-updates") {
-    nextState.streamScenario = "realtime-updates";
+  if (scenario === "realtime-updates" || scenario === "realtime-first-blood" || scenario === "realtime-after-first-blood" || scenario === "realtime-first-blood-empty" || scenario === "realtime-first-blood-burst" || scenario === "realtime-first-blood-long-names") {
+    nextState.streamScenario = scenario;
+    if (scenario === 'realtime-first-blood-empty' || scenario === 'realtime-first-blood-burst' || scenario === 'realtime-first-blood-long-names') nextState.attackItems = [];
+    if (scenario === 'realtime-after-first-blood') {
+      nextState.attackItems.unshift({ id: 'atk-13', first_blood: true, attacker: 'College Gamma', victim: 'College Alpha', service: 'college-http', tick: 13, verdict: 'first valid submission accepted' });
+    }
   }
 
+  if (scenario === 'submissions' || scenario === 'submissions-delete-failure') {
+    nextState.submissionItems = Array.from({ length: 30 }, (_, index) => {
+      const id = 30 - index;
+      const status = index === 0 || index === 3 ? 'accepted' : index % 2 ? 'invalid' : 'duplicate';
+      return { id, team_id: 101, attacker: index % 2 ? 'College Beta' : 'College Alpha', victim: status === 'invalid' ? '' : 'College Gamma', challenge_id: status === 'invalid' ? 0 : 1, service: status === 'invalid' ? '' : 'college-http', flag: status === 'invalid' ? `wrong-flag-${id}` : `PLAYIT{capture-${id}}`, tick: 12, status, detail: status === 'accepted' ? 'flag is correct.' : status === 'duplicate' ? 'flag already submitted.' : 'flag is wrong or expired.', first_blood: index === 0, submitted_at: `2026-05-08T10:00:${String(id).padStart(2,'0')}Z` };
+    });
+    if (scenario === 'submissions-delete-failure') nextState.failedRoutes.push('DELETE /api/v2/admin/submissions/30');
+  }
   if (scenario === "attack-map-dense") {
     nextState.attackItems = denseAttackMapItems.map((item) => ({ ...item }));
     nextState.gameStatus.current_tick = {
@@ -1247,13 +1259,15 @@ function writeSSE(res, data) {
 function makeRealtimeAttackPage() {
   const items = [
     {
-      id: "atk-13",
-      attacker: "College Gamma",
+      id: state.streamScenario === "realtime-after-first-blood" ? "atk-14" : "atk-13",
+      first_blood: state.streamScenario === "realtime-first-blood" || state.streamScenario === "realtime-first-blood-empty" || state.streamScenario === "realtime-first-blood-burst" || state.streamScenario === "realtime-first-blood-long-names",
+      attacker: state.streamScenario === 'realtime-first-blood-long-names' ? 'International Cyber Defense Research and Incident Response Alliance' : 'College Gamma',
       victim: "College Alpha",
-      service: "college-http",
-      tick: 13,
+      service: state.streamScenario === 'realtime-first-blood-long-names' ? 'HyperconvergedIdentityAndAccessManagementChallengeServiceWithRegionalReplicasAndSecondaryFailover' : 'college-http',
+      tick: state.streamScenario === "realtime-after-first-blood" ? 14 : 13,
       verdict: "first valid submission accepted",
     },
+    ...(state.streamScenario === 'realtime-first-blood-burst' ? [{ id: 'atk-14', first_blood: true, attacker: 'College Alpha', victim: 'College Gamma', service: 'college-vault', tick: 13, verdict: 'first valid submission accepted' }] : []),
     ...state.attackItems,
   ];
 
@@ -1290,12 +1304,12 @@ function makeRealtimeGameStatus() {
 function writeScenarioSSE(res, pathname, initialData) {
   writeSSE(res, initialData);
 
-  if (state.streamScenario !== "realtime-updates") {
+  if (!["realtime-updates", "realtime-first-blood", "realtime-after-first-blood", "realtime-first-blood-empty", "realtime-first-blood-burst", "realtime-first-blood-long-names"].includes(state.streamScenario)) {
     return;
   }
 
   let followUpData = null;
-  if (pathname === "/public/v1/attacks/stream") {
+  if (pathname === "/public/v1/attacks/stream" || pathname === "/admin/v1/game/attacks/stream") {
     followUpData = makeRealtimeAttackPage();
   } else if (pathname === "/public/v1/scoreboard/stream") {
     followUpData = makeRealtimeScoreboard();
@@ -2410,6 +2424,25 @@ function deleteDeployment(res, deploymentID) {
 }
 
 async function handleAdminGameRoutes(ctx) {
+  if (ctx.method === 'GET' && ctx.url.pathname === '/api/v2/admin/submissions') {
+    const params = ctx.url.searchParams;
+    const filtered = (state.submissionItems ?? []).filter((row) => {
+      for (const key of ['attacker','victim','service','flag']) if (params.get(key) && !row[key].toLowerCase().includes(params.get(key).toLowerCase())) return false;
+      if (params.get('status') && row.status !== params.get('status')) return false;
+      if (params.get('tick_from') && row.tick < Number(params.get('tick_from'))) return false;
+      if (params.get('tick_to') && row.tick > Number(params.get('tick_to'))) return false;
+      return true;
+    });
+    return writeSuccess(ctx.res, paginate(filtered, params));
+  }
+  if (ctx.method === 'DELETE' && /^\/api\/v2\/admin\/submissions\/\d+$/.test(ctx.url.pathname)) {
+    const id = Number(ctx.url.pathname.split('/').at(-1));
+    const row = (state.submissionItems ?? []).find((item) => item.id === id);
+    if (!row) return writeFailure(ctx.res, 404, 'submission not found');
+    state.submissionItems = state.submissionItems.filter((item) => item.id !== id);
+    return writeSuccess(ctx.res, { id, status: row.status, service: row.service, first_blood_cleared: row.first_blood });
+  }
+
   const { res, url, method } = ctx;
 
   const handled = writeGetRoute(res, method, url.pathname, {
@@ -2731,9 +2764,10 @@ function handleStreamRoutes({ res, url, method }) {
       writeScenarioSSE(response, pathname, state.gameStatus),
     "/admin/v1/game/scoreboard/stream": (response, pathname) =>
       writeScenarioSSE(response, pathname, state.scoreboard),
-    "/admin/v1/game/attacks/stream": (response) =>
-      writeSSE(
+    "/admin/v1/game/attacks/stream": (response, pathname) =>
+      writeScenarioSSE(
         response,
+        pathname,
         paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
       ),
     "/admin/v1/game/checker-runs/stream": (response) =>

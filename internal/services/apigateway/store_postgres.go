@@ -554,7 +554,7 @@ func decodeScoreboardFreeze(freezeAt, unfreezeAt sql.NullTime, snapshotRaw []byt
 
 func (s *postgresStore) ListAttackFeed(ctx context.Context) ([]attackEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, attacker, victim, service, tick, verdict, created_at
+		SELECT id, attacker, victim, service, tick, verdict, created_at, first_blood
 		FROM attack_events
 		ORDER BY created_at DESC, id DESC
 		LIMIT 12
@@ -567,7 +567,7 @@ func (s *postgresStore) ListAttackFeed(ctx context.Context) ([]attackEvent, erro
 	result := make([]attackEvent, 0)
 	for rows.Next() {
 		var event attackEvent
-		if err := rows.Scan(&event.ID, &event.Attacker, &event.Victim, &event.Service, &event.Tick, &event.Verdict, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &event.Attacker, &event.Victim, &event.Service, &event.Tick, &event.Verdict, &event.CreatedAt, &event.FirstBlood); err != nil {
 			return nil, err
 		}
 		result = append(result, event)

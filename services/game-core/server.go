@@ -297,6 +297,8 @@ func (s *gameCoreServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/game/checker-runs", s.handleCheckerRuns)
 	mux.HandleFunc("GET /internal/v1/game/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /internal/v1/game/attacks", s.handleAttackFeed)
+	mux.HandleFunc("GET /internal/v1/game/submissions", s.handleSubmissions)
+	mux.HandleFunc("DELETE /internal/v1/game/submissions/{submission_id}", s.handleDeleteSubmission)
 	mux.HandleFunc("POST /internal/v1/game/scoring/recompute", s.handleRecomputeScoring)
 	mux.HandleFunc("GET /internal/v1/game/scoring/audit", s.handleAuditScoring)
 	mux.HandleFunc("GET /internal/v1/game/scheduler", s.handleSchedulerStatus)
@@ -1362,15 +1364,6 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 	if err != nil {
 		return nil, err
 	}
-	switch match.State {
-	case "finished":
-		return nil, errContestOver
-	case "paused":
-		return nil, errContestPaused
-	case "running":
-	default:
-		return nil, errContestNotStarted
-	}
 
 	status, err := s.store.GameStatus(ctx)
 	if err != nil {
@@ -1384,6 +1377,27 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 	}
 	if status.CurrentTick != nil {
 		currentTick = status.CurrentTick.ID
+	}
+
+	var gateErr error
+	switch match.State {
+	case "finished":
+		gateErr = errContestOver
+	case "paused":
+		gateErr = errContestPaused
+	case "running":
+	default:
+		gateErr = errContestNotStarted
+	}
+	if gateErr != nil {
+		denied := make([]submissionVerdictAlias, 0, len(flags))
+		for _, flag := range flags {
+			denied = append(denied, submissionVerdictAlias{Flag: flag, Status: "invalid", Detail: gateErr.Error()})
+		}
+		if err := s.recordRejectedSubmissions(ctx, teamID, attackerName, currentTick, denied); err != nil {
+			return nil, err
+		}
+		return nil, gateErr
 	}
 
 	results := make([]submissionVerdictAlias, 0, len(flags))
@@ -1447,6 +1461,9 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 
 		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct."})
 		acceptedAny = true
+	}
+	if err := s.recordRejectedSubmissions(ctx, teamID, attackerName, currentTick, results); err != nil {
+		return nil, err
 	}
 	if acceptedAny {
 		s.scheduleScoreboardRecompute()

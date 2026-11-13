@@ -158,6 +158,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/admin/audit-logs", s.handleAdminListAuditLogs)
 	mux.HandleFunc("GET /api/v2/admin/operations/status", s.handleAdminOperationsStatus)
 	mux.HandleFunc("GET /api/v2/admin/game/status", s.handleAdminGameStatus)
+	mux.HandleFunc("GET /api/v2/admin/submissions", s.handleAdminSubmissions)
+	mux.HandleFunc("DELETE /api/v2/admin/submissions/{submission_id}", s.handleAdminDeleteSubmission)
 	mux.HandleFunc("GET /api/v2/admin/game/match", s.handleAdminGameMatchStatus)
 	mux.HandleFunc("POST /api/v2/admin/game/match/start", s.handleAdminStartGameMatch)
 	mux.HandleFunc("POST /api/v2/admin/game/match/pause", s.handleAdminPauseGameMatch)

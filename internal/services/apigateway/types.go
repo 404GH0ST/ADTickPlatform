@@ -146,13 +146,14 @@ type ScoringAuditMismatchAlias struct {
 }
 
 type AttackEventAlias struct {
-	ID        string    `json:"id"`
-	Attacker  string    `json:"attacker"`
-	Victim    string    `json:"victim"`
-	Service   string    `json:"service"`
-	Tick      int       `json:"tick"`
-	Verdict   string    `json:"verdict"`
-	CreatedAt time.Time `json:"-"`
+	FirstBlood bool      `json:"first_blood"`
+	ID         string    `json:"id"`
+	Attacker   string    `json:"attacker"`
+	Victim     string    `json:"victim"`
+	Service    string    `json:"service"`
+	Tick       int       `json:"tick"`
+	Verdict    string    `json:"verdict"`
+	CreatedAt  time.Time `json:"-"`
 }
 
 type AttackFeedQuery struct {
@@ -166,6 +167,7 @@ type AttackFeedQuery struct {
 }
 
 type AttackFeedPage struct {
+	Revision   int64              `json:"revision"`
 	Items      []AttackEventAlias `json:"items"`
 	Limit      int                `json:"limit"`
 	Offset     int                `json:"offset"`

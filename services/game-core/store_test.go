@@ -376,3 +376,51 @@ func TestMemoryStoreAcceptFlagSubmissionRefreshesScoreboard(t *testing.T) {
 		t.Fatalf("expected recovered defense penalty, got %+v", rows["Team Delta"])
 	}
 }
+
+func TestFirstBloodIsPerChallengeAndSurvivesFeedFilters(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := store.StartMatch(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartNextTick(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	submissions := []acceptedFlagSubmission{
+		{Flag: "first", SubmittingTeam: 101, ChallengeID: 1, ChallengeName: "banking", AttackerName: "Alpha", VictimName: "Delta", ExpiresTick: 1, SubmittedAt: now},
+		{Flag: "second", SubmittingTeam: 103, ChallengeID: 1, ChallengeName: "banking renamed", AttackerName: "Sigma", VictimName: "Delta", ExpiresTick: 1, SubmittedAt: now},
+		{Flag: "other", SubmittingTeam: 101, ChallengeID: 2, ChallengeName: "other", AttackerName: "Alpha", VictimName: "Delta", ExpiresTick: 1, SubmittedAt: now},
+	}
+	for _, submission := range submissions {
+		if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: submission.Flag, OwnerTeamID: 102, ChallengeID: submission.ChallengeID, IssuedTick: 1, ExpiresTick: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if accepted, err := store.AcceptFlagSubmission(ctx, submission); err != nil || !accepted {
+			t.Fatalf("accept: %v %v", accepted, err)
+		}
+	}
+	if accepted, err := store.AcceptFlagSubmission(ctx, submissions[0]); err != nil || accepted {
+		t.Fatalf("duplicate: %v %v", accepted, err)
+	}
+	page, err := store.ListAttackFeed(ctx, apigateway.AttackFeedQuery{Attacker: "Sigma", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].FirstBlood {
+		t.Fatalf("filtered repeat must not be first blood: %+v", page)
+	}
+	page, err = store.ListAttackFeed(ctx, apigateway.AttackFeedQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	winners := 0
+	for _, event := range page.Items {
+		if event.FirstBlood {
+			winners++
+		}
+	}
+	if winners != 2 {
+		t.Fatalf("expected two challenge winners, got %d", winners)
+	}
+}

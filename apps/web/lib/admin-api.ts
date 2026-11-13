@@ -900,3 +900,10 @@ export async function bulkImportAdminTeams(teams: Array<{
   const body = (await response.json()) as AdminBulkImportResult;
   return { status: response.status, body };
 }
+
+export async function listAdminSubmissions(query: Record<string, string | number | undefined> = {}) {
+  return adminFetch<import('./admin-dashboard-types').AdminSubmissionPage>(`/api/v2/admin/submissions${buildQueryString(query)}`);
+}
+export async function deleteAdminSubmission(id: number) {
+  return adminFetch<import('./admin-dashboard-types').SubmissionDeletion>(`/api/v2/admin/submissions/${id}`, { method: 'DELETE' });
+}

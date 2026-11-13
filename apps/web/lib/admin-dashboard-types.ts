@@ -305,6 +305,7 @@ export type AdminScoringAudit = {
 };
 
 export type AdminAttackEvent = {
+  first_blood?: boolean;
   id: string;
   attacker: string;
   victim: string;
@@ -314,6 +315,7 @@ export type AdminAttackEvent = {
 };
 
 export type AdminAttackFeedPage = {
+  revision?: number;
   items: AdminAttackEvent[];
   limit: number;
   offset: number;
@@ -477,4 +479,33 @@ export type AdminBulkImportResult = {
   teams_created: number;
   players_created: number;
   errors?: string[];
+};
+
+export type AdminSubmission = {
+  id: number;
+  team_id: number;
+  attacker: string;
+  victim: string;
+  challenge_id: number;
+  service: string;
+  flag: string;
+  tick: number;
+  status: 'accepted' | 'duplicate' | 'invalid';
+  detail: string;
+  first_blood: boolean;
+  submitted_at: string;
+};
+export type AdminSubmissionPage = {
+  items: AdminSubmission[];
+  limit: number;
+  offset: number;
+  total_count: number;
+  has_prev: boolean;
+  has_next: boolean;
+};
+export type SubmissionDeletion = {
+  id: number;
+  status: string;
+  service: string;
+  first_blood_cleared: boolean;
 };

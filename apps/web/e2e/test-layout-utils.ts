@@ -26,7 +26,7 @@ export async function openDisclosureIfNeeded(disclosure: Locator) {
 
 export async function assertEmptyAttacksState(page: Page) {
   await expect(
-    page.getByText(/No accepted attacks are available to plot in this view/),
+    page.getByTestId('attack-map-waiting'),
   ).toBeVisible();
   await expect(
     page.getByText("No accepted attacks in this view"),

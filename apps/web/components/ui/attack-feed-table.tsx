@@ -11,6 +11,7 @@ import {
 import { EmptyTableRow } from "@/components/ui/empty-state";
 
 type AttackRow = {
+  first_blood?: boolean;
   id: string;
   tick: number;
   attacker: string;
@@ -52,7 +53,7 @@ export function AttackFeedTable({
               <TableCell>{attack.attacker}</TableCell>
               <TableCell>{attack.victim}</TableCell>
               <TableCell>{attack.service}</TableCell>
-              <TableCell>{attack.verdict}</TableCell>
+              <TableCell>{attack.first_blood ? <span className="medal-gold mr-2 inline-block rounded-sm border px-1.5 py-0.5 text-xs font-semibold">First blood</span> : null}{attack.verdict}</TableCell>
             </TableRow>
           ))
         )}

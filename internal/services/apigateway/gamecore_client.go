@@ -18,6 +18,8 @@ import (
 var errGameCoreDisabled = errors.New("game core is not configured")
 
 type gameCoreClient interface {
+	Submissions(context.Context, SubmissionQuery) (SubmissionPage, error)
+	DeleteSubmission(context.Context, int64) (SubmissionDeletion, error)
 	Status(ctx context.Context) (GameStatus, error)
 	MatchStatus(ctx context.Context) (GameMatchStatus, error)
 	StartMatch(ctx context.Context) (GameMatchStatus, error)
@@ -391,4 +393,31 @@ func decodeErrorMessage(body io.Reader) string {
 		return strings.TrimSpace(payload.Message)
 	}
 	return ""
+}
+
+func (noopGameCoreClient) Submissions(context.Context, SubmissionQuery) (SubmissionPage, error) {
+	return SubmissionPage{}, errGameCoreDisabled
+}
+func (noopGameCoreClient) DeleteSubmission(context.Context, int64) (SubmissionDeletion, error) {
+	return SubmissionDeletion{}, errGameCoreDisabled
+}
+func (c *httpGameCoreClient) Submissions(ctx context.Context, query SubmissionQuery) (SubmissionPage, error) {
+	values := url.Values{}
+	values.Set("limit", strconv.Itoa(query.Limit))
+	values.Set("offset", strconv.Itoa(query.Offset))
+	for key, value := range map[string]string{"attacker": query.Attacker, "victim": query.Victim, "service": query.Service, "status": query.Status, "flag": query.Flag} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	if query.TickFrom > 0 {
+		values.Set("tick_from", strconv.Itoa(query.TickFrom))
+	}
+	if query.TickTo > 0 {
+		values.Set("tick_to", strconv.Itoa(query.TickTo))
+	}
+	return requestGameCoreJSON[SubmissionPage](ctx, c, http.MethodGet, "/internal/v1/game/submissions?"+values.Encode())
+}
+func (c *httpGameCoreClient) DeleteSubmission(ctx context.Context, id int64) (SubmissionDeletion, error) {
+	return requestGameCoreJSON[SubmissionDeletion](ctx, c, http.MethodDelete, fmt.Sprintf("/internal/v1/game/submissions/%d", id))
 }

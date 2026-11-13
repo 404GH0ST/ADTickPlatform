@@ -42,6 +42,7 @@ export type ServiceRow = {
 };
 
 export type AttackEvent = {
+  first_blood?: boolean;
   id: string;
   attacker: string;
   victim: string;
@@ -51,6 +52,7 @@ export type AttackEvent = {
 };
 
 export type AttackFeedPage = {
+  revision?: number;
   items: AttackEvent[];
   limit: number;
   offset: number;

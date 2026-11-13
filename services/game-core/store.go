@@ -117,6 +117,9 @@ type gameStore interface {
 	IssueFlag(ctx context.Context, flag issuedFlagRecord) error
 	LookupIssuedFlag(ctx context.Context, flag string) (issuedFlagRecord, error)
 	AcceptFlagSubmission(ctx context.Context, submission acceptedFlagSubmission) (bool, error)
+	RecordSubmission(context.Context, apigateway.AdminSubmission) error
+	ListSubmissions(context.Context, apigateway.SubmissionQuery) (apigateway.SubmissionPage, error)
+	DeleteSubmission(context.Context, int64) (apigateway.SubmissionDeletion, error)
 	ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
 	RecomputeScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
 	AuditScoreboard(ctx context.Context) (apigateway.ScoringAuditAlias, error)
@@ -139,22 +142,26 @@ type gameStore interface {
 }
 
 type memoryGameStore struct {
-	mu            sync.Mutex
-	targets       []checkerTarget
-	teamNames     map[int]string
-	challenges    map[int]memoryChallenge
-	ticks         []apigateway.GameTickStatus
-	runs          []apigateway.GameCheckerRun
-	serviceStates map[checkerRunGroupKey]apigateway.GameServiceStateSummary
-	flags         map[string]issuedFlagRecord
-	accepted      map[string]acceptedFlagSubmission
-	attackFeed    []apigateway.AttackEventAlias
-	scoreboard    []apigateway.ScoreRowAlias
-	match         apigateway.GameMatchStatus
-	scheduler     apigateway.GameSchedulerStatus
-	events        []apigateway.GameSchedulerEvent
-	nextRun       int64
-	nextEvent     int64
+	mu                   sync.Mutex
+	targets              []checkerTarget
+	teamNames            map[int]string
+	challenges           map[int]memoryChallenge
+	ticks                []apigateway.GameTickStatus
+	runs                 []apigateway.GameCheckerRun
+	serviceStates        map[checkerRunGroupKey]apigateway.GameServiceStateSummary
+	flags                map[string]issuedFlagRecord
+	accepted             map[string]acceptedFlagSubmission
+	attackFeed           []apigateway.AttackEventAlias
+	firstBloodChallenges map[int]bool
+	submissions          []apigateway.AdminSubmission
+	nextSubmission       int64
+	attackFeedRevision   int64
+	scoreboard           []apigateway.ScoreRowAlias
+	match                apigateway.GameMatchStatus
+	scheduler            apigateway.GameSchedulerStatus
+	events               []apigateway.GameSchedulerEvent
+	nextRun              int64
+	nextEvent            int64
 }
 
 type memoryChallenge struct {
@@ -215,16 +222,17 @@ func newMemoryGameStore() gameStore {
 	}
 
 	return &memoryGameStore{
-		targets:       targets,
-		teamNames:     teamNames,
-		challenges:    challengeMap,
-		ticks:         make([]apigateway.GameTickStatus, 0),
-		runs:          make([]apigateway.GameCheckerRun, 0),
-		serviceStates: make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary),
-		flags:         make(map[string]issuedFlagRecord),
-		accepted:      make(map[string]acceptedFlagSubmission),
-		attackFeed:    make([]apigateway.AttackEventAlias, 0),
-		scoreboard:    make([]apigateway.ScoreRowAlias, 0),
+		targets:              targets,
+		teamNames:            teamNames,
+		challenges:           challengeMap,
+		ticks:                make([]apigateway.GameTickStatus, 0),
+		runs:                 make([]apigateway.GameCheckerRun, 0),
+		serviceStates:        make(map[checkerRunGroupKey]apigateway.GameServiceStateSummary),
+		flags:                make(map[string]issuedFlagRecord),
+		accepted:             make(map[string]acceptedFlagSubmission),
+		attackFeed:           make([]apigateway.AttackEventAlias, 0),
+		firstBloodChallenges: make(map[int]bool),
+		scoreboard:           make([]apigateway.ScoreRowAlias, 0),
 		match: apigateway.GameMatchStatus{
 			State:                "not_started",
 			AcceptingSubmissions: false,
@@ -422,15 +430,21 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 	if _, ok := s.accepted[key]; ok {
 		return false, nil
 	}
+	firstBlood := !s.firstBloodChallenges[submission.ChallengeID]
+	s.firstBloodChallenges[submission.ChallengeID] = true
 	s.accepted[key] = submission
+	s.nextSubmission++
+	attackID := fmt.Sprintf("%s-%d", acceptedFlagAttackEventID(submission), s.nextSubmission)
+	s.submissions = append(s.submissions, apigateway.AdminSubmission{ID: s.nextSubmission, TeamID: submission.SubmittingTeam, Attacker: submission.AttackerName, Victim: submission.VictimName, ChallengeID: submission.ChallengeID, Service: submission.ChallengeName, Flag: submission.Flag, Tick: submission.SubmissionTick, Status: "accepted", Detail: "flag is correct.", FirstBlood: firstBlood, SubmittedAt: submission.SubmittedAt.UTC(), AttackID: attackID})
 	s.attackFeed = append([]apigateway.AttackEventAlias{{
-		ID:        acceptedFlagAttackEventID(submission),
-		Attacker:  submission.AttackerName,
-		Victim:    submission.VictimName,
-		Service:   submission.ChallengeName,
-		Tick:      submission.SubmissionTick,
-		Verdict:   "first valid submission accepted",
-		CreatedAt: submission.SubmittedAt.UTC(),
+		FirstBlood: firstBlood,
+		ID:         attackID,
+		Attacker:   submission.AttackerName,
+		Victim:     submission.VictimName,
+		Service:    submission.ChallengeName,
+		Tick:       submission.SubmissionTick,
+		Verdict:    "first valid submission accepted",
+		CreatedAt:  submission.SubmittedAt.UTC(),
 	}}, s.attackFeed...)
 	s.recomputeScoreboardLocked()
 	return true, nil
@@ -594,6 +608,7 @@ func (s *memoryGameStore) ListAttackFeed(_ context.Context, query apigateway.Att
 		offset = 0
 	}
 	page := apigateway.AttackFeedPage{
+		Revision:   s.attackFeedRevision,
 		Limit:      limit,
 		Offset:     offset,
 		TotalCount: len(filtered),
@@ -1147,10 +1162,21 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 		return false, err
 	}
 
+	var attackID string
+	err = tx.QueryRowContext(ctx, `
+ WITH seq AS (SELECT nextval(pg_get_serial_sequence('submission_events', 'id')) AS id)
+ INSERT INTO submission_events (id, team_id, attacker, victim, challenge_id, service, flag, tick, status, detail, submitted_at, attack_event_id)
+ SELECT seq.id, $1, $2, $3, $4, $5, $6, $7, 'accepted', 'flag is correct.', $8, $9 || '-' || seq.id::text FROM seq
+ RETURNING attack_event_id
+ `, submission.SubmittingTeam, submission.AttackerName, submission.VictimName, submission.ChallengeID, submission.ChallengeName, submission.Flag, submission.SubmissionTick, submission.SubmittedAt.UTC(), acceptedFlagAttackEventID(submission)).Scan(&attackID)
+	if err != nil {
+		return false, err
+	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO attack_events (id, attacker, victim, service, tick, verdict, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, acceptedFlagAttackEventID(submission), submission.AttackerName, submission.VictimName, submission.ChallengeName, submission.SubmissionTick, "first valid submission accepted", submission.SubmittedAt.UTC()); err != nil {
+		INSERT INTO attack_events (id, attacker, victim, service, tick, verdict, created_at, challenge_id, first_blood)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+		    NOT EXISTS (SELECT 1 FROM attack_events WHERE challenge_id = $8 AND first_blood))
+	`, attackID, submission.AttackerName, submission.VictimName, submission.ChallengeName, submission.SubmissionTick, "first valid submission accepted", submission.SubmittedAt.UTC(), submission.ChallengeID); err != nil {
 		return false, err
 	}
 
@@ -2102,6 +2128,10 @@ func (s *postgresGameStore) listStoredScoreboard(ctx context.Context) ([]apigate
 }
 
 func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error) {
+	var revision int64
+	if err := s.db.QueryRowContext(ctx, `SELECT revision FROM attack_feed_state WHERE singleton = TRUE`).Scan(&revision); err != nil {
+		return apigateway.AttackFeedPage{}, err
+	}
 	limit := query.Limit
 	if limit <= 0 {
 		limit = 12
@@ -2145,7 +2175,7 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	// #nosec G201 -- whereClause is assembled from fixed predicates and placeholders only.
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, attacker, victim, service, tick, verdict, created_at
+		SELECT id, attacker, victim, service, tick, verdict, created_at, first_blood
 		FROM attack_events
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -2159,7 +2189,7 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 	result := make([]apigateway.AttackEventAlias, 0)
 	for rows.Next() {
 		var item apigateway.AttackEventAlias
-		if err := rows.Scan(&item.ID, &item.Attacker, &item.Victim, &item.Service, &item.Tick, &item.Verdict, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Attacker, &item.Victim, &item.Service, &item.Tick, &item.Verdict, &item.CreatedAt, &item.FirstBlood); err != nil {
 			return apigateway.AttackFeedPage{}, err
 		}
 		result = append(result, item)
@@ -2168,6 +2198,7 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 		return apigateway.AttackFeedPage{}, err
 	}
 	return apigateway.AttackFeedPage{
+		Revision:   revision,
 		Items:      result,
 		Limit:      limit,
 		Offset:     offset,
