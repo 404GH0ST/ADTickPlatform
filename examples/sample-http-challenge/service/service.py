@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 STATE_DIR = Path(os.environ.get("AD_STATE_DIR", "/opt/ad/state"))
 STATE_PATH = STATE_DIR / "sample-http-state.json"
+CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-http-checker-token")
 SERVICE_PORT = int(os.environ.get("PORT", os.environ.get("AD_PLATFORM_SERVICE_PORT", "8080")))
 
 
@@ -52,11 +53,14 @@ class SampleHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/flag":
-            supplied = parse_qs(parsed.query).get("value", [""])[0]
-            if supplied and supplied == state.get("flag", ""):
-                self._send_json(HTTPStatus.OK, {"status": "stored", "flag": supplied})
+            if self.headers.get("X-Checker-Token", "") != CHECKER_TOKEN:
+                self._send_json(HTTPStatus.FORBIDDEN, {"status": "forbidden"})
                 return
-            self._send_json(HTTPStatus.NOT_FOUND, {"status": "missing"})
+            flag = state.get("flag", "")
+            if flag:
+                self._send_json(HTTPStatus.OK, {"status": "stored", "flag": flag})
+            else:
+                self._send_json(HTTPStatus.NOT_FOUND, {"status": "missing"})
             return
 
         if parsed.path == "/leak":
@@ -73,6 +77,10 @@ class SampleHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path != "/flag":
             self._send_json(HTTPStatus.NOT_FOUND, {"status": "not_found"})
+            return
+
+        if self.headers.get("X-Checker-Token", "") != CHECKER_TOKEN:
+            self._send_json(HTTPStatus.FORBIDDEN, {"status": "forbidden"})
             return
 
         content_length = int(self.headers.get("Content-Length", "0"))

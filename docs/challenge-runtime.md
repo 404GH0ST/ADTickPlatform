@@ -388,3 +388,30 @@ Reporting service state safely:
 - Do not blindly relay the target's raw response to stdout after your verdict if
   it could contain a crafted marker. If you must, strip lines beginning with
   `ADPLATFORM_SERVICE_STATE=` from target output before printing them.
+
+## Retention verification contract
+
+Game-core persists successful `put` metadata and the instance's checker-token
+snapshot with the issued flag. It reuses the original `AD_FLAG` and `AD_METADATA`
+for randomized delayed `get` calls and a mandatory `get` before the next `put`.
+Checker metadata must therefore remain valid for independent checker executions,
+not only the initial single-container batch. Another final verification runs before
+match completion. The monitor runs only while the match is running; new deployments
+start retention tracking with their first newly issued flag, and legacy rows without
+credential snapshots are skipped.
+
+Return **42** from `get` only when the service was reachable and the expected flag
+is definitively missing or different. Return an ordinary nonzero status for network,
+protocol, metadata, or checker-infrastructure errors. A confirmed loss incurs the
+[scaled defense penalty and SLA forfeiture](game-rules.md#flag-retention-and-replacement-penalties).
+
+Retrieve the actual stored value by an opaque location/identifier and compare it
+against `AD_FLAG` inside the trusted checker. Do not send the expected flag in the
+retrieval request: that would let a broken service pass by echoing the request.
+The bundled examples use token-authenticated `GET /flag` or `GET /v1/flag` without
+a `value` query. Their intentionally vulnerable attack paths remain separate.
+
+The migration `0042_flag_retention_checks.sql` is required. Rebuild and redeploy
+both example service and checker images together for the updated retrieval API.
+The checker token is an instance write/read credential, not a secret from that
+container's root user. It cannot replace retention verification.

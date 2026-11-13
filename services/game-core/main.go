@@ -92,6 +92,8 @@ func main() {
 		time.Second,
 	)
 	defer matchMonitor.Close()
+	stopRetentionMonitor := server.startRetentionMonitor()
+	defer stopRetentionMonitor()
 
 	mux := httpapi.NewBaseMux(info)
 	server.RegisterRoutes(mux)

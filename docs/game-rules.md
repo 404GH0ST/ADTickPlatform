@@ -380,3 +380,46 @@ These are game-design choices rather than architecture blockers:
 - whether each team also gets a dedicated automation WireGuard peer
 - whether attack scoring is linear or normalized
 - whether SLA penalties should be harsher for checker timeouts than ordinary failures
+
+## Flag retention and replacement penalties
+
+A successful `put` creates an obligation to retain that exact flag until its next
+platform-controlled replacement. Game-core saves the retrieval metadata and checks
+it again at randomized times during the tick, before the next `put`, and before
+match completion. The monitor polls every five seconds; checks are scheduled with
+secret randomness between one eighth and one third of the configured tick interval
+(or 30–90 seconds when an interval is unavailable). Pre-rotation verification runs
+regardless of the next scheduled time. Late failures are attributed to the tick
+that issued the flag, rather than the next healthy tick.
+
+Any failed retention check permanently forfeits that service's SLA for the issuing
+tick. A checker-confirmed missing or replaced value also incurs a defense deduction:
+
+```text
+n = number of other active teams eligible to play at confirmation time
+penalty = ceil(max(10, 2*n + n^0.75 + 1))
+```
+
+This exceeds an upper bound on the defense loss avoided plus the attack points
+denied by hiding one flag. Examples: 4 total teams → 10 points; 8 → 20 points;
+50 → 118 points. SLA forfeiture is additional. The first confirmed amount is
+persisted once per team/challenge/tick; repeated checks, later recovery, process
+restarts, and later team-count changes do not multiply or erase that deduction.
+Failures and the actual deduction appear in checker history and score replay.
+
+Checker `get` exit code **42** means a reachable service explicitly reported a
+missing flag or returned a value different from the originally issued value.
+Transport failures and ordinary checker errors still lose the tick's SLA but do
+not receive this additional confirmed-loss deduction. All bundled checkers support
+this distinction; custom checker images must implement the exit-code contract.
+Organizer resets rotate the per-instance checker token, invalidating outstanding
+retention snapshots. Maintenance, inactive/deferred instances, and stale snapshots
+are excluded from penalty recording.
+
+Submission truth remains the signed, issued flag in the platform database. A
+replacement value never becomes authoritative, and a previously stolen genuine
+flag stays valid for its original submission window. Invalid decoys cannot prove
+which team successfully exploited a service, so they do not receive compensation
+attack points. Retention checking measures storage availability; it cannot prove
+malicious intent or stop container root from selectively serving honest responses
+to the checker while patching the attack path.

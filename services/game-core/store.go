@@ -68,6 +68,9 @@ type checkerRunRecord struct {
 }
 
 type issuedFlagRecord struct {
+	Metadata      string
+	CheckerToken  string
+	NextCheckAt   time.Time
 	Flag          string
 	OwnerTeamID   int
 	OwnerTeamName string
@@ -116,6 +119,9 @@ type gameStore interface {
 	RecordCheckerRun(ctx context.Context, run checkerRunRecord) (apigateway.GameCheckerRun, error)
 	IssueFlag(ctx context.Context, flag issuedFlagRecord) error
 	LookupIssuedFlag(ctx context.Context, flag string) (issuedFlagRecord, error)
+	LatestIssuedFlag(context.Context, int, int) (issuedFlagRecord, error)
+	ScheduleRetentionCheck(context.Context, string, time.Time) error
+	RecordRetentionCheck(context.Context, issuedFlagRecord, checkerRunRecord, bool) (bool, error)
 	AcceptFlagSubmission(ctx context.Context, submission acceptedFlagSubmission) (bool, error)
 	RecordSubmission(context.Context, apigateway.AdminSubmission) error
 	ListSubmissions(context.Context, apigateway.SubmissionQuery) (apigateway.SubmissionPage, error)
@@ -149,6 +155,7 @@ type memoryGameStore struct {
 	ticks                []apigateway.GameTickStatus
 	runs                 []apigateway.GameCheckerRun
 	serviceStates        map[checkerRunGroupKey]apigateway.GameServiceStateSummary
+	retentionFailures    map[checkerRunGroupKey]flagRetentionLoss
 	flags                map[string]issuedFlagRecord
 	accepted             map[string]acceptedFlagSubmission
 	attackFeed           []apigateway.AttackEventAlias
@@ -525,8 +532,17 @@ func (s *memoryGameStore) recomputeScoreboardLocked() []apigateway.ScoreRowAlias
 		teamID := key.TeamID
 		challengeID := key.ChallengeID
 		value := faustSLAValueForStatus(summary.Status)
+		if _, failed := s.retentionFailures[key]; failed {
+			value = 0
+		}
 		scores[teamID].SLA += value
 		scores[teamID].Services[challengeID].SLA += value
+	}
+	for key, loss := range s.retentionFailures {
+		if loss.ConfirmedMissing {
+			scores[key.TeamID].Defense -= loss.Penalty
+			scores[key.TeamID].Services[key.ChallengeID].Defense -= loss.Penalty
+		}
 	}
 	slaFactor := faustSLAFactor(len(s.teamNames))
 	for _, score := range scores {
@@ -1063,26 +1079,15 @@ func (s *postgresGameStore) RecordCheckerRun(ctx context.Context, run checkerRun
 func (s *postgresGameStore) IssueFlag(ctx context.Context, flag issuedFlagRecord) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO issued_flags (
-			flag, owner_team_id, owner_team_name, challenge_id, challenge_name, issued_tick, expires_tick, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			flag, owner_team_id, owner_team_name, challenge_id, challenge_name, issued_tick, expires_tick, created_at, checker_metadata, checker_token_snapshot, retention_check_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (flag) DO NOTHING
-	`, flag.Flag, flag.OwnerTeamID, flag.OwnerTeamName, flag.ChallengeID, flag.ChallengeName, flag.IssuedTick, flag.ExpiresTick, flag.CreatedAt.UTC())
+	`, flag.Flag, flag.OwnerTeamID, flag.OwnerTeamName, flag.ChallengeID, flag.ChallengeName, flag.IssuedTick, flag.ExpiresTick, flag.CreatedAt.UTC(), flag.Metadata, flag.CheckerToken, nullableCheckTime(flag.NextCheckAt))
 	return err
 }
 
 func (s *postgresGameStore) LookupIssuedFlag(ctx context.Context, flag string) (issuedFlagRecord, error) {
-	var record issuedFlagRecord
-	var createdAt time.Time
-	err := s.db.QueryRowContext(ctx, `
-		SELECT flag, owner_team_id, owner_team_name, challenge_id, challenge_name, issued_tick, expires_tick, created_at
-		FROM issued_flags
-		WHERE flag = $1
-	`, flag).Scan(&record.Flag, &record.OwnerTeamID, &record.OwnerTeamName, &record.ChallengeID, &record.ChallengeName, &record.IssuedTick, &record.ExpiresTick, &createdAt)
-	if err != nil {
-		return issuedFlagRecord{}, err
-	}
-	record.CreatedAt = createdAt.UTC()
-	return record, nil
+	return scanRetentionFlag(s.db.QueryRowContext(ctx, `SELECT `+retentionFlagColumns+` FROM issued_flags WHERE flag=$1`, flag))
 }
 
 func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission acceptedFlagSubmission) (bool, error) {
@@ -1376,6 +1381,14 @@ func (s *memoryGameStore) refreshMemoryServiceState(run checkerRunRecord) {
 	challengeID := run.ChallengeID
 	key := checkerRunKeyFromIDs(tickID, teamID, challengeID)
 
+	if loss, failed := s.retentionFailures[key]; failed {
+		status := "down"
+		if loss.ConfirmedMissing {
+			status = "flag_not_found"
+		}
+		s.serviceStates[key] = apigateway.GameServiceStateSummary{Status: status, Phase: "get", TickID: tickID, Message: "stored flag failed retention verification"}
+		return
+	}
 	if existing, ok := s.serviceStates[key]; ok && run.Status == "skipped" && strings.TrimSpace(run.ReportedServiceState) == "" {
 		s.serviceStates[key] = existing
 		return
@@ -1518,6 +1531,20 @@ func (s *postgresGameStore) loadCheckerRunSummariesFromRuns(ctx context.Context,
 }
 
 func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, run checkerRunRecord) error {
+	var confirmed bool
+	err := tx.QueryRowContext(ctx, `SELECT confirmed_missing FROM flag_retention_failures WHERE tick_id=$1 AND team_id=$2 AND challenge_id=$3`, run.TickID, run.TeamID, run.ChallengeID).Scan(&confirmed)
+	if err == nil {
+		status := "down"
+		if confirmed {
+			status = "flag_not_found"
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO checker_service_states(tick_id,team_id,challenge_id,service_state,state_phase,state_message,updated_at) VALUES($1,$2,$3,$4,'get','stored flag failed retention verification',NOW()) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET service_state=EXCLUDED.service_state,state_phase='get',state_message=EXCLUDED.state_message,updated_at=NOW()`, run.TickID, run.TeamID, run.ChallengeID, status)
+		return err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
 	if normalized := apigateway.NormalizeServiceStateStatus(run.ReportedServiceState); normalized != "" {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO checker_service_states (
@@ -1926,8 +1953,9 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	defenseByTeam, err := s.sumFloatByTeam(ctx, `
 		SELECT
 			f.owner_team_id,
-			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END), 0.0)
+			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END + COALESCE(losses.penalty_points,0.0)), 0.0)
 		FROM issued_flags f
+        LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count
 			FROM submitted_flags
@@ -1943,7 +1971,8 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		SELECT states.team_id,
 		       COALESCE(SUM(
 			       CASE
-			           WHEN states.service_state = 'ok' THEN 1.0
+			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
+                   WHEN states.service_state = 'ok' THEN 1.0
 			           WHEN states.service_state = 'recovering' THEN 0.5
 			           ELSE 0.0
 			       END
@@ -1978,7 +2007,8 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		       states.challenge_id,
 		       COALESCE(SUM(
 			       CASE
-			           WHEN states.service_state = 'ok' THEN 1.0
+			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
+                   WHEN states.service_state = 'ok' THEN 1.0
 			           WHEN states.service_state = 'recovering' THEN 0.5
 			           ELSE 0.0
 			       END
@@ -1994,8 +2024,9 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		SELECT
 			f.owner_team_id,
 			f.challenge_id,
-			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END), 0.0)
+			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END + COALESCE(losses.penalty_points,0.0)), 0.0)
 		FROM issued_flags f
+        LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count
 			FROM submitted_flags

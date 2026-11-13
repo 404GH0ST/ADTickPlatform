@@ -3,10 +3,10 @@ import json
 import os
 import sys
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
+CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-http-checker-token")
 MAX_HTTP_RESPONSE_BYTES = 1 << 20
 
 
@@ -17,9 +17,9 @@ def read_response_body(response) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def http_request(method: str, url: str, payload: dict | None = None) -> tuple[int, str]:
+def http_request(method: str, url: str, payload: dict | None = None, headers: dict | None = None) -> tuple[int, str]:
     data = None
-    headers = {}
+    headers = dict(headers or {})
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -46,7 +46,7 @@ def main() -> int:
 
     try:
         if phase == "put":
-            status, body = http_request("POST", f"{base_url}/flag", {"flag": flag})
+            status, body = http_request("POST", f"{base_url}/flag", {"flag": flag}, {"X-Checker-Token": CHECKER_TOKEN})
             if status != 200:
                 print(body, file=sys.stderr)
                 return 1
@@ -54,11 +54,22 @@ def main() -> int:
             return 0
 
         if phase == "get":
-            query = urlencode({"value": flag})
-            status, body = http_request("GET", f"{base_url}/flag?{query}")
+            # Never send the expected flag to the service during retrieval.
+            try:
+                status, body = http_request("GET", f"{base_url}/flag", headers={"X-Checker-Token": CHECKER_TOKEN})
+            except HTTPError as exc:
+                if exc.code == 404:
+                    missing = json.loads(read_response_body(exc))
+                    if isinstance(missing, dict) and missing.get("status") == "missing":
+                        print("stored flag is missing", file=sys.stderr)
+                        return 42
+                raise
+            payload = json.loads(body)
             if status != 200:
-                print(body, file=sys.stderr)
                 return 1
+            if not isinstance(payload, dict) or payload.get("flag") != flag:
+                print("stored flag does not match the issued flag", file=sys.stderr)
+                return 42
             print(body)
             return 0
 

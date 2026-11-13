@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +25,8 @@ type gameCoreServer struct {
 	accessReconcile      accessReconcileClient
 	flags                flagCodec
 	flagsMu              sync.RWMutex
+	tickMu               sync.Mutex
+	retentionLocks       sync.Map
 	scheduler            gameScheduler
 	checkerPhases        []string
 	checkerTimeout       int
@@ -521,7 +525,7 @@ func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if current.State != "finished" {
-		status, err := s.store.StopMatch(r.Context(), s.now())
+		status, err := s.stopMatchWithRetention(r.Context(), s.now())
 		if err != nil {
 			writeProblem(w, http.StatusInternalServerError, "Match stop failed", err.Error())
 			return
@@ -857,6 +861,10 @@ func parseScheduleValue(raw string) (*time.Time, error) {
 }
 
 func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickStatus, error) {
+	if !s.tickMu.TryLock() {
+		return apigateway.GameTickStatus{}, errTickInProgress
+	}
+	defer s.tickMu.Unlock()
 	match, err := s.matchStatus(ctx)
 	if err != nil {
 		return apigateway.GameTickStatus{}, err
@@ -1250,6 +1258,19 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 
 func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
 	var counts checkerTargetTickResult
+	unlock := s.lockRetentionTarget(target)
+	defer unlock()
+	if slices.Contains(s.checkerPhases, "put") {
+		previous, err := s.store.LatestIssuedFlag(ctx, target.TeamID, target.ChallengeID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return counts, err
+		}
+		if err == nil && previous.CheckerToken != "" && previous.CheckerToken == target.CheckerToken {
+			if err := s.checkFlagRetention(ctx, target, previous); err != nil {
+				return counts, err
+			}
+		}
+	}
 	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, tickID, tickID)
 
 	// All phases for this target run inside a single checker container, which
@@ -1326,8 +1347,24 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 			}
 		}
 
-		if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
-			return counts, fmt.Errorf("checker run persistence failed: %w", err)
+		retentionRecorded := false
+		if phase == "get" && run.Status == "failed" && run.ExitCode == flagMissingExitCode {
+			run.Message = "confirmed missing stored flag; tick SLA forfeited and severe defense penalty"
+			flag, err := s.store.LookupIssuedFlag(ctx, flagValue)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return counts, err
+			}
+			if err == nil {
+				retentionRecorded, err = s.store.RecordRetentionCheck(ctx, flag, run, true)
+				if err != nil {
+					return counts, err
+				}
+			}
+		}
+		if !retentionRecorded {
+			if _, err := s.store.RecordCheckerRun(ctx, run); err != nil {
+				return counts, err
+			}
 		}
 
 		if phase == "put" && run.Status == "success" {
@@ -1340,6 +1377,9 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 				IssuedTick:    tickID,
 				ExpiresTick:   tickID,
 				CreatedAt:     run.CheckedAt,
+				Metadata:      run.Output,
+				CheckerToken:  target.CheckerToken,
+				NextCheckAt:   s.nextRetentionCheck(),
 			}
 			if err := s.store.IssueFlag(ctx, flag); err != nil {
 				return counts, fmt.Errorf("flag issuance persistence failed: %w", err)

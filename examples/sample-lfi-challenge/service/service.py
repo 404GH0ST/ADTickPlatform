@@ -107,12 +107,14 @@ class LFISampleHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/v1/flag":
-            supplied = parse_qs(parsed.query).get("value", [""])[0]
-            flag = read_flag()
-            if supplied and supplied == flag:
-                self._send_json(HTTPStatus.OK, {"status": "stored", "flag": supplied})
+            if self.headers.get("X-Checker-Token", "") != CHECKER_TOKEN:
+                self._send_json(HTTPStatus.FORBIDDEN, {"status": "forbidden"})
                 return
-            self._send_json(HTTPStatus.NOT_FOUND, {"status": "missing"})
+            flag = read_flag()
+            if flag:
+                self._send_json(HTTPStatus.OK, {"status": "stored", "flag": flag})
+            else:
+                self._send_json(HTTPStatus.NOT_FOUND, {"status": "missing"})
             return
 
         if parsed.path.startswith("/v1/messages/"):

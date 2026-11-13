@@ -135,7 +135,7 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 			now := server.now().UTC()
 			endAt = &now
 		}
-		if _, err := server.store.StopMatch(ctx, endAt.UTC()); err != nil {
+		if _, err := server.stopMatchWithRetention(ctx, endAt.UTC()); err != nil {
 			return apigateway.GameMatchStatus{}, err
 		}
 		m.pendingAccessState = desired.State

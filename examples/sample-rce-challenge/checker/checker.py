@@ -94,12 +94,22 @@ def main() -> int:
             if metadata.get("path") != "flag.txt":
                 print("missing checker metadata", file=sys.stderr)
                 return 1
-            query = urlencode({"value": flag})
-            status, body = http_request("GET", f"{base_url}/v1/flag?{query}")
-            payload = require_json(status, body)
-            if payload.get("flag") != flag:
-                print(body, file=sys.stderr)
+            # Never send the expected flag to the service during retrieval.
+            try:
+                status, body = http_request("GET", f"{base_url}/v1/flag", headers={"X-Checker-Token": CHECKER_TOKEN})
+            except HTTPError as exc:
+                if exc.code == 404:
+                    missing = json.loads(read_response_body(exc))
+                    if isinstance(missing, dict) and missing.get("status") == "missing":
+                        print("stored flag is missing", file=sys.stderr)
+                        return 42
+                raise
+            payload = json.loads(body)
+            if status != 200:
                 return 1
+            if not isinstance(payload, dict) or payload.get("flag") != flag:
+                print("stored flag does not match the issued flag", file=sys.stderr)
+                return 42
             print(body)
             return 0
 
