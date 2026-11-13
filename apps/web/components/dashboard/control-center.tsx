@@ -9,7 +9,6 @@ import {
   ScoreboardPanel,
   ServicesPanel,
   SSHSessionDialog,
-  UnlockServiceDialog,
 } from "@/components/dashboard/control-center-sections";
 import { FlagSubmitPanel } from "@/components/dashboard/flag-submit-panel";
 import {
@@ -72,18 +71,6 @@ export function ControlCenter({
         onSetAttackVictim: state.setAttackVictim,
       })}
 
-      <UnlockServiceDialog
-        actionError={state.actionError}
-        open={state.unlockTarget !== null}
-        pendingAction={state.pendingAction}
-        proof={state.proof}
-        target={state.unlockTarget}
-        onClose={state.closeUnlockDialog}
-        onConfirm={() => {
-          void state.requestUnlock();
-        }}
-        onProofChange={state.setProof}
-      />
       <SSHSessionDialog
         actionError={state.actionError}
         issuedSession={state.issuedSession}

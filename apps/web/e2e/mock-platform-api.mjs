@@ -1726,6 +1726,21 @@ async function handleParticipantRoutes(ctx) {
     return writeSuccess(res, paginate(filtered, url.searchParams));
   }
 
+  if (method === "POST" && url.pathname === "/api/v2/submit") {
+    const body = await readJsonBody(ctx.req);
+    const results = (body?.flags ?? []).map((flag) => {
+      const accepted = flag === "PLAYIT{enemy-challenge-1}";
+      if (accepted) {
+        const service = findServiceState(1);
+        service.unlocked = true;
+        service.last_event = "SSH unlocked by accepted enemy flag";
+      }
+      return { flag, status: accepted ? "accepted" : "invalid", challenge_id: accepted ? 1 : undefined };
+    });
+    const accepted_count = results.filter((v) => v.status === "accepted").length;
+    return writeSuccess(res, { results, accepted_count, rejected_count: results.length - accepted_count });
+  }
+
   return (
     handleChallengeSourceDownload(ctx) ||
     (await handleServiceUnlock(ctx)) ||
@@ -1758,9 +1773,9 @@ async function handleServiceUnlock({ req, res, url, method }) {
   }
 
   const serviceState = findServiceState(challengeID);
-  const body = await readJsonBody(req);
-  if (!serviceState || !body?.proof) {
-    return writeFailure(res, 400, "unlock proof is invalid.");
+  await readJsonBody(req);
+  if (!serviceState?.unlocked) {
+    return writeFailure(res, 400, "submit a correct enemy flag for this challenge to unlock SSH automatically.");
   }
   if (serviceState.maintenance) {
     return writeFailure(res, 503, "challenge is under maintenance.");

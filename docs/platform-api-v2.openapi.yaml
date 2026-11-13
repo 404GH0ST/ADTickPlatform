@@ -686,23 +686,13 @@ paths:
     post:
       tags:
         - Services
-      summary: Unlock owned service
-      description: Submit proof recovered from your own service to unlock SSH access.
+      summary: Retry existing SSH access grant
+      description: SSH unlocks automatically after an accepted enemy flag on the same challenge. This legacy endpoint retries an existing grant; proofs cannot authorize access.
       operationId: unlockService
       security:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/ChallengeId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UnlockRequest'
-            examples:
-              default:
-                value:
-                  proof: extracted-unlock-secret
       responses:
         '200':
           description: Service unlock accepted
@@ -727,7 +717,7 @@ paths:
                   value:
                     title: Request rejected
                     status: 400
-                    detail: unlock proof is invalid.
+                    detail: submit a correct enemy flag for this challenge to unlock SSH automatically.
         '403':
           description: Authentication required
           content:
@@ -1243,6 +1233,10 @@ components:
         - status
         - detail
       properties:
+        challenge_id:
+          type: integer
+          description: Challenge of an accepted enemy flag; acceptance grants SSH on this challenge.
+          minimum: 1
         flag:
           type: string
         status:
@@ -1335,15 +1329,6 @@ components:
           minimum: 0
         sla_message:
           type: string
-    UnlockRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - proof
-      properties:
-        proof:
-          type: string
-          minLength: 1
     UnlockData:
       type: object
       additionalProperties: false

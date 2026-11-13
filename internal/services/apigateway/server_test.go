@@ -936,6 +936,20 @@ func newTestMux() *http.ServeMux {
 	return mux
 }
 
+// Model the durable grant written by game-core after a successful capture.
+func newTestMuxWithCaptureGrant(t *testing.T) *http.ServeMux {
+	t.Helper()
+	store := NewMemoryStore(101)
+	for _, id := range []int{1, 2} {
+		if _, err := store.UnlockService(context.Background(), 101, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, storeBackedControllerClient{store: store}, noopWireGuardClient{}).RegisterRoutes(mux)
+	return mux
+}
+
 func newTestMuxWithGameCore(game gameCoreClient) *http.ServeMux {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	store := NewMemoryStore(101)
@@ -2813,10 +2827,10 @@ func TestAttacksSupportsTickRangeFilters(t *testing.T) {
 	}
 }
 
-func TestUnlockRejectsInvalidProof(t *testing.T) {
+func TestUnlockProofCannotBypassCaptureRequirement(t *testing.T) {
 	mux := newTestMux()
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"wrong-proof"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 2)+`"}`))
 	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
@@ -2829,13 +2843,16 @@ func TestUnlockRejectsInvalidProof(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode unlock response: %v", err)
 	}
-	if payload.Detail != "unlock proof is invalid." {
+	if payload.Detail != "submit a correct enemy flag for this challenge to unlock SSH automatically." {
 		t.Fatalf("unexpected unlock message %q", payload.Detail)
 	}
 }
 
 func TestUnlockAppliesStableSSHCredential(t *testing.T) {
 	store := NewMemoryStore(101)
+	if _, err := store.UnlockService(context.Background(), 101, 1); err != nil {
+		t.Fatal(err)
+	}
 	controller := &recordingCredentialControllerClient{
 		storeBackedControllerClient: storeBackedControllerClient{store: store},
 	}
@@ -2861,7 +2878,7 @@ func TestUnlockAppliesStableSSHCredential(t *testing.T) {
 }
 
 func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
-	mux := newTestMux()
+	mux := newTestMuxWithCaptureGrant(t)
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 2)+`"}`))
 	setTestTeamAuthHeader(t, unlockRequest)
@@ -3485,7 +3502,7 @@ func TestRestartReturnsRateLimit429(t *testing.T) {
 }
 
 func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
-	mux := newTestMux()
+	mux := newTestMuxWithCaptureGrant(t)
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
 	setTestTeamAuthHeader(t, unlockRequest)
 	unlockResponse := httptest.NewRecorder()
@@ -3617,6 +3634,9 @@ func TestRestartWaitsForCheckerVerification(t *testing.T) {
 func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	store := NewMemoryStore(101)
+	if _, err := store.UnlockService(context.Background(), 101, 1); err != nil {
+		t.Fatal(err)
+	}
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{sshApplyErr: fmt.Errorf("runtime apply failed")}, noopWireGuardClient{}).RegisterRoutes(mux)
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
@@ -3654,7 +3674,7 @@ func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 }
 
 func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
-	mux := newTestMux()
+	mux := newTestMuxWithCaptureGrant(t)
 
 	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
 	setTestTeamAuthHeader(t, unlockRequest)
@@ -5617,5 +5637,54 @@ func TestSubmitRejectsWhenContestIsOver(t *testing.T) {
 	}
 	if payload.Detail != "contest is over." {
 		t.Fatalf("unexpected message %q", payload.Detail)
+	}
+}
+
+func TestAcceptedEnemyFlagAutomaticallyUnlocksOnlyMatchingService(t *testing.T) {
+	for _, backend := range []string{"game-core", "submission-service"} {
+		t.Run(backend, func(t *testing.T) {
+			store := NewMemoryStore(101)
+			controller := &recordingCredentialControllerClient{storeBackedControllerClient: storeBackedControllerClient{store: store}}
+			verdicts := []SubmissionVerdictAlias{
+				{Flag: "enemy", Status: "accepted", ChallengeID: 2},
+				{Flag: "bad", Status: "invalid", ChallengeID: 1},
+				{Flag: "duplicate", Status: "duplicate", ChallengeID: 3},
+				{Flag: "enemy-again", Status: "accepted", ChallengeID: 2},
+			}
+			server := NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}, testGameCoreClient{submit: verdicts})
+			if backend == "submission-service" {
+				server.WithSubmissionClient(testSubmissionClient{submit: verdicts})
+			}
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway"})
+			server.RegisterRoutes(mux)
+			req := httptest.NewRequest(http.MethodPost, "/api/v2/submit", strings.NewReader(`{"flags":["enemy","bad","duplicate","enemy-again"]}`))
+			setTestTeamAuthHeader(t, req)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, req)
+			if response.Code != http.StatusOK {
+				t.Fatalf("submit: %d %s", response.Code, response.Body.String())
+			}
+			states, err := store.ListTeamServices(context.Background(), 101)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range states {
+				if state.Unlocked != (state.ChallengeID == 2) {
+					t.Fatalf("unexpected unlock: %+v", state)
+				}
+			}
+			if controller.applyCalls != 1 || controller.challengeID != 2 || controller.teamID != 101 {
+				t.Fatalf("wrong credential target/calls: %+v", controller)
+			}
+			other, err := store.ListTeamServices(context.Background(), 102)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range other {
+				if state.Unlocked {
+					t.Fatalf("victim unlocked: %+v", state)
+				}
+			}
+		})
 	}
 }

@@ -52,15 +52,12 @@ export type ControlCenterState = {
   attackPageState: AttackFeedPage;
   closeFactoryResetDialog: () => void;
   closeSSHSessionDialog: () => void;
-  closeUnlockDialog: () => void;
   issuedSession: SSHSessionData | null;
   pageAttackFeed: (direction: 'prev' | 'next') => Promise<void>;
   pendingAction: string | null;
-  proof: string;
   requestFactoryReset: () => Promise<void>;
   requestRestart: (service: ServiceRow) => Promise<void>;
   requestSSHSession: () => Promise<void>;
-  requestUnlock: () => Promise<void>;
   resetAttackFilters: () => Promise<void>;
   resetTarget: ServiceRow | null;
   rows: ServiceRow[];
@@ -75,9 +72,7 @@ export type ControlCenterState = {
   setAttackService: (value: string) => void;
   setAttackTickFrom: (value: string) => void;
   setAttackTickTo: (value: string) => void;
-  setProof: (value: string) => void;
   summary: ControlCenterSummary;
-  unlockTarget: ServiceRow | null;
 };
 
 export function useControlCenter({
@@ -94,8 +89,15 @@ export function useControlCenter({
     }),
     [attackPage.limit, attackPage.offset],
   );
+  const router = useRouter();
   const [rows, setRows] = useState<ServiceRow[]>(services);
   const [scoreRows, setScoreRows] = useState<ScoreRow[]>(scores);
+
+  useEffect(() => {
+    const refresh = () => router.refresh();
+    window.addEventListener('platform:flag-accepted', refresh);
+    return () => window.removeEventListener('platform:flag-accepted', refresh);
+  }, [router]);
 
   useEffect(() => {
     setRows(services);
@@ -105,7 +107,6 @@ export function useControlCenter({
     setScoreRows(scores);
   }, [scores]);
 
-  const router = useRouter();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -115,8 +116,6 @@ export function useControlCenter({
     return () => clearInterval(interval);
   }, [router]);
   const [attackPageState, setAttackPageState] = useState<AttackFeedPage>(attackPage);
-  const [proof, setProof] = useState('unlock-proof-from-own-service');
-  const [unlockTarget, setUnlockTarget] = useState<ServiceRow | null>(null);
   const [sessionTarget, setSessionTarget] = useState<ServiceRow | null>(null);
   const [resetTarget, setResetTarget] = useState<ServiceRow | null>(null);
   const [issuedSession, setIssuedSession] = useState<SSHSessionData | null>(null);
@@ -283,46 +282,6 @@ export function useControlCenter({
     await refreshAttackFeed(false, next);
   }
 
-  async function requestUnlock(): Promise<void> {
-    if (!unlockTarget) {
-      return;
-    }
-
-    setPendingAction(`unlock:${unlockTarget.id}`);
-    setActionError(null);
-
-    try {
-      const response = await fetch(`/api/platform/services/${unlockTarget.challengeId}/unlock`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ proof }),
-      });
-      await processApiResponse<{ unlocked: boolean }>(response, 'unlock request');
-
-      setRows((current) =>
-        current.map((row) =>
-          row.id === unlockTarget.id
-            ? {
-                ...row,
-                unlocked: true,
-                status: row.status === 'degraded' ? 'warming' : row.status,
-                sshHint: 'unlock accepted; use SSH Access to view the team credential',
-                lastEvent: 'unlock granted via participant API',
-              }
-            : row,
-        ),
-      );
-      await refreshServiceRow(unlockTarget.challengeId);
-      setUnlockTarget(null);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'unlock request failed');
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
   async function requestSSHSession(): Promise<void> {
     if (!sessionTarget) {
       return;
@@ -464,18 +423,11 @@ export function useControlCenter({
   function selectPrimaryAction(service: ServiceRow): void {
     if (service.unlocked) {
       setSessionTarget(service);
-      return;
     }
-
-    setUnlockTarget(service);
   }
 
   function selectResetTarget(service: ServiceRow): void {
     setResetTarget(service);
-  }
-
-  function closeUnlockDialog(): void {
-    setUnlockTarget(null);
   }
 
   function closeSSHSessionDialog(): void {
@@ -498,15 +450,12 @@ export function useControlCenter({
     attackPageState,
     closeFactoryResetDialog,
     closeSSHSessionDialog,
-    closeUnlockDialog,
     issuedSession,
     pageAttackFeed,
     pendingAction,
-    proof,
     requestFactoryReset,
     requestRestart,
     requestSSHSession,
-    requestUnlock,
     resetAttackFilters,
     resetTarget,
     rows,
@@ -521,8 +470,6 @@ export function useControlCenter({
     setAttackService,
     setAttackTickFrom,
     setAttackTickTo,
-    setProof,
     summary,
-    unlockTarget,
   };
 }

@@ -175,9 +175,10 @@ test("participant attacks routes show degraded warning and empty-state messaging
   await assertEmptyAttacksState(page);
 });
 
-test("participant service actions update the service card through unlock, ssh, restart, and factory reset", async ({
-  page,
+test("accepted enemy flag opens SSH before restart and factory reset", async ({
+  page, request,
 }) => {
+  await request.post(`${mockApiBaseUrl}/api/v2/admin/game/match/start`);
   await page.goto("/services");
 
   await expect(page.locator("h1", { hasText: "Services" })).toBeVisible();
@@ -198,15 +199,13 @@ test("participant service actions update the service card through unlock, ssh, r
     serviceCard.getByRole("link", { name: "Download Source" }),
   ).toHaveAttribute("href", "/api/platform/challenges/1/source");
 
-  await serviceCard.getByRole("button", { name: "Unlock Service" }).click();
-  const unlockDialog = page.getByRole("dialog", { name: "Unlock Service" });
-  await unlockDialog.getByLabel("Unlock proof").fill("proof-from-own-service");
-  await unlockDialog.getByRole("button", { name: "Unlock Service" }).click();
+  await expect(serviceCard.getByRole("button", { name: "SSH Locked" })).toBeDisabled();
+  await expect(page.getByLabel("Unlock proof")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Flags", exact: true }).fill("PLAYIT{enemy-challenge-1}");
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
 
-  await expect(
-    serviceCard.getByText("unlock granted via participant API"),
-  ).toBeVisible();
-  await expect(serviceCard.getByText("unlocked")).toBeVisible();
+  await expect(serviceCard.getByText("SSH unlocked by accepted enemy flag")).toBeVisible();
+  await expect(serviceCard.getByText("unlocked", { exact: true })).toBeVisible();
 
   await serviceCard.getByRole("button", { name: "SSH Access" }).click();
   const sshDialog = page.getByRole("dialog", { name: "SSH Access" });
@@ -246,5 +245,5 @@ test("participant service actions update the service card through unlock, ssh, r
     serviceCard.getByText("factory reset triggered via participant API"),
   ).toBeVisible();
   await expect(serviceCard.getByText("cooldown: 90s")).toBeVisible();
-  await expect(serviceCard.getByText("unlocked")).toBeVisible();
+  await expect(serviceCard.getByText("unlocked", { exact: true })).toBeVisible();
 });

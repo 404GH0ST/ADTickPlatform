@@ -14,7 +14,7 @@ The platform must also provide:
 - a live attack map
 - Docker-based team service isolation
 - isolation between one service and another service
-- a controlled workflow to unlock patch access by solving the team's own service
+- automatic patch access after an accepted enemy flag on the same challenge
 - per-member WireGuard access to the game network
 - service reset support
 - checker, controller, and submission subsystems
@@ -75,7 +75,7 @@ The platform is decomposed into several specialized microservices to ensure secu
 | Scoreboard | `Scoring Worker` writes snapshots, `Realtime Gateway` streams deltas, `Next.js` renders the UI |
 | Live attack map | `Submission Service` emits accepted attack events, `Realtime Gateway` pushes them to the UI |
 | Docker service per team | `Controller Service` provisions one isolated runtime per `team x service` |
-| Teams solve own service to unlock patching | `Direct Container Access Model` validates unlock proof before issuing SSH credentials to the exact service container |
+| Teams capture an enemy flag to unlock patching | Game-core persists SSH access for the submitting team and matching challenge with the accepted capture |
 | Reset container service | `Controller Service` supports team-triggered factory reset for each service and optional soft restart |
 | Service isolated from other services | Runtime workers place each `team x service` in its own network island with no east-west access to sibling services |
 | Team connectivity into the game network | `WireGuard Gateway` issues one peer config per team member and optional automation peers |
@@ -390,19 +390,9 @@ This avoids forcing teams to reuse a human member credential for headless automa
 
 ## 6.1 Unlock Requirement
 
-The requirement says teams must solve their own service to unlock patch access. The cleanest model is:
+An accepted flag captured from another team automatically unlocks SSH on the submitting team's own container for the same challenge. Game-core persists this grant in the acceptance transaction, including flags arriving through the TCP submission service, then reconciles controller access policies. The participant opens **SSH Access** to retrieve and apply the stable credential. Factory resets preserve access during the same match; organizer maintenance clears it.
 
-1. every `team x service` image contains a team-specific unlock secret or challenge path
-2. the team obtains that secret by exploiting or solving its own service
-3. the team submits the unlock proof to the platform
-4. the platform exposes the stable team SSH credential for the matching service container
-5. a later factory reset preserves unlock status for that team/service during the same match
-
-Implementation options:
-
-- hidden file or token only reachable through exploitation
-- special challenge endpoint guarded by the intended vulnerability
-- secret derived from `HMAC(master_secret, team_id, service_id, season_salt)`
+The legacy unlock endpoint only retries an existing grant. Injected unlock proofs no longer authorize access.
 
 ## 6.2 Direct Service Container Access
 
@@ -431,7 +421,7 @@ Recommended controls:
 
 For many Attack-Defense competitions, direct access to the owned service container is the expected team workflow:
 
-- the team exploits its own service
+- the team submits a correct flag captured from another team on the challenge
 - the team enters the exact service instance
 - the team patches live files or configuration
 - if the patch breaks SLA, the team factory-resets that service and tries again
@@ -726,7 +716,7 @@ This architecture satisfies the requested Attack-Defense Tick requirements by:
 - supporting attack, defense, and SLA scoring
 - exposing a live scoreboard and attack map
 - providing team-triggered factory reset for SLA recovery when a patch goes wrong
-- requiring teams to solve their own service before SSH access to that service container is granted
+- requiring an accepted enemy flag on the same challenge before SSH access is granted
 - preserving unlock state after factory reset so teams can recover quickly without re-solving
 - giving each team member an individual WireGuard identity for secure access into the game network
 - isolating each service from sibling services to reduce lateral movement and preserve fairness

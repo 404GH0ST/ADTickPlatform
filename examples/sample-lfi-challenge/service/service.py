@@ -11,23 +11,19 @@ from urllib.parse import parse_qs, urlparse
 
 STATE_DIR = Path(os.environ.get("AD_STATE_DIR", "/opt/ad/state"))
 MESSAGES_DIR = STATE_DIR / "messages"
-SECRET_DIR = STATE_DIR / "secret"
 FLAG_PATH = STATE_DIR / "flag.txt"
 TEMPLATES_DIR = Path(os.environ.get("AD_TEMPLATES_DIR", "/opt/ad/content/templates"))
 SERVICE_PORT = int(os.environ.get("PORT", os.environ.get("AD_PLATFORM_SERVICE_PORT", "8080")))
-UNLOCK_PROOF = os.environ.get("AD_PLATFORM_UNLOCK_PROOF", "missing-unlock-proof")
 CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-lfi-checker-token")
 TITLE_RE = re.compile(r"^[A-Za-z0-9 _.\-]{1,64}$")
 
 
 def bootstrap() -> None:
     MESSAGES_DIR.mkdir(parents=True, exist_ok=True)
-    SECRET_DIR.mkdir(parents=True, exist_ok=True)
     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     welcome_path = TEMPLATES_DIR / "welcome.txt"
     if not welcome_path.exists():
         welcome_path.write_text("Welcome to sample LFI challenge.\n", encoding="utf-8")
-    (SECRET_DIR / "unlock-proof.txt").write_text(f"{UNLOCK_PROOF}\n", encoding="utf-8")
 
 
 def slot_path(slot: int) -> Path:

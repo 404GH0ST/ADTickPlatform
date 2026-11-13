@@ -227,3 +227,47 @@ func TestSubmissionMigrationBackfillsLegacyCaptureAndCanDeleteIt(t *testing.T) {
 		t.Fatal("legacy scoring record retained")
 	}
 }
+
+func TestPostgresCaptureGrantsOnlyAttackerMatchingSSHAccess(t *testing.T) {
+	db := isolatedSubmissionDB(t)
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+ INSERT INTO teams(id,name,email,join_key) VALUES(101,'attacker','a@test.local','a'),(102,'victim','v@test.local','v');
+ INSERT INTO challenges(id,name) VALUES(1,'one'),(2,'two');
+ INSERT INTO game_match_state(singleton,state) VALUES(TRUE,'running');
+ INSERT INTO game_ticks(id,status) VALUES(1,'running');
+ INSERT INTO team_service_states(team_id,challenge_id,endpoint,status,checker,ssh_hint,last_event,reset_cooldown)
+ SELECT t.id,c.id,'test','healthy','ok','locked','','' FROM teams t CROSS JOIN challenges c;
+ `); err != nil {
+		t.Fatal(err)
+	}
+	store := &postgresGameStore{db: db}
+	now := time.Now().UTC()
+	if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: "enemy", OwnerTeamID: 102, ChallengeID: 1, IssuedTick: 1, ExpiresTick: 1, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{Flag: "enemy", SubmittingTeam: 101, ChallengeID: 1, ExpiresTick: 1, SubmittedAt: now}); err != nil || !ok {
+		t.Fatalf("accept: %v %v", ok, err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT team_id,challenge_id,unlocked FROM team_service_states`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var team, challenge int
+		var unlocked bool
+		if err := rows.Scan(&team, &challenge, &unlocked); err != nil {
+			t.Fatal(err)
+		}
+		if unlocked != (team == 101 && challenge == 1) {
+			t.Fatalf("wrong grant team=%d challenge=%d unlocked=%v", team, challenge, unlocked)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1110,7 +1110,7 @@ func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 	if len(payload) != 2 {
 		t.Fatalf("expected 2 verdicts, got %d", len(payload))
 	}
-	if payload[0].Detail != "flag is correct." || payload[1].Detail != "flag already submitted." {
+	if payload[0].ChallengeID != 1 || payload[0].Detail != "flag is correct." || payload[1].Detail != "flag already submitted." {
 		t.Fatalf("unexpected submit verdicts %+v", payload)
 	}
 }
@@ -1488,5 +1488,41 @@ func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
 	}
 	if payload.TotalCount != 1 || payload.HasPrev || payload.HasNext {
 		t.Fatalf("unexpected tick-filtered attack metadata %+v", payload)
+	}
+}
+
+func TestAcceptedFlagReconcilesAccessEvenWhenControllerFails(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryGameStore()
+	now := time.Now().UTC()
+	if _, err := store.StartMatch(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartNextTick(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	codec := newFlagCodec("test-flag-secret", "PLAYIT")
+	enemy := codec.Issue(102, 2, 1, 1)
+	if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: enemy, OwnerTeamID: 102, ChallengeID: 2, IssuedTick: 1, ExpiresTick: 1, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	access := &monitorAccessReconcileClient{failCalls: 1}
+	server := newGameCoreServer("test", store, testCheckerClient{}, codec, nil, nil, 15)
+	server.accessReconcile = access
+	results, err := server.submitFlags(ctx, 101, []string{enemy, "wrong", codec.Issue(101, 2, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 3 || results[0].Status != "accepted" || results[0].ChallengeID != 2 || results[1].Status != "invalid" || results[2].Status != "invalid" {
+		t.Fatalf("verdicts: %+v", results)
+	}
+	if access.calls != 1 {
+		t.Fatalf("expected one access reconcile, got %d", access.calls)
+	}
+	if _, err := server.submitFlags(ctx, 101, []string{enemy}); err != nil {
+		t.Fatal(err)
+	}
+	if access.calls != 1 {
+		t.Fatal("duplicate triggered another unlock")
 	}
 }

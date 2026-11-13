@@ -10,7 +10,6 @@ from urllib.parse import parse_qs, urlparse
 STATE_DIR = Path(os.environ.get("AD_STATE_DIR", "/opt/ad/state"))
 STATE_PATH = STATE_DIR / "sample-http-state.json"
 SERVICE_PORT = int(os.environ.get("PORT", os.environ.get("AD_PLATFORM_SERVICE_PORT", "8080")))
-UNLOCK_PROOF = os.environ.get("AD_PLATFORM_UNLOCK_PROOF", "missing-unlock-proof")
 
 
 def load_state() -> dict[str, str]:
@@ -50,10 +49,6 @@ class SampleHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
-            return
-
-        if parsed.path == "/unlock":
-            self._send_json(HTTPStatus.OK, {"proof": UNLOCK_PROOF})
             return
 
         if parsed.path == "/flag":

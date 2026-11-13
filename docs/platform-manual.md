@@ -30,8 +30,8 @@ request and response shapes.
    The response is the rendered client `.conf` text and the response headers
    carry the suggested filename via `Content-Disposition`.
 5. Inspect your own service state with `GET /api/v2/team/services`.
-6. Extract the unlock proof from your own service and submit it to
-   `POST /api/v2/services/{challenge_id}/unlock`.
+6. Submit a correct enemy flag to `POST /api/v2/submit` (or the TCP submission service).
+   SSH opens automatically on your own service for that challenge.
 7. Retrieve the stable team SSH credential from
    `POST /api/v2/services/{challenge_id}/ssh-session`.
 8. Use restart or factory reset when needed:
@@ -212,25 +212,9 @@ Example:
 
 ## Unlock and SSH
 
-`POST /api/v2/services/{challenge_id}/unlock`
+Submit at least one correct flag from another team on the matching challenge. An accepted capture automatically grants SSH access to your own container. Open **SSH Access** to retrieve the stable credential. Factory reset preserves access during the same match.
 
-Request:
-
-```json
-{
-  "proof": "<unlock proof>"
-}
-```
-
-Success:
-
-```json
-{
-  "challenge_id": 1,
-  "team_id": 101,
-  "unlocked": true
-}
-```
+`POST /api/v2/services/{challenge_id}/unlock` is a legacy retry endpoint for an existing grant. It cannot unlock a locked service, and client-supplied proofs are ignored.
 
 `POST /api/v2/services/{challenge_id}/ssh-session`
 

@@ -1459,7 +1459,7 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			continue
 		}
 
-		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct."})
+		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct.", ChallengeID: issued.ChallengeID})
 		acceptedAny = true
 	}
 	if err := s.recordRejectedSubmissions(ctx, teamID, attackerName, currentTick, results); err != nil {
@@ -1467,6 +1467,12 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 	}
 	if acceptedAny {
 		s.scheduleScoreboardRecompute()
+		if s.accessReconcile != nil {
+			if err := s.accessReconcile.ReconcileAccess(ctx); err != nil {
+				// The grant is durable; the next tick retries access reconciliation.
+				log.Printf("access reconcile after accepted flag: %v", err)
+			}
+		}
 	}
 	return results, nil
 }
@@ -1557,15 +1563,16 @@ func normalizedCheckerRunStatus(status string) string {
 }
 
 type submissionVerdictAlias struct {
-	Flag   string `json:"flag"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
+	ChallengeID int    `json:"challenge_id,omitempty"`
+	Flag        string `json:"flag"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail"`
 }
 
 func toSubmissionVerdictAliases(values []submissionVerdictAlias) []apigateway.SubmissionVerdictAlias {
 	result := make([]apigateway.SubmissionVerdictAlias, 0, len(values))
 	for _, value := range values {
-		result = append(result, apigateway.SubmissionVerdictAlias{Flag: value.Flag, Status: value.Status, Detail: value.Detail})
+		result = append(result, apigateway.SubmissionVerdictAlias{Flag: value.Flag, Status: value.Status, Detail: value.Detail, ChallengeID: value.ChallengeID})
 	}
 	return result
 }

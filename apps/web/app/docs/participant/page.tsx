@@ -19,7 +19,7 @@ const participantSteps = [
   {
     step: '3',
     title: 'Unlock SSH',
-    detail: 'Recover the unlock proof from your own service, then submit it to open SSH for your team.',
+    detail: 'Submit a correct flag from another team to automatically open SSH for your team on that challenge.',
   },
   {
     step: '4',
@@ -66,7 +66,7 @@ export default async function ParticipantManualPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <p>Download the whitebox source bundle for the challenge, recover the unlock proof from your own service, and request the stable SSH credential.</p>
+              <p>Download the whitebox source bundle, submit a correct enemy flag on the challenge, and open SSH Access to view the stable team credential.</p>
               <p>Patch files directly inside the running service container, then use <code>POST /api/v2/services/{'{challenge_id}'}/reset/restart</code> when you want to keep the current filesystem changes.</p>
               <p>Use <code>POST /api/v2/services/{'{challenge_id}'}/reset/factory</code> only when you want to throw away the current patch state and return to the organizer baseline image.</p>
             </CardContent>

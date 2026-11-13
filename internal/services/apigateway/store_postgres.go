@@ -715,8 +715,8 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 		UPDATE team_service_states
 		SET unlocked = TRUE,
 		    status = CASE WHEN status = 'degraded' THEN 'warming' ELSE status END,
-		    ssh_hint = 'unlock accepted; use SSH Access to view the team credential',
-		    last_event = 'unlock granted via participant API'
+		    ssh_hint = 'enemy flag accepted; open SSH Access to view the team credential',
+		    last_event = 'SSH unlocked by accepted enemy flag'
 		WHERE team_id = $1 AND challenge_id = $2
 		  AND EXISTS (
 			SELECT 1

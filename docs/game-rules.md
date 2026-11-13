@@ -230,15 +230,15 @@ The platform should treat checker timeouts as explicit failures.
 
 ## 7.1 Intent
 
-Teams must solve their own service before they can patch it.
+Teams earn patch access by submitting at least one correct flag from another team on the same challenge.
 
 ## 7.2 Default Flow
 
-1. organizer builds each service image with a team-specific unlock secret or exploit-gated unlock path
-2. a team extracts its own unlock proof by solving the service
-3. the team submits the proof to the platform
-4. the platform validates the proof against expected team/service state
-5. the platform exposes the stable team SSH credential for that exact `team x service` container
+1. A team captures another team's flag and submits it through the flag submission API or TCP submission service.
+2. Game-core validates the flag and accepts the capture. Own-team, invalid, expired, and duplicate submissions do not create a grant.
+3. Acceptance automatically unlocks SSH on the submitting team's own container for that challenge and reconciles network access.
+4. The team opens **SSH Access** to retrieve its stable root credential. No separate unlock proof is required.
+5. Factory reset preserves the grant during the same match. Organizer maintenance or access reset clears it; a new accepted capture grants access again.
 
 ## 7.3 Patch Session
 

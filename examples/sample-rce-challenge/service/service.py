@@ -12,12 +12,9 @@ from urllib.parse import parse_qs, urlparse
 STATE_DIR = Path(os.environ.get("AD_STATE_DIR", "/opt/ad/state"))
 PUBLIC_DIR = Path(os.environ.get("AD_PUBLIC_DIR", "/opt/ad/public"))
 EXPOSED_DIR = Path(os.environ.get("AD_EXPOSED_DIR", "/opt/ad/exposed"))
-SECRET_DIR = STATE_DIR / "secret"
 FLAG_PATH = STATE_DIR / "flag.txt"
 EXPOSED_FLAG_PATH = EXPOSED_DIR / "flag.txt"
-EXPOSED_UNLOCK_PROOF_PATH = EXPOSED_DIR / "unlock-proof.txt"
 SERVICE_PORT = int(os.environ.get("PORT", os.environ.get("AD_PLATFORM_SERVICE_PORT", "8080")))
-UNLOCK_PROOF = os.environ.get("AD_PLATFORM_UNLOCK_PROOF", "missing-unlock-proof")
 CHECKER_TOKEN = os.environ.get("AD_CHECKER_TOKEN", "sample-rce-checker-token")
 
 
@@ -25,12 +22,8 @@ def bootstrap() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     EXPOSED_DIR.mkdir(parents=True, exist_ok=True)
-    SECRET_DIR.mkdir(parents=True, exist_ok=True)
     (PUBLIC_DIR / "status.txt").write_text("sample RCE diagnostics online\n", encoding="utf-8")
     (PUBLIC_DIR / "status.txt").chmod(0o644)
-    (SECRET_DIR / "unlock-proof.txt").write_text(f"{UNLOCK_PROOF}\n", encoding="utf-8")
-    (SECRET_DIR / "unlock-proof.txt").chmod(0o600)
-    publish_exposed(EXPOSED_UNLOCK_PROOF_PATH, UNLOCK_PROOF)
 
 
 def read_flag() -> str:

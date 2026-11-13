@@ -17,7 +17,8 @@ PidFile /run/sshd.pid
 EOF
 
 # Do NOT ship a known root password. SSH stays closed until the platform
-# provisions a per-team credential on unlock (controller runs chpasswd).
+# provisions a per-team credential after an accepted enemy flag on this
+# challenge (controller runs chpasswd when SSH Access is opened).
 # Lock the account explicitly so password auth cannot succeed before then.
 passwd -l root >/dev/null 2>&1 || true
 

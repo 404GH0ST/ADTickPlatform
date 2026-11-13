@@ -1180,6 +1180,18 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 		return false, err
 	}
 
+	// Persist the patch-access grant atomically with the accepted capture. This
+	// also covers submissions arriving through the TCP submission service.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET unlocked = TRUE,
+		    ssh_hint = 'enemy flag accepted; open SSH Access to view the team credential',
+		    last_event = 'SSH unlocked by accepted enemy flag'
+		WHERE team_id = $1 AND challenge_id = $2 AND unlocked = FALSE
+	`, submission.SubmittingTeam, submission.ChallengeID); err != nil {
+		return false, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}

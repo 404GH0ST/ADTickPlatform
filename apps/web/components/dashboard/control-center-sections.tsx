@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/card";
 import { AppDialog } from "@/components/ui/app-dialog";
 import { EmptyStateText } from "@/components/ui/empty-state";
-import { InfoLine, InfoPanel } from "@/components/ui/info-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -96,17 +95,6 @@ type AttacksPanelProps = {
 
 const selectClassName =
   "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
-
-type UnlockDialogProps = {
-  actionError: string | null;
-  open: boolean;
-  pendingAction: string | null;
-  proof: string;
-  target: ServiceRow | null;
-  onClose: () => void;
-  onConfirm: () => void;
-  onProofChange: (value: string) => void;
-};
 
 type SSHSessionDialogProps = {
   actionError: string | null;
@@ -392,7 +380,7 @@ export function ServicesPanel({
           <CardHeader>
             <CardTitle>Services</CardTitle>
             <CardDescription>
-              Owned service controls for unlock, root access, restart, and
+              Owned service controls for SSH access, restart, and
               factory reset.
             </CardDescription>
           </CardHeader>
@@ -634,53 +622,6 @@ function formatAttackFilterSummary(filters: AttackFilters): string {
   ].filter((value): value is string => value !== null);
 
   return parts.join(', ');
-}
-
-export function UnlockServiceDialog({
-  actionError,
-  open,
-  pendingAction,
-  proof,
-  target,
-  onClose,
-  onConfirm,
-  onProofChange,
-}: UnlockDialogProps): ReactElement {
-  return (
-    <AppDialog
-      body={
-        <div className="space-y-3">
-          {actionError ? <ErrorBanner message={actionError} /> : null}
-          <div className="space-y-2">
-            <Label htmlFor="unlock-proof">Unlock proof</Label>
-            <Input
-              id="unlock-proof"
-              value={proof}
-              onChange={(event) => onProofChange(event.target.value)}
-            />
-          </div>
-          <ServiceTargetBlock target={target} />
-        </div>
-      }
-      description="Submit proof from your own service. Unlock stays active through a factory reset during the same match."
-      footer={
-        <>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button disabled={pendingAction !== null} onClick={onConfirm}>
-            {pendingAction?.startsWith("unlock:") ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            Unlock Service
-          </Button>
-        </>
-      }
-      onClose={onClose}
-      open={open}
-      title="Unlock Service"
-    />
-  );
 }
 
 export function SSHSessionDialog({
@@ -979,7 +920,6 @@ function ServiceActionBar({
   onSelectReset: (service: ServiceRow) => void;
 }): ReactElement {
   const isPrimaryPending =
-    pendingAction === `unlock:${service.id}` ||
     pendingAction === `ssh:${service.id}`;
   const isRestartPending = pendingAction === `restart:${service.id}`;
   const isResetPending = pendingAction === `reset:${service.id}`;
@@ -987,15 +927,16 @@ function ServiceActionBar({
 
   return (
     <div className="space-y-3">
+      {!service.unlocked ? <p className="text-sm text-muted-foreground">Submit a correct flag from another team on this challenge to unlock SSH automatically.</p> : null}
       <div className="flex flex-wrap gap-3">
         <Button
-          disabled={actionsDisabled}
+          disabled={actionsDisabled || !service.unlocked}
           onClick={() => onSelectPrimaryAction(service)}
         >
           {isPrimaryPending ? (
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
-          {service.unlocked ? "SSH Access" : "Unlock Service"}
+          {service.unlocked ? "SSH Access" : "SSH Locked"}
         </Button>
         <Button
           disabled={actionsDisabled}
@@ -1037,23 +978,6 @@ function ServiceActionBar({
     </div>
   );
 }
-
-function ServiceTargetBlock({
-  target,
-}: {
-  target: ServiceRow | null;
-}): ReactElement {
-  return (
-    <InfoPanel compact>
-      <InfoLine
-        label="Target"
-        value={target?.name ?? "unknown"}
-        valueClassName="font-semibold"
-      />
-    </InfoPanel>
-  );
-}
-
 
 function ResetWarningBlock(): ReactElement {
   return (

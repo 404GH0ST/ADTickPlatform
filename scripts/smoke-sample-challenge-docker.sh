@@ -140,7 +140,7 @@ team_token="$(
     jq -er '.token'
 )"
 
-echo "fetching unlock proof from deployed service"
+echo "checking deployed sample service"
 container_name="svc-$(slug_name "${CHALLENGE_NAME}")-team-101"
 if ! docker ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
   echo "expected runtime container ${container_name} was not created; deployment did not reach the real docker runtime" >&2
@@ -156,31 +156,6 @@ with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
         raise SystemExit(1)
 PY
 fi
-unlock_proof="$(
-  curl -fsS "http://${endpoint}/unlock" 2>/dev/null | jq -er '.proof' 2>/dev/null || \
-  docker exec -i "${container_name}" python3 - <<'PY'
-import json
-import os
-from urllib.request import urlopen
-port = os.environ.get("AD_PLATFORM_SERVICE_PORT", os.environ.get("PORT", "8080"))
-with urlopen(f"http://127.0.0.1:{port}/unlock", timeout=5) as response:
-    body = json.loads(response.read().decode("utf-8"))
-    print(body["proof"])
-PY
-)"
-
-echo "unlocking service through participant API"
-curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/unlock" \
-  -H "Authorization: Bearer ${team_token}" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
-  jq -c '{challenge_id,team_id,unlocked}'
-
-echo "requesting ssh credential"
-curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/ssh-session" \
-  -H "Authorization: Bearer ${team_token}" |
-  jq -c '{host,port,username,password_present:(.password | length > 0)}'
-
 echo "starting match"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/match/start" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" |
@@ -263,6 +238,16 @@ if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0]
   echo "stolen flag submission did not return the expected success verdict" >&2
   exit 1
 fi
+
+echo "verifying capture automatically unlocked the matching service"
+curl -fsS "http://127.0.0.1:8080/api/v2/team/services" \
+  -H "Authorization: Bearer ${team_token}" |
+  jq -e --argjson id "${challenge_id}" 'any(.[]; .challenge_id == $id and .unlocked == true)' >/dev/null
+
+echo "requesting SSH credential after accepted capture"
+curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/ssh-session" \
+  -H "Authorization: Bearer ${team_token}" |
+  jq -e '.username == "root" and (.password | length > 0)' >/dev/null
 
 echo "verifying duplicate submission handling"
 duplicate_submit_response="$(

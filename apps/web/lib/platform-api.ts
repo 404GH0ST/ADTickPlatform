@@ -515,12 +515,11 @@ export async function listTeamServices() {
   return participantFetch<TeamServiceState[]>("/api/v2/team/services");
 }
 
-export async function unlockService(challengeID: number, proof: string) {
+export async function unlockService(challengeID: number) {
   return participantFetch<UnlockResponseData>(
     `/api/v2/services/${challengeID}/unlock`,
     {
       method: "POST",
-      body: JSON.stringify({ proof }),
     },
   );
 }

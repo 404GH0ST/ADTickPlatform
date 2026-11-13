@@ -89,6 +89,7 @@ export function FlagSubmitPanel({
       );
       if ((payload.accepted_count ?? 0) > 0) {
         setRawFlags("");
+        window.dispatchEvent(new Event("platform:flag-accepted"));
       }
     } catch (submitError) {
       setError(

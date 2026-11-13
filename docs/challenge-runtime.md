@@ -45,17 +45,13 @@ The platform injects:
 - `AD_PLATFORM_UNLOCK_PROOF`
 - `PORT`
 
-Unlock proofs are deterministic per `(team, challenge, unlock_proof_epoch)`.
-Putting a challenge under **maintenance** (or calling **rotate unlock
-proof**) bumps the epoch so previously stolen proofs stop verifying after
-instances are redeployed with the new env value. Teams must re-exploit the
-fixed image to recover the new proof.
+`AD_PLATFORM_UNLOCK_PROOF` remains a legacy environment variable for image compatibility. It no longer authorizes SSH. An accepted enemy flag automatically grants the submitting team SSH access on the same challenge. Maintenance clears access grants; teams must obtain another accepted capture after the challenge resumes.
 
 Recommended service-image behavior:
 
 - bind the vulnerable service to `AD_PLATFORM_SERVICE_PORT` or `PORT`
 - do not rely on Docker host port publishing; the platform reaches the service through its static `10.80.x.y` address on the game network
-- expose the unlock proof through the intended exploit path
+- expose checker-stored flags through the intended exploit path
 - keep mutable state in the mounted state directory if the challenge needs persistence between restarts
 
 ### Persistent State

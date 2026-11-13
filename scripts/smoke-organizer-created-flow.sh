@@ -288,29 +288,6 @@ with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
 PY
 fi
 
-unlock_proof="$(
-  curl -fsS "http://${team_one_endpoint}/unlock" 2>/dev/null | jq -er '.proof' 2>/dev/null || \
-  docker exec -i "${container_name}" python3 - <<'PY'
-import json
-import os
-from urllib.request import urlopen
-port = os.environ.get("AD_PLATFORM_SERVICE_PORT", os.environ.get("PORT", "8080"))
-with urlopen(f"http://127.0.0.1:{port}/unlock", timeout=5) as response:
-    body = json.loads(response.read().decode("utf-8"))
-    print(body["proof"])
-PY
-)"
-
-curl_json "unlock team one service" -X POST "${API_URL}/api/v2/services/${challenge_id}/unlock" \
-  -H "Authorization: Bearer ${team_one_token}" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
-  jq -c '{challenge_id,team_id,unlocked}'
-
-curl_json "request ssh credential" -X POST "${API_URL}/api/v2/services/${challenge_id}/ssh-session" \
-  -H "Authorization: Bearer ${team_one_token}" |
-  jq -c '{host,port,username,password_present:(.password | length > 0)}'
-
 curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
 
@@ -375,6 +352,14 @@ if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0]
   echo "stolen flag submission was not accepted" >&2
   exit 1
 fi
+
+curl_json "verify automatic SSH unlock" "${API_URL}/api/v2/team/services" \
+  -H "Authorization: Bearer ${team_one_token}" |
+  jq -e --argjson id "${challenge_id}" 'any(.[]; .challenge_id == $id and .unlocked == true)' >/dev/null
+
+curl_json "request SSH credential after capture" -X POST "${API_URL}/api/v2/services/${challenge_id}/ssh-session" \
+  -H "Authorization: Bearer ${team_one_token}" |
+  jq -e '.username == "root" and (.password | length > 0)' >/dev/null
 
 scoreboard_response="$(
   curl_json "recompute scoring" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" \

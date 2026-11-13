@@ -11,10 +11,6 @@ type submitRequest struct {
 	Flags []string `json:"flags"`
 }
 
-type unlockRequest struct {
-	Proof string `json:"proof"`
-}
-
 type challenge struct {
 	ID                int    `json:"id"`
 	Name              string `json:"name"`
@@ -28,9 +24,10 @@ type authenticateResponse struct {
 }
 
 type SubmissionVerdictAlias struct {
-	Flag   string `json:"flag"`
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
+	ChallengeID int    `json:"challenge_id,omitempty"`
+	Flag        string `json:"flag"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 type submissionVerdict = SubmissionVerdictAlias

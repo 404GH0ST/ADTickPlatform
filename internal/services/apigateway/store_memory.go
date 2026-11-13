@@ -670,8 +670,8 @@ func (s *memoryStore) UnlockService(ctx context.Context, teamID, challengeID int
 	}
 	state.Unlocked = true
 	state.Status = demoteStatus(state.Status)
-	state.SSHHint = "unlock accepted; use SSH Access to view the team credential"
-	state.LastEvent = "unlock granted via participant API"
+	state.SSHHint = "enemy flag accepted; open SSH Access to view the team credential"
+	state.LastEvent = "SSH unlocked by accepted enemy flag"
 
 	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
 }

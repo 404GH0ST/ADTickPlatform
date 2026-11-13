@@ -13,7 +13,6 @@ import (
 	"unicode"
 
 	"adplatform/internal/platform/httpapi"
-	"adplatform/internal/platform/unlockproof"
 )
 
 type Server struct {
@@ -825,6 +824,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if s.submission != nil {
 		if results, submissionErr := s.submission.SubmitFlags(r.Context(), teamID, req.Flags); submissionErr == nil {
+			s.applyAcceptedFlagAccess(r.Context(), teamID, results)
 			writeData(w, http.StatusOK, newSubmissionResult(results))
 			return
 		} else if !errors.Is(submissionErr, errSubmissionServiceDisabled) {
@@ -835,6 +835,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if s.gameCore != nil {
 		if gameResults, gameErr := s.gameCore.SubmitFlags(r.Context(), teamID, req.Flags); gameErr == nil {
+			s.applyAcceptedFlagAccess(r.Context(), teamID, gameResults)
 			writeData(w, http.StatusOK, newSubmissionResult(gameResults))
 			return
 		} else if !errors.Is(gameErr, errGameCoreDisabled) {
@@ -852,6 +853,32 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, newSubmissionResult(results))
+}
+
+// An access failure must not change an already committed flag verdict. The
+// durable grant is reconciled again by the controller and SSH Access can retry
+// applying the credential.
+func (s *Server) applyAcceptedFlagAccess(ctx context.Context, teamID int, results []submissionVerdict) {
+	seen := map[int]bool{}
+	for _, result := range results {
+		if result.Status != "accepted" || result.ChallengeID <= 0 || seen[result.ChallengeID] {
+			continue
+		}
+		seen[result.ChallengeID] = true
+		if _, err := s.store.UnlockService(ctx, teamID, result.ChallengeID); err != nil {
+			log.Printf("automatic SSH unlock team=%d challenge=%d: %v", teamID, result.ChallengeID, err)
+			continue
+		}
+		if err := s.controller.ReconcileServiceAccess(ctx, teamID, result.ChallengeID); err != nil {
+			log.Printf("automatic SSH access reconcile team=%d challenge=%d: %v", teamID, result.ChallengeID, err)
+			continue
+		}
+		if err := s.controller.ApplySSHCredential(ctx, teamID, result.ChallengeID, ControllerSSHCredential{
+			Password: stableRootPassword(s.sshCredentialSecret, teamID, result.ChallengeID),
+		}); err != nil {
+			_ = s.store.MarkSSHSessionApplyFailure(ctx, teamID, result.ChallengeID)
+		}
+	}
 }
 
 func (s *Server) enrichServiceStatesWithSLADetails(ctx context.Context, teamID int, states []serviceState) []serviceState {
@@ -1121,18 +1148,21 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req unlockRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil || strings.TrimSpace(req.Proof) == "" {
-		writeProblem(w, http.StatusBadRequest, "Invalid request", "unlock proof is invalid.")
+	// Legacy endpoint only retries access for an existing capture-based grant.
+	// Client-supplied proofs can no longer grant SSH access.
+	states, err := s.store.ListTeamServices(r.Context(), teamID)
+	if err != nil {
+		writeStoreFailure(w, err)
 		return
 	}
-	epoch, epochErr := s.store.GetChallengeUnlockProofEpoch(r.Context(), challengeID)
-	if epochErr != nil {
-		writeDomainFailure(w, epochErr)
-		return
+	unlocked := false
+	for _, state := range states {
+		if state.ChallengeID == challengeID {
+			unlocked = state.Unlocked
+		}
 	}
-	if !unlockproof.Verify(s.unlockProofSecret, teamID, challengeID, epoch, req.Proof) {
-		writeProblem(w, http.StatusBadRequest, "Unlock rejected", "unlock proof is invalid.")
+	if !unlocked {
+		writeProblem(w, http.StatusBadRequest, "SSH locked", "submit a correct enemy flag for this challenge to unlock SSH automatically.")
 		return
 	}
 
@@ -1180,6 +1210,10 @@ func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {
 	data, err := s.store.CreateSSHSession(r.Context(), teamID, challengeID, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
+		return
+	}
+	if err := s.controller.ReconcileServiceAccess(r.Context(), teamID, challengeID); err != nil {
+		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "service access reconcile failed.")
 		return
 	}
 	data.Password = stableRootPassword(s.sshCredentialSecret, teamID, challengeID)
