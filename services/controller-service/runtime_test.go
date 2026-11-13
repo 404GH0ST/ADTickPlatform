@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,15 @@ import (
 	"adplatform/internal/platform/unlockproof"
 	"adplatform/internal/services/apigateway"
 )
+
+func TestFactoryResetClassifiesPredeleteValidationFailure(t *testing.T) {
+	executor := &dockerCLIExecutor{serviceSecurity: testServiceSecurity(), captureMode: "disabled"}
+	err := executor.FactoryResetService(context.Background(), apigateway.ControllerRuntimeTask{RuntimeKind: "unsupported"})
+	var predelete resetPreflightError
+	if !errors.As(err, &predelete) || predelete.runtimeMayHaveChanged {
+		t.Fatalf("runtime validation failure was not classified as clean predelete: %v", err)
+	}
+}
 
 type stubCheckerValidationClient struct {
 	result apigateway.CheckerValidationResult

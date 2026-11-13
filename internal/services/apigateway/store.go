@@ -82,9 +82,13 @@ type Store interface {
 	UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error)
 	CreateSSHSession(ctx context.Context, teamID, challengeID int, now time.Time) (sshSessionData, error)
 	MarkSSHSessionApplyFailure(ctx context.Context, teamID, challengeID int) error
+	LockServiceLifecycle(ctx context.Context, teamID, challengeID int) (func(), error)
 	PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error)
+	AbortFactoryResetService(ctx context.Context, prepared resetData) error
 	CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error)
 	MarkFactoryResetFailure(ctx context.Context, teamID, challengeID int) error
+	MarkFactoryResetCompletionFailure(ctx context.Context, teamID, challengeID int) error
+	ValidateRestartService(ctx context.Context, teamID, challengeID int) error
 	RestartService(ctx context.Context, teamID, challengeID int) (resetData, error)
 	ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 	CreateAdminTeam(ctx context.Context, input adminCreateTeamRequest) (adminTeam, error)

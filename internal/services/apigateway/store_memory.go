@@ -35,11 +35,12 @@ type serviceInstanceRecord struct {
 }
 
 type memoryStore struct {
-	mu        sync.Mutex
-	submitted map[string]struct{}
-	teamNames map[int]string
-	teams     map[int]*adminTeam
-	players   map[int]*adminPlayerRecord
+	mu             sync.Mutex
+	lifecycleLocks sync.Map
+	submitted      map[string]struct{}
+	teamNames      map[int]string
+	teams          map[int]*adminTeam
+	players        map[int]*adminPlayerRecord
 	// Teams/players are active unless present in these sets. Tracked separately
 	// so every existing construction site stays active-by-default without edits.
 	deactivatedTeams   map[int]bool
@@ -723,6 +724,29 @@ func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, chal
 	return nil
 }
 
+func (s *memoryStore) LockServiceLifecycle(ctx context.Context, teamID, challengeID int) (func(), error) {
+	value, _ := s.lifecycleLocks.LoadOrStore([2]int{teamID, challengeID}, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock, nil
+}
+
+func (s *memoryStore) ValidateRestartService(ctx context.Context, teamID, challengeID int) error {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	if state.Status == "resetting" {
+		return ErrServiceUnavailable
+	}
+	return nil
+}
+
 func (s *memoryStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
 	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
 		return resetData{}, err
@@ -745,17 +769,42 @@ func (s *memoryStore) PrepareFactoryResetService(ctx context.Context, teamID, ch
 	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
 		return resetData{}, ErrServiceUnavailable
 	}
+	if state.Status == "resetting" {
+		return resetData{}, ErrServiceUnavailable
+	}
 	checkerToken, err := newCheckerToken()
 	if err != nil {
 		return resetData{}, err
 	}
+	prepared := resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked,
+		previousToken: instance.CheckerToken, resetToken: checkerToken, previousStatus: state.Status,
+		previousChecker: state.Checker, previousEvent: state.LastEvent, previousCooldown: state.ResetCooldown}
 	instance.CheckerToken = checkerToken
 	state.Status = "resetting"
 	state.Checker = "warning"
 	state.LastEvent = "factory reset started via participant API"
 	state.ResetCooldown = "resetting"
 
-	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked}, nil
+	return prepared, nil
+}
+
+func (s *memoryStore) AbortFactoryResetService(_ context.Context, prepared resetData) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, err := s.lookupTeamStateLocked(prepared.TeamID, prepared.ChallengeID)
+	if err != nil {
+		return err
+	}
+	instance := s.instances[prepared.TeamID][prepared.ChallengeID]
+	if instance == nil || instance.CheckerToken != prepared.resetToken || state.Status != "resetting" {
+		return ErrServiceUnavailable
+	}
+	instance.CheckerToken = prepared.previousToken
+	state.Status = prepared.previousStatus
+	state.Checker = prepared.previousChecker
+	state.LastEvent = prepared.previousEvent
+	state.ResetCooldown = prepared.previousCooldown
+	return nil
 }
 
 func (s *memoryStore) CompleteFactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
@@ -791,8 +840,24 @@ func (s *memoryStore) MarkFactoryResetFailure(_ context.Context, teamID, challen
 	return nil
 }
 
+func (s *memoryStore) MarkFactoryResetCompletionFailure(_ context.Context, teamID, challengeID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	if err != nil {
+		return err
+	}
+	if state.Status == "resetting" {
+		state.Status = "degraded"
+		state.Checker = "warning"
+		state.ResetCooldown = "ready"
+		state.LastEvent = "factory reset state finalization failed"
+	}
+	return nil
+}
+
 func (s *memoryStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+	if err := s.ValidateRestartService(ctx, teamID, challengeID); err != nil {
 		return resetData{}, err
 	}
 	s.mu.Lock()

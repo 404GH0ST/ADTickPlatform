@@ -201,7 +201,8 @@ func (s *postgresGameStore) RecordRetentionCheck(ctx context.Context, f issuedFl
 		err = tx.QueryRowContext(ctx, `INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at)
  VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET
  penalty_points=CASE WHEN flag_retention_failures.confirmed_missing THEN flag_retention_failures.penalty_points ELSE EXCLUDED.penalty_points END,
- confirmed_missing=flag_retention_failures.confirmed_missing OR EXCLUDED.confirmed_missing,checked_at=EXCLUDED.checked_at
+ confirmed_missing=flag_retention_failures.confirmed_missing OR EXCLUDED.confirmed_missing,checked_at=EXCLUDED.checked_at,
+ reset_attempt_token=NULL,reset_created=FALSE,reset_prior_confirmed=NULL,reset_prior_penalty=NULL
  RETURNING penalty_points`, f.IssuedTick, f.OwnerTeamID, f.ChallengeID, f.Flag, confirmed, penalty, run.CheckedAt.UTC()).Scan(&penalty)
 		if err != nil {
 			return false, err

@@ -105,6 +105,12 @@ type recordingResetControllerClient struct {
 	err   error
 }
 
+type failingResetCompletionStore struct{ Store }
+
+func (f failingResetCompletionStore) CompleteFactoryResetService(context.Context, int, int) (resetData, error) {
+	return resetData{}, errors.New("simulated completion failure")
+}
+
 type requeueFailingStore struct {
 	Store
 	maintenanceObserved bool
@@ -3605,6 +3611,57 @@ func TestFactoryResetFailureMarksServiceDegraded(t *testing.T) {
 	}
 	if state.LastEvent != "factory reset runtime failed" {
 		t.Fatalf("unexpected last event %q", state.LastEvent)
+	}
+}
+
+func TestFactoryResetPredeleteFailureRestoresService(t *testing.T) {
+	store := NewMemoryStore(101)
+	before, err := store.GetControllerRuntimeTask(context.Background(), 101, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := &recordingResetControllerClient{store: store, err: fmt.Errorf("%w: rejected config", errResetPreflight)}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("reset status %d: %s", response.Code, response.Body.String())
+	}
+	after, err := store.GetControllerRuntimeTask(context.Background(), 101, 1)
+	if err != nil || after.CheckerToken != before.CheckerToken {
+		t.Fatalf("predelete failure left checker token rotated: before=%q after=%q err=%v", before.CheckerToken, after.CheckerToken, err)
+	}
+	services, err := store.ListTeamServices(context.Background(), 101)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := findServiceStateForTest(t, services, 1); state.Status == "resetting" {
+		t.Fatalf("predelete failure stranded service: %+v", state)
+	}
+}
+
+func TestFactoryResetCompletionFailureReleasesResettingState(t *testing.T) {
+	underlying := NewMemoryStore(101)
+	store := failingResetCompletionStore{Store: underlying}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, noopControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code < 400 {
+		t.Fatalf("completion error returned success: %d", response.Code)
+	}
+	services, err := underlying.ListTeamServices(context.Background(), 101)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := findServiceStateForTest(t, services, 1)
+	if state.Status != "degraded" || state.ResetCooldown != "ready" {
+		t.Fatalf("completion failure stranded reset: %+v", state)
 	}
 }
 

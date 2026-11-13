@@ -15,6 +15,8 @@ import (
 )
 
 var errControllerDisabled = errors.New("controller is not configured")
+var errResetPreflight = errors.New("factory reset rejected before runtime mutation")
+var errResetBeforeVolume = errors.New("factory reset failed before volume removal")
 
 type controllerProblemError struct {
 	statusCode int
@@ -212,13 +214,25 @@ func (c *httpControllerClient) postJSON(ctx context.Context, path string, body a
 		return fmt.Errorf("controller request failed with status %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusNotFound {
+		if strings.HasSuffix(path, "/reset/factory") && resp.Header.Get("X-ADPlatform-Reset-Predelete") == "clean" {
+			return fmt.Errorf("%w: %w", errResetPreflight, ErrChallengeNotFound)
+		}
 		return ErrChallengeNotFound
 	}
-	return &controllerProblemError{
+	problemErr := &controllerProblemError{
 		statusCode: resp.StatusCode,
 		title:      problem.Title,
 		detail:     problem.Detail,
 	}
+	if strings.HasSuffix(path, "/reset/factory") {
+		switch resp.Header.Get("X-ADPlatform-Reset-Predelete") {
+		case "clean":
+			return fmt.Errorf("%w: %w", errResetPreflight, problemErr)
+		case "runtime-changed":
+			return fmt.Errorf("%w: %w", errResetBeforeVolume, problemErr)
+		}
+	}
+	return problemErr
 }
 
 func requestControllerJSON[T any](ctx context.Context, c *httpControllerClient, method, path string, body any) (T, error) {

@@ -38,8 +38,9 @@ request and response shapes.
    - `POST /api/v2/services/{challenge_id}/reset/restart`
    - `POST /api/v2/services/{challenge_id}/reset/factory`
    Factory reset removes stored flags. If an issued flag is still outstanding,
-   that tick's SLA is forfeited and the penalty is committed when reset starts,
-   including when runtime recovery fails. Successful responses include `penalty_points`.
+   that tick's SLA is forfeited and the penalty applies when reset reaches state
+   removal, including if subsequent runtime recovery fails. Successful responses
+   include `penalty_points`.
 9. Submit captured flags with `POST /api/v2/submit`, or use the **Submit flags** panel on the Services page in the web UI.
 10. Change your account password from **Account** settings (`PUT /api/v2/me/password`) when needed.
 11. Read organizer announcements shown at the top of the participant shell.

@@ -1247,23 +1247,42 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
-	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+	operationCtx, operationCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
+	defer operationCancel()
+	unlockLifecycle, err := s.store.LockServiceLifecycle(operationCtx, teamID, challengeID)
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	defer unlockLifecycle()
+	if err := s.store.ValidateServiceAction(operationCtx, teamID, challengeID); err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
-	prepared, err := s.store.PrepareFactoryResetService(r.Context(), teamID, challengeID)
+	prepared, err := s.store.PrepareFactoryResetService(operationCtx, teamID, challengeID)
 	if err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
-	// Preparation has committed the token rotation and any flag loss. Finish
-	// recovery even if the participant closes the HTTP connection.
-	resetCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 4*time.Minute)
+	// Preparation has committed the token rotation and reserved any flag loss.
+	// Finish recovery even if the participant closes the HTTP connection.
+	resetCtx, cancel := context.WithTimeout(operationCtx, 4*time.Minute)
 	defer cancel()
 	if err := s.controller.FactoryResetService(resetCtx, teamID, challengeID); err != nil {
-		failureCtx, failureCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+		failureCtx, failureCancel := context.WithTimeout(operationCtx, 10*time.Second)
 		defer failureCancel()
-		_ = s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID)
+		if errors.Is(err, errResetPreflight) || errors.Is(err, errResetBeforeVolume) {
+			if abortErr := s.store.AbortFactoryResetService(failureCtx, prepared); abortErr != nil {
+				log.Printf("factory reset preflight rollback failed for team %d challenge %d: %v", teamID, challengeID, abortErr)
+				writeStoreFailure(w, abortErr)
+				return
+			}
+			if errors.Is(err, errResetBeforeVolume) {
+				_ = s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID)
+			}
+		} else if markErr := s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID); markErr != nil {
+			log.Printf("factory reset failure state update failed for team %d challenge %d: %v", teamID, challengeID, markErr)
+		}
 		if errors.Is(err, ErrChallengeNotFound) {
 			writeDomainFailure(w, err)
 			return
@@ -1271,8 +1290,28 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadGateway, "Reset unavailable", "factory reset runtime failed.")
 		return
 	}
-	data, err := s.store.CompleteFactoryResetService(resetCtx, teamID, challengeID)
+	finalizeCtx, finalizeCancel := context.WithTimeout(operationCtx, 20*time.Second)
+	defer finalizeCancel()
+	var data resetData
+	for attempt := 0; attempt < 3; attempt++ {
+		data, err = s.store.CompleteFactoryResetService(finalizeCtx, teamID, challengeID)
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			select {
+			case <-finalizeCtx.Done():
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}
 	if err != nil {
+		fallbackCtx, fallbackCancel := context.WithTimeout(operationCtx, 10*time.Second)
+		defer fallbackCancel()
+		if markErr := s.store.MarkFactoryResetCompletionFailure(fallbackCtx, teamID, challengeID); markErr != nil {
+			log.Printf("factory reset completion recovery failed for team %d challenge %d: %v", teamID, challengeID, markErr)
+			go s.retryFactoryResetCompletionFailure(teamID, challengeID)
+		}
 		writeDomainFailure(w, err)
 		return
 	}
@@ -1283,6 +1322,23 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		"penalty_points":   data.PenaltyPoints,
 	})
 	writeData(w, http.StatusOK, data)
+}
+
+func (s *Server) retryFactoryResetCompletionFailure(teamID, challengeID int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if err := s.store.MarkFactoryResetCompletionFailure(ctx, teamID, challengeID); err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
@@ -1299,7 +1355,13 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
-	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
+	unlockLifecycle, err := s.store.LockServiceLifecycle(r.Context(), teamID, challengeID)
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	defer unlockLifecycle()
+	if err := s.store.ValidateRestartService(r.Context(), teamID, challengeID); err != nil {
 		writeDomainFailure(w, err)
 		return
 	}

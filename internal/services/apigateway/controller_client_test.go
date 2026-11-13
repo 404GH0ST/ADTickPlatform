@@ -38,6 +38,41 @@ func TestHTTPControllerClientFactoryResetUsesExpectedRoute(t *testing.T) {
 	}
 }
 
+func TestHTTPControllerClientClassifiesPredeleteResetFailures(t *testing.T) {
+	for _, test := range []struct {
+		stage string
+		want  error
+	}{
+		{stage: "clean", want: errResetPreflight},
+		{stage: "runtime-changed", want: errResetBeforeVolume},
+	} {
+		t.Run(test.stage, func(t *testing.T) {
+			client := NewHTTPControllerClient("http://controller.internal", "controller-token")
+			client.(*httpControllerClient).client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusInternalServerError,
+					Header: http.Header{"X-Adplatform-Reset-Predelete": []string{test.stage}},
+					Body:   io.NopCloser(strings.NewReader(`{"title":"Factory reset failed","status":500,"detail":"predelete failure"}`))}, nil
+			})}
+			if err := client.FactoryResetService(context.Background(), 101, 3); !errors.Is(err, test.want) {
+				t.Fatalf("stage %s classified as %v", test.stage, err)
+			}
+		})
+	}
+}
+
+func TestHTTPControllerClientClassifiesMissingResetTaskAsPredelete(t *testing.T) {
+	client := NewHTTPControllerClient("http://controller.internal", "controller-token")
+	client.(*httpControllerClient).client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusNotFound,
+			Header: http.Header{"X-Adplatform-Reset-Predelete": []string{"clean"}},
+			Body:   io.NopCloser(strings.NewReader(`{"title":"Request failed","status":404,"detail":"service runtime was not found"}`))}, nil
+	})}
+	err := client.FactoryResetService(context.Background(), 101, 3)
+	if !errors.Is(err, errResetPreflight) || !errors.Is(err, ErrChallengeNotFound) {
+		t.Fatalf("missing task did not preserve both error classifications: %v", err)
+	}
+}
+
 func TestHTTPControllerClientReconcileDeploymentsUsesExpectedRoute(t *testing.T) {
 	var requestedPath string
 	client := NewHTTPControllerClient("http://controller.internal", "controller-token")

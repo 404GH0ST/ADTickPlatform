@@ -71,6 +71,54 @@ func TestPostgresParticipantResetChargesOutstandingFlagBeforeRuntime(t *testing.
 	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flag_retention_failures`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("preparation penalty not durable: count=%d err=%v", count, err)
 	}
+	if err = store.ValidateRestartService(ctx, 101, 1); !errors.Is(err, ErrServiceUnavailable) {
+		t.Fatalf("restart allowed during reset: %v", err)
+	}
+	if err = store.AbortFactoryResetService(ctx, prepared); err != nil {
+		t.Fatalf("predelete reset rollback failed: %v", err)
+	}
+	var restoredToken, restoredStatus string
+	if err = db.QueryRowContext(ctx, `SELECT si.checker_token,tss.status FROM service_instances si JOIN team_service_states tss USING(team_id,challenge_id) WHERE si.team_id=101 AND si.challenge_id=1`).Scan(&restoredToken, &restoredStatus); err != nil || restoredToken != "before-reset" || restoredStatus != "stable" {
+		t.Fatalf("predelete rollback did not restore service: token=%q status=%q err=%v", restoredToken, restoredStatus, err)
+	}
+	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flag_retention_failures`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("predelete rollback kept penalty: count=%d err=%v", count, err)
+	}
+	if err = store.ValidateRestartService(ctx, 101, 1); err != nil {
+		t.Fatalf("restart remained blocked after predelete rollback: %v", err)
+	}
+	lockCtx, lockCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer lockCancel()
+	unlockFirst, err := store.LockServiceLifecycle(lockCtx, 101, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondLock := make(chan error, 1)
+	go func() {
+		unlock, err := store.LockServiceLifecycle(lockCtx, 101, 1)
+		if err == nil {
+			unlock()
+		}
+		secondLock <- err
+	}()
+	select {
+	case err := <-secondLock:
+		t.Fatalf("lifecycle lock did not serialize same service: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlockFirst()
+	select {
+	case err := <-secondLock:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-lockCtx.Done():
+		t.Fatal(lockCtx.Err())
+	}
+	prepared, err = store.PrepareFactoryResetService(ctx, 101, 1)
+	if err != nil || prepared.PenaltyPoints != 20 {
+		t.Fatalf("reset retry after predelete rollback: %+v %v", prepared, err)
+	}
 	if err = store.MarkFactoryResetFailure(ctx, 101, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +160,30 @@ func TestPostgresParticipantResetChargesOutstandingFlagBeforeRuntime(t *testing.
 	var forfeited bool
 	if err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM flag_retention_failures WHERE tick_id=1 AND team_id=101 AND challenge_id=1)`).Scan(&forfeited); err != nil || !forfeited {
 		t.Fatalf("tick SLA not forfeited: %v %v", forfeited, err)
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO service_instances(team_id,challenge_id,runtime_kind,runtime_status,container_name,baseline_image,checker_image,endpoint,ssh_host,checker_token)
+		VALUES(104,1,'docker','ready','reset-test-104','test','checker','10.80.1.14:8080','10.80.1.14','before-104');
+		INSERT INTO team_service_states(team_id,challenge_id,endpoint,status,checker,unlocked,ssh_hint,last_event,reset_cooldown)
+		VALUES(104,1,'10.80.1.14:8080','stable','passing',FALSE,'','','ready');
+		INSERT INTO issued_flags(flag,owner_team_id,owner_team_name,challenge_id,challenge_name,issued_tick,expires_tick,checker_token_snapshot)
+		VALUES('preexisting-loss-flag',104,'Team-104',1,'reset-test',1,1,'before-104');
+		INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at)
+		VALUES(1,104,1,'preexisting-loss-flag',FALSE,0,NOW());
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = store.PrepareFactoryResetService(ctx, 104, 1)
+	if err != nil || prepared.PenaltyPoints != 20 {
+		t.Fatalf("preexisting loss not escalated: %+v %v", prepared, err)
+	}
+	if err = store.AbortFactoryResetService(ctx, prepared); err != nil {
+		t.Fatal(err)
+	}
+	var confirmed bool
+	if err = db.QueryRowContext(ctx, `SELECT confirmed_missing,penalty_points FROM flag_retention_failures WHERE team_id=104 AND challenge_id=1`).Scan(&confirmed, &penalty); err != nil || confirmed || penalty != 0 {
+		t.Fatalf("preexisting loss not restored: confirmed=%v penalty=%v err=%v", confirmed, penalty, err)
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO service_instances(team_id,challenge_id,runtime_kind,runtime_status,container_name,baseline_image,checker_image,endpoint,ssh_host,checker_token)

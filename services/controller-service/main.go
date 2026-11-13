@@ -297,13 +297,23 @@ func (s *controllerServer) handleFactoryResetService(w http.ResponseWriter, r *h
 		return
 	}
 	started := time.Now()
+	w.Header().Set("X-ADPlatform-Reset-Predelete", "clean")
 	task, ok := s.parseRuntimeTask(w, r)
 	if !ok {
 		s.metrics.recordOperation(controllerOperationFactoryReset, time.Since(started), true)
 		return
 	}
+	w.Header().Del("X-ADPlatform-Reset-Predelete")
 	if err := s.executor.FactoryResetService(r.Context(), task); err != nil {
 		s.metrics.recordOperation(controllerOperationFactoryReset, time.Since(started), true)
+		var preflight resetPreflightError
+		if errors.As(err, &preflight) {
+			stage := "clean"
+			if preflight.runtimeMayHaveChanged {
+				stage = "runtime-changed"
+			}
+			w.Header().Set("X-ADPlatform-Reset-Predelete", stage)
+		}
 		writeProblem(w, http.StatusInternalServerError, "Factory reset failed", err.Error())
 		return
 	}

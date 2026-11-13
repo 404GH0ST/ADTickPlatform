@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type postgresStore struct {
-	db *sql.DB
+	db             *sql.DB
+	lifecycleOnce  sync.Once
+	lifecycleSlots chan struct{}
 }
 
 func NewPostgresStore(db *sql.DB) Store {
@@ -814,6 +817,54 @@ func (s *postgresStore) MarkSSHSessionApplyFailure(ctx context.Context, teamID, 
 	return nil
 }
 
+func (s *postgresStore) LockServiceLifecycle(ctx context.Context, teamID, challengeID int) (func(), error) {
+	s.lifecycleOnce.Do(func() {
+		// The held advisory-lock transaction needs other pooled connections for
+		// validation, penalty writes, audit, and unrelated API traffic.
+		maxOpen := s.db.Stats().MaxOpenConnections
+		limit := 12
+		if maxOpen > 0 {
+			limit = (maxOpen - 1) / 2
+			if limit < 1 {
+				limit = 1
+			}
+		}
+		s.lifecycleSlots = make(chan struct{}, limit)
+	})
+	select {
+	case s.lifecycleSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		<-s.lifecycleSlots
+		return nil, err
+	}
+	// Separate keyspace from the checker/prepare lock. Keep this transaction
+	// open through the controller operation and its final state update.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::integer, $2::integer)`, -teamID, challengeID); err != nil {
+		_ = tx.Rollback()
+		<-s.lifecycleSlots
+		return nil, err
+	}
+	return func() { _ = tx.Rollback(); <-s.lifecycleSlots }, nil
+}
+
+func (s *postgresStore) ValidateRestartService(ctx context.Context, teamID, challengeID int) error {
+	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+		return err
+	}
+	var resetting bool
+	if err := s.db.QueryRowContext(ctx, `SELECT status='resetting' FROM team_service_states WHERE team_id=$1 AND challenge_id=$2`, teamID, challengeID).Scan(&resetting); err != nil {
+		return err
+	}
+	if resetting {
+		return ErrServiceUnavailable
+	}
+	return nil
+}
+
 func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
 	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
 		return resetData{}, err
@@ -832,15 +883,16 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::integer, $2::integer)`, teamID, challengeID); err != nil {
 		return resetData{}, err
 	}
-	var previousToken, stateStatus string
+	var previousToken, stateStatus, stateChecker, stateEvent, stateCooldown string
 	var resetRecent bool
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(si.checker_token, ''), tss.status, si.updated_at > NOW() - INTERVAL '5 minutes'
+		SELECT COALESCE(si.checker_token, ''), tss.status, tss.checker, tss.last_event, tss.reset_cooldown,
+		       si.updated_at > NOW() - INTERVAL '5 minutes'
 		FROM service_instances si
 		JOIN team_service_states tss ON tss.team_id=si.team_id AND tss.challenge_id=si.challenge_id
 		WHERE si.team_id=$1 AND si.challenge_id=$2
 		FOR UPDATE OF si,tss
-	`, teamID, challengeID).Scan(&previousToken, &stateStatus, &resetRecent); err != nil {
+	`, teamID, challengeID).Scan(&previousToken, &stateStatus, &stateChecker, &stateEvent, &stateCooldown, &resetRecent); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return resetData{}, ErrChallengeNotFound
 		}
@@ -915,14 +967,19 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 				WHERE id <> $1 AND active = TRUE
 				  AND (play_from_tick IS NULL OR play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 			)
-			INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at)
-			SELECT $3,$1,$2,$4,TRUE,CEIL(GREATEST(10.0,2*n+POWER(n,0.75)+1)),NOW() FROM opponents
+			INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at,
+			                                    reset_attempt_token,reset_created)
+			SELECT $3,$1,$2,$4,TRUE,CEIL(GREATEST(10.0,2*n+POWER(n,0.75)+1)),NOW(),$5,TRUE FROM opponents
 			ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET
+				reset_prior_confirmed = flag_retention_failures.confirmed_missing,
+				reset_prior_penalty = flag_retention_failures.penalty_points,
+				reset_attempt_token = EXCLUDED.reset_attempt_token,
+				reset_created = FALSE,
 				penalty_points = CASE WHEN flag_retention_failures.confirmed_missing THEN flag_retention_failures.penalty_points ELSE EXCLUDED.penalty_points END,
 				confirmed_missing = TRUE,
 				checked_at = EXCLUDED.checked_at
 			RETURNING penalty_points
-		`, teamID, challengeID, issuedTick, flag).Scan(&penalty)
+		`, teamID, challengeID, issuedTick, flag, checkerToken).Scan(&penalty)
 		if err != nil {
 			return resetData{}, err
 		}
@@ -933,7 +990,57 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 	if err = tx.Commit(); err != nil {
 		return resetData{}, err
 	}
-	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked, PenaltyPoints: penalty}, nil
+	return resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: unlocked, PenaltyPoints: penalty,
+		previousToken: previousToken, resetToken: checkerToken, previousStatus: stateStatus,
+		previousChecker: stateChecker, previousEvent: stateEvent, previousCooldown: stateCooldown}, nil
+}
+
+func (s *postgresStore) AbortFactoryResetService(ctx context.Context, prepared resetData) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::integer,$2::integer)`, prepared.TeamID, prepared.ChallengeID); err != nil {
+		return err
+	}
+	var token, status string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT si.checker_token,tss.status FROM service_instances si
+		JOIN team_service_states tss ON tss.team_id=si.team_id AND tss.challenge_id=si.challenge_id
+		WHERE si.team_id=$1 AND si.challenge_id=$2 FOR UPDATE OF si,tss
+	`, prepared.TeamID, prepared.ChallengeID).Scan(&token, &status); err != nil {
+		return err
+	}
+	if token != prepared.resetToken || status != "resetting" {
+		return ErrServiceUnavailable
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM flag_retention_failures
+		WHERE team_id=$1 AND challenge_id=$2 AND reset_attempt_token=$3 AND reset_created=TRUE
+	`, prepared.TeamID, prepared.ChallengeID, prepared.resetToken); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE flag_retention_failures
+		SET confirmed_missing=COALESCE(reset_prior_confirmed,FALSE),
+		    penalty_points=COALESCE(reset_prior_penalty,0),
+		    reset_attempt_token=NULL,reset_created=FALSE,
+		    reset_prior_confirmed=NULL,reset_prior_penalty=NULL
+		WHERE team_id=$1 AND challenge_id=$2 AND reset_attempt_token=$3
+	`, prepared.TeamID, prepared.ChallengeID, prepared.resetToken); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE service_instances SET checker_token=$3,updated_at=NOW() WHERE team_id=$1 AND challenge_id=$2`, prepared.TeamID, prepared.ChallengeID, prepared.previousToken); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE team_service_states SET status=$3,checker=$4,last_event=$5,reset_cooldown=$6
+		WHERE team_id=$1 AND challenge_id=$2
+	`, prepared.TeamID, prepared.ChallengeID, prepared.previousStatus, prepared.previousChecker, prepared.previousEvent, prepared.previousCooldown); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *postgresStore) CompleteFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
@@ -976,8 +1083,19 @@ func (s *postgresStore) MarkFactoryResetFailure(ctx context.Context, teamID, cha
 	return nil
 }
 
+func (s *postgresStore) MarkFactoryResetCompletionFailure(ctx context.Context, teamID, challengeID int) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE team_service_states
+		SET status='degraded',checker='warning',reset_cooldown='ready',
+		    last_event=CASE WHEN last_event LIKE 'factory reset discarded stored flag%'
+		        THEN last_event || '; state finalization failed' ELSE 'factory reset state finalization failed' END
+		WHERE team_id=$1 AND challenge_id=$2 AND status='resetting'
+	`, teamID, challengeID)
+	return err
+}
+
 func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
+	if err := s.ValidateRestartService(ctx, teamID, challengeID); err != nil {
 		return resetData{}, err
 	}
 	result, err := s.db.ExecContext(ctx, `
@@ -987,6 +1105,7 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 		    last_event = 'service restart completed; waiting for checker verification',
 		    reset_cooldown = 'cooldown: 30s'
 		WHERE team_id = $1 AND challenge_id = $2
+		  AND status <> 'resetting'
 		  AND EXISTS (
 			SELECT 1
 			FROM challenges c

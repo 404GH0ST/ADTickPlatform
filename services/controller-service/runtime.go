@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -26,6 +27,22 @@ type runtimeExecutor interface {
 	RemoveTeamServices(ctx context.Context, teamID int) error
 	RemoveChallengeServices(ctx context.Context, challengeID int) error
 }
+
+// These failures are known to occur before the state volume is removed. The
+// API may reverse its provisional penalty; it marks the service degraded when
+// the container itself may already have changed.
+type resetPreflightError struct {
+	err                   error
+	runtimeMayHaveChanged bool
+}
+
+type volumeLookupError struct{ err error }
+
+func (e volumeLookupError) Error() string { return e.err.Error() }
+func (e volumeLookupError) Unwrap() error { return e.err }
+
+func (e resetPreflightError) Error() string { return e.err.Error() }
+func (e resetPreflightError) Unwrap() error { return e.err }
 
 func newRuntimeExecutor() runtimeExecutor {
 	switch strings.ToLower(config.String("CONTROLLER_RUNTIME_MODE", "dry-run")) {
@@ -252,7 +269,7 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 
 func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
 	if err := e.validateCaptureConfig(); err != nil {
-		return err
+		return resetPreflightError{err: err}
 	}
 	if e.captureEnabled() {
 		e.captureMu.Lock()
@@ -260,16 +277,27 @@ func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigat
 	}
 
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
-		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
+		return resetPreflightError{err: fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)}
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
 	if err := e.removeContainerIfExists(runCtx, task.ContainerName); err != nil {
-		return err
+		return resetPreflightError{err: err, runtimeMayHaveChanged: true}
 	}
 	if err := e.removeVolumeIfExists(runCtx, task.StateVolume); err != nil {
+		var lookup volumeLookupError
+		if errors.As(err, &lookup) {
+			return resetPreflightError{err: err, runtimeMayHaveChanged: true}
+		}
+		// Docker may report an error after a removal attempt. Only reverse the
+		// penalty when a fresh inspection proves the volume still exists.
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer probeCancel()
+		if _, probeErr := e.execDocker(probeCtx, "volume", "inspect", task.StateVolume); probeErr == nil {
+			return resetPreflightError{err: err, runtimeMayHaveChanged: true}
+		}
 		return err
 	}
 	if err := e.runFreshContainer(runCtx, task); err != nil {
@@ -707,7 +735,7 @@ func (e *dockerCLIExecutor) removeVolumeIfExists(ctx context.Context, volumeName
 	}
 	output, err := e.execDocker(ctx, "volume", "ls", "--filter", fmt.Sprintf("name=^%s$", volumeName), "--format", "{{.Name}}")
 	if err != nil {
-		return err
+		return volumeLookupError{err: err}
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		if strings.TrimSpace(line) == volumeName {

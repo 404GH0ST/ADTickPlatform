@@ -412,11 +412,13 @@ missing flag or returned a value different from the originally issued value.
 Transport failures and ordinary checker errors still lose the tick's SLA but do
 not receive this additional confirmed-loss deduction. All bundled checkers support
 this distinction; custom checker images must implement the exit-code contract.
-Participant factory resets delete the state volume. Starting a reset with an
-outstanding issued flag forfeits that flag's tick SLA and records the same severe
-defense deduction atomically with checker-token rotation. The deduction persists
-if runtime recovery fails or the HTTP request disconnects; a rejected reset that
-never starts is not charged. A checker put already in flight finishes recording
+Participant factory resets delete the state volume. A reset that reaches state
+removal with an outstanding issued flag forfeits that flag's tick SLA and records
+the same severe defense deduction. The deduction is reserved atomically with
+checker-token rotation, then reversed if the controller confirms failure before
+volume removal. It persists if recovery fails after removal or the removal outcome
+is uncertain. An HTTP disconnect does not cancel a reset already in progress.
+A checker put already in flight finishes recording
 its flag before reset preparation. The deduction is recorded once per flag.
 Successful reset responses include `penalty_points`, and the service's last event
 explains the loss. Organizer resets rotate the per-instance checker token, invalidating
