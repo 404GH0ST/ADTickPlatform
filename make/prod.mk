@@ -14,7 +14,7 @@ prod-runtime-cleanup:
 	if [[ -n "$${container_ids}" ]]; then \
 		while IFS= read -r container_id; do \
 			[[ -n "$${container_id}" ]] || continue; \
-			mounted="$$(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$${container_id}" 2>/dev/null || true)"; \
+			mounted="$$(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{if ne .Destination "/opt/adplatform-capture"}}{{println .Name}}{{end}}{{end}}{{end}}' "$${container_id}" 2>/dev/null || true)"; \
 			if [[ -n "$${mounted}" ]]; then \
 				volume_names="$${volume_names}"$$'\n'"$${mounted}"; \
 			fi; \
@@ -54,7 +54,7 @@ generate-prod-env:
 	./scripts/generate-prod-env.sh $(PROD_ENV)
 
 setup-prod-env:
-	./scripts/setup-prod-env.sh "$(DOMAIN)" "$(or $(SCHEME),$(SCHEMA))" "$(WG_PORT)"
+	PROD_ENV="$(PROD_ENV)" CAPTURE_MODE="$(CAPTURE_MODE)" ./scripts/setup-prod-env.sh "$(DOMAIN)" "$(or $(SCHEME),$(SCHEMA))" "$(WG_PORT)"
 
 validate-prod-env:
 	@./scripts/validate-prod-env.sh $(PROD_ENV)
@@ -79,7 +79,7 @@ prod-host-config-arm64: validate-prod-compose-security
 	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) config >/dev/null
 
 preflight-prod-host:
-	./scripts/preflight-prod-host.sh
+	PROD_ENV="$(PROD_ENV)" ./scripts/preflight-prod-host.sh
 
 wg-host-keygen:
 	./scripts/host-wireguard.sh keygen
@@ -103,6 +103,7 @@ wg-host-setup:
 	./scripts/host-wireguard.sh setup
 
 up-prod: prod-web-artifacts validate-prod-env
+	@./scripts/validate-prod-env.sh "$(PROD_ENV)" base
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
 	COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml up -d --build
 
@@ -111,6 +112,7 @@ up-prod-host: prod-web-artifacts preflight-prod-host
 	COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml -f $(PROD_HOST_OVERRIDE) up -d --build
 
 up-prod-arm64: prod-web-artifacts validate-prod-env
+	@./scripts/validate-prod-env.sh "$(PROD_ENV)" base
 	@test -f $(PROD_ENV) || { echo "missing $(PROD_ENV); copy deploy/compose/prod.env.example first"; exit 1; }
 	AD_PLATFORM_TARGETOS=$(LINUX_ARM64_TARGETOS) AD_PLATFORM_TARGETARCH=$(LINUX_ARM64_TARGETARCH) DOCKER_DEFAULT_PLATFORM=$(LINUX_ARM64_PLATFORM) COMPOSE_PARALLEL_LIMIT=$(COMPOSE_PARALLEL_LIMIT) docker compose --env-file $(PROD_ENV) -f deploy/compose/prod.yml up -d --build
 

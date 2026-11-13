@@ -33,4 +33,24 @@ if ! jq -e '
   exit 1
 fi
 
+if ! jq -e '
+  .services["controller-service"] as $c |
+  if $c.environment.CONTROLLER_CAPTURE_MODE == "guarded" then
+    $c.cgroup == "host" and
+    (["BPF","PERFMON","NET_ADMIN","SYS_ADMIN"] - $c.cap_add | length == 0) and
+    ($c.privileged // false | not) and
+    ($c.pid // "" | . != "host") and
+    ($c.volumes | any(.target == "/sys/fs/cgroup" and (.read_only // false) == false)) and
+    ($c.volumes | any(.target == "/host/proc" and .read_only == true)) and
+    ($c.volumes | any(.target == "/host/docker-netns" and .read_only == true and .bind.propagation == "rslave")) and
+    $c.depends_on["capture-bootstrap"].condition == "service_completed_successfully" and
+    .services["capture-bootstrap"].network_mode == "none" and
+    .services["capture-bootstrap"].read_only == true and
+    .services["capture-bootstrap"].cap_drop == ["ALL"]
+  else true end
+' "${rendered}" >/dev/null; then
+  echo "rendered compose configuration is missing guarded capture boundaries" >&2
+  exit 1
+fi
+
 echo "production host compose security validated: ${prod_env}"

@@ -16,6 +16,7 @@ load_env_file "${PROD_ENV}"
 "${ROOT_DIR}/scripts/validate-prod-env.sh" "${PROD_ENV}"
 
 require_noninteractive_root
+"${ROOT_DIR}/scripts/preflight-capture-host.sh" "${PROD_ENV}"
 
 require_env() {
   local name="$1"

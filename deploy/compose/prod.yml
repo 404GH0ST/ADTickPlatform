@@ -171,6 +171,21 @@ services:
     networks:
       - control
 
+  capture-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/capture-bootstrap.Dockerfile
+      args:
+        TARGETOS: ${AD_PLATFORM_TARGETOS:-linux}
+        TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - capture-bootstrap:/capture
+
   controller-service:
     build:
       context: ../..
@@ -180,6 +195,8 @@ services:
         TARGETARCH: ${AD_PLATFORM_TARGETARCH:-amd64}
     restart: unless-stopped
     depends_on:
+      capture-bootstrap:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       docker-socket-proxy:
@@ -206,7 +223,10 @@ services:
       CONTROLLER_DOCKER_NETWORK: ${CONTROLLER_DOCKER_NETWORK:-adplatform_prod_game}
       AD_PLATFORM_GAME_NETWORK_SUBNET: ${AD_PLATFORM_GAME_NETWORK_SUBNET:-10.80.0.0/16}
       CONTROLLER_STATE_MOUNT_PATH: /opt/ad/state
-      CONTROLLER_RUNTIME_TIMEOUT: 15s
+      CONTROLLER_RUNTIME_TIMEOUT: ${CONTROLLER_RUNTIME_TIMEOUT:-30s}
+      CONTROLLER_CAPTURE_MODE: ${CONTROLLER_CAPTURE_MODE:-disabled}
+      CONTROLLER_CAPTURE_BOOTSTRAP_VOLUME: ${CONTROLLER_CAPTURE_BOOTSTRAP_VOLUME:-adplatform_prod_capture_bootstrap}
+      CAPTURE_NETNS_HOST_PATH: ${CAPTURE_NETNS_HOST_PATH:-/var/run/docker/netns}
       CONTROLLER_SERVICE_CAP_DROP: ${CONTROLLER_SERVICE_CAP_DROP:-ALL}
       CONTROLLER_SERVICE_CAP_ADD: ${CONTROLLER_SERVICE_CAP_ADD:-CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE,SYS_CHROOT,AUDIT_WRITE}
       CONTROLLER_SERVICE_SECURITY_OPT: ${CONTROLLER_SERVICE_SECURITY_OPT:-no-new-privileges:true}
@@ -518,6 +538,10 @@ services:
       - control
 
 volumes:
+  capture-bootstrap:
+    name: ${CONTROLLER_CAPTURE_BOOTSTRAP_VOLUME:-adplatform_prod_capture_bootstrap}
+    labels:
+      adplatform.capture-bootstrap: "true"
   postgres-data:
   redis-data:
   wireguard-artifacts:

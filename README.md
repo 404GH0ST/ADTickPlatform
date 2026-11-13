@@ -122,7 +122,7 @@ The production deployment runs behind a Caddy reverse proxy with automated datab
 1. Configure production secrets and public addresses:
    ```bash
    make generate-prod-env CHALLENGE_SOURCE_HOST_PATH=/srv/adplatform/challenge-sources
-   make setup-prod-env DOMAIN=localhost SCHEME=https   # or your public domain
+   make setup-prod-env DOMAIN=localhost SCHEME=https CAPTURE_MODE=guarded   # or your public domain
    # Creates deploy/compose/prod.env with random secrets + ADMIN_PASSWORD
    # Public DNS uses Caddy ACME; localhost/IP uses a generated self-signed cert.
    make create-admin   # after the stack is up; uses ADMIN_* from prod.env
@@ -135,6 +135,11 @@ The production deployment runs behind a Caddy reverse proxy with automated datab
    make create-admin
    ```
    *Note: Operator operations require root execution or `sudo NOPASSWD` for host inspection commands.*
+
+   Guarded live packet capture requires BPF LSM, kernel BTF, cgroup v2, and local
+   rootful Docker. Setup enables it by default for files without an explicit mode;
+   preflight rejects unsupported hosts. See [capture deployment and migration](deploy/security/direct-capture/README.md)
+   before upgrading existing challenges. Use `CAPTURE_MODE=disabled` for PCAP analysis only.
 
 ---
 

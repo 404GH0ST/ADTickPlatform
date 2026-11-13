@@ -20,6 +20,19 @@ if [[ ! -f "${PROD_ENV}" ]]; then
   "${ROOT_DIR}/scripts/generate-prod-env.sh" "${PROD_ENV}"
 fi
 
+# Preserve an explicit previous choice, otherwise enable guarded live capture.
+capture_mode="${CAPTURE_MODE:-}"
+if [[ -z "${capture_mode}" ]]; then
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == CONTROLLER_CAPTURE_MODE=* ]]; then capture_mode="${line#*=}"; fi
+  done <"${PROD_ENV}"
+fi
+capture_mode="${capture_mode:-guarded}"
+if [[ "${capture_mode}" != guarded && "${capture_mode}" != disabled ]]; then
+  echo "Error: CAPTURE_MODE must be guarded or disabled." >&2
+  exit 1
+fi
+
 # Usage helper
 show_usage() {
   echo "Usage: $0 <domain_or_ip> [scheme] [wireguard_port]" >&2
@@ -173,6 +186,8 @@ trap cleanup EXIT
 
 # Read and replace keys in-place
 seen_edge_tls_directive=0
+seen_capture_mode=0
+seen_security_opt=0
 while IFS= read -r line || [[ -n "${line}" ]]; do
   if [[ "${line}" != *=* || "${line}" =~ ^[[:space:]]*# ]]; then
     printf '%s\n' "${line}" >>"${tmp_file}"
@@ -181,6 +196,16 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
 
   key="${line%%=*}"
   case "${key}" in
+    CONTROLLER_CAPTURE_MODE)
+      [[ "${seen_capture_mode}" -eq 0 ]] || continue
+      value="${capture_mode}"
+      seen_capture_mode=1
+      ;;
+    CONTROLLER_SERVICE_SECURITY_OPT)
+      seen_security_opt=1
+      value="${line#*=}"
+      if [[ "${capture_mode}" == guarded ]]; then value="no-new-privileges:true"; fi
+      ;;
     EDGE_SITE_ADDRESS) value="${edge_site_address}" ;;
     AD_PLATFORM_PUBLIC_BASE_URL) value="${ad_platform_public_url}" ;;
     WIREGUARD_SERVER_ENDPOINT) value="${wireguard_endpoint}" ;;
@@ -203,8 +228,17 @@ if [[ "${seen_edge_tls_directive}" -eq 0 ]]; then
   printf 'EDGE_TLS_DIRECTIVE=%s\n' "${edge_tls_directive}" >>"${tmp_file}"
 fi
 
+if [[ "${seen_capture_mode}" -eq 0 ]]; then
+  printf 'CONTROLLER_CAPTURE_MODE=%s\n' "${capture_mode}" >>"${tmp_file}"
+fi
+if [[ "${seen_security_opt}" -eq 0 && "${capture_mode}" == guarded ]]; then
+  printf 'CONTROLLER_SERVICE_SECURITY_OPT=no-new-privileges:true\n' >>"${tmp_file}"
+fi
 mv "${tmp_file}" "${PROD_ENV}"
 chmod 600 "${PROD_ENV}"
 trap - EXIT
 
-echo "Successfully updated prod.env!"
+echo "Successfully updated prod.env! Capture mode: ${capture_mode}"
+if [[ "${capture_mode}" == guarded ]]; then
+  echo "Deploy with make up-prod-host; the preflight requires BPF LSM and cgroup v2."
+fi

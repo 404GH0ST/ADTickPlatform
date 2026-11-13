@@ -37,6 +37,20 @@ services:
     network_mode: host
     cap_add:
       - NET_ADMIN
+      - BPF
+      - PERFMON
+      - SYS_ADMIN
+    cgroup: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - /proc:/host/proc:ro
+      - type: bind
+        source: ${CAPTURE_NETNS_HOST_PATH:-/var/run/docker/netns}
+        target: /host/docker-netns
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$${CONTROLLER_SERVICE_ADDR}/healthz || exit 1"]
     environment:

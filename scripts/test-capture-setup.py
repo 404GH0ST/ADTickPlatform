@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Check production capture setup using temporary env files; never edits prod.env."""
+from pathlib import Path
+import os
+import subprocess
+import tempfile
+ROOT=Path(__file__).resolve().parents[1]
+def run(*args, env=None, ok=True):
+    result=subprocess.run(args,cwd=ROOT,env=env,text=True,capture_output=True)
+    assert (result.returncode==0)==ok,result.stdout+result.stderr
+    return result
+with tempfile.TemporaryDirectory(prefix='adcap-setup-') as work:
+    path=Path(work)/'prod.env'
+    template=(ROOT/'deploy/compose/prod.env.example').read_text()
+    # Simulate an existing older file, preserving a literal secret verbatim.
+    secret='ADMIN_API_TOKEN=keep-literal-$(must-not-execute)-secret'
+    legacy='\n'.join(line for line in template.splitlines() if not line.startswith('CONTROLLER_CAPTURE_MODE='))
+    legacy=legacy.replace('CONTROLLER_SERVICE_SECURITY_OPT=no-new-privileges:true','CONTROLLER_SERVICE_SECURITY_OPT=')
+    legacy='\n'.join(secret if line.startswith('ADMIN_API_TOKEN=') else line for line in legacy.splitlines())
+    path.write_text(legacy+'\n')
+    env={k:v for k,v in os.environ.items() if not k.startswith(('CONTROLLER_','CAPTURE_','EDGE_','AD_PLATFORM_PUBLIC_BASE_URL'))}
+    env['CADDY_CERT_DIR']=str(Path(work)/'certs')
+    run('make','setup-prod-env',f'PROD_ENV={path}','DOMAIN=ctf.example.test','SCHEME=https',env=env)
+    assert 'CONTROLLER_CAPTURE_MODE=guarded\n' in path.read_text()
+    assert 'CONTROLLER_SERVICE_SECURITY_OPT=no-new-privileges:true\n' in path.read_text()
+    assert secret in path.read_text(),'setup changed secret'
+    assert path.stat().st_mode&0o777==0o600
+    run('scripts/validate-prod-compose-security.sh',str(path),env=env)
+    run('scripts/validate-prod-env.sh',str(path),'base',env=env,ok=False)
+    run('make','setup-prod-env',f'PROD_ENV={path}','DOMAIN=ctf.example.test','CAPTURE_MODE=disabled',env=env)
+    run('make','setup-prod-env',f'PROD_ENV={path}','DOMAIN=ctf.example.test',env=env)
+    assert path.read_text().count('CONTROLLER_CAPTURE_MODE=disabled\n')==1
+    before=path.read_bytes()
+    run('make','setup-prod-env',f'PROD_ENV={path}','DOMAIN=ctf.example.test','CAPTURE_MODE=unrestricted',env=env,ok=False)
+    assert path.read_bytes()==before,'invalid mode changed configuration'
+    path.write_text(template.replace('CONTROLLER_SERVICE_CAP_ADD=CHOWN,','CONTROLLER_SERVICE_CAP_ADD=SYS_ADMIN,CHOWN,'))
+    run('scripts/validate-prod-env.sh',str(path),env=env,ok=False)
+    path.write_text(template.replace('CONTROLLER_CAPTURE_MODE=guarded','CONTROLLER_CAPTURE_MODE=disabled').replace('CONTROLLER_SERVICE_CAP_ADD=CHOWN,','CONTROLLER_SERVICE_CAP_ADD=NET_RAW,CHOWN,'))
+    run('scripts/validate-prod-env.sh',str(path),env=env,ok=False)
+    path.write_text(template.replace('CONTROLLER_CAPTURE_MODE=guarded','CONTROLLER_CAPTURE_MODE=disabled').replace('CONTROLLER_SERVICE_CAP_DROP=ALL','CONTROLLER_SERVICE_CAP_DROP=none'))
+    run('scripts/validate-prod-env.sh',str(path),env=env,ok=False)
+print('capture setup: migration, overrides, secret preservation, compose guards, unsafe configurations passed')
