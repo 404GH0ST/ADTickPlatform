@@ -4,45 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"adplatform/internal/platform/database"
+	"adplatform/internal/platform/database/dbtest"
 	"adplatform/internal/services/apigateway"
 )
 
 func isolatedSubmissionDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dsn := os.Getenv("SUBMISSION_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("SUBMISSION_TEST_POSTGRES_DSN is not set")
-	}
-	ctx := context.Background()
-	base, err := database.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema := fmt.Sprintf("submission_test_%d", time.Now().UnixNano())
-	if _, err = base.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
-		base.Close()
-		t.Fatal(err)
-	}
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := parsed.Query()
-	params.Set("search_path", schema)
-	parsed.RawQuery = params.Encode()
-	db, err := database.OpenPostgres(ctx, parsed.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close(); base.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE"); base.Close() })
-	return db
+	return dbtest.IsolatedSchema(t, "SUBMISSION_TEST_POSTGRES_DSN", "submission_test")
 }
 
 func TestPostgresSubmissionDeletionAndConcurrentNextWinner(t *testing.T) {

@@ -3,27 +3,19 @@ package apigateway
 import (
 	"context"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"adplatform/internal/platform/database"
+	"adplatform/internal/platform/database/dbtest"
 )
 
 func TestPostgresSecurityAndAllocationInvariants(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
+	db := dbtest.IsolatedSchema(t, "TEST_POSTGRES_DSN", "integration_test")
 	t.Setenv("WIREGUARD_SERVER_PUBLIC_KEY", "integration-test-server-public-key")
 
 	ctx := context.Background()
-	db, err := database.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatalf("open postgres: %v", err)
-	}
-	defer db.Close()
 	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
 		t.Fatalf("migrate postgres: %v", err)
 	}

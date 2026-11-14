@@ -3,27 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"adplatform/internal/platform/database"
+	"adplatform/internal/platform/database/dbtest"
 	"adplatform/internal/services/apigateway"
 )
 
-// This opt-in test requires a disposable database: it creates match fixtures.
+// This opt-in test runs in its own schema, so it can share a database.
 func TestPostgresFirstBloodConcurrentAccepts(t *testing.T) {
-	dsn := os.Getenv("FIRST_BLOOD_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("FIRST_BLOOD_TEST_POSTGRES_DSN is not set")
-	}
+	db := dbtest.IsolatedSchema(t, "FIRST_BLOOD_TEST_POSTGRES_DSN", "first_blood_test")
 	ctx := context.Background()
-	db, err := database.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
 		t.Fatal(err)
 	}
