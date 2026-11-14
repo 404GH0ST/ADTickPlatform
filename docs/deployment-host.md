@@ -103,6 +103,10 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    `make generate-prod-env` writes `deploy/compose/prod.env` with strong random
    secrets (service tokens, DB password, WireGuard key, **organizer ADMIN_PASSWORD**,
    Grafana password) and refuses to overwrite unless `FORCE=true` is set.
+   Flags are deterministic for a given `GAME_CORE_FLAG_SECRET`. If you rehearse on
+   one database and run the event on another, generate a new secret for the event
+   so rehearsal flags cannot be replayed (see
+   [Flag Lifecycle](game-rules.md#51-generation)).
    Production setup rejects plain HTTP. For local development without TLS, use
    the development stack instead of `prod.yml`. Public DNS names use Caddy's
    automatic ACME certificates; localhost and IP literals use the generated

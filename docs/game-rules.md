@@ -19,9 +19,11 @@ This document defines the default game behavior that the architecture is designe
 Suggested defaults:
 
 - tick duration: `120` seconds
-- flag validity window: `1` tick
+- flag validity window: `1` tick (fixed; not configurable)
 - checker timeout per phase: `10` to `20` seconds
-- submission grace period: `0` seconds unless explicitly configured
+- submission grace period: none. A flag stops being accepted the moment the
+  next tick starts, before that tick's new flags are planted. There is no
+  setting to extend this.
 
 Recommended access defaults:
 
@@ -147,14 +149,20 @@ total_score(team, tick) = attack_score + sum(defense_score per service) + sum(sl
 
 ## 5.1 Generation
 
-Each flag should be derived from:
+Each flag is derived from:
 
-- match identifier
 - owner team identifier
 - service identifier
 - issuing tick
-- slot number
-- server-side secret
+- expiry tick
+- server-side secret (`GAME_CORE_FLAG_SECRET`)
+
+There is no match identifier or random component. With the same secret, the
+same team, service and tick always produce the same flag string. A rehearsal
+and the real event that both start from a fresh database (team IDs from 101,
+challenge IDs from 1) would therefore issue identical flags. Anyone who saw
+rehearsal flags could submit them again in the real event. Generate a new
+`GAME_CORE_FLAG_SECRET` before every event.
 
 Example logical format:
 
@@ -162,8 +170,8 @@ Example logical format:
 PLAYIT{<payload>.<mac>}
 ```
 
-The `<payload>` is a base64url-encoded JSON blob containing `owner_team_id`,
-`challenge_id`, `issued_tick`, and `expires_tick`, signed with HMAC-SHA256
+The `<payload>` is the base64url encoding of
+`<owner_team_id>:<challenge_id>:<issued_tick>:<expires_tick>`, signed with HMAC-SHA256
 using the platform flag secret. The `PLAYIT` prefix and the curly braces
 are the configurable flag format — the organizer can change the prefix
 from the admin dashboard (see [Platform Settings](admin-api.md#platform-settings)),
@@ -391,6 +399,13 @@ secret randomness between one eighth and one third of the configured tick interv
 (or 30–90 seconds when an interval is unavailable). Pre-rotation verification runs
 regardless of the next scheduled time. Late failures are attributed to the tick
 that issued the flag, rather than the next healthy tick.
+
+The check before match completion has a 3-minute budget, because its cost grows
+with the number of team services. Checks that finish within the budget are scored
+normally. If the budget runs out, the match still stops, and a
+`final_retention_incomplete` scheduler event records how many targets were
+covered. The order is shuffled, so the same services are not always the ones
+left unchecked.
 
 Any failed retention check permanently forfeits that service's SLA for the issuing
 tick. A checker-confirmed missing or replaced value also incurs a defense deduction:
