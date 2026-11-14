@@ -942,12 +942,16 @@ func (s *Server) handleAdminStopGameMatch(w http.ResponseWriter, r *http.Request
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	status, err := s.gameCore.StopMatch(r.Context())
+	// A stop can take minutes; finish it (and its audit entry) even if the
+	// organizer's connection drops while it runs.
+	stopContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), gameCoreMatchStopTimeout)
+	defer cancel()
+	status, err := s.gameCore.StopMatch(stopContext)
 	if err != nil {
 		writeGameCoreFailure(w, err, "game-core match stop failed.")
 		return
 	}
-	s.recordAdminAudit(r.Context(), "match.stop", "match", "primary-match", "stopped match", map[string]any{
+	s.recordAdminAudit(stopContext, "match.stop", "match", "primary-match", "stopped match", map[string]any{
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})

@@ -133,7 +133,17 @@ type httpGameCoreClient struct {
 	baseURL string
 	token   string
 	client  *http.Client
+	// stopClient serves match stop, which waits for a running tick and then
+	// runs the final retention sweep.
+	stopClient *http.Client
 }
+
+// gameCoreMatchStopTimeout caps one match stop call. Game-core bounds the stop
+// itself to GAME_CORE_TICK_TIMEOUT + 3m sweep budget + 5m margin (11m with the
+// default 180s tick timeout) and finishes it even if this call is abandoned.
+// This cap only guards against a hung connection; it stays above game-core's
+// bound for any tick timeout up to 22 minutes.
+const gameCoreMatchStopTimeout = 30 * time.Minute
 
 type gameCoreHTTPError struct {
 	StatusCode int
@@ -165,6 +175,9 @@ func NewHTTPGameCoreClientWithTimeout(baseURL, token string, timeout time.Durati
 		client: &http.Client{
 			Timeout: timeout,
 		},
+		stopClient: &http.Client{
+			Timeout: max(timeout, gameCoreMatchStopTimeout),
+		},
 	}
 }
 
@@ -189,7 +202,11 @@ func (c *httpGameCoreClient) ResumeMatch(ctx context.Context) (GameMatchStatus, 
 }
 
 func (c *httpGameCoreClient) StopMatch(ctx context.Context) (GameMatchStatus, error) {
-	return requestGameCoreJSON[GameMatchStatus](ctx, c, http.MethodPost, "/internal/v1/game/match/stop")
+	stop := *c
+	if c.stopClient != nil {
+		stop.client = c.stopClient
+	}
+	return requestGameCoreJSON[GameMatchStatus](ctx, &stop, http.MethodPost, "/internal/v1/game/match/stop")
 }
 
 func (c *httpGameCoreClient) UpdateMatchSchedule(ctx context.Context, req UpdateMatchScheduleRequest) (GameMatchStatus, error) {
