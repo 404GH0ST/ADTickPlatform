@@ -2004,6 +2004,10 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	teamCount := len(teams)
 	slaFactor := faustSLAFactor(teamCount)
 
+	// submitted_flags has no FK to issued_flags: deleting a team or challenge
+	// cascades its issued flags but leaves captures behind. Count only captures
+	// of flags that still exist, matching the per-service breakdown and the
+	// defense side, so totals equal the sum of their service rows.
 	attackByTeam, err := s.sumFloatByTeam(ctx, `
 		SELECT ranked.team_id,
 		       COALESCE(SUM(1.0 + (1.0 / ranked.capture_count)), 0.0)
@@ -2013,6 +2017,7 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 				sf.team_id,
 				COUNT(*) OVER (PARTITION BY sf.flag) AS capture_count
 			FROM submitted_flags sf
+			JOIN issued_flags f ON f.flag = sf.flag
 		) ranked
 		GROUP BY ranked.team_id
 	`)

@@ -245,3 +245,41 @@ func TestPostgresCaptureGrantsOnlyAttackerMatchingSSHAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Deleting a challenge cascades its issued flags but not the captures in
+// submitted_flags. Team attack totals must still equal their service rows.
+func TestPostgresScoreboardIgnoresCapturesOfDeletedFlags(t *testing.T) {
+	db := isolatedSubmissionDB(t)
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+ INSERT INTO teams(id,name,email,join_key) VALUES(101,'Team Alpha','a@test.local','a'),(102,'Team Delta','b@test.local','b');
+ INSERT INTO challenges(id,name,published) VALUES(1,'kept',TRUE),(2,'deleted',TRUE);
+ INSERT INTO game_ticks(id,status) VALUES(1,'completed');
+ INSERT INTO issued_flags(flag,owner_team_id,owner_team_name,challenge_id,challenge_name,issued_tick,expires_tick) VALUES
+   ('flag-kept',102,'Team Delta',1,'kept',1,1),('flag-deleted',102,'Team Delta',2,'deleted',1,1);
+ INSERT INTO submitted_flags(flag,team_id) VALUES('flag-kept',101),('flag-deleted',101);
+ DELETE FROM challenges WHERE id=2;
+ `); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := newPostgresGameStore(db).RecomputeScoreboard(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		attack, defense := 0.0, 0.0
+		for _, service := range row.Services {
+			attack += service.Attack
+			defense += service.Defense
+		}
+		if row.Attack != attack || row.Defense != defense {
+			t.Fatalf("%s totals attack=%.2f defense=%.2f do not match services attack=%.2f defense=%.2f", row.Team, row.Attack, row.Defense, attack, defense)
+		}
+		if row.Team == "Team Alpha" && row.Attack != 2 {
+			t.Fatalf("expected only the surviving capture (2 points), got %.2f", row.Attack)
+		}
+	}
+}
