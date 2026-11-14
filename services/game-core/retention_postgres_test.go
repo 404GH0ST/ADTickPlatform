@@ -189,3 +189,43 @@ func TestPostgresRetentionPenaltySurvivesRecoveryAndReload(t *testing.T) {
 	}
 
 }
+
+// On Postgres every store call honours its context. A tick that hits its
+// timeout must still persist the runs it covered and complete.
+func TestPostgresTickTimeoutRecordsRunsAndCompletes(t *testing.T) {
+	db := isolatedSubmissionDB(t)
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+ INSERT INTO teams(id,name,email,join_key) VALUES(101,'Team Alpha','a@test.local','a'),(102,'Team Delta','b@test.local','b');
+ INSERT INTO challenges(id,name,published,checker_image) VALUES(1,'timeout',TRUE,'checker');
+ INSERT INTO game_match_state(singleton,state) VALUES(TRUE,'running');
+ INSERT INTO service_instances(team_id,challenge_id,runtime_kind,runtime_status,container_name,baseline_image,checker_image,endpoint,ssh_host,checker_token)
+ VALUES(101,1,'docker','ready','timeout-a','test','checker','10.80.1.11:8080','10.80.1.11','token-a'),
+       (102,1,'docker','ready','timeout-b','test','checker','10.80.1.12:8080','10.80.1.12','token-b');
+ INSERT INTO team_service_states(team_id,challenge_id,endpoint,status,checker,unlocked,ssh_hint,last_event,reset_cooldown)
+ VALUES(101,1,'10.80.1.11:8080','healthy','ok',FALSE,'','','ready'),(102,1,'10.80.1.12:8080','healthy','ok',FALSE,'','','ready');
+ `); err != nil {
+		t.Fatal(err)
+	}
+	srv := newGameCoreServer("test", newPostgresGameStore(db), blockingCheckerClient{}, newFlagCodec("test-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).WithAutoTickOnMatchStart(false).WithTickTimeout(200 * time.Millisecond)
+	srv.scoringDebounce = time.Hour
+	tick, err := srv.advanceTick(ctx)
+	if err != nil {
+		t.Fatalf("tick timeout failed the tick: %v", err)
+	}
+	var status string
+	var runs int
+	if err := db.QueryRowContext(ctx, `SELECT status FROM game_ticks WHERE id=$1`, tick.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM checker_runs WHERE tick_id=$1`, tick.ID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || runs == 0 {
+		t.Fatalf("expected a completed tick with persisted runs, got status=%q runs=%d", status, runs)
+	}
+}

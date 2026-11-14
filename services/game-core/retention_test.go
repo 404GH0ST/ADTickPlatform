@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -274,4 +277,115 @@ func TestImmediateFlagReplacementIsPenalizedWithoutDuplicateHistory(t *testing.T
 	if row := retentionTeamScore(t, store); row.Defense != -10 || row.SLA != 0 {
 		t.Fatalf("immediate replacement not penalized: %+v", row)
 	}
+}
+
+// gatedTickChecker holds tick 2's put until released and honours cancellation.
+type gatedTickChecker struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *gatedTickChecker) Execute(ctx context.Context, r apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	if r.TickID == 2 && r.Phase == "put" {
+		c.once.Do(func() { close(c.entered) })
+		<-c.release
+	}
+	if err := ctx.Err(); err != nil {
+		return apigateway.CheckerExecutionResult{}, err
+	}
+	return testCheckerClient{}.Execute(ctx, r)
+}
+func (c *gatedTickChecker) ExecuteBatch(ctx context.Context, r apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, r)
+}
+
+// An organizer stop waits for the running tick and then verifies retained
+// flags. If the HTTP caller gives up meanwhile, the stop must still finish.
+func TestStopMatchCompletesAfterCallerDisconnects(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	store.targets = store.targets[:1]
+	checker := &gatedTickChecker{entered: make(chan struct{}), release: make(chan struct{})}
+	srv := newGameCoreServer("test", store, checker, newFlagCodec("test-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 1).
+		WithWarmupRequired(false).WithAutoTickOnMatchStart(false)
+	srv.scoringDebounce = time.Hour
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
+	srv.RegisterRoutes(mux)
+	bg := context.Background()
+	if _, err := store.StartMatch(bg, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.advanceTick(bg); err != nil {
+		t.Fatal(err)
+	}
+	tickDone := make(chan struct{})
+	go func() { _, _ = srv.advanceTick(bg); close(tickDone) }()
+	<-checker.entered
+
+	callerCtx, cancel := context.WithTimeout(bg, 50*time.Millisecond)
+	defer cancel()
+	request := httptest.NewRequest(http.MethodPost, "/internal/v1/game/match/stop", nil).WithContext(callerCtx)
+	request.Header.Set("Authorization", "Bearer test")
+	response := httptest.NewRecorder()
+	stopDone := make(chan struct{})
+	go func() { mux.ServeHTTP(response, request); close(stopDone) }()
+
+	<-callerCtx.Done() // the gateway has given up while the tick is still running
+	close(checker.release)
+	<-tickDone
+	<-stopDone
+
+	match, err := store.MatchStatus(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.State != "finished" {
+		t.Fatalf("stop aborted after caller disconnect; match state %q, response %d %s", match.State, response.Code, response.Body.String())
+	}
+}
+
+// The forced final sweep can outgrow any fixed budget on a large or degraded
+// event. When it runs out, the match must still stop rather than fail (and fail
+// again on every retry, since force restarts the whole sweep).
+func TestStopMatchFinishesWhenFinalRetentionSweepRunsOutOfBudget(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	checker := &hangAfterFirstTickChecker{}
+	srv := newGameCoreServer("test", store, checker, newFlagCodec("test-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).WithAutoTickOnMatchStart(false).WithCheckerParallelism(2)
+	srv.scoringDebounce = time.Hour
+	srv.finalRetentionSweepBudget = 100 * time.Millisecond
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	checker.mu.Lock()
+	checker.hang = true // every retention get now outlasts the sweep budget
+	checker.mu.Unlock()
+
+	status, err := srv.stopMatchWithRetention(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("stop failed when the final sweep ran out of budget: %v", err)
+	}
+	if status.State != "finished" {
+		t.Fatalf("match not stopped: %+v", status)
+	}
+	store.mu.Lock()
+	losses := len(store.retentionFailures)
+	store.mu.Unlock()
+	if losses != 0 {
+		t.Fatalf("interrupted final checks were recorded as %d retention losses", losses)
+	}
+	events, err := store.ListSchedulerEvents(ctx, apigateway.GameSchedulerEventQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events.Items {
+		if event.EventType == "final_retention_incomplete" {
+			return
+		}
+	}
+	t.Fatalf("incomplete final sweep was not reported: %+v", events.Items)
 }

@@ -50,6 +50,9 @@ type gameCoreServer struct {
 	lastWarmup           apigateway.GameWarmupResult
 	autoTickOnMatchStart bool
 	now                  func() time.Time
+
+	// finalRetentionSweepBudget caps the forced sweep run by a match stop.
+	finalRetentionSweepBudget time.Duration
 }
 
 // accessReconcileClient re-applies host access policies after a tick so deferred
@@ -91,6 +94,8 @@ func newGameCoreServer(adminToken string, store gameStore, checker checkerClient
 		warmupPutRetryDelay:  2 * time.Second,
 		autoTickOnMatchStart: true,
 		now:                  time.Now,
+
+		finalRetentionSweepBudget: defaultFinalRetentionSweepBudget,
 	}
 }
 
@@ -525,7 +530,12 @@ func (s *gameCoreServer) handleStopMatch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if current.State != "finished" {
-		status, err := s.stopMatchWithRetention(r.Context(), s.now())
+		// Stopping waits for any running tick, then verifies every retained flag.
+		// That can outlast the caller's HTTP deadline; a disconnect must not
+		// abort the stop and leave the match running.
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.matchStopTimeout())
+		defer cancel()
+		status, err := s.stopMatchWithRetention(stopCtx, s.now())
 		if err != nil {
 			writeProblem(w, http.StatusInternalServerError, "Match stop failed", err.Error())
 			return
@@ -903,7 +913,9 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		runCtx, cancel = context.WithTimeout(ctx, s.tickTimeout)
 		defer cancel()
 	}
-	results, err := s.runCheckerTargets(runCtx, tick.ID, targets)
+	// runCtx bounds checker execution only. Results are persisted with ctx so a
+	// tick that hits its timeout still records what it covered and completes.
+	results, err := s.runCheckerTargets(ctx, runCtx, tick.ID, targets)
 	if err != nil {
 		tick.Status = "failed"
 		tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
@@ -1201,7 +1213,8 @@ func rotateCheckerTargets(targets []checkerTarget, tickID int) []checkerTarget {
 	return rotated
 }
 
-func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targets []checkerTarget) ([]checkerTargetTickResult, error) {
+// runCheckerTargets executes checkers under execCtx and persists under ctx.
+func (s *gameCoreServer) runCheckerTargets(ctx, execCtx context.Context, tickID int, targets []checkerTarget) ([]checkerTargetTickResult, error) {
 	parallelism := s.checkerParallelism
 	if parallelism <= 0 {
 		parallelism = 1
@@ -1214,7 +1227,7 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 	}
 
 	results := make([]checkerTargetTickResult, len(targets))
-	workerCtx, cancel := context.WithCancel(ctx)
+	workerCtx, cancel := context.WithCancel(execCtx)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -1230,7 +1243,7 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 				if workerCtx.Err() != nil {
 					continue
 				}
-				result, err := s.runCheckerTarget(workerCtx, tickID, targets[index])
+				result, err := s.runCheckerTarget(ctx, workerCtx, tickID, targets[index])
 				results[index] = result
 				if err != nil {
 					errMu.Lock()
@@ -1259,7 +1272,9 @@ func (s *gameCoreServer) runCheckerTargets(ctx context.Context, tickID int, targ
 	return results, nil
 }
 
-func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
+// runCheckerTarget runs the target's checker under execCtx; every store read
+// and write, including the target lock, uses ctx.
+func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID int, target checkerTarget) (checkerTargetTickResult, error) {
 	var counts checkerTargetTickResult
 	unlock := s.lockRetentionTarget(target)
 	defer unlock()
@@ -1305,7 +1320,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 			return counts, err
 		}
 		if err == nil && previous.CheckerToken != "" && previous.CheckerToken == target.CheckerToken {
-			if err := s.checkFlagRetention(ctx, target, previous); err != nil {
+			if err := s.checkFlagRetention(ctx, execCtx, target, previous); err != nil {
 				return counts, err
 			}
 		}
@@ -1315,7 +1330,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx context.Context, tickID int, targe
 	// All phases for this target run inside a single checker container, which
 	// chains each successful phase's output into the next and halts on the first
 	// failure. This collapses the per-phase container cold-starts of a tick.
-	batch, execErr := s.checker.ExecuteBatch(ctx, apigateway.CheckerBatchExecutionRequest{
+	batch, execErr := s.checker.ExecuteBatch(execCtx, apigateway.CheckerBatchExecutionRequest{
 		ChallengeID:    target.ChallengeID,
 		TeamID:         target.TeamID,
 		TeamName:       target.TeamName,

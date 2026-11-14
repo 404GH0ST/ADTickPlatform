@@ -330,7 +330,7 @@ func TestChangedCheckerTargetStillLosesTickSLA(t *testing.T) {
 	if err != nil || len(targets) == 0 {
 		t.Fatalf("checker targets: %d %v", len(targets), err)
 	}
-	counts, err := server.runCheckerTarget(context.Background(), 1, targets[0])
+	counts, err := server.runCheckerTarget(context.Background(), context.Background(), 1, targets[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1553,5 +1553,64 @@ func TestAcceptedFlagReconcilesAccessEvenWhenControllerFails(t *testing.T) {
 	}
 	if access.calls != 1 {
 		t.Fatal("duplicate triggered another unlock")
+	}
+}
+
+// hangAfterFirstTickChecker passes every phase until hang is set, then blocks
+// each call until its context is cancelled.
+type hangAfterFirstTickChecker struct {
+	mu   sync.Mutex
+	hang bool
+}
+
+func (c *hangAfterFirstTickChecker) Execute(ctx context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	c.mu.Lock()
+	hang := c.hang
+	c.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return apigateway.CheckerExecutionResult{}, ctx.Err()
+	}
+	return testCheckerClient{}.Execute(ctx, request)
+}
+
+func (c *hangAfterFirstTickChecker) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, request)
+}
+
+// A tick deadline that lands inside the pre-put retention check must complete
+// the tick (recording the covered targets) instead of failing it, and must not
+// record the interrupted check as a retention loss.
+func TestTickTimeoutDuringRetentionCheckCompletesTick(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	checker := &hangAfterFirstTickChecker{}
+	srv := newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(false).
+		WithAutoTickOnMatchStart(false).
+		WithTickTimeout(100 * time.Millisecond)
+	srv.scoringDebounce = time.Hour
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatalf("start match: %v", err)
+	}
+	if tick, err := srv.advanceTick(ctx); err != nil || tick.Status != "completed" {
+		t.Fatalf("healthy tick 1: %+v %v", tick, err)
+	}
+
+	checker.mu.Lock()
+	checker.hang = true
+	checker.mu.Unlock()
+	tick, err := srv.advanceTick(ctx)
+	if err != nil {
+		t.Fatalf("tick timeout inside the retention check failed the tick: %v", err)
+	}
+	if tick.Status != "completed" || tick.FailedCheckerRuns == 0 || !strings.Contains(tick.Message, "timed out") {
+		t.Fatalf("expected a completed, timed-out tick with failed runs, got %+v", tick)
+	}
+	store.mu.Lock()
+	losses := len(store.retentionFailures)
+	store.mu.Unlock()
+	if losses != 0 {
+		t.Fatalf("interrupted retention checks were recorded as %d retention losses", losses)
 	}
 }
