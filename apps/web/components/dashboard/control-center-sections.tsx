@@ -14,6 +14,10 @@ import type {
   ServiceRow,
 } from "@/lib/dashboard-types";
 import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
+import {
+  cooldownMessage,
+  type ServiceActionFeedback,
+} from "@/lib/service-actions";
 import { Badge } from "@/components/ui/badge";
 import { AttackMapPanel } from "@/components/ui/attack-map-panel";
 import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
@@ -68,6 +72,7 @@ type ServicesPanelProps = {
   rows: ServiceRow[];
   pendingAction: string | null;
   overview: PlatformOverview;
+  serviceFeedback: (service: ServiceRow) => ServiceActionFeedback;
   onSelectPrimaryAction: (service: ServiceRow) => void;
   onRestart: (service: ServiceRow) => void;
   onSelectReset: (service: ServiceRow) => void;
@@ -107,6 +112,7 @@ type SSHSessionDialogProps = {
 
 type FactoryResetDialogProps = {
   actionError: string | null;
+  cooldownSeconds: number;
   open: boolean;
   pendingAction: string | null;
   target: ServiceRow | null;
@@ -367,6 +373,7 @@ export function ServicesPanel({
   rows,
   pendingAction,
   overview,
+  serviceFeedback,
   onSelectPrimaryAction,
   onRestart,
   onSelectReset,
@@ -393,6 +400,7 @@ export function ServicesPanel({
           {rows.map((service) => (
             <ServiceCard
               key={service.id}
+              feedback={serviceFeedback(service)}
               matchState={overview.matchState}
               pendingAction={pendingAction}
               service={service}
@@ -583,6 +591,7 @@ export function AttacksPanel({
           attackRows={attackRows}
           description="Accepted submissions rendered as directional team flow for the current paginated slice."
           highlightedAttackIDs={highlightedAttackIDs}
+          teamRoster={teamOptions}
           title="Attack flow"
           onVisibleRowsChange={(rows) => setVisibleRows(rows)}
         />
@@ -692,6 +701,7 @@ export function SSHSessionDialog({
 
 export function FactoryResetDialog({
   actionError,
+  cooldownSeconds,
   open,
   pendingAction,
   target,
@@ -702,7 +712,14 @@ export function FactoryResetDialog({
     <AppDialog
       body={
         <div className="space-y-3">
-          {actionError ? <ErrorBanner message={actionError} /> : null}
+          {actionError ? (
+            <ErrorBanner message={actionError} />
+          ) : cooldownSeconds > 0 ? (
+            <StatusBanner
+              message={cooldownMessage("reset", cooldownSeconds)}
+              variant="warning"
+            />
+          ) : null}
           <ResetWarningBlock />
         </div>
       }
@@ -810,6 +827,7 @@ function serviceLockHelpText(
 }
 
 function ServiceCard({
+  feedback,
   matchState,
   pendingAction,
   service,
@@ -817,6 +835,7 @@ function ServiceCard({
   onSelectPrimaryAction,
   onSelectReset,
 }: {
+  feedback: ServiceActionFeedback;
   matchState?: string | null;
   pendingAction: string | null;
   service: ServiceRow;
@@ -853,8 +872,9 @@ function ServiceCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ServiceDetails service={service} />
+        <ServiceDetails feedback={feedback} service={service} />
         <ServiceActionBar
+          feedback={feedback}
           matchState={matchState}
           pendingAction={pendingAction}
           service={service}
@@ -867,7 +887,29 @@ function ServiceCard({
   );
 }
 
-function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
+/** Live cooldown text when this session knows it; otherwise the API label. */
+function serviceCooldownLabel(
+  service: ServiceRow,
+  feedback: ServiceActionFeedback,
+): string {
+  const parts = [
+    feedback.resetCooldown > 0
+      ? `factory reset cooldown: ${feedback.resetCooldown}s`
+      : null,
+    feedback.restartCooldown > 0
+      ? `restart cooldown: ${feedback.restartCooldown}s`
+      : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : service.resetCooldown;
+}
+
+function ServiceDetails({
+  feedback,
+  service,
+}: {
+  feedback: ServiceActionFeedback;
+  service: ServiceRow;
+}): ReactElement {
   return (
     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <DetailRow label="Challenge" value={`#${service.challengeId}`} />
@@ -882,7 +924,7 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
         }
       />
       <DetailRow label="Service state" value={formatSLAState(service)} />
-      <DetailRow label="Reset" value={service.resetCooldown} />
+      <DetailRow label="Reset" value={serviceCooldownLabel(service, feedback)} />
       <DetailRow
         label="SSH"
         value={
@@ -905,6 +947,7 @@ function ServiceDetails({ service }: { service: ServiceRow }): ReactElement {
 }
 
 function ServiceActionBar({
+  feedback,
   matchState,
   pendingAction,
   service,
@@ -912,6 +955,7 @@ function ServiceActionBar({
   onSelectPrimaryAction,
   onSelectReset,
 }: {
+  feedback: ServiceActionFeedback;
   matchState?: string | null;
   pendingAction: string | null;
   service: ServiceRow;
@@ -927,6 +971,14 @@ function ServiceActionBar({
 
   return (
     <div className="space-y-3">
+      {feedback.notice ? (
+        <div data-testid={`service-action-notice-${service.id}`}>
+          <StatusBanner
+            message={feedback.notice.message}
+            variant={feedback.notice.variant}
+          />
+        </div>
+      ) : null}
       {!service.unlocked ? <p className="text-sm text-muted-foreground">Submit a correct flag from another team on this challenge to unlock SSH automatically.</p> : null}
       <div className="flex flex-wrap gap-3">
         <Button
@@ -947,6 +999,11 @@ function ServiceActionBar({
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
           Restart
+          {feedback.restartCooldown > 0 ? (
+            <span className="tabular-nums text-muted-foreground">
+              {` ${feedback.restartCooldown}s`}
+            </span>
+          ) : null}
         </Button>
         {service.hasSourceDownload && !service.maintenance ? (
           <Button asChild variant="outline">
@@ -968,6 +1025,11 @@ function ServiceActionBar({
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
           Factory Reset
+          {feedback.resetCooldown > 0 ? (
+            <span className="tabular-nums text-muted-foreground">
+              {` ${feedback.resetCooldown}s`}
+            </span>
+          ) : null}
         </Button>
       </div>
       {service.maintenance ? (

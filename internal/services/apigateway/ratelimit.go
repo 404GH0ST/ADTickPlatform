@@ -28,10 +28,20 @@ type rateLimitPolicy struct {
 type rateLimitDecision struct {
 	allowed    bool
 	retryAfter time.Duration
+	// backendUnavailable marks a fail-closed rejection caused by a limiter
+	// outage rather than an exhausted bucket.
+	backendUnavailable bool
 }
 
 type rateLimiter interface {
 	Allow(ctx context.Context, key string, policy rateLimitPolicy) (rateLimitDecision, error)
+}
+
+// rateLimitRefunder is implemented by limiters that can return a consumed
+// token, so an action rejected before doing any work does not start its
+// cooldown.
+type rateLimitRefunder interface {
+	Refund(ctx context.Context, key string, policy rateLimitPolicy) error
 }
 
 type noopRateLimiter struct{}
@@ -83,6 +93,17 @@ redis.call('PEXPIRE', key, ttl_ms)
 return {allowed, retry_after_ms}
 `)
 
+var redisTokenRefundScript = strings.TrimSpace(`
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local tokens = tonumber(redis.call('HGET', key, 'tokens'))
+if not tokens then
+  return 0
+end
+redis.call('HSET', key, 'tokens', tostring(math.min(capacity, tokens + 1)))
+return 1
+`)
+
 func newRateLimiter(redisAddr, redisPassword string) rateLimiter {
 	if strings.TrimSpace(redisAddr) == "" {
 		return noopRateLimiter{}
@@ -107,51 +128,23 @@ func (l *redisRateLimiter) Allow(ctx context.Context, key string, policy rateLim
 		return rateLimitDecision{allowed: true}, nil
 	}
 
-	dialer := net.Dialer{Timeout: l.dialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", l.addr)
-	if err != nil {
-		return rateLimitDecision{}, err
-	}
-	defer conn.Close()
-
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(l.dialTimeout))
-	}
-
-	reader := bufio.NewReader(conn)
-	if l.password != "" {
-		if err := writeRedisCommand(conn, "AUTH", l.password); err != nil {
-			return rateLimitDecision{}, err
-		}
-		if _, err := readRedisValue(reader); err != nil {
-			return rateLimitDecision{}, err
-		}
-	}
-
 	idleTTL := time.Duration(math.Ceil((float64(policy.capacity)/policy.refillPerSecond)*2*1000)) * time.Millisecond
 	if idleTTL < 5*time.Second {
 		idleTTL = 5 * time.Second
 	}
 
 	nowMillis := time.Now().UTC().UnixMilli()
-	if err := writeRedisCommand(
-		conn,
+	reply, err := l.command(ctx,
 		"EVAL",
 		redisTokenBucketScript,
 		"1",
 		"ratelimit:"+key,
 		strconv.Itoa(policy.capacity),
-		strconv.FormatFloat(policy.refillPerSecond/1000, 'f', 6, 64),
+		formatRefillPerMillisecond(policy.refillPerSecond),
 		strconv.FormatInt(nowMillis, 10),
 		"1",
 		strconv.FormatInt(idleTTL.Milliseconds(), 10),
-	); err != nil {
-		return rateLimitDecision{}, err
-	}
-
-	reply, err := readRedisValue(reader)
+	)
 	if err != nil {
 		return rateLimitDecision{}, err
 	}
@@ -174,6 +167,54 @@ func (l *redisRateLimiter) Allow(ctx context.Context, key string, policy rateLim
 		allowed:    allowed == 1,
 		retryAfter: time.Duration(retryAfterMillis) * time.Millisecond,
 	}, nil
+}
+
+// Refund returns the token consumed by an allowed request whose action was
+// rejected before doing any work. The bucket's timestamp is left untouched so
+// elapsed refill is still credited; the result is capped at capacity, and a
+// missing (expired) bucket is already full.
+func (l *redisRateLimiter) Refund(ctx context.Context, key string, policy rateLimitPolicy) error {
+	if policy.capacity <= 0 || policy.refillPerSecond <= 0 {
+		return nil
+	}
+	_, err := l.command(ctx, "EVAL", redisTokenRefundScript, "1", "ratelimit:"+key, strconv.Itoa(policy.capacity))
+	return err
+}
+
+func (l *redisRateLimiter) command(ctx context.Context, parts ...string) (any, error) {
+	dialer := net.Dialer{Timeout: l.dialTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", l.addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(l.dialTimeout))
+	}
+
+	reader := bufio.NewReader(conn)
+	if l.password != "" {
+		if err := writeRedisCommand(conn, "AUTH", l.password); err != nil {
+			return nil, err
+		}
+		if _, err := readRedisValue(reader); err != nil {
+			return nil, err
+		}
+	}
+	if err := writeRedisCommand(conn, parts...); err != nil {
+		return nil, err
+	}
+	return readRedisValue(reader)
+}
+
+// formatRefillPerMillisecond renders the bucket refill rate for the Lua script
+// at full precision. Fixed six-decimal formatting rounded slow policies (for
+// example 3 per hour, 8.3e-7/ms) up to 1e-6/ms, loosening them by up to 20%.
+func formatRefillPerMillisecond(refillPerSecond float64) string {
+	return strconv.FormatFloat(refillPerSecond/1000, 'g', -1, 64)
 }
 
 func writeRedisCommand(w io.Writer, parts ...string) error {
@@ -304,7 +345,7 @@ func (s *Server) allowRateLimit(ctx context.Context, key string, policy rateLimi
 		if policy.failClosedOnError {
 			log.Printf("rate limiter failed closed for key %q: %v", key, err)
 			s.rateLimitMetrics.recordHit(endpointFromKey(key))
-			return rateLimitDecision{allowed: false, retryAfter: 5 * time.Second}, false
+			return rateLimitDecision{allowed: false, retryAfter: 5 * time.Second, backendUnavailable: true}, false
 		}
 		log.Printf("rate limiter failed open for key %q: %v", key, err)
 		return rateLimitDecision{allowed: true}, true
@@ -313,6 +354,20 @@ func (s *Server) allowRateLimit(ctx context.Context, key string, policy rateLimi
 		s.rateLimitMetrics.recordHit(endpointFromKey(key))
 	}
 	return decision, decision.allowed
+}
+
+// refundRateLimit gives back the token an allowed request consumed. It is
+// best effort: on failure the caller simply keeps the cooldown it already had.
+func (s *Server) refundRateLimit(ctx context.Context, key string, policy rateLimitPolicy) {
+	refunder, ok := s.rateLimiter.(rateLimitRefunder)
+	if !ok {
+		return
+	}
+	refundCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := refunder.Refund(refundCtx, key, policy); err != nil {
+		log.Printf("rate limit refund failed for key %q: %v", key, err)
+	}
 }
 
 func endpointFromKey(key string) string {
@@ -359,12 +414,34 @@ func (m *rateLimitMetrics) WritePrometheus(w io.Writer) {
 }
 
 func writeRateLimitFailure(w http.ResponseWriter, decision rateLimitDecision, message string) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(decision)))
+	writeProblem(w, http.StatusTooManyRequests, "Too many requests", message)
+}
+
+// writeCooldownFailure rejects a service lifecycle action that is still on its
+// per-service cooldown, naming the action and the remaining wait so the
+// participant knows exactly when it becomes available again.
+func writeCooldownFailure(w http.ResponseWriter, decision rateLimitDecision, action string) {
+	if decision.backendUnavailable {
+		writeRateLimitFailure(w, decision, fmt.Sprintf("%s is temporarily unavailable; try again shortly.", action))
+		return
+	}
+	retryAfter := retryAfterSeconds(decision)
+	unit := "seconds"
+	if retryAfter == 1 {
+		unit = "second"
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	writeProblem(w, http.StatusTooManyRequests, "Cooldown active",
+		fmt.Sprintf("%s is on cooldown for this service. Wait %d %s before trying again.", action, retryAfter, unit))
+}
+
+func retryAfterSeconds(decision rateLimitDecision) int {
 	retryAfter := int(math.Ceil(decision.retryAfter.Seconds()))
 	if retryAfter <= 0 {
 		retryAfter = 1
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-	writeProblem(w, http.StatusTooManyRequests, "Too many requests", message)
+	return retryAfter
 }
 
 func rateLimitTeamKey(prefix string, teamID int) string {
@@ -415,7 +492,11 @@ var (
 	submitRateLimitPolicy            = rateLimitPolicy{capacity: 45, refillPerSecond: 15, failClosedOnError: true}
 	submitUserRateLimitPolicy        = rateLimitPolicy{capacity: 15, refillPerSecond: 5, failClosedOnError: true}
 	sshSessionRateLimitPolicy        = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
-	factoryResetRateLimitPolicy      = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}
-	restartRateLimitPolicy           = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
-	defaultRateLimit429Message       = "no bruteforce needed, calm down a little bit."
+	// Single-token buckets make these true per-service cooldowns: one action,
+	// then a fixed wait whose remainder is reported as Retry-After.
+	factoryResetCooldown        = 90 * time.Second
+	restartCooldown             = 30 * time.Second
+	factoryResetRateLimitPolicy = rateLimitPolicy{capacity: 1, refillPerSecond: 1 / factoryResetCooldown.Seconds(), failClosedOnError: true}
+	restartRateLimitPolicy      = rateLimitPolicy{capacity: 1, refillPerSecond: 1 / restartCooldown.Seconds(), failClosedOnError: true}
+	defaultRateLimit429Message  = "no bruteforce needed, calm down a little bit."
 )

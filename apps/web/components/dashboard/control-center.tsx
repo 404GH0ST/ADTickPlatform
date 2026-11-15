@@ -15,6 +15,7 @@ import {
   type ControlCenterOptions,
   useControlCenter,
 } from "@/components/dashboard/use-control-center";
+import type { ServiceActionFeedback } from "@/lib/service-actions";
 
 export function ControlCenter({
   scores,
@@ -47,6 +48,7 @@ export function ControlCenter({
         pendingAction: state.pendingAction,
         rows: state.rows,
         scoreRows: state.scoreRows,
+        serviceFeedback: state.serviceFeedback,
         currentTeamName,
         overview,
         onApplyAttackFilters: () => {
@@ -83,6 +85,11 @@ export function ControlCenter({
       />
       <FactoryResetDialog
         actionError={state.actionError}
+        cooldownSeconds={
+          state.resetTarget
+            ? state.serviceFeedback(state.resetTarget).resetCooldown
+            : 0
+        }
         open={state.resetTarget !== null}
         pendingAction={state.pendingAction}
         target={state.resetTarget}
@@ -104,6 +111,7 @@ function renderControlCenterPanel({
   pendingAction,
   rows,
   scoreRows,
+  serviceFeedback,
   onApplyAttackFilters,
   onPageAttackFeed,
   onRequestRestart,
@@ -135,6 +143,9 @@ function renderControlCenterPanel({
   pendingAction: string | null;
   rows: ControlCenterOptions["services"];
   scoreRows: ControlCenterOptions["scores"];
+  serviceFeedback: (
+    service: ControlCenterOptions["services"][number],
+  ) => ServiceActionFeedback;
   onApplyAttackFilters: () => void;
   onPageAttackFeed: (direction: "prev" | "next") => void;
   onRequestRestart: (service: ControlCenterOptions["services"][number]) => void;
@@ -182,6 +193,7 @@ function renderControlCenterPanel({
           rows={rows}
           pendingAction={pendingAction}
           overview={overview}
+          serviceFeedback={serviceFeedback}
           onSelectPrimaryAction={onSelectPrimaryAction}
           onRestart={onRequestRestart}
           onSelectReset={onSelectResetTarget}

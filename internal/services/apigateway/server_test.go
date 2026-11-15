@@ -3448,6 +3448,10 @@ func TestFactoryResetReturnsRateLimit429(t *testing.T) {
 	if got := response.Header().Get("Retry-After"); got != "2" {
 		t.Fatalf("expected Retry-After 2, got %q", got)
 	}
+	want := "Factory reset is on cooldown for this service. Wait 2 seconds before trying again."
+	if !strings.Contains(response.Body.String(), want) {
+		t.Fatalf("expected cooldown detail %q, got %s", want, response.Body.String())
+	}
 }
 
 func TestRestartReturnsRateLimit429(t *testing.T) {
@@ -3468,6 +3472,10 @@ func TestRestartReturnsRateLimit429(t *testing.T) {
 	}
 	if got := response.Header().Get("Retry-After"); got != "2" {
 		t.Fatalf("expected Retry-After 2, got %q", got)
+	}
+	want := "Restart is on cooldown for this service. Wait 2 seconds before trying again."
+	if !strings.Contains(response.Body.String(), want) {
+		t.Fatalf("expected cooldown detail %q, got %s", want, response.Body.String())
 	}
 }
 
@@ -5686,6 +5694,124 @@ func TestAcceptedEnemyFlagAutomaticallyUnlocksOnlyMatchingService(t *testing.T) 
 				if state.Unlocked {
 					t.Fatalf("victim unlocked: %+v", state)
 				}
+			}
+		})
+	}
+}
+
+type refundingRateLimiter struct {
+	refunds []string
+}
+
+func (l *refundingRateLimiter) Allow(context.Context, string, rateLimitPolicy) (rateLimitDecision, error) {
+	return rateLimitDecision{allowed: true}, nil
+}
+
+func (l *refundingRateLimiter) Refund(_ context.Context, key string, _ rateLimitPolicy) error {
+	l.refunds = append(l.refunds, key)
+	return nil
+}
+
+type rejectingServiceActionStore struct{ Store }
+
+func (rejectingServiceActionStore) ValidateServiceAction(context.Context, int, int) error {
+	return ErrServiceUnavailable
+}
+
+func (rejectingServiceActionStore) ValidateRestartService(context.Context, int, int) error {
+	return ErrServiceUnavailable
+}
+
+type failingRestartController struct{ testControllerClient }
+
+func (failingRestartController) RestartService(context.Context, int, int) error {
+	return errors.New("runtime restart failed")
+}
+
+func TestServiceActionCooldownRefundedOnlyWhenNothingRan(t *testing.T) {
+	resetKey := rateLimitTeamChallengeKey("factory-reset", 101, 1)
+	restartKey := rateLimitTeamChallengeKey("restart", 101, 1)
+	for _, tc := range []struct {
+		name       string
+		path       string
+		store      func() Store
+		controller func(Store) controllerClient
+		wantStatus int
+		wantRefund []string
+	}{
+		{
+			name:       "factory reset rejected by validation",
+			path:       "/api/v2/services/1/reset/factory",
+			store:      func() Store { return rejectingServiceActionStore{NewMemoryStore(101)} },
+			wantStatus: 400,
+			controller: func(Store) controllerClient { return testControllerClient{} },
+			wantRefund: []string{resetKey},
+		},
+		{
+			name:       "factory reset rejected by controller preflight",
+			path:       "/api/v2/services/1/reset/factory",
+			store:      func() Store { return NewMemoryStore(101) },
+			wantStatus: 502,
+			controller: func(store Store) controllerClient {
+				return &recordingResetControllerClient{store: store, err: fmt.Errorf("%w: rejected config", errResetPreflight)}
+			},
+			wantRefund: []string{resetKey},
+		},
+		{
+			name:       "factory reset failed in runtime keeps cooldown",
+			path:       "/api/v2/services/1/reset/factory",
+			store:      func() Store { return NewMemoryStore(101) },
+			wantStatus: 502,
+			controller: func(store Store) controllerClient {
+				return &recordingResetControllerClient{store: store, err: fmt.Errorf("%w: stop failed", errResetBeforeVolume)}
+			},
+		},
+		{
+			name:       "factory reset success keeps cooldown",
+			path:       "/api/v2/services/1/reset/factory",
+			store:      func() Store { return NewMemoryStore(101) },
+			wantStatus: 200,
+			controller: func(store Store) controllerClient { return &recordingResetControllerClient{store: store} },
+		},
+		{
+			name:       "restart rejected by validation",
+			path:       "/api/v2/services/1/reset/restart",
+			store:      func() Store { return rejectingServiceActionStore{NewMemoryStore(101)} },
+			wantStatus: 400,
+			controller: func(Store) controllerClient { return testControllerClient{} },
+			wantRefund: []string{restartKey},
+		},
+		{
+			name:       "restart failed in runtime keeps cooldown",
+			path:       "/api/v2/services/1/reset/restart",
+			store:      func() Store { return NewMemoryStore(101) },
+			wantStatus: 502,
+			controller: func(Store) controllerClient { return failingRestartController{} },
+		},
+		{
+			name:       "restart success keeps cooldown",
+			path:       "/api/v2/services/1/reset/restart",
+			store:      func() Store { return NewMemoryStore(101) },
+			wantStatus: 200,
+			controller: func(Store) controllerClient { return testControllerClient{} },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.store()
+			limiter := &refundingRateLimiter{}
+			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+			NewWithDeps("dev-team-token", "dev-admin-token", 101, store, tc.controller(store), noopWireGuardClient{}).
+				WithRateLimiter(limiter).
+				RegisterRoutes(mux)
+			request := httptest.NewRequest(http.MethodPost, tc.path, nil)
+			setTestTeamAuthHeader(t, request)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d: %s", tc.wantStatus, response.Code, response.Body.String())
+			}
+			if !slices.Equal(limiter.refunds, tc.wantRefund) {
+				t.Fatalf("status %d: expected refunds %v, got %v (body %s)", response.Code, tc.wantRefund, limiter.refunds, response.Body.String())
 			}
 		})
 	}

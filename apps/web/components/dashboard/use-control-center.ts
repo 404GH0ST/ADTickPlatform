@@ -16,7 +16,19 @@ import {
   isDefaultAttackFilters,
   type AttackFilters,
 } from '@/lib/dashboard-utils';
-import { processApiResponse } from '@/lib/api-utils';
+import { PlatformAPIError, processApiResponse } from '@/lib/api-utils';
+import {
+  SERVICE_ACTION_COOLDOWN_SECONDS,
+  cooldownKey,
+  cooldownMessage,
+  factoryResetSuccessMessage,
+  parseRetryAfterSeconds,
+  remainingCooldownSeconds,
+  restartSuccessMessage,
+  type ServiceAction,
+  type ServiceActionFeedback,
+  type ServiceNotice,
+} from '@/lib/service-actions';
 
 export type ControlCenterOptions = {
   attackPage: AttackFeedPage;
@@ -60,6 +72,7 @@ export type ControlCenterState = {
   requestSSHSession: () => Promise<void>;
   resetAttackFilters: () => Promise<void>;
   resetTarget: ServiceRow | null;
+  serviceFeedback: (service: ServiceRow) => ServiceActionFeedback;
   rows: ServiceRow[];
   scoreRows: ScoreRow[];
   selectPrimaryAction: (service: ServiceRow) => void;
@@ -121,6 +134,67 @@ export function useControlCenter({
   const [issuedSession, setIssuedSession] = useState<SSHSessionData | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [serviceNotices, setServiceNotices] = useState<Record<string, ServiceNotice>>({});
+  const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const cooldownActive = Object.values(cooldownUntil).some((until) => until > now);
+
+  useEffect(() => {
+    if (!cooldownActive) {
+      return;
+    }
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [cooldownActive]);
+
+  function startCooldown(action: ServiceAction, serviceId: string, seconds: number): void {
+    const current = Date.now();
+    setNow(current);
+    setCooldownUntil((existing) => ({
+      ...existing,
+      [cooldownKey(action, serviceId)]: current + seconds * 1000,
+    }));
+  }
+
+  function setServiceNotice(serviceId: string, notice: ServiceNotice): void {
+    setServiceNotices((existing) => ({ ...existing, [serviceId]: notice }));
+  }
+
+  /**
+   * Turn a failed lifecycle request into a participant-facing message. A 429
+   * is the per-service cooldown: sync the local countdown to Retry-After.
+   */
+  function describeActionFailure(
+    action: ServiceAction,
+    serviceId: string,
+    error: unknown,
+    fallback: string,
+  ): ServiceNotice {
+    if (error instanceof PlatformAPIError && error.status === 429) {
+      const seconds = parseRetryAfterSeconds(error.retryAfter);
+      if (seconds !== null) {
+        startCooldown(action, serviceId, seconds);
+      }
+      const message =
+        error.message && !error.message.startsWith('API request to')
+          ? error.message
+          : cooldownMessage(action, seconds ?? SERVICE_ACTION_COOLDOWN_SECONDS[action]);
+      return { action, variant: 'warning', message };
+    }
+    return {
+      action,
+      variant: 'error',
+      message: error instanceof Error ? error.message : fallback,
+    };
+  }
+
+  function serviceFeedback(service: ServiceRow): ServiceActionFeedback {
+    return {
+      notice: serviceNotices[service.id] ?? null,
+      restartCooldown: remainingCooldownSeconds(cooldownUntil[cooldownKey('restart', service.id)], now),
+      resetCooldown: remainingCooldownSeconds(cooldownUntil[cooldownKey('reset', service.id)], now),
+    };
+  }
   const [attackFilters, setAttackFilters] = useState<AttackFilters>(initialAttackFilters);
   const attackPageRef = useRef<AttackFeedPage>(attackPage);
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
@@ -325,18 +399,19 @@ export function useControlCenter({
       return;
     }
 
-    setPendingAction(`reset:${resetTarget.id}`);
+    const target = resetTarget;
+    setPendingAction(`reset:${target.id}`);
     setActionError(null);
 
     try {
-      const response = await fetch(`/api/platform/services/${resetTarget.challengeId}/reset/factory`, {
+      const response = await fetch(`/api/platform/services/${target.challengeId}/reset/factory`, {
         method: 'POST',
       });
       const payload = await processApiResponse<{ unlock_preserved: boolean; penalty_points?: number }>(response, 'factory reset request');
 
       setRows((current) =>
         current.map((row) =>
-          row.id === resetTarget.id
+          row.id === target.id
             ? {
                 ...row,
                 status: 'warming',
@@ -353,11 +428,19 @@ export function useControlCenter({
             : row,
         ),
       );
-      await refreshServiceRow(resetTarget.challengeId);
+      startCooldown('reset', target.id, SERVICE_ACTION_COOLDOWN_SECONDS.reset);
+      setServiceNotice(target.id, {
+        action: 'reset',
+        variant: payload.penalty_points ? 'warning' : 'success',
+        message: factoryResetSuccessMessage(payload),
+      });
       setIssuedSession(null);
       setResetTarget(null);
+      await refreshServiceRow(target.challengeId).catch(() => undefined);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'factory reset request failed');
+      const notice = describeActionFailure('reset', target.id, error, 'factory reset request failed');
+      setActionError(notice.message);
+      setServiceNotice(target.id, notice);
     } finally {
       setPendingAction(null);
     }
@@ -372,6 +455,12 @@ export function useControlCenter({
         method: 'POST',
       });
       await processApiResponse<{ action: 'restart' }>(response, 'restart request');
+      startCooldown('restart', service.id, SERVICE_ACTION_COOLDOWN_SECONDS.restart);
+      setServiceNotice(service.id, {
+        action: 'restart',
+        variant: 'success',
+        message: restartSuccessMessage(),
+      });
 
       setRows((current) =>
         current.map((row) =>
@@ -386,9 +475,12 @@ export function useControlCenter({
             : row,
         ),
       );
-      await refreshServiceRow(service.challengeId);
+      await refreshServiceRow(service.challengeId).catch(() => undefined);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'restart request failed');
+      setServiceNotice(
+        service.id,
+        describeActionFailure('restart', service.id, error, 'restart request failed'),
+      );
     } finally {
       setPendingAction(null);
     }
@@ -429,6 +521,7 @@ export function useControlCenter({
   }
 
   function selectResetTarget(service: ServiceRow): void {
+    setActionError(null);
     setResetTarget(service);
   }
 
@@ -461,6 +554,7 @@ export function useControlCenter({
     resetAttackFilters,
     resetTarget,
     rows,
+    serviceFeedback,
     scoreRows,
     selectPrimaryAction,
     selectResetTarget,

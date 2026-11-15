@@ -1468,6 +1468,7 @@ async function handleSystemRoutes({ req, res, url, method }) {
   if (method === "POST" && url.pathname === "/__reset") {
     const body = await readJsonBody(req);
     state = createStateForScenario(body?.scenario);
+    serviceActionCooldowns.clear();
     // Close all active SSE connections so Next.js re-fetches fresh data
     for (const conn of activeSSEConnections) {
       conn.end();
@@ -1808,9 +1809,38 @@ const handleSSHSession = serviceActionRoute(
   },
 );
 
+// Mirrors the api-gateway's single-token per-service cooldown buckets.
+const serviceActionCooldowns = new Map();
+
+function rejectDuringCooldown(res, action, label, challengeID, windowSeconds) {
+  const key = `${action}:${challengeID}`;
+  const now = Date.now();
+  const until = serviceActionCooldowns.get(key) ?? 0;
+  if (until > now) {
+    const seconds = Math.max(1, Math.ceil((until - now) / 1000));
+    res.writeHead(429, {
+      "Content-Type": "application/problem+json",
+      "Retry-After": String(seconds),
+    });
+    res.end(
+      JSON.stringify({
+        title: "Cooldown active",
+        status: 429,
+        detail: `${label} is on cooldown for this service. Wait ${seconds} ${seconds === 1 ? "second" : "seconds"} before trying again.`,
+      }),
+    );
+    return true;
+  }
+  serviceActionCooldowns.set(key, now + windowSeconds * 1000);
+  return false;
+}
+
 const handleServiceRestart = serviceActionRoute(
   /^\/api\/v2\/services\/(\d+)\/reset\/restart$/,
   ({ res, challengeID, serviceState }) => {
+    if (rejectDuringCooldown(res, "restart", "Restart", challengeID, 30)) {
+      return true;
+    }
     serviceState.status = "warming";
     serviceState.checker = "warning";
     serviceState.last_event = "service restart triggered via participant API";
@@ -1827,6 +1857,9 @@ const handleServiceRestart = serviceActionRoute(
 const handleFactoryReset = serviceActionRoute(
   /^\/api\/v2\/services\/(\d+)\/reset\/factory$/,
   ({ res, challengeID, serviceState }) => {
+    if (rejectDuringCooldown(res, "reset", "Factory reset", challengeID, 90)) {
+      return true;
+    }
     serviceState.status = "warming";
     serviceState.checker = "warning";
     serviceState.unlocked = true;

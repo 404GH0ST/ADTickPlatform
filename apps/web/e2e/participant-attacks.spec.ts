@@ -229,13 +229,23 @@ test("accepted enemy flag opens SSH before restart and factory reset", async ({
   ).toBeVisible();
   await sshDialog.getByRole("button", { name: "Close" }).first().click();
 
-  await serviceCard.getByRole("button", { name: "Restart" }).click();
+  const actionNotice = serviceCard.getByTestId(/^service-action-notice-/);
+  const restartButton = serviceCard.getByRole("button", { name: /^Restart/ });
+
+  await restartButton.click();
   await expect(
     serviceCard.getByText("service restart triggered via participant API"),
   ).toBeVisible();
-  await expect(serviceCard.getByText("restart requested")).toBeVisible();
+  await expect(actionNotice).toContainText("Restart complete");
+  await expect(actionNotice).toContainText("patches kept");
+  await expect(serviceCard.getByText(/^restart cooldown: \d+s$/)).toBeVisible();
 
-  await serviceCard.getByRole("button", { name: "Factory Reset" }).click();
+  await restartButton.click();
+  await expect(actionNotice).toContainText(
+    /Restart is on cooldown for this service\. Wait \d+ seconds? before trying again\./,
+  );
+
+  await serviceCard.getByRole("button", { name: /^Factory Reset/ }).click();
   const resetDialog = page.getByRole("dialog", {
     name: "Factory Reset Service",
   });
@@ -244,6 +254,17 @@ test("accepted enemy flag opens SSH before restart and factory reset", async ({
   await expect(
     serviceCard.getByText("factory reset triggered via participant API"),
   ).toBeVisible();
-  await expect(serviceCard.getByText("cooldown: 90s")).toBeVisible();
+  await expect(actionNotice).toContainText("Factory reset complete");
+  await expect(actionNotice).toContainText("baseline image");
+  await expect(serviceCard.getByText(/factory reset cooldown: \d+s/)).toBeVisible();
   await expect(serviceCard.getByText("unlocked", { exact: true })).toBeVisible();
+
+  await serviceCard.getByRole("button", { name: /^Factory Reset/ }).click();
+  await expect(
+    resetDialog.getByText(/Factory reset is on cooldown for this service\. Wait \d+ seconds/),
+  ).toBeVisible();
+  await resetDialog.getByRole("button", { name: "Confirm Reset" }).click();
+  await expect(
+    resetDialog.getByText(/Factory reset is on cooldown for this service\. Wait \d+ seconds/),
+  ).toBeVisible();
 });

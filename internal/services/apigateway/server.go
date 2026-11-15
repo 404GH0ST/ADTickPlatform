@@ -1180,25 +1180,32 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamChallengeKey("factory-reset", teamID, challengeID), factoryResetRateLimitPolicy)
+	cooldownKey := rateLimitTeamChallengeKey("factory-reset", teamID, challengeID)
+	decision, allowed := s.allowRateLimit(r.Context(), cooldownKey, factoryResetRateLimitPolicy)
 	if !allowed {
-		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		writeCooldownFailure(w, decision, "Factory reset")
 		return
 	}
+	// Until preparation commits, a rejection has changed nothing, so it must
+	// not start the cooldown.
+	refundCooldown := func() { s.refundRateLimit(r.Context(), cooldownKey, factoryResetRateLimitPolicy) }
 	operationCtx, operationCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 	defer operationCancel()
 	unlockLifecycle, err := s.store.LockServiceLifecycle(operationCtx, teamID, challengeID)
 	if err != nil {
+		refundCooldown()
 		writeStoreFailure(w, err)
 		return
 	}
 	defer unlockLifecycle()
 	if err := s.store.ValidateServiceAction(operationCtx, teamID, challengeID); err != nil {
+		refundCooldown()
 		writeDomainFailure(w, err)
 		return
 	}
 	prepared, err := s.store.PrepareFactoryResetService(operationCtx, teamID, challengeID)
 	if err != nil {
+		refundCooldown()
 		writeDomainFailure(w, err)
 		return
 	}
@@ -1217,6 +1224,10 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, errResetBeforeVolume) {
 				_ = s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID)
+			} else {
+				// The controller rejected the reset before touching the runtime
+				// and preparation was rolled back: nothing happened.
+				refundCooldown()
 			}
 		} else if markErr := s.store.MarkFactoryResetFailure(failureCtx, teamID, challengeID); markErr != nil {
 			log.Printf("factory reset failure state update failed for team %d challenge %d: %v", teamID, challengeID, markErr)
@@ -1288,18 +1299,24 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamChallengeKey("restart", teamID, challengeID), restartRateLimitPolicy)
+	cooldownKey := rateLimitTeamChallengeKey("restart", teamID, challengeID)
+	decision, allowed := s.allowRateLimit(r.Context(), cooldownKey, restartRateLimitPolicy)
 	if !allowed {
-		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		writeCooldownFailure(w, decision, "Restart")
 		return
 	}
+	// A rejection before the runtime restart has changed nothing, so it must
+	// not start the cooldown.
+	refundCooldown := func() { s.refundRateLimit(r.Context(), cooldownKey, restartRateLimitPolicy) }
 	unlockLifecycle, err := s.store.LockServiceLifecycle(r.Context(), teamID, challengeID)
 	if err != nil {
+		refundCooldown()
 		writeStoreFailure(w, err)
 		return
 	}
 	defer unlockLifecycle()
 	if err := s.store.ValidateRestartService(r.Context(), teamID, challengeID); err != nil {
+		refundCooldown()
 		writeDomainFailure(w, err)
 		return
 	}
