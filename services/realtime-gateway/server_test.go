@@ -498,3 +498,37 @@ func (r *safeRecorder) BodyString() string {
 	defer r.mu.Unlock()
 	return r.ResponseRecorder.Body.String()
 }
+
+// orderedFeedClient's public scoreboard only completes once the attack feed
+// has been fetched, so it deadlocks (until its timeout) under sequential sync.
+type orderedFeedClient struct {
+	testSnapshotClient
+	attacksFetched chan struct{}
+	once           sync.Once
+}
+
+func (c *orderedFeedClient) Scoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
+	select {
+	case <-c.attacksFetched:
+		return c.testSnapshotClient.Scoreboard(ctx)
+	case <-time.After(2 * time.Second):
+		return nil, context.DeadlineExceeded
+	}
+}
+
+func (c *orderedFeedClient) Attacks(ctx context.Context) (apigateway.AttackFeedPage, error) {
+	c.once.Do(func() { close(c.attacksFetched) })
+	return c.testSnapshotClient.Attacks(ctx)
+}
+
+func TestSyncDoesNotHoldFeedsBehindASlowScoreboard(t *testing.T) {
+	client := &orderedFeedClient{attacksFetched: make(chan struct{})}
+	gateway := newRealtimeGateway(client, time.Second, "dev-admin-token")
+	started := time.Now()
+	if err := gateway.syncOnce(context.Background()); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("attack feed waited behind the scoreboard: sync took %s", elapsed)
+	}
+}

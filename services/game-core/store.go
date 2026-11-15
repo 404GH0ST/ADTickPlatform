@@ -2004,111 +2004,66 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	teamCount := len(teams)
 	slaFactor := faustSLAFactor(teamCount)
 
+	// Each component is one aggregate grouped both by (team, challenge) and by
+	// team. The two groupings read the same rows, so team totals equal the sum
+	// of their service rows and every expensive join runs once per build.
+	//
 	// submitted_flags has no FK to issued_flags: deleting a team or challenge
 	// cascades its issued flags but leaves captures behind. Count only captures
-	// of flags that still exist, matching the per-service breakdown and the
-	// defense side, so totals equal the sum of their service rows.
-	attackByTeam, err := s.sumFloatByTeam(ctx, `
-		SELECT ranked.team_id,
-		       COALESCE(SUM(1.0 + (1.0 / ranked.capture_count)), 0.0)
-		FROM (
-			SELECT
-				sf.flag,
-				sf.team_id,
-				COUNT(*) OVER (PARTITION BY sf.flag) AS capture_count
-			FROM submitted_flags sf
-			JOIN issued_flags f ON f.flag = sf.flag
-		) ranked
-		GROUP BY ranked.team_id
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defenseByTeam, err := s.sumFloatByTeam(ctx, `
-		SELECT
-			f.owner_team_id,
-			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END + COALESCE(losses.penalty_points,0.0)), 0.0)
-		FROM issued_flags f
-        LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
-		LEFT JOIN (
+	// of flags that still exist, matching the defense side.
+	attackByTeam, attackByTeamService, err := s.sumFloatByTeamWithChallenges(ctx, `
+		WITH capture_counts AS (
 			SELECT flag, COUNT(*) AS capture_count
 			FROM submitted_flags
 			GROUP BY flag
-		) captures ON captures.flag = f.flag
-		GROUP BY f.owner_team_id
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	slaByTeam, err := s.sumFloatByTeam(ctx, `
-		SELECT states.team_id,
-		       COALESCE(SUM(
-			       CASE
-			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
-                   WHEN states.service_state = 'ok' THEN 1.0
-			           WHEN states.service_state = 'recovering' THEN 0.5
-			           ELSE 0.0
-			       END
-		       ) * $1, 0.0)
-		FROM checker_service_states states
-		GROUP BY states.team_id
-	`, slaFactor)
-	if err != nil {
-		return nil, err
-	}
-
-	attackByTeamService, err := s.sumFloatByTeamAndChallenge(ctx, `
-		SELECT ranked.team_id,
+		)
+		SELECT sf.team_id,
 		       f.challenge_id,
-		       COALESCE(SUM(1.0 + (1.0 / ranked.capture_count)), 0.0)
-		FROM (
-			SELECT
-				sf.flag,
-				sf.team_id,
-				COUNT(*) OVER (PARTITION BY sf.flag) AS capture_count
-			FROM submitted_flags sf
-		) ranked
-		JOIN issued_flags f ON f.flag = ranked.flag
-		GROUP BY ranked.team_id, f.challenge_id
+		       GROUPING(f.challenge_id),
+		       COALESCE(SUM(1.0 + (1.0 / captures.capture_count)), 0.0)
+		FROM submitted_flags sf
+		JOIN capture_counts captures ON captures.flag = sf.flag
+		JOIN issued_flags f ON f.flag = sf.flag
+		GROUP BY GROUPING SETS ((sf.team_id, f.challenge_id), (sf.team_id))
 	`)
 	if err != nil {
 		return nil, err
 	}
 
-	slaByTeamService, err := s.sumFloatByTeamAndChallenge(ctx, `
-		SELECT states.team_id,
-		       states.challenge_id,
-		       COALESCE(SUM(
-			       CASE
-			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
-                   WHEN states.service_state = 'ok' THEN 1.0
-			           WHEN states.service_state = 'recovering' THEN 0.5
-			           ELSE 0.0
-			       END
-		       ) * $1, 0.0)
-		FROM checker_service_states states
-		GROUP BY states.team_id, states.challenge_id
-	`, slaFactor)
-	if err != nil {
-		return nil, err
-	}
-
-	defenseByTeamService, err := s.sumFloatByTeamAndChallenge(ctx, `
+	defenseByTeam, defenseByTeamService, err := s.sumFloatByTeamWithChallenges(ctx, `
 		SELECT
 			f.owner_team_id,
 			f.challenge_id,
+			GROUPING(f.challenge_id),
 			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END + COALESCE(losses.penalty_points,0.0)), 0.0)
 		FROM issued_flags f
-        LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
+		LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count
 			FROM submitted_flags
 			GROUP BY flag
 		) captures ON captures.flag = f.flag
-		GROUP BY f.owner_team_id, f.challenge_id
+		GROUP BY GROUPING SETS ((f.owner_team_id, f.challenge_id), (f.owner_team_id))
 	`)
+	if err != nil {
+		return nil, err
+	}
+
+	slaByTeam, slaByTeamService, err := s.sumFloatByTeamWithChallenges(ctx, `
+		SELECT states.team_id,
+		       states.challenge_id,
+		       GROUPING(states.challenge_id),
+		       COALESCE(SUM(
+			       CASE
+			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
+			           WHEN states.service_state = 'ok' THEN 1.0
+			           WHEN states.service_state = 'recovering' THEN 0.5
+			           ELSE 0.0
+			       END
+		       ) * $1, 0.0)
+		FROM checker_service_states states
+		GROUP BY GROUPING SETS ((states.team_id, states.challenge_id), (states.team_id))
+	`, slaFactor)
 	if err != nil {
 		return nil, err
 	}
@@ -2558,45 +2513,36 @@ func (s teamScoreSnapshot) Total() float64 {
 	return s.Attack + s.Defense + s.SLA
 }
 
-func (s *postgresGameStore) sumFloatByTeam(ctx context.Context, query string, args ...any) (map[int]float64, error) {
+// sumFloatByTeamWithChallenges scans an aggregate grouped by
+// GROUPING SETS ((team, challenge), (team)) whose columns are team_id,
+// challenge_id, GROUPING(challenge_id) and the summed value. Team-only rows
+// (GROUPING = 1) are team totals.
+func (s *postgresGameStore) sumFloatByTeamWithChallenges(ctx context.Context, query string, args ...any) (map[int]float64, map[int]map[int]float64, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
-	result := make(map[int]float64)
+	byTeam := make(map[int]float64)
+	byTeamAndChallenge := make(map[int]map[int]float64)
 	for rows.Next() {
-		var teamID int
+		var teamID, teamTotal int
+		var challengeID sql.NullInt64
 		var value float64
-		if err := rows.Scan(&teamID, &value); err != nil {
-			return nil, err
+		if err := rows.Scan(&teamID, &challengeID, &teamTotal, &value); err != nil {
+			return nil, nil, err
 		}
-		result[teamID] = value
-	}
-	return result, rows.Err()
-}
-
-func (s *postgresGameStore) sumFloatByTeamAndChallenge(ctx context.Context, query string, args ...any) (map[int]map[int]float64, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	result := make(map[int]map[int]float64)
-	for rows.Next() {
-		var teamID, challengeID int
-		var value float64
-		if err := rows.Scan(&teamID, &challengeID, &value); err != nil {
-			return nil, err
+		if teamTotal == 1 {
+			byTeam[teamID] = value
+			continue
 		}
-		if _, ok := result[teamID]; !ok {
-			result[teamID] = make(map[int]float64)
+		if _, ok := byTeamAndChallenge[teamID]; !ok {
+			byTeamAndChallenge[teamID] = make(map[int]float64)
 		}
-		result[teamID][challengeID] = value
+		byTeamAndChallenge[teamID][int(challengeID.Int64)] = value
 	}
-	return result, rows.Err()
+	return byTeam, byTeamAndChallenge, rows.Err()
 }
 
 func acceptedSubmissionKey(flag string, teamID int) string {

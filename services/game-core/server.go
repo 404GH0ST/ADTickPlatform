@@ -19,37 +19,41 @@ import (
 )
 
 type gameCoreServer struct {
-	adminToken           string
-	store                gameStore
-	checker              checkerClient
-	accessReconcile      accessReconcileClient
-	flags                flagCodec
-	flagsMu              sync.RWMutex
-	tickMu               sync.Mutex
-	retentionLocks       sync.Map
-	scheduler            gameScheduler
-	checkerPhases        []string
-	checkerTimeout       int
-	checkerParallelism   int
-	tickTimeout          time.Duration
-	scoringDebounce      time.Duration
-	scoringRetryDelay    time.Duration
-	scoringTimeout       time.Duration
-	scoringMu            sync.Mutex
-	scoringTimer         *time.Timer
-	scoringStatus        scoringRecomputeStatus
-	matchStartAt         *time.Time
-	matchEndAt           *time.Time
-	warmupRequired       bool
-	warmupTimeout        time.Duration
-	warmupMinSuccess     float64
-	warmupPutRetries     int
-	warmupPutRetryDelay  time.Duration
-	warmupMu             sync.RWMutex
-	warmupInFlight       bool
-	lastWarmup           apigateway.GameWarmupResult
-	autoTickOnMatchStart bool
-	now                  func() time.Time
+	adminToken         string
+	store              gameStore
+	checker            checkerClient
+	accessReconcile    accessReconcileClient
+	flags              flagCodec
+	flagsMu            sync.RWMutex
+	tickMu             sync.Mutex
+	retentionLocks     sync.Map
+	scheduler          gameScheduler
+	checkerPhases      []string
+	checkerTimeout     int
+	checkerParallelism int
+	tickTimeout        time.Duration
+	scoringDebounce    time.Duration
+	scoringRetryDelay  time.Duration
+	scoringTimeout     time.Duration
+	scoringMu          sync.Mutex
+	scoringTimer       *time.Timer
+	scoringStatus      scoringRecomputeStatus
+	// Concurrent live scoreboard reads share one build (scoreboard_reads.go).
+	liveScoreboardMu         sync.Mutex
+	liveScoreboardGeneration uint64
+	liveScoreboardBuild      *liveScoreboardBuild
+	matchStartAt             *time.Time
+	matchEndAt               *time.Time
+	warmupRequired           bool
+	warmupTimeout            time.Duration
+	warmupMinSuccess         float64
+	warmupPutRetries         int
+	warmupPutRetryDelay      time.Duration
+	warmupMu                 sync.RWMutex
+	warmupInFlight           bool
+	lastWarmup               apigateway.GameWarmupResult
+	autoTickOnMatchStart     bool
+	now                      func() time.Time
 
 	// finalRetentionSweepBudget caps the forced sweep run by a match stop.
 	finalRetentionSweepBudget time.Duration
@@ -604,7 +608,7 @@ func (s *gameCoreServer) handleScoreboard(w http.ResponseWriter, r *http.Request
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	rows, err := s.store.ListScoreboard(r.Context())
+	rows, err := s.liveScoreboard(r.Context())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Scoreboard unavailable", err.Error())
 		return
@@ -972,6 +976,7 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 	if err != nil {
 		return apigateway.GameTickStatus{}, err
 	}
+	s.invalidateLiveScoreboard()
 	if _, err := s.store.RecomputeScoreboard(persistCtx); err != nil {
 		return apigateway.GameTickStatus{}, err
 	}
@@ -1611,6 +1616,8 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 }
 
 func (s *gameCoreServer) scheduleScoreboardRecompute() {
+	// Every caller has just committed a score change.
+	s.invalidateLiveScoreboard()
 	s.scoringMu.Lock()
 	defer s.scoringMu.Unlock()
 

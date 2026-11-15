@@ -118,26 +118,41 @@ func (g *realtimeGateway) Run(ctx context.Context) {
 }
 
 func (g *realtimeGateway) syncOnce(ctx context.Context) error {
-	var errs []string
-
-	if err := g.syncKind(ctx, streamScoreboard); err != nil {
-		errs = append(errs, "scoreboard sync failed: "+err.Error())
+	type syncJob struct {
+		kind  streamKind
+		label string
 	}
-	if err := g.syncKind(ctx, streamAttacks); err != nil {
-		errs = append(errs, "attack sync failed: "+err.Error())
+	jobs := []syncJob{
+		{streamScoreboard, "scoreboard"},
+		{streamAttacks, "attack"},
 	}
 	if g.adminToken != "" {
-		if err := g.syncKind(ctx, streamAdminScoreboard); err != nil {
-			errs = append(errs, "admin scoreboard sync failed: "+err.Error())
-		}
-		if err := g.syncKind(ctx, streamGameStatus); err != nil {
-			errs = append(errs, "game status sync failed: "+err.Error())
-		}
-		if err := g.syncKind(ctx, streamSchedulerEvents); err != nil {
-			errs = append(errs, "scheduler events sync failed: "+err.Error())
-		}
-		if err := g.syncKind(ctx, streamCheckerRuns); err != nil {
-			errs = append(errs, "checker runs sync failed: "+err.Error())
+		jobs = append(jobs,
+			syncJob{streamAdminScoreboard, "admin scoreboard"},
+			syncJob{streamGameStatus, "game status"},
+			syncJob{streamSchedulerEvents, "scheduler events"},
+			syncJob{streamCheckerRuns, "checker runs"},
+		)
+	}
+
+	// Feeds sync concurrently: a slow scoreboard build must not hold back the
+	// attack stream, and the public and admin boards reach game-core together
+	// so it serves both from one build.
+	results := make([]error, len(jobs))
+	var wg sync.WaitGroup
+	for index, job := range jobs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[index] = g.syncKind(ctx, job.kind)
+		}()
+	}
+	wg.Wait()
+
+	var errs []string
+	for index, err := range results {
+		if err != nil {
+			errs = append(errs, jobs[index].label+" sync failed: "+err.Error())
 		}
 	}
 
