@@ -25,7 +25,7 @@ test("participant services page stays readable without horizontal overflow on mo
 
   const actionBar = page
     .getByTestId("service-card-svc-1")
-    .getByRole("button", { name: "Unlock Service" })
+    .getByRole("button", { name: "SSH Locked" })
     .locator("..");
   await expectNoHorizontalOverflow(actionBar);
 });

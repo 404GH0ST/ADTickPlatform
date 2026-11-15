@@ -233,17 +233,6 @@ expect_problem \
   "${EDGE_BASE_URL}/api/v2/services/${locked_challenge_id}/ssh-session"
 echo "locked service ssh denied"
 
-expect_problem \
-  "invalid unlock proof" \
-  "400" \
-  "unlock proof is invalid." \
-  -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
-  -H 'Content-Type: application/json' \
-  -d '{"proof":"definitely-not-valid"}' \
-  "${EDGE_BASE_URL}/api/v2/services/${locked_challenge_id}/unlock"
-echo "invalid unlock proof denied"
-
 draft_challenge_body="$(
   source_bundle_path="$(
     curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -273,17 +262,6 @@ expect_problem \
   -H "Authorization: Bearer ${participant_token}" \
   "${EDGE_BASE_URL}/api/v2/challenges/${DRAFT_CHALLENGE_ID}/source"
 echo "draft source denied"
-
-expect_problem \
-  "draft service unlock" \
-  "400" \
-  "challenge id is invalid." \
-  -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
-  -H 'Content-Type: application/json' \
-  -d '{"proof":"definitely-not-valid"}' \
-  "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/unlock"
-echo "draft service unlock denied"
 
 expect_problem \
   "draft service ssh" \
@@ -347,17 +325,6 @@ queued_state="$(
     jq -r --argjson challenge_id "${QUEUED_CHALLENGE_ID}" 'first(.[] | select(.challenge_id == $challenge_id) | .reset_cooldown) // ""'
 )"
 if [[ "${queued_state}" == "deploying" ]]; then
-  expect_problem \
-    "queued service unlock" \
-    "400" \
-    "service is not available yet." \
-    -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
-    -H 'Content-Type: application/json' \
-    -d '{"proof":"definitely-not-valid"}' \
-    "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/unlock"
-  echo "queued service unlock denied"
-
   expect_problem \
     "queued service ssh" \
     "400" \

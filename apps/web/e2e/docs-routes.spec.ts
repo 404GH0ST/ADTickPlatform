@@ -63,7 +63,8 @@ test("raw OpenAPI YAML route serves the participant spec", async ({
   const body = await response.text();
   expect(body).toContain("openapi:");
   expect(body).toContain("/api/v2/authenticate");
-  expect(body).toContain("/api/v2/services/{challenge_id}/unlock");
+  expect(body).toContain("/api/v2/services/{challenge_id}/ssh-session");
+  expect(body).not.toContain("/api/v2/services/{challenge_id}/unlock");
 });
 
 test("legacy platform manual route redirects to the participant manual", async ({

@@ -145,14 +145,6 @@ if [[ "${team_services_429_seen}" -ne 1 ]]; then
 fi
 echo "team/services rate limit triggered"
 
-if [[ -z "${team_services_body}" ]]; then
-  team_services_body="$(
-    curl -fsS -H "Authorization: Bearer ${participant_token}" "${EDGE_BASE_URL}/api/v2/team/services"
-  )"
-fi
-locked_challenge_id="$(printf '%s' "${team_services_body}" | jq -er 'first(.[] | select(.unlocked == false) | .challenge_id)')"
-echo "using locked challenge_id=${locked_challenge_id}"
-
 draft_challenge_body="$(
   source_bundle_path="$(
     curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
@@ -174,33 +166,6 @@ draft_challenge_response="$(
 )"
 RATE_LIMIT_DRAFT_CHALLENGE_ID="$(printf '%s' "${draft_challenge_response}" | jq -er '.id')"
 echo "created rate-limit draft challenge id=${RATE_LIMIT_DRAFT_CHALLENGE_ID}"
-
-unlock_429_seen=0
-for attempt in 1 2 3 4 5 6 7 8 9 10 11; do
-  response="$(http_status_body \
-    -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
-    -H 'Content-Type: application/json' \
-    -d '{"proof":"definitely-not-valid"}' \
-    "${EDGE_BASE_URL}/api/v2/services/${locked_challenge_id}/unlock")"
-  status="$(printf '%s\n' "${response}" | sed -n '1p')"
-  body="$(printf '%s\n' "${response}" | tail -n +2)"
-  if [[ "${status}" == "400" ]]; then
-    continue
-  fi
-  if [[ "${status}" == "429" ]]; then
-    unlock_429_seen=1
-    break
-  fi
-  echo "unlock attempt ${attempt} failed with unexpected status ${status}" >&2
-  printf '%s\n' "${body}" >&2
-  exit 1
-done
-if [[ "${unlock_429_seen}" -ne 1 ]]; then
-  echo "unlock rate limit did not trigger within 11 attempts" >&2
-  exit 1
-fi
-echo "unlock rate limit triggered"
 
 ssh_429_seen=0
 for attempt in 1 2 3 4 5 6 7; do

@@ -117,7 +117,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/attacks", s.handleAttacks)
 	mux.HandleFunc("GET /api/v2/team/services", s.handleTeamServices)
 	mux.HandleFunc("POST /api/v2/submit", s.handleSubmit)
-	mux.HandleFunc("POST /api/v2/services/{challenge_id}/unlock", s.handleUnlock)
 	mux.HandleFunc("POST /api/v2/services/{challenge_id}/ssh-session", s.handleSSHSession)
 	mux.HandleFunc("POST /api/v2/services/{challenge_id}/reset/factory", s.handleFactoryReset)
 	mux.HandleFunc("POST /api/v2/services/{challenge_id}/reset/restart", s.handleRestart)
@@ -1126,67 +1125,6 @@ func matchSubmissionState(match *GameMatchStatus) string {
 		}
 	}
 	return "not_started"
-}
-
-func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
-	teamID, ok := s.requireTeamAuth(w, r, "please authenticate before unlock.")
-	if !ok {
-		return
-	}
-	challengeID, ok := parseChallengeID(w, r)
-	if !ok {
-		return
-	}
-	if err := s.store.ValidateServiceAction(r.Context(), teamID, challengeID); err != nil {
-		writeDomainFailure(w, err)
-		return
-	}
-
-	decision, allowed := s.allowRateLimit(r.Context(), rateLimitTeamChallengeKey("unlock", teamID, challengeID), unlockRateLimitPolicy)
-	if !allowed {
-		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
-		return
-	}
-
-	// Legacy endpoint only retries access for an existing capture-based grant.
-	// Client-supplied proofs can no longer grant SSH access.
-	states, err := s.store.ListTeamServices(r.Context(), teamID)
-	if err != nil {
-		writeStoreFailure(w, err)
-		return
-	}
-	unlocked := false
-	for _, state := range states {
-		if state.ChallengeID == challengeID {
-			unlocked = state.Unlocked
-		}
-	}
-	if !unlocked {
-		writeProblem(w, http.StatusBadRequest, "SSH locked", "submit a correct enemy flag for this challenge to unlock SSH automatically.")
-		return
-	}
-
-	data, err := s.store.UnlockService(r.Context(), teamID, challengeID)
-	if err != nil {
-		writeDomainFailure(w, err)
-		return
-	}
-	if err := s.controller.ReconcileServiceAccess(r.Context(), teamID, challengeID); err != nil {
-		writeProblem(w, http.StatusBadGateway, "Unlock unavailable", "service unlock access reconcile failed.")
-		return
-	}
-	password := stableRootPassword(s.sshCredentialSecret, teamID, challengeID)
-	if err := s.controller.ApplySSHCredential(r.Context(), teamID, challengeID, ControllerSSHCredential{
-		Password: password,
-	}); err != nil {
-		_ = s.store.MarkSSHSessionApplyFailure(r.Context(), teamID, challengeID)
-		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "ssh credential runtime apply failed.")
-		return
-	}
-	s.recordTeamAudit(r.Context(), teamID, "service.unlock", "service", auditServiceTarget(teamID, challengeID), "unlocked service", map[string]any{
-		"challenge_id": challengeID,
-	})
-	writeData(w, http.StatusOK, data)
 }
 
 func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {

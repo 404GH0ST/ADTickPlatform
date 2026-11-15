@@ -5,7 +5,7 @@ info:
   summary: Participant-facing API for attack-defense automation
   description: >
     Participant API for authentication, player registration, team join, target
-    discovery, whitebox source download, flag submission, service unlock, SSH
+    discovery, whitebox source download, flag submission, SSH
     access, and service recovery workflows.
 servers:
   - url: https://10.0.2.3
@@ -682,60 +682,6 @@ paths:
                     title: Forbidden
                     status: 403
                     detail: please authenticate before access.
-  /api/v2/services/{challenge_id}/unlock:
-    post:
-      tags:
-        - Services
-      summary: Retry existing SSH access grant
-      description: SSH unlocks automatically after an accepted enemy flag on the same challenge. This legacy endpoint retries an existing grant; proofs cannot authorize access.
-      operationId: unlockService
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/ChallengeId'
-      responses:
-        '200':
-          description: Service unlock accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UnlockData'
-              examples:
-                default:
-                  value:
-                    challenge_id: 1
-                    team_id: 101
-                    unlocked: true
-        '400':
-          description: Invalid unlock request
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
-              examples:
-                invalidProof:
-                  value:
-                    title: Request rejected
-                    status: 400
-                    detail: submit a correct enemy flag for this challenge to unlock SSH automatically.
-        '403':
-          description: Authentication required
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
-              examples:
-                unauthenticated:
-                  value:
-                    title: Forbidden
-                    status: 403
-                    detail: please authenticate before unlock.
-        '429':
-          description: Unlock rate limited
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetails'
   /api/v2/services/{challenge_id}/ssh-session:
     post:
       tags:
@@ -1330,22 +1276,6 @@ components:
           minimum: 0
         sla_message:
           type: string
-    UnlockData:
-      type: object
-      additionalProperties: false
-      required:
-        - challenge_id
-        - team_id
-        - unlocked
-      properties:
-        challenge_id:
-          type: integer
-          minimum: 1
-        team_id:
-          type: integer
-          minimum: 1
-        unlocked:
-          type: boolean
     SshSessionData:
       type: object
       additionalProperties: false

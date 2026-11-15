@@ -130,12 +130,6 @@ import {
 
 export { PlatformAPIError } from "./api-utils";
 
-type UnlockResponseData = {
-  challenge_id: number;
-  team_id: number;
-  unlocked: boolean;
-};
-
 type SSHSessionResponseData = {
   challenge_id: number;
   host: string;
@@ -514,15 +508,6 @@ export async function listAttackFeed(query: AttackFeedQuery = { limit: 12 }) {
 
 export async function listTeamServices() {
   return participantFetch<TeamServiceState[]>("/api/v2/team/services");
-}
-
-export async function unlockService(challengeID: number) {
-  return participantFetch<UnlockResponseData>(
-    `/api/v2/services/${challengeID}/unlock`,
-    {
-      method: "POST",
-    },
-  );
 }
 
 export async function createSSHSession(challengeID: number) {

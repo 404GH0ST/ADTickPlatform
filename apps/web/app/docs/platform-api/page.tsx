@@ -55,7 +55,7 @@ export default async function ParticipantSwaggerPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>This page covers the participant API only.</p>
-              <p>Use it for target discovery, submission, unlock, SSH session, and reset flows.</p>
+              <p>Use it for target discovery, submission, SSH session, and reset flows.</p>
               <p>The OpenAPI source is the same YAML served at <code>/docs/platform-api-v2.openapi.yaml</code>.</p>
               <p>Swagger UI assets load from a CDN at runtime. If that CDN is blocked, use the raw YAML route instead.</p>
             </CardContent>

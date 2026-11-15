@@ -110,7 +110,6 @@ const participantOwnedApiCases: ApiCase[] = [
   { method: "POST", path: "/api/platform/services/1/ssh-session" },
   { method: "POST", path: "/api/platform/services/1/reset/factory" },
   { method: "POST", path: "/api/platform/services/1/reset/restart" },
-  { method: "POST", path: "/api/platform/services/1/unlock", data: { proof: "bad" } },
 ];
 
 async function loginAsParticipant(page: Page) {

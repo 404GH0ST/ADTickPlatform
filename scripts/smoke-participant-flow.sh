@@ -9,14 +9,12 @@ load_env_file_override "${ROOT_DIR}/.runtime/backend-stack.env"
 
 require_bin curl
 require_bin jq
-require_bin openssl
 
 API_URL="${AD_PLATFORM_API_URL:-http://127.0.0.1:8080}"
 EMAIL="${AD_PLATFORM_EMAIL:-alpha.captain@example.com}"
 PASSWORD="${AD_PLATFORM_PASSWORD:-alpha-secret}"
 TEAM_ID="${AD_PLATFORM_TEAM_ID:-101}"
 REQUESTED_CHALLENGE_ID="${SMOKE_CHALLENGE_ID:-}"
-UNLOCK_SECRET="${UNLOCK_PROOF_SECRET:-dev-unlock-secret}"
 
 auth_payload="$(jq -nc --arg email "${EMAIL}" --arg password "${PASSWORD}" '{email:$email,password:$password}')"
 token="$(
@@ -39,13 +37,6 @@ if [[ -z "${CHALLENGE_ID}" ]]; then
   )"
 fi
 
-proof_digest="$(
-  printf '%s:%s' "${CHALLENGE_ID}" "${TEAM_ID}" |
-    openssl dgst -sha256 -hmac "${UNLOCK_SECRET}" -hex |
-    awk '{print $2}'
-)"
-unlock_proof="ADU1.${CHALLENGE_ID}.${TEAM_ID}.${proof_digest}"
-
 echo "participant smoke: api=${API_URL} team_id=${TEAM_ID} challenge_id=${CHALLENGE_ID}"
 
 echo "authenticate:"
@@ -60,14 +51,6 @@ curl -fsS "${API_URL}/api/v2/scoreboard" | jq -c 'map({rank,team,total})'
 echo "team services before:"
 printf '%s\n' "${team_services_json}" |
   jq -c --argjson challenge_id "${CHALLENGE_ID}" 'map(select(.challenge_id == $challenge_id))'
-
-echo "unlock:"
-unlock_payload="$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')"
-curl -fsS -X POST "${API_URL}/api/v2/services/${CHALLENGE_ID}/unlock" \
-  -H "Authorization: Bearer ${token}" \
-  -H 'Content-Type: application/json' \
-  -d "${unlock_payload}" |
-  jq -c '{challenge_id,team_id,unlocked}'
 
 echo "ssh session:"
 curl -fsS -X POST "${API_URL}/api/v2/services/${CHALLENGE_ID}/ssh-session" \

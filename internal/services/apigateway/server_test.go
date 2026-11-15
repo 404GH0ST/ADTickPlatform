@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"adplatform/internal/platform/httpapi"
-	"adplatform/internal/platform/unlockproof"
 )
 
 type testControllerClient struct {
@@ -1127,10 +1126,6 @@ func newTestMuxWithLimiter(limiter rateLimiter) *http.ServeMux {
 	server.WithRateLimiter(limiter)
 	server.RegisterRoutes(mux)
 	return mux
-}
-
-func testUnlockProof(teamID, challengeID int) string {
-	return unlockproof.Issue("dev-team-token", teamID, challengeID, 1)
 }
 
 func findServiceStateForTest(t *testing.T, services []serviceState, challengeID int) serviceState {
@@ -2324,7 +2319,6 @@ func TestTeamRoutesRejectUnauthenticatedAndAdminCallers(t *testing.T) {
 		{http.MethodGet, "/api/v2/services", ""},
 		{http.MethodGet, "/api/v2/team/services", ""},
 		{http.MethodPost, "/api/v2/submit", `{"flags":["FLAGv1.demo"]}`},
-		{http.MethodPost, "/api/v2/services/1/unlock", `{"proof":"bad"}`},
 		{http.MethodPost, "/api/v2/services/1/ssh-session", `{}`},
 		{http.MethodPost, "/api/v2/services/1/reset/factory", `{}`},
 		{http.MethodPost, "/api/v2/services/1/reset/restart", `{}`},
@@ -2833,28 +2827,22 @@ func TestAttacksSupportsTickRangeFilters(t *testing.T) {
 	}
 }
 
-func TestUnlockProofCannotBypassCaptureRequirement(t *testing.T) {
-	mux := newTestMux()
+// SSH unlocks only through an accepted enemy flag; the legacy proof-based
+// unlock endpoint is removed and SSH Access (/ssh-session) is the retry path.
+func TestLegacyUnlockEndpointIsRemoved(t *testing.T) {
+	mux := newTestMuxWithCaptureGrant(t)
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 2)+`"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"anything"}`))
 	setTestTeamAuthHeader(t, request)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", response.Code)
-	}
-
-	var payload httpapi.ProblemDetails
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode unlock response: %v", err)
-	}
-	if payload.Detail != "submit a correct enemy flag for this challenge to unlock SSH automatically." {
-		t.Fatalf("unexpected unlock message %q", payload.Detail)
+	if response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected legacy unlock route to be gone, got %d: %s", response.Code, response.Body.String())
 	}
 }
 
-func TestUnlockAppliesStableSSHCredential(t *testing.T) {
+func TestSSHSessionAppliesStableSSHCredential(t *testing.T) {
 	store := NewMemoryStore(101)
 	if _, err := store.UnlockService(context.Background(), 101, 1); err != nil {
 		t.Fatal(err)
@@ -2865,12 +2853,12 @@ func TestUnlockAppliesStableSSHCredential(t *testing.T) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, controller, noopWireGuardClient{}).RegisterRoutes(mux)
 
-	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	setTestTeamAuthHeader(t, unlockRequest)
-	unlockResponse := httptest.NewRecorder()
-	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("expected unlock 200, got %d: %s", unlockResponse.Code, unlockResponse.Body.String())
+	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
+	setTestTeamAuthHeader(t, sshRequest)
+	sshResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sshResponse, sshRequest)
+	if sshResponse.Code != http.StatusOK {
+		t.Fatalf("expected ssh session 200, got %d: %s", sshResponse.Code, sshResponse.Body.String())
 	}
 	if controller.applyCalls != 1 {
 		t.Fatalf("expected one ssh credential apply, got %d", controller.applyCalls)
@@ -2885,14 +2873,6 @@ func TestUnlockAppliesStableSSHCredential(t *testing.T) {
 
 func TestTeamServicesReflectUnlockAndResetState(t *testing.T) {
 	mux := newTestMuxWithCaptureGrant(t)
-
-	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 2)+`"}`))
-	setTestTeamAuthHeader(t, unlockRequest)
-	unlockResponse := httptest.NewRecorder()
-	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("expected unlock 200, got %d", unlockResponse.Code)
-	}
 
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/2/reset/factory", nil)
 	setTestTeamAuthHeader(t, resetRequest)
@@ -3230,6 +3210,19 @@ func TestSummarizeSLARunsMapsFaustServiceStates(t *testing.T) {
 			phase:   "put",
 			message: "target unreachable",
 		},
+		{
+			// A match pause mid-tick skips every phase; nothing was observed
+			// about the service, so it must not be reported down.
+			name: "interrupted tick",
+			runs: []GameCheckerRun{
+				{Phase: "put", Status: "skipped", Message: "checker interrupted: tick cancelled before this target finished"},
+				{Phase: "get", Status: "skipped", Message: "checker interrupted: tick cancelled before this target finished"},
+				{Phase: "check", Status: "skipped", Message: "checker interrupted: tick cancelled before this target finished"},
+			},
+			status:  "unknown",
+			phase:   "put",
+			message: "checker interrupted: tick cancelled before this target finished",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -3362,10 +3355,6 @@ func TestParticipantServiceActionsRejectQueuedDeployment(t *testing.T) {
 		req  *http.Request
 	}{
 		{
-			name: "unlock",
-			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/unlock", created.ID), bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, created.ID)+`"}`)),
-		},
-		{
 			name: "ssh-session",
 			req:  httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v2/services/%d/ssh-session", created.ID), nil),
 		},
@@ -3380,9 +3369,6 @@ func TestParticipantServiceActionsRejectQueuedDeployment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setTestTeamAuthHeader(t, tc.req)
-			if tc.name == "unlock" {
-				tc.req.Header.Set("Content-Type", "application/json")
-			}
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, tc.req)
 
@@ -3411,28 +3397,6 @@ func TestTeamServicesReturnsRateLimit429(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
 	setTestTeamAuthHeader(t, request)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, request)
-
-	if response.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429, got %d", response.Code)
-	}
-	if got := response.Header().Get("Retry-After"); got != "2" {
-		t.Fatalf("expected Retry-After 2, got %q", got)
-	}
-}
-
-func TestUnlockReturnsRateLimit429(t *testing.T) {
-	mux := newTestMuxWithLimiter(testRateLimiter{
-		denyKeys: map[string]bool{
-			rateLimitTeamChallengeKey("unlock", 101, 1): true,
-		},
-		retryAfter: 2 * time.Second,
-	})
-
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	setTestTeamAuthHeader(t, request)
-	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
@@ -3509,14 +3473,6 @@ func TestRestartReturnsRateLimit429(t *testing.T) {
 
 func TestUnlockSurvivesFactoryResetForSSH(t *testing.T) {
 	mux := newTestMuxWithCaptureGrant(t)
-	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	setTestTeamAuthHeader(t, unlockRequest)
-	unlockResponse := httptest.NewRecorder()
-	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("expected unlock 200, got %d", unlockResponse.Code)
-	}
-
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
 	setTestTeamAuthHeader(t, resetRequest)
 	resetResponse := httptest.NewRecorder()
@@ -3688,7 +3644,7 @@ func TestRestartWaitsForCheckerVerification(t *testing.T) {
 	}
 }
 
-func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
+func TestSSHSessionReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	store := NewMemoryStore(101)
 	if _, err := store.UnlockService(context.Background(), 101, 1); err != nil {
@@ -3696,12 +3652,12 @@ func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 	}
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{sshApplyErr: fmt.Errorf("runtime apply failed")}, noopWireGuardClient{}).RegisterRoutes(mux)
 
-	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	setTestTeamAuthHeader(t, unlockRequest)
-	unlockResponse := httptest.NewRecorder()
-	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusBadGateway {
-		t.Fatalf("expected unlock 502, got %d", unlockResponse.Code)
+	sshRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/ssh-session", nil)
+	setTestTeamAuthHeader(t, sshRequest)
+	sshResponse := httptest.NewRecorder()
+	mux.ServeHTTP(sshResponse, sshRequest)
+	if sshResponse.Code != http.StatusBadGateway {
+		t.Fatalf("expected ssh session 502, got %d", sshResponse.Code)
 	}
 
 	servicesRequest := httptest.NewRequest(http.MethodGet, "/api/v2/team/services", nil)
@@ -3733,14 +3689,6 @@ func TestUnlockReturnsBadGatewayWhenRuntimeApplyFails(t *testing.T) {
 func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 	mux := newTestMuxWithCaptureGrant(t)
 
-	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"`+testUnlockProof(101, 1)+`"}`))
-	setTestTeamAuthHeader(t, unlockRequest)
-	unlockResponse := httptest.NewRecorder()
-	mux.ServeHTTP(unlockResponse, unlockRequest)
-	if unlockResponse.Code != http.StatusOK {
-		t.Fatalf("expected unlock 200, got %d", unlockResponse.Code)
-	}
-
 	resetRequest := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/reset/factory", nil)
 	setTestTeamAuthHeader(t, resetRequest)
 	resetResponse := httptest.NewRecorder()
@@ -3766,8 +3714,8 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 	}
 
 	payload := decodeCompat[adminAuditLogPage](t, auditResponse.Body.Bytes())
-	if payload.TotalCount < 3 {
-		t.Fatalf("expected at least 3 audit entries, got %d", payload.TotalCount)
+	if payload.TotalCount < 2 {
+		t.Fatalf("expected at least 2 audit entries, got %d", payload.TotalCount)
 	}
 
 	joinedActions := make([]string, 0, len(payload.Items))
@@ -3775,9 +3723,6 @@ func TestAdminAuditLogCapturesParticipantServiceActions(t *testing.T) {
 		joinedActions = append(joinedActions, item.Action)
 	}
 	actionSet := strings.Join(joinedActions, ",")
-	if !strings.Contains(actionSet, "service.unlock") {
-		t.Fatalf("expected unlock audit action, got %v", joinedActions)
-	}
 	if !strings.Contains(actionSet, "service.factory_reset") {
 		t.Fatalf("expected factory reset audit action, got %v", joinedActions)
 	}

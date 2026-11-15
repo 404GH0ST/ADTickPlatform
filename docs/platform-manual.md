@@ -218,7 +218,7 @@ Example:
 
 Submit at least one correct flag from another team on the matching challenge. An accepted capture automatically grants SSH access to your own container. Open **SSH Access** to retrieve the stable credential. Factory reset preserves access during the same match.
 
-`POST /api/v2/services/{challenge_id}/unlock` is a legacy retry endpoint for an existing grant. It cannot unlock a locked service, and client-supplied proofs are ignored.
+There is no separate unlock call. If the credential did not reach your container (for example after a runtime hiccup), request SSH Access again: `ssh-session` re-applies the existing grant.
 
 `POST /api/v2/services/{challenge_id}/ssh-session`
 

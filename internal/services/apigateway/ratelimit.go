@@ -414,7 +414,6 @@ var (
 	challengeSourceRateLimitPolicy   = rateLimitPolicy{capacity: 3, refillPerSecond: 1, failClosedOnError: true}
 	submitRateLimitPolicy            = rateLimitPolicy{capacity: 45, refillPerSecond: 15, failClosedOnError: true}
 	submitUserRateLimitPolicy        = rateLimitPolicy{capacity: 15, refillPerSecond: 5, failClosedOnError: true}
-	unlockRateLimitPolicy            = rateLimitPolicy{capacity: 10, refillPerSecond: 10.0 / 60.0, failClosedOnError: true}
 	sshSessionRateLimitPolicy        = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}
 	factoryResetRateLimitPolicy      = rateLimitPolicy{capacity: 3, refillPerSecond: 3.0 / 60.0, failClosedOnError: true}
 	restartRateLimitPolicy           = rateLimitPolicy{capacity: 6, refillPerSecond: 6.0 / 60.0, failClosedOnError: true}

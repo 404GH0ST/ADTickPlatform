@@ -10,7 +10,6 @@ require_bin jq
 require_bin wg
 require_bin nft
 require_bin iptables
-require_bin openssl
 if [[ "${EUID}" -ne 0 ]]; then
   require_bin sudo
 fi
@@ -27,12 +26,6 @@ WIREGUARD_INTERFACE="${WIREGUARD_GATEWAY_INTERFACE:-wg0}"
 WIREGUARD_FIREWALL_TABLE="${WIREGUARD_GATEWAY_FIREWALL_TABLE:-adplatform_wireguard}"
 ACCESS_FIREWALL_TABLE="${CONTROLLER_ACCESS_FIREWALL_TABLE:-adplatform_service_access}"
 ACCESS_FIREWALL_BACKEND="${CONTROLLER_ACCESS_FIREWALL_BACKEND:-iptables}"
-UNLOCK_SECRET="${UNLOCK_PROOF_SECRET:-}"
-
-if [[ -z "${UNLOCK_SECRET}" ]]; then
-  echo "UNLOCK_PROOF_SECRET must be set in ${PROD_ENV} for host enforcement smoke." >&2
-  exit 1
-fi
 
 admin_get() {
   local path="$1"
@@ -162,18 +155,18 @@ endpoint="$(printf '%s\n' "${team_services}" | jq -er '.[0].endpoint')"
 service_host="${endpoint%:*}"
 service_port="${endpoint##*:}"
 
-unlock_digest="$(
-  printf '%s:%s' "${challenge_id}" "${TEAM_ID}" |
-    openssl dgst -sha256 -hmac "${UNLOCK_SECRET}" -hex |
-    awk '{print $2}'
-)"
-unlock_proof="ADU1.${challenge_id}.${TEAM_ID}.${unlock_digest}"
+# SSH unlocks only through an accepted enemy flag, so the smoke team must
+# already hold a capture grant on this challenge.
+if ! printf '%s\n' "${team_services}" | jq -e --argjson challenge_id "${challenge_id}" 'any(.[]; .challenge_id == $challenge_id and .unlocked == true)' >/dev/null; then
+  echo "team ${TEAM_ID} has no SSH grant on challenge ${challenge_id}; submit an accepted enemy flag for it before running host enforcement smoke." >&2
+  exit 1
+fi
 
-echo "participant unlock:"
-participant_post "/api/v2/services/${challenge_id}/unlock" "${participant_token}" "$(jq -nc --arg proof "${unlock_proof}" '{proof:$proof}')" |
-  jq -c '{challenge_id,team_id,unlocked}'
+echo "participant ssh access (re-applies the existing grant):"
+participant_post "/api/v2/services/${challenge_id}/ssh-session" "${participant_token}" |
+  jq -c '{challenge_id,host,port,password_present:(.password | length > 0)}'
 
-echo "trusted deployment reconcile after unlock:"
+echo "trusted deployment reconcile after ssh access:"
 trusted_reconcile="$(admin_post /api/v2/admin/deployments/reconcile)"
 echo "${trusted_reconcile}" | jq -c '{processed_jobs,processed_instances,completed_jobs}'
 

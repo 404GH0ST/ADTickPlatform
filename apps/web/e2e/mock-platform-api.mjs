@@ -1749,7 +1749,6 @@ async function handleParticipantRoutes(ctx) {
 
   return (
     handleChallengeSourceDownload(ctx) ||
-    (await handleServiceUnlock(ctx)) ||
     handleSSHSession(ctx) ||
     handleServiceRestart(ctx) ||
     handleFactoryReset(ctx)
@@ -1770,33 +1769,6 @@ function handleChallengeSourceDownload({ res, url, method }) {
   });
   res.end("mock-source-bundle");
   return true;
-}
-
-async function handleServiceUnlock({ req, res, url, method }) {
-  const challengeID = routeID(url.pathname, /^\/api\/v2\/services\/(\d+)\/unlock$/);
-  if (method !== "POST" || challengeID === null) {
-    return false;
-  }
-
-  const serviceState = findServiceState(challengeID);
-  await readJsonBody(req);
-  if (!serviceState?.unlocked) {
-    return writeFailure(res, 400, "submit a correct enemy flag for this challenge to unlock SSH automatically.");
-  }
-  if (serviceState.maintenance) {
-    return writeFailure(res, 503, "challenge is under maintenance.");
-  }
-
-  serviceState.unlocked = true;
-  serviceState.ssh_hint =
-    "unlock accepted; use SSH Access to view the team credential";
-  serviceState.last_event = "unlock granted via participant API";
-
-  return writeSuccess(res, {
-    challenge_id: challengeID,
-    team_id: serviceState.team_id,
-    unlocked: true,
-  });
 }
 
 function serviceActionRoute(pattern, handler) {
