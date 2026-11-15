@@ -32,6 +32,7 @@ async function installMockAttackSfx(page: Page) {
       onended: (() => void) | null = null;
       type = 'sine';
       frequency = new MockAudioParam();
+      detune = new MockAudioParam();
       buffer: { duration: number; decoded?: boolean } | null = null;
       loop = false;
       private voice?: Voice;
@@ -73,6 +74,8 @@ async function installMockAttackSfx(page: Page) {
       }
       decodeAudioData() { return Promise.resolve({ duration: 2.624, decoded: true }); }
       createGain() { return new MockGain(); }
+      createWaveShaper() { return Object.assign(new MockNode(), { curve: null, oversample: 'none' }); }
+      createConvolver() { return Object.assign(new MockNode(), { buffer: null, normalize: true }); }
       createStereoPanner() { return Object.assign(new MockNode(), { pan: new MockAudioParam() }); }
       createBiquadFilter() { return Object.assign(new MockNode(), { type: 'bandpass', frequency: new MockAudioParam(), Q: new MockAudioParam() }); }
       createDynamicsCompressor() {
@@ -220,7 +223,7 @@ for (const muted of [false, true]) {
       expect(initialVoices.length).toBeGreaterThan(10);
       const announcer = initialVoices.filter((voice) => voice.kind === 'sample');
       expect(announcer).toHaveLength(1);
-      expect(announcer[0].start - initialVoices[0].start).toBeCloseTo(6.45, 2);
+      expect(announcer[0].start - initialVoices[0].start).toBeCloseTo(4.12, 2);
       expect(announcer[0].heard).toBe(false);
     }
     await globe.getByTestId('first-blood-intro').evaluate((element) => Promise.all(
@@ -337,7 +340,8 @@ for (const view of [
     await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-13');
     await expect(globe.locator('[data-first-blood-charge]')).toBeVisible();
     expect(Number(await globe.getAttribute('data-zoom'))).toBeGreaterThan(1.05);
-    // Both real team markers remain inside the shot without test-driven camera moves.
+    // The attacker is always in the charge shot without test-driven camera moves.
+    await expect(globe.locator('[data-first-blood-endpoint="attacker"]')).toHaveCount(1);
     const framing = await globe.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       return Array.from(element.querySelectorAll('[data-first-blood-endpoint]')).map((node) => {
@@ -345,7 +349,9 @@ for (const view of [
         return { x: matrix.e - bounds.left, y: matrix.f - bounds.top, width: bounds.width, height: bounds.height };
       });
     });
-    expect(framing).toHaveLength(2);
+    // A wide route opens on the attacker alone (the camera travels to the
+    // victim for the impact); whichever endpoints are drawn must be in shot.
+    expect(framing.length).toBeGreaterThanOrEqual(1);
     for (const point of framing) {
       expect(point.x).toBeGreaterThan(24);
       expect(point.x).toBeLessThan(point.width - 24);
@@ -365,12 +371,14 @@ for (const view of [
     await expect(globe.locator('[data-first-blood-strike]')).toBeVisible();
     await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
     await expect(globe.locator('[data-first-blood-shard]')).toHaveCount(12);
-    await expect(globe.getByTestId('first-blood-announcement')).toContainText('Flag captured');
+    await expect(globe.getByTestId('first-blood-announcement')).toContainText('First blood · college-http');
     await globe.screenshot({ path: `test-results/first-blood-impact-${view.name.replaceAll(' ', '-')}.png` });
     const voices = await scoreVoices(page);
     const announcer = voices.find((voice) => voice.kind === 'sample')!;
-    expect(announcer.heard).toBe(false);
-    expect(announcer.start - voices[0].start).toBeCloseTo(6.45, 2);
+    // The voice is the impact's payoff, so it speaks during the impact beat.
+    expect(announcer.start - voices[0].start).toBeCloseTo(4.12, 2);
+    await expect.poll(async () => (await scoreVoices(page)).find((voice) => voice.kind === 'sample')?.heard).toBe(true);
+    await expect(globe).toHaveAttribute('data-first-blood-stage', /impact|recover/);
     await expect(globe).toHaveAttribute('data-first-blood-stage', 'recover');
     await expect(globe).not.toHaveAttribute('data-first-blood-stage');
     await expect(globe).toHaveAttribute('data-zoom', '1.000');
@@ -407,14 +415,14 @@ test('reduced motion keeps first blood legible without zoom, shake or fragments'
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
   await expect(globe.locator('[data-first-blood-shard]')).toHaveCount(0);
   await expect(globe.locator('[data-first-blood-impact] [class]')).toHaveCount(0);
-  await expect(globe.getByTestId('first-blood-announcement')).toContainText('Flag captured');
+  await expect(globe.getByTestId('first-blood-announcement')).toContainText('First blood · college-http');
   const banner = globe.getByTestId('first-blood-banner');
   await expect(banner).toBeVisible();
   expect(await banner.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
   await expect(banner).toHaveCount(0, { timeout: 6000 });
 });
 
-test('first blood on two challenges queues each team sequence and its sound once', async ({ page, request }) => {
+test('simultaneous first bloods share one sequence, one announcer and one banner', async ({ page, request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
   await installMockAttackSfx(page);
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
@@ -425,21 +433,35 @@ test('first blood on two challenges queues each team sequence and its sound once
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-burst' } });
   await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-13');
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact', { timeout: 6000 });
-  await expect(globe.getByTestId('first-blood-announcement')).toContainText('college-http');
   await expect(globe.locator('[data-first-blood-effect]')).toHaveCount(1);
-  await expect(globe.getByTestId('first-blood-banner')).toBeVisible();
-  await expect(globe.getByTestId('first-blood-banner')).toContainText('college-http');
-  await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge', { timeout: 10000 });
-  await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-14');
-  await expect(globe.getByTestId('first-blood-intro')).toContainText('college-vault');
-  await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
-  await expect(globe.locator('[data-first-blood-effect]')).toHaveCount(1);
-  const announcers = (await scoreVoices(page)).filter((voice) => voice.kind === 'sample');
-  expect(announcers).toHaveLength(2);
-  expect(announcers[0].heard).toBe(true);
-  expect(announcers[0].stop).toBeLessThanOrEqual(announcers[1].start - 6.45 + 0.05);
+  const banner = globe.getByTestId('first-blood-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner.getByRole('heading')).toHaveText('2 first bloods');
+  await expect(banner.getByTestId('first-blood-banner-challenge')).toHaveText('college-http');
+  await expect(banner.getByTestId('first-blood-banner-extra')).toHaveText('College Alpha first on college-vault');
   await expect(globe).not.toHaveAttribute('data-first-blood-stage');
-  await expect(globe.getByTestId('first-blood-banner')).toContainText('college-vault');
+  await expect(banner).toHaveCount(0, { timeout: 8000 });
+  // The second capture never replays as a stale, separate cinematic.
+  await page.waitForTimeout(1200);
+  await expect(globe).not.toHaveAttribute('data-first-blood-stage');
+  expect((await scoreVoices(page)).filter((voice) => voice.kind === 'sample')).toHaveLength(1);
+});
+
+test('a plain click on the globe during first blood keeps the sequence running', async ({ page, request }) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await installMockAttackSfx(page);
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
+  await page.goto('/attacks');
+  const globe = page.getByTestId('cyber-attack-map');
+  await globe.scrollIntoViewIfNeeded();
+  await page.mouse.click(24, 24);
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'focus');
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge');
+  const box = (await globe.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
+  await expect(globe.getByTestId('first-blood-banner')).toBeVisible();
 });
 
 test('manual camera control interrupts first blood and cancels the pending strike sound', async ({ page, request }) => {
@@ -451,6 +473,7 @@ test('manual camera control interrupts first blood and cancels the pending strik
   await globe.scrollIntoViewIfNeeded();
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'focus');
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge');
   await globe.getByRole('button', { name: 'Zoom in' }).click();
   await expect(globe).not.toHaveAttribute('data-first-blood-stage');
@@ -513,4 +536,80 @@ test('replacing first blood while its closing banner is showing celebrates the n
   await expect(globe.getByTestId('first-blood-banner')).toContainText('College Beta');
   await expect(globe.getByTestId('first-blood-banner-challenge')).toHaveText('college-http');
   expect((await scoreVoices(page)).filter((voice) => voice.kind === 'sample')).toHaveLength(2);
+});
+
+for (const route of [
+  { name: 'victim behind the globe', attacker: { lat: -33.4, lon: -70.6 }, victim: { lat: 39.9, lon: 116.4 } },
+  { name: 'near-antipodal teams', attacker: { lat: 40.4, lon: -3.7 }, victim: { lat: -41.3, lon: 174.8 } },
+]) {
+  test(`first blood across the globe (${route.name}) charges and lands on screen`, async ({ page, request }) => {
+    await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+    await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
+    await page.goto('/attacks');
+    const globe = page.getByTestId('cyber-attack-map');
+    await globe.scrollIntoViewIfNeeded();
+    const payload = {
+      revision: 1,
+      items: [{ id: 'atk-far', first_blood: true, attacker: 'Team Red', attackerLocation: route.attacker, victim: 'Team Blue', victimLocation: route.victim, service: 'svc', tick: 3, verdict: 'first valid submission accepted' }],
+      limit: 12, offset: 0, total_count: 1, has_prev: false, has_next: false,
+    };
+    await page.route('**/api/platform/attacks**', (r) => r.fulfill({ json: payload }));
+    await page.route('**/api/platform/realtime/attacks/stream', (r) => r.fulfill({
+      contentType: 'text/event-stream', body: `data: ${JSON.stringify(payload)}\n\n`,
+    }));
+    await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+    const inFrame = (kind: 'attacker' | 'victim') => globe.evaluate((element, which) => {
+      const node = element.querySelector(`[data-first-blood-endpoint="${which}"]`) as SVGGraphicsElement | null;
+      if (!node) return false;
+      const bounds = element.getBoundingClientRect();
+      const matrix = node.getScreenCTM()!;
+      const x = matrix.e - bounds.left;
+      const y = matrix.f - bounds.top;
+      return x > 24 && x < bounds.width - 24 && y > 32 && y < bounds.height - 32;
+    }, kind);
+    await expect(globe).toHaveAttribute('data-first-blood-stage', 'focus', { timeout: 15000 });
+    await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge');
+    await expect(globe.locator('[data-first-blood-charge]')).toBeVisible();
+    await expect.poll(() => inFrame('attacker')).toBe(true);
+    await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
+    await expect(globe.locator('[data-first-blood-impact]')).toHaveCount(1);
+    await expect(globe.locator('[data-first-blood-shard]')).toHaveCount(12);
+    await expect.poll(() => inFrame('victim')).toBe(true);
+    await expect(globe.getByTestId('first-blood-banner')).toBeVisible();
+    await expect(globe).not.toHaveAttribute('data-first-blood-stage');
+    await expect(globe).toHaveAttribute('data-zoom', '1.000');
+  });
+}
+
+test('team locations stay put when a new team appears in the attack feed', async ({ page, request }) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
+  await page.goto('/attacks');
+  const globe = page.getByTestId('cyber-attack-map');
+  await globe.scrollIntoViewIfNeeded();
+  const frame = (items: object[]) => ({ revision: items.length, items, limit: 12, offset: 0, total_count: items.length, has_prev: false, has_next: false });
+  const serve = async (payload: object) => {
+    await page.unroute('**/api/platform/attacks**');
+    await page.unroute('**/api/platform/realtime/attacks/stream');
+    await page.route('**/api/platform/attacks**', (route) => route.fulfill({ json: payload }));
+    await page.route('**/api/platform/realtime/attacks/stream', (route) => route.fulfill({
+      contentType: 'text/event-stream', body: `data: ${JSON.stringify(payload)}\n\n`,
+    }));
+    // Drop the current stream so the client reconnects and reads the new frame.
+    await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  };
+  // Read placements from the globe root: a team behind the globe is not drawn.
+  const location = async (team: string) => (await globe.getAttribute('data-team-placements'))
+    ?.split(';').find((entry) => entry.startsWith(`${team}@`)) ?? null;
+  const gammaHitsAlpha = { id: 'atk-1', attacker: 'College Gamma', victim: 'College Alpha', service: 'college-http', tick: 2, verdict: 'accepted' };
+  await serve(frame([gammaHitsAlpha]));
+  await expect(globe).toHaveAttribute('data-route-count', '1');
+  const gammaBefore = await location('College Gamma');
+  const alphaBefore = await location('College Alpha');
+  expect(gammaBefore).not.toBeNull();
+  // College Beta sorts between the two existing teams; it must not shift them.
+  await serve(frame([{ id: 'atk-2', attacker: 'College Beta', victim: 'College Alpha', service: 'college-http', tick: 3, verdict: 'accepted' }, gammaHitsAlpha]));
+  await expect(globe).toHaveAttribute('data-route-count', '2');
+  expect(await location('College Gamma')).toBe(gammaBefore);
+  expect(await location('College Alpha')).toBe(alphaBefore);
 });

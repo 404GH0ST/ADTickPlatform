@@ -558,6 +558,7 @@ function renderOrganizerPanel({
         pendingAction={pendingAction}
         serviceOptions={challengeRows.map((challenge) => challenge.name)}
         teamOptions={teamRows.map((team) => team.name)}
+        teamRoster={scoreRows.map((row) => row.team)}
         onApplyFilters={onApplyAttackFilters}
         onFilterChange={onSetAttackFilters}
         onPage={onPageAttacks}

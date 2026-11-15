@@ -35,17 +35,21 @@ while waiting for the first attack.
 
 Submit a valid stolen flag for a challenge that has no first blood. The camera
 frames both teams, the attacker charges, the strike travels to the defender,
-and the defender marker breaks apart with a bass impact before reforming. The
-camera then restores its previous view. The animation lasts about 6.5 seconds.
-A continuous stereo score covers the camera, charge, strike, debris, and recovery.
-After the camera settles, a closing banner names the capturing team and the
-challenge while `lol-first-blood.mp3` plays. It stays visible for at least four
-seconds, holds longer if the announcer is still playing, then fades out. The
-result remains readable when sound is muted or unavailable. Long team and
-challenge names wrap within the mobile banner.
+and the defender marker explodes before reforming. When the two teams are too
+far apart to share one shot (one is behind the globe), the camera opens on the
+attacker and travels around the globe with the strike so the impact always
+lands on screen. The animation lasts about 6.6 seconds, with a continuous
+stereo score covering the camera, charge, strike, explosion, and recovery.
+The announcer (`public/first-blood-announcer.mp3`) speaks just after the
+impact. As the camera returns, a closing banner names the capturing team and
+the challenge. It stays visible for at least 4.5 seconds, holds longer if the
+announcer is still playing, then collapses out. The result remains readable
+when sound is muted or unavailable. Long team and challenge names wrap within
+the mobile banner.
 
-Ordinary captures retain their existing sound. Multiple challenges' first bloods
-play in order, waiting for both the closing banner and its announcer to finish.
+Ordinary captures retain their existing sound. First bloods that arrive
+together (or while another is playing) share one sequence: the earliest
+capture leads the animation and the banner lists the others.
 Later captures use the normal animation; loading history, reloading the page,
 and highlighting a tick do not replay a first blood. Reduced motion keeps the capture status without animated
 zoom, shake, or fragments.

@@ -66,9 +66,16 @@ export function AttackMapPanel({
   description = 'Directional attack flow across teams, services, and match ticks.',
   highlightedAttackIDs = [],
   title = 'Attack map',
+  teamRoster = [],
   onVisibleRowsChange,
 }: {
   attackRows: AttackMapEvent[];
+  /**
+   * Every team in the match (the scoreboard). Teams are placed on the globe
+   * from this full roster up front, so a team appearing in or dropping out of
+   * the loaded attack page never shifts anyone else's location.
+   */
+  teamRoster?: string[];
   className?: string;
   description?: string;
   highlightedAttackIDs?: string[];
@@ -188,6 +195,13 @@ export function AttackMapPanel({
         ]),
       ).sort(),
     [attackRows],
+  );
+  // Key on content, not identity: callers rebuild the roster array each
+  // render, and the globe restarts auto-rotation when this list changes.
+  const placementKey = Array.from(new Set([...teamRoster, ...allTeams])).sort().join('\u0000');
+  const placementTeams = useMemo(
+    () => (placementKey === '' ? [] : placementKey.split('\u0000')),
+    [placementKey],
   );
   const normalizedTeamQuery = teamQuery.trim().toLowerCase();
   const searchedTeams = useMemo(() => {
@@ -494,7 +508,7 @@ export function AttackMapPanel({
           focusedTeams={focusedTeams}
           highlightedAttackIDs={activeHighlightIDs}
           liveAttackIDs={highlightedAttackIDs}
-          placementScopeTeams={allTeams}
+          placementScopeTeams={placementTeams}
           selectedAttackId={selectedAttackId}
           selectedTeamId={selectedTeamId}
           teamLocations={teamLocations}

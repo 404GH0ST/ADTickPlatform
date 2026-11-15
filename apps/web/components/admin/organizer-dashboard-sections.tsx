@@ -1554,6 +1554,7 @@ export function GameTab({
         pendingAction={pendingAction}
         serviceOptions={serviceOptions}
         teamOptions={teamOptions}
+        teamRoster={scoreRows.map((row) => row.team)}
         onApplyFilters={onApplyAttackFilters}
         onFilterChange={onAttackFilterChange}
         onPage={onPageAttacks}
@@ -4202,6 +4203,7 @@ export function GameAttacksCard({
   pendingAction,
   serviceOptions = [],
   teamOptions = [],
+  teamRoster = [],
   onApplyFilters,
   onFilterChange,
   onPage,
@@ -4215,6 +4217,8 @@ export function GameAttacksCard({
   pendingAction: string | null;
   serviceOptions?: string[];
   teamOptions?: string[];
+  /** Scoreboard teams, so the globe layout matches what participants see. */
+  teamRoster?: string[];
   onApplyFilters: () => void;
   onFilterChange: (next: GameFilters["attack"]) => void;
   onPage: (direction: "prev" | "next") => void;
@@ -4375,6 +4379,7 @@ export function GameAttacksCard({
           attackRows={attackRows}
           highlightedAttackIDs={highlightedAttackIDs}
           description="Accepted submissions rendered as directional team flow for the current organizer slice."
+          teamRoster={teamRoster}
           title="Attack flow"
         />
         {attackRows.length === 0 ? (

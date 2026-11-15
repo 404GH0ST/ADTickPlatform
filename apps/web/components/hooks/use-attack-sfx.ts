@@ -90,21 +90,15 @@ export function useAttackSfxPreferences() {
   );
 
   useEffect(() => {
-    const mediaQuery =
-      typeof window === 'undefined' || !window.matchMedia
-        ? null
-        : window.matchMedia('(prefers-reduced-motion: reduce)');
     const syncPreferences = () => setPreferences(readAttackSfxPreferences());
 
     window.addEventListener('storage', syncPreferences);
     window.addEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
-    mediaQuery?.addEventListener('change', syncPreferences);
     syncPreferences();
 
     return () => {
       window.removeEventListener('storage', syncPreferences);
       window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
-      mediaQuery?.removeEventListener('change', syncPreferences);
     };
   }, []);
 
@@ -147,20 +141,13 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
     }
     document.addEventListener('visibilitychange', stopHiddenSound);
 
-    const mediaQuery =
-      typeof window === 'undefined' || !window.matchMedia
-        ? null
-        : window.matchMedia('(prefers-reduced-motion: reduce)');
-
     window.addEventListener('storage', syncPreferences);
     window.addEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
-    mediaQuery?.addEventListener('change', syncPreferences);
     syncPreferences();
 
     return () => {
       window.removeEventListener('storage', syncPreferences);
       window.removeEventListener(ATTACK_SFX_PREFERENCE_EVENT, syncPreferences);
-      mediaQuery?.removeEventListener('change', syncPreferences);
       document.removeEventListener('visibilitychange', stopHiddenSound);
     };
   }, []);
@@ -227,6 +214,13 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
 
     if (milestones.length > 0) {
       milestones.forEach((id) => celebratedIdsRef.current.add(id));
+      if (context.state !== 'running') {
+        // A suspended clock would start the score late against the visuals'
+        // timers. Skip this cue (the banner still carries the result) and wake
+        // the context for the next one.
+        void context.resume().catch(() => {});
+        return;
+      }
       playingMilestoneRef.current?.stop();
       playingMilestoneRef.current = playFirstBloodScore(context, {
         volume: preferences.volume,
@@ -251,7 +245,7 @@ let firstBloodAnnouncerPromise: Promise<AudioBuffer> | null = null;
 
 function getFirstBloodAnnouncerBuffer(context: BrowserAudioContext): Promise<AudioBuffer> {
   if (!firstBloodAnnouncerPromise) {
-    firstBloodAnnouncerPromise = fetch('/lol-first-blood.mp3')
+    firstBloodAnnouncerPromise = fetch('/first-blood-announcer.mp3')
       .then((response) => {
         if (!response.ok) throw new Error('First blood announcer unavailable');
         return response.arrayBuffer();
@@ -337,14 +331,13 @@ function readAttackSfxPreferences(): AttackSfxPreferences {
 
   const storedEnabled = readStoredValue(ATTACK_SFX_ENABLED_KEY);
   const storedVolume = readStoredValue(ATTACK_SFX_VOLUME_KEY);
-  const reducedMotion =
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  // Sound is independent of prefers-reduced-motion; users mute it explicitly.
   const volume = storedVolume === null ? Number.NaN : Number(storedVolume);
 
   return {
     enabled:
       storedEnabled === null
-        ? !reducedMotion
+        ? true
         : storedEnabled === 'on' || storedEnabled === 'true',
     volume: Number.isFinite(volume)
       ? clampVolume(volume)

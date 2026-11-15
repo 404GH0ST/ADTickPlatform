@@ -12,6 +12,7 @@ import {
   FIRST_BLOOD_FOCUS_MS, FIRST_BLOOD_CHARGE_MS, FIRST_BLOOD_INTRO_MS,
   FIRST_BLOOD_FLIGHT_MS, FIRST_BLOOD_IMPACT_MS, FIRST_BLOOD_RECOVER_MS,
   FIRST_BLOOD_BANNER_HOLD_MS, FIRST_BLOOD_BANNER_EXIT_MS, FIRST_BLOOD_TOTAL_MS,
+  FIRST_BLOOD_BANNER_AT_MS,
   type FirstBloodStage,
 } from '@/lib/first-blood';
 import { useAttackSfx } from '@/components/hooks/use-attack-sfx';
@@ -30,7 +31,9 @@ export type CyberAttackEvent = {
   victimLocation?: GeoPoint;
 };
 
-type FirstBloodSequence = { attack: CyberAttackEvent; stage: FirstBloodStage };
+// `attack` leads the cinematic; `attacks` is every first blood it announces.
+type FirstBloodSequence = { attack: CyberAttackEvent; attacks: CyberAttackEvent[]; stage: FirstBloodStage };
+type ClosingFirstBlood = { attacks: CyberAttackEvent[]; leaving: boolean };
 type GlobeCamera = { rotation: GlobeRotation; zoom: number; x: number; y: number };
 
 type GlobeRotation = {
@@ -153,6 +156,10 @@ const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
 const FRESH_ATTACK_FLY_MS = 1_500;
 const FRESH_FRAME_DEBOUNCE_MS = 350;
+const DRAG_INTERRUPT_PX = 6;
+// Below this depth an endpoint is too close to the rim (or behind it) to share
+// one first-blood shot with the other team; the camera travels instead.
+const FIRST_BLOOD_SPLIT_DEPTH = 0.12;
 const DEFAULT_LABEL_LIMIT = 10;
 const DENSE_KEYBOARD_ITEM_LIMIT = 28;
 const PACKET_ANIMATION_ROUTE_LIMIT = 80;
@@ -226,9 +233,10 @@ export function CyberAttackMap({
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
   const [cameraCenter, setCameraCenter] = useState({ x: CENTER_X, y: CENTER_Y });
   const [firstBloodSequence, setFirstBloodSequence] = useState<FirstBloodSequence | null>(null);
-  const [closingFirstBlood, setClosingFirstBlood] = useState<{ attack: CyberAttackEvent; leaving: boolean } | null>(null);
+  const [closingFirstBlood, setClosingFirstBlood] = useState<ClosingFirstBlood | null>(null);
   const firstBloodPresentationActive = firstBloodSequence !== null || closingFirstBlood !== null;
   const sequenceRef = useRef<FirstBloodSequence | null>(null);
+  const closingRef = useRef<ClosingFirstBlood | null>(null);
   const sequenceBusyRef = useRef(false);
   const sequenceQueueRef = useRef<CyberAttackEvent[]>([]);
   const sequenceTimersRef = useRef<Set<number>>(new Set());
@@ -471,7 +479,9 @@ export function CyberAttackMap({
       .map((attack) => attack.id);
     const milestone = milestoneIds.length > 0;
     if (milestone) {
-      sequenceQueueRef.current.push(...attacks.filter((attack) => milestoneIds.includes(attack.id)));
+      // The feed is newest-first; queue in capture order so the earliest
+      // first blood of a burst leads its sequence.
+      sequenceQueueRef.current.push(...attacks.filter((attack) => milestoneIds.includes(attack.id)).reverse());
       if (!sequenceBusyRef.current) startNextFirstBlood();
     }
     // Milestones live until their own queued sequence ends; normal captures
@@ -526,19 +536,32 @@ export function CyberAttackMap({
   useEffect(() => {
     const ids = new Set(attacks.map((attack) => attack.id));
     sequenceQueueRef.current = sequenceQueueRef.current.filter((attack) => ids.has(attack.id));
-    const activeId = sequenceRef.current?.attack.id ?? closingFirstBlood?.attack.id;
-    if (activeId && !ids.has(activeId)) {
-      // A deletion and its replacement first blood may share one SSE frame.
-      // Cancel the withdrawn award while preserving valid arrivals in the queue.
-      const queued = sequenceQueueRef.current;
-      interruptFirstBlood();
-      sequenceQueueRef.current = queued;
-      if (queued.length > 0) {
-        setFreshAttackIds((current) => new Set([...current, ...queued.map((attack) => attack.id)]));
-        startNextFirstBlood();
+    const group = sequenceRef.current?.attacks ?? closingRef.current?.attacks ?? [];
+    const survivors = group.filter((attack) => ids.has(attack.id));
+    if (survivors.length === group.length) return;
+    const leadId = sequenceRef.current?.attack.id ?? group[0]?.id;
+    if (leadId && ids.has(leadId)) {
+      // A withdrawn co-award only drops its row; the lead keeps playing.
+      if (sequenceRef.current) {
+        sequenceRef.current = { ...sequenceRef.current, attacks: survivors };
+        setFirstBloodSequence(sequenceRef.current);
       }
+      if (closingRef.current) {
+        closingRef.current = { ...closingRef.current, attacks: survivors };
+        setClosingFirstBlood(closingRef.current);
+      }
+      return;
     }
-  }, [attacks, closingFirstBlood?.attack.id]);
+    // A deletion and its replacement first blood may share one SSE frame.
+    // Cancel the withdrawn award while preserving valid arrivals in the queue.
+    const queued = [...survivors, ...sequenceQueueRef.current];
+    interruptFirstBlood();
+    sequenceQueueRef.current = queued;
+    if (queued.length > 0) {
+      setFreshAttackIds((current) => new Set([...current, ...queued.map((attack) => attack.id)]));
+      startNextFirstBlood();
+    }
+  }, [attacks]);
 
   useEffect(() => {
     if (!surfaceActive && cinematicFrameRef.current !== null) {
@@ -660,13 +683,21 @@ export function CyberAttackMap({
     sequenceTimersRef.current.add(timer);
   }
 
+  function showClosingFirstBlood(next: ClosingFirstBlood | null): void {
+    closingRef.current = next;
+    setClosingFirstBlood(next);
+  }
+
   function startNextFirstBlood(): void {
-    const attack = sequenceQueueRef.current.shift();
+    // Everything pending plays as one sequence: the earliest capture leads the
+    // cinematic and the banner lists the rest, so a burst never goes stale.
+    const group = sequenceQueueRef.current.splice(0);
+    const attack = group[0];
     if (!attack) return;
     sequenceBusyRef.current = true;
     clearAutoRotationTimers(false);
     savedCameraRef.current = { ...cameraRef.current };
-    sequenceRef.current = { attack, stage: 'focus' };
+    sequenceRef.current = { attack, attacks: group, stage: 'focus' };
     setFirstBloodSequence(sequenceRef.current);
     setIntroAttackIds(new Set([attack.id]));
     setCelebratingAttackIds(new Set());
@@ -676,80 +707,124 @@ export function CyberAttackMap({
     const attacker = landmarksByTeam[attack.attacker];
     const victim = landmarksByTeam[attack.victim];
     const target = getFeaturedAttackRotation(attacker, victim);
+    // Each beat's camera. A route that fits one hemisphere is framed in a
+    // single shot; a route that wraps the globe (one team behind it, or both
+    // pinned to the rim) opens on the attacker and whips around after the
+    // strike so the impact always lands on screen.
+    let plan: { focus: GlobeCamera; charge: GlobeCamera; flight: GlobeCamera; punch: GlobeCamera; settle: GlobeCamera } | null = null;
+    let attackerPan = -0.5;
+    let victimPan = 0.5;
     if (target && attacker && victim) {
       const start = projectGlobePoint(attacker, target);
       const end = projectGlobePoint(victim, target);
-      const width = compactSurfaceRef.current ? 600 : MAP_WIDTH;
-      // Frame both endpoints and their burst/labels. Never zoom one team out
-      // of shot, including wide routes and the narrow mobile surface.
-      const fitZoom = clamp(Math.min(
-        compactSurfaceRef.current ? 1.5 : 1.85,
-        width / (Math.abs(start.x - end.x) + 210),
-        MAP_HEIGHT / (Math.abs(start.y - end.y) + 340),
-      ), ZOOM_MIN, ZOOM_MAX);
-      animateCinematicCamera({
-        rotation: target, zoom: fitZoom,
-        x: (start.x + end.x) / 2,
-        y: (start.y + end.y) / 2 + 38,
-      }, FIRST_BLOOD_FOCUS_MS);
+      const zoomed = (camera: GlobeCamera, scale: number): GlobeCamera => ({
+        ...camera, zoom: clamp(camera.zoom * scale, ZOOM_MIN, ZOOM_MAX),
+      });
+      if (start.visible && end.visible && Math.min(start.z, end.z) >= FIRST_BLOOD_SPLIT_DEPTH) {
+        const width = compactSurfaceRef.current ? 600 : MAP_WIDTH;
+        // Frame both endpoints and their burst/labels. Never zoom one team out
+        // of shot, including wide routes and the narrow mobile surface.
+        const fitZoom = clamp(Math.min(
+          compactSurfaceRef.current ? 1.5 : 1.85,
+          width / (Math.abs(start.x - end.x) + 210),
+          MAP_HEIGHT / (Math.abs(start.y - end.y) + 340),
+        ), ZOOM_MIN, ZOOM_MAX);
+        const shot = { rotation: target, zoom: fitZoom, x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 + 38 };
+        // A slow push-in while charging, a lean toward the target as the
+        // strike travels, and a hard punch on contact that settles back.
+        const lean = (amount: number, scale: number): GlobeCamera => zoomed({
+          ...shot,
+          x: shot.x + (end.x - shot.x) * amount,
+          y: shot.y + (end.y - 38 - shot.y) * amount,
+        }, scale);
+        plan = { focus: shot, charge: lean(0, 1.05), flight: lean(0.22, 1.09), punch: lean(0.26, 1.17), settle: lean(0.2, 1.08) };
+        attackerPan = (start.x - CENTER_X) / GLOBE_RADIUS;
+        victimPan = (end.x - CENTER_X) / GLOBE_RADIUS;
+      } else {
+        const centerOn = (point: GeoPoint): GlobeCamera => ({
+          rotation: { lat: clamp(point.lat * 0.85, -MAX_ROTATION_LAT, MAX_ROTATION_LAT), lon: normalizeLongitude(point.lon) },
+          zoom: compactSurfaceRef.current ? 1.2 : 1.35,
+          x: CENTER_X,
+          y: CENTER_Y + 38,
+        });
+        const launch = centerOn(interpolateGreatCircle(attacker, victim, 0.2));
+        const arrival = centerOn(interpolateGreatCircle(attacker, victim, 0.8));
+        plan = { focus: launch, charge: zoomed(launch, 1.05), flight: arrival, punch: zoomed(arrival, 1.12), settle: zoomed(arrival, 1.04) };
+        // The sound travels with the camera: launch left of centre, land right.
+        attackerPan = clamp((projectGlobePoint(attacker, launch.rotation).x - CENTER_X) / GLOBE_RADIUS, -0.6, -0.15);
+        victimPan = clamp((projectGlobePoint(victim, arrival.rotation).x - CENTER_X) / GLOBE_RADIUS, 0.15, 0.6);
+      }
+      animateCinematicCamera(plan.focus, FIRST_BLOOD_FOCUS_MS);
     }
+    const moveTo = (camera: GlobeCamera | undefined, duration: number) => {
+      if (camera) animateCinematicCamera(camera, duration);
+    };
     sequenceAudioRef.current = new AbortController();
-    const projectedAttacker = attacker && target ? projectGlobePoint(attacker, target) : null;
-    const projectedVictim = victim && target ? projectGlobePoint(victim, target) : null;
     const sequenceAudio = sequenceAudioRef.current;
-    const sound = playFirstBloodSfx([attack.id], [attack.id], sequenceAudio.signal, {
-      attackerPan: projectedAttacker ? (projectedAttacker.x - CENTER_X) / GLOBE_RADIUS : -0.5,
-      victimPan: projectedVictim ? (projectedVictim.x - CENTER_X) / GLOBE_RADIUS : 0.5,
-    });
-    scheduleSequence(() => setFirstBloodStage('charge'), FIRST_BLOOD_FOCUS_MS);
+    const sound = playFirstBloodSfx([attack.id], [attack.id], sequenceAudio.signal, { attackerPan, victimPan });
+    scheduleSequence(() => {
+      setFirstBloodStage('charge');
+      moveTo(plan?.charge, FIRST_BLOOD_CHARGE_MS);
+    }, FIRST_BLOOD_FOCUS_MS);
     scheduleSequence(() => {
       setIntroAttackIds(new Set());
       setCelebratingAttackIds(new Set([attack.id]));
       setFirstBloodStage('flight');
+      moveTo(plan?.flight, FIRST_BLOOD_FLIGHT_MS);
     }, FIRST_BLOOD_INTRO_MS);
-    scheduleSequence(() => setFirstBloodStage('impact'), FIRST_BLOOD_INTRO_MS + FIRST_BLOOD_FLIGHT_MS);
+    scheduleSequence(() => {
+      setFirstBloodStage('impact');
+      moveTo(plan?.punch, 110);
+      scheduleSequence(() => moveTo(plan?.settle, 700), 130);
+    }, FIRST_BLOOD_INTRO_MS + FIRST_BLOOD_FLIGHT_MS);
+    let minimumHoldDone = false;
+    let sequenceDone = false;
+    let audioDone = !sound;
+    let leaving = false;
+    const release = () => {
+      if (sequenceAudio.signal.aborted || !minimumHoldDone || !sequenceDone || !audioDone || leaving) return;
+      leaving = true;
+      showClosingFirstBlood({ attacks: closingRef.current?.attacks ?? group, leaving: true });
+      scheduleSequence(() => {
+        if (sequenceAudio.signal.aborted) return;
+        showClosingFirstBlood(null);
+        sequenceBusyRef.current = false;
+        if (sequenceQueueRef.current.length > 0) startNextFirstBlood();
+      }, FIRST_BLOOD_BANNER_EXIT_MS);
+    };
+    // The banner rises with the camera return, while the announcer speaks.
     scheduleSequence(() => {
       setFirstBloodStage('recover');
       const saved = savedCameraRef.current;
       if (saved) animateCinematicCamera(saved, FIRST_BLOOD_RECOVER_MS);
-    }, FIRST_BLOOD_INTRO_MS + FIRST_BLOOD_FLIGHT_MS + FIRST_BLOOD_IMPACT_MS);
-    scheduleSequence(() => {
-      sequenceRef.current = null;
-      savedCameraRef.current = null;
-      setFirstBloodSequence(null);
-      setCelebratingAttackIds(new Set());
-      setFreshAttackIds((current) => new Set([...current].filter((id) => id !== attack.id)));
-      setClosingFirstBlood({ attack, leaving: false });
-      let minimumHoldDone = false;
-      let audioDone = !sound;
-      let leaving = false;
-      const release = () => {
-        if (sequenceAudio.signal.aborted || !minimumHoldDone || !audioDone || leaving) return;
-        leaving = true;
-        setClosingFirstBlood({ attack, leaving: true });
-        scheduleSequence(() => {
-          if (sequenceAudio.signal.aborted) return;
-          setClosingFirstBlood(null);
-          sequenceBusyRef.current = false;
-          if (sequenceQueueRef.current.length > 0) startNextFirstBlood();
-        }, FIRST_BLOOD_BANNER_EXIT_MS);
-      };
+      showClosingFirstBlood({ attacks: sequenceRef.current?.attacks ?? group, leaving: false });
       scheduleSequence(() => {
         minimumHoldDone = true;
         release();
       }, FIRST_BLOOD_BANNER_HOLD_MS);
-      // Keep the result up through the full announcer, including slow decoding.
-      if (sound) void sound.finished.then(() => { audioDone = true; release(); });
+    }, FIRST_BLOOD_BANNER_AT_MS);
+    scheduleSequence(() => {
+      const ids = new Set(group.map((entry) => entry.id));
+      sequenceRef.current = null;
+      savedCameraRef.current = null;
+      setFirstBloodSequence(null);
+      setCelebratingAttackIds(new Set());
+      setFreshAttackIds((current) => new Set([...current].filter((id) => !ids.has(id))));
+      sequenceDone = true;
+      release();
     }, FIRST_BLOOD_TOTAL_MS);
+    // Keep the result up through the full announcer, including slow decoding.
+    if (sound) void sound.finished.then(() => { audioDone = true; release(); });
   }
 
   function interruptFirstBlood(): void {
     if (!sequenceRef.current && !sequenceBusyRef.current) return;
     sequenceBusyRef.current = false;
-    setClosingFirstBlood(null);
+    const closingIds = closingRef.current?.attacks.map((attack) => attack.id) ?? [];
+    showClosingFirstBlood(null);
     sequenceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     sequenceTimersRef.current.clear();
-    const interruptedIds = new Set([...(sequenceRef.current ? [sequenceRef.current.attack.id] : closingFirstBlood ? [closingFirstBlood.attack.id] : []), ...sequenceQueueRef.current.map((attack) => attack.id)]);
+    const interruptedIds = new Set([...(sequenceRef.current?.attacks.map((attack) => attack.id) ?? []), ...closingIds, ...sequenceQueueRef.current.map((attack) => attack.id)]);
     setFreshAttackIds((current) => new Set([...current].filter((id) => !interruptedIds.has(id))));
     sequenceQueueRef.current = [];
     sequenceAudioRef.current?.abort();
@@ -891,7 +966,8 @@ export function CyberAttackMap({
     if (event.button !== 0 || isInteractivePointerTarget(event.target)) {
       return;
     }
-    interruptFirstBlood();
+    // A plain click (e.g. the gesture that unlocks audio on a venue screen)
+    // must not cancel the cinematic; only an actual drag takes the camera.
     markUserActivity();
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -909,6 +985,10 @@ export function CyberAttackMap({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
+    }
+    if (sequenceBusyRef.current) {
+      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < DRAG_INTERRUPT_PX) return;
+      interruptFirstBlood();
     }
     markUserActivity();
     const nextLon = normalizeLongitude(drag.startLon - (event.clientX - drag.x) * 0.42);
@@ -958,6 +1038,7 @@ export function CyberAttackMap({
       data-first-blood-stage={firstBloodSequence?.stage}
       data-first-blood-closing={closingFirstBlood ? 'true' : undefined}
       data-zoom={zoom.toFixed(3)}
+      data-team-placements={Object.entries(scene.landmarksByTeam).map(([team, place]) => `${team}@${place.lat},${place.lon}`).join(';')}
       data-keyboard-mode={denseKeyboardMode ? 'jump' : 'direct'}
       data-surface-active={surfaceActive ? 'true' : 'false'}
       data-motion-enabled={motionEnabled ? 'true' : 'false'}
@@ -998,6 +1079,13 @@ export function CyberAttackMap({
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
+          <filter id={`${mapId}-first-blood-glow`} filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="4000" height="4000">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
           <clipPath id={clipId}>
             <circle cx={CENTER_X} cy={CENTER_Y} r={GLOBE_RADIUS} />
           </clipPath>
@@ -1096,11 +1184,37 @@ export function CyberAttackMap({
             nodes={nodes}
             className={flyClassName}
             motion={surfaceActive && !reducedMotion}
+            glowId={`${mapId}-first-blood-glow`}
+            clipId={clipId}
           />
         ) : null}
       </svg>
 
-      {introAttacks.length > 0 || firstBloodAnnouncement ? (
+      {firstBloodSequence && surfaceActive && !reducedMotion ? (() => {
+        const arc = arcs.find((entry) => entry.id === firstBloodSequence.attack.id);
+        const fx = arc ? clamp(((arc.endX - (cameraCenter.x - viewWidth / 2)) / viewWidth) * 100, 0, 100) : 50;
+        const fy = arc ? clamp(((arc.endY - (cameraCenter.y - viewHeight / 2)) / viewHeight) * 100, 0, 100) : 50;
+        return (
+          <div aria-hidden="true" data-first-blood-overlay={firstBloodSequence.stage}
+            className="pointer-events-none absolute inset-0 overflow-hidden"
+            style={{ '--fx': `${fx}%`, '--fy': `${fy}%` } as CSSProperties}>
+            <div className={`${flyClassName}-vignette absolute inset-0`} />
+            {firstBloodSequence.stage === 'flight' || firstBloodSequence.stage === 'impact' ? <>
+              <div className={`${flyClassName}-speed absolute inset-0`} />
+              <div className={`${flyClassName}-speed absolute inset-0`} data-alt="true" />
+            </> : null}
+            <div className={`${flyClassName}-bar absolute inset-x-0 top-0`} data-edge="top" />
+            <div className={`${flyClassName}-bar absolute inset-x-0 bottom-0`} data-edge="bottom" />
+            {firstBloodSequence.stage === 'impact' ? <>
+              <div className={`${flyClassName}-impact-frame absolute inset-0`} />
+              <div className={`${flyClassName}-tint absolute inset-0`} />
+              <div className={`${flyClassName}-flash absolute inset-0`} />
+            </> : null}
+          </div>
+        );
+      })() : null}
+
+      {introAttacks.length > 0 || (firstBloodAnnouncement && firstBloodSequence?.stage !== 'recover') ? (
         <FirstBloodNotice
           attacks={introAttacks.length > 0 ? introAttacks : firstBloodAnnouncement ? [firstBloodAnnouncement] : []}
           intro={introAttacks.length > 0}
@@ -1110,7 +1224,7 @@ export function CyberAttackMap({
       ) : null}
       {closingFirstBlood ? (
         <FirstBloodBanner
-          attack={closingFirstBlood.attack}
+          attacks={closingFirstBlood.attacks}
           leaving={closingFirstBlood.leaving}
           reducedMotion={reducedMotion || !surfaceActive}
         />
@@ -1316,10 +1430,10 @@ export function CyberAttackMap({
           from { opacity: 1; }
           to { opacity: 0; }
         }
-        .${flyClassName}-notice[data-first-blood-notice-stage="recover"] {
-          animation: ${flyClassName}-settle 400ms ease 600ms both;
+        .${flyClassName}-notice[data-first-blood-notice-stage="impact"] {
+          animation: ${flyClassName}-settle 300ms ease ${FIRST_BLOOD_IMPACT_MS - 300}ms both;
         }
-        .${flyClassName}-settle { animation: ${flyClassName}-settle 700ms ease both; }
+        .${flyClassName}-settle { animation: ${flyClassName}-settle ${FIRST_BLOOD_RECOVER_MS}ms ease both; }
         @keyframes ${flyClassName}-charge-ring {
           from { stroke-dashoffset: 1; transform: rotate(-90deg) scale(1.35); opacity: 0.2; }
           to { stroke-dashoffset: 0; transform: rotate(270deg) scale(0.65); opacity: 1; }
@@ -1337,12 +1451,12 @@ export function CyberAttackMap({
           25% { opacity: 0.85; }
           100% { transform: translateY(42px); opacity: 0; }
         }
-        .${flyClassName}-charge-in { animation: ${flyClassName}-charge-in 850ms ease-in 1 both; }
+        .${flyClassName}-charge-in { animation: ${flyClassName}-charge-in 520ms ease-in infinite both; }
         @keyframes ${flyClassName}-launch {
           from { transform: scale(0.6); opacity: 1; }
           to { transform: scale(2.3); opacity: 0; }
         }
-        .${flyClassName}-launch { animation: ${flyClassName}-launch 750ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .${flyClassName}-launch { animation: ${flyClassName}-launch ${FIRST_BLOOD_FLIGHT_MS}ms cubic-bezier(0.16, 1, 0.3, 1) both; }
         @keyframes ${flyClassName}-strike {
           0% { stroke-dashoffset: 0.23; opacity: 0; }
           8%, 96% { opacity: 1; }
@@ -1353,26 +1467,152 @@ export function CyberAttackMap({
           0% { transform: scale(0.4); opacity: 1; }
           100% { transform: scale(4); opacity: 0; }
         }
-        .${flyClassName}-shock { animation: ${flyClassName}-shock 1100ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .${flyClassName}-shock { animation: ${flyClassName}-shock ${FIRST_BLOOD_IMPACT_MS - 150}ms cubic-bezier(0.16, 1, 0.3, 1) both; }
         @keyframes ${flyClassName}-shard {
           from { transform: translateY(0) rotate(0); opacity: 1; }
           65% { opacity: 0.8; }
           to { transform: translateY(calc(-1 * var(--shard-distance))) rotate(var(--shard-turn)); opacity: 0; }
         }
-        .${flyClassName}-shard { animation: ${flyClassName}-shard 1250ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .${flyClassName}-shard { animation: ${flyClassName}-shard ${FIRST_BLOOD_IMPACT_MS - 50}ms cubic-bezier(0.16, 1, 0.3, 1) both; }
         @keyframes ${flyClassName}-reform {
           from { transform: scale(2); opacity: 0; stroke-dasharray: 2 12; }
           to { transform: scale(1); opacity: 0.65; stroke-dasharray: 14 0; }
         }
-        .${flyClassName}-reform { animation: ${flyClassName}-reform 800ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .${flyClassName}-reform { animation: ${flyClassName}-reform ${FIRST_BLOOD_RECOVER_MS}ms cubic-bezier(0.16, 1, 0.3, 1) both; }
         @keyframes ${flyClassName}-recoil {
-          0%, 100% { transform: translate(0, 0); }
-          10% { transform: translate(-3px, 1.5px); }
-          25% { transform: translate(2px, -1px); }
-          45% { transform: translate(-1px, 0.5px); }
-          70% { transform: translate(0.5px, 0); }
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          6% { transform: translate(-7px, 3px) scale(1.012); }
+          14% { transform: translate(6px, -4px) scale(1.008); }
+          24% { transform: translate(-4px, 2px); }
+          36% { transform: translate(3px, -1.5px); }
+          50% { transform: translate(-1.5px, 1px); }
+          70% { transform: translate(0.6px, 0); }
         }
-        .${flyClassName}-recoil { animation: ${flyClassName}-recoil 450ms ease-out both; }
+        .${flyClassName}-recoil { animation: ${flyClassName}-recoil 600ms ease-out both; }
+        @keyframes ${flyClassName}-spin { to { transform: rotate(360deg); } }
+        .${flyClassName}-spin { animation: ${flyClassName}-spin 2.4s linear infinite; }
+        .${flyClassName}-spin-reverse { animation: ${flyClassName}-spin 1.6s linear infinite reverse; }
+        @keyframes ${flyClassName}-rumble { ${FIRST_BLOOD_RUMBLE_KEYFRAMES} }
+        .${flyClassName}-rumble { animation: ${flyClassName}-rumble ${FIRST_BLOOD_CHARGE_MS}ms linear both; }
+        @keyframes ${flyClassName}-flicker {
+          0% { opacity: 1; } 30% { opacity: 0.4; } 45% { opacity: 1; } 58% { opacity: 0.3; } 68% { opacity: 1; }
+          76% { opacity: 0.35; } 83% { opacity: 1; } 88% { opacity: 0.4; } 92% { opacity: 1; } 95% { opacity: 0.5; } 97%, 100% { opacity: 1; }
+        }
+        .${flyClassName}-flicker { animation: ${flyClassName}-flicker ${FIRST_BLOOD_CHARGE_MS}ms linear both; }
+        @keyframes ${flyClassName}-burst {
+          from { transform: translateY(0) scaleY(0.4); opacity: 1; }
+          to { transform: translateY(-26px) scaleY(1.4); opacity: 0; }
+        }
+        .${flyClassName}-burst { animation: ${flyClassName}-burst 480ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-target { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        .${flyClassName}-target { animation: ${flyClassName}-target 420ms ease-in-out infinite; }
+        @keyframes ${flyClassName}-core-flash {
+          from { transform: scale(0.3); opacity: 1; }
+          to { transform: scale(3.4); opacity: 0; }
+        }
+        .${flyClassName}-core-flash { animation: ${flyClassName}-core-flash 320ms ease-out both; }
+        @keyframes ${flyClassName}-crack {
+          0% { stroke-dashoffset: 1; opacity: 1; }
+          30% { stroke-dashoffset: 0; opacity: 1; }
+          100% { stroke-dashoffset: 0; opacity: 0; }
+        }
+        .${flyClassName}-crack { animation: ${flyClassName}-crack ${FIRST_BLOOD_IMPACT_MS - 100}ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes ${flyClassName}-spark {
+          from { transform: translateY(0); opacity: 1; }
+          70% { opacity: 0.9; }
+          to { transform: translateY(calc(-1 * var(--spark-distance))); opacity: 0; }
+        }
+        .${flyClassName}-spark { animation: ${flyClassName}-spark 700ms cubic-bezier(0.1, 0.9, 0.3, 1) both; }
+        @keyframes ${flyClassName}-glitch {
+          0% { transform: translate(-3px, 0); } 15% { transform: translate(3px, 1px); } 30% { transform: translate(-2px, -1px); }
+          45% { transform: translate(1px, 0); } 60%, 100% { transform: translate(0, 0); }
+        }
+        .${flyClassName}-glitch { animation: ${flyClassName}-glitch 360ms steps(1, end) both; }
+        @keyframes ${flyClassName}-ember {
+          from { transform: translateY(0); opacity: 0; }
+          20% { opacity: 0.9; }
+          to { transform: translateY(calc(-1 * var(--ember-rise))); opacity: 0; }
+        }
+        .${flyClassName}-ember { animation: ${flyClassName}-ember 800ms ease-out both; }
+        @keyframes ${flyClassName}-overlay-in { from { opacity: 0; } to { opacity: 0.7; } }
+        @keyframes ${flyClassName}-vignette-charge {
+          0% { opacity: 0.7; } 40% { opacity: 0.8; } 55% { opacity: 0.66; } 70% { opacity: 0.9; }
+          80% { opacity: 0.74; } 90% { opacity: 1; } 95% { opacity: 0.85; } 100% { opacity: 1; }
+        }
+        @keyframes ${flyClassName}-overlay-out { from { opacity: 1; } to { opacity: 0; } }
+        .${flyClassName}-vignette {
+          background: radial-gradient(ellipse at 50% 50%, transparent 38%,
+            color-mix(in srgb, var(--signal-negative) 16%, transparent) 72%,
+            color-mix(in srgb, #000 58%, transparent) 100%);
+          animation: ${flyClassName}-overlay-in ${FIRST_BLOOD_FOCUS_MS}ms ease-out both;
+        }
+        [data-first-blood-overlay="charge"] .${flyClassName}-vignette { animation: ${flyClassName}-vignette-charge ${FIRST_BLOOD_CHARGE_MS}ms ease-in both; }
+        [data-first-blood-overlay="flight"] .${flyClassName}-vignette,
+        [data-first-blood-overlay="impact"] .${flyClassName}-vignette { animation: none; opacity: 1; }
+        [data-first-blood-overlay="recover"] .${flyClassName}-vignette { animation: ${flyClassName}-overlay-out ${FIRST_BLOOD_RECOVER_MS}ms ease both; }
+        @keyframes ${flyClassName}-bar-in-top { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+        @keyframes ${flyClassName}-bar-in-bottom { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes ${flyClassName}-bar-out-top { from { transform: translateY(0); } to { transform: translateY(-100%); } }
+        @keyframes ${flyClassName}-bar-out-bottom { from { transform: translateY(0); } to { transform: translateY(100%); } }
+        .${flyClassName}-bar {
+          height: 7%;
+          background: color-mix(in srgb, #000 84%, var(--signal-negative));
+          animation: ${flyClassName}-bar-in-top ${FIRST_BLOOD_FOCUS_MS}ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .${flyClassName}-bar[data-edge="bottom"] { animation-name: ${flyClassName}-bar-in-bottom; }
+        [data-first-blood-overlay="recover"] .${flyClassName}-bar { animation: ${flyClassName}-bar-out-top ${FIRST_BLOOD_RECOVER_MS}ms ease-in both; }
+        [data-first-blood-overlay="recover"] .${flyClassName}-bar[data-edge="bottom"] { animation-name: ${flyClassName}-bar-out-bottom; }
+        @keyframes ${flyClassName}-flash { 0% { opacity: 0; } 8% { opacity: 1; } 100% { opacity: 0; } }
+        .${flyClassName}-flash {
+          background: radial-gradient(circle at var(--fx) var(--fy),
+            color-mix(in srgb, #fff 85%, transparent) 0%,
+            color-mix(in srgb, var(--signal-negative) 55%, transparent) 18%,
+            transparent 60%);
+          mix-blend-mode: screen;
+          animation: ${flyClassName}-flash 420ms ease-out both;
+        }
+        @keyframes ${flyClassName}-crackle { 0%, 100% { opacity: 0; } 18% { opacity: 1; } 34% { opacity: 0.15; } 46% { opacity: 0.9; } 60% { opacity: 0; } }
+        .${flyClassName}-crackle { animation: ${flyClassName}-crackle 260ms steps(1, end) infinite; }
+        @keyframes ${flyClassName}-crackle-build { from { opacity: 0.15; transform: scale(0.8); } to { opacity: 1; transform: scale(1.15); } }
+        .${flyClassName}-crackle-build { animation: ${flyClassName}-crackle-build ${FIRST_BLOOD_CHARGE_MS}ms ease-in both; }
+        @keyframes ${flyClassName}-scorch { from { stroke-opacity: 0.9; stroke-width: 7; } to { stroke-opacity: 0; stroke-width: 1; } }
+        .${flyClassName}-scorch { animation: ${flyClassName}-scorch ${FIRST_BLOOD_IMPACT_MS}ms ease-out both; }
+        @keyframes ${flyClassName}-global-shock {
+          from { transform: scale(0.4); opacity: 0.95; stroke-width: 4; }
+          to { transform: scale(9); opacity: 0; stroke-width: 0.4; }
+        }
+        .${flyClassName}-global-shock {
+          transform-box: fill-box;
+          transform-origin: center;
+          animation: ${flyClassName}-global-shock ${FIRST_BLOOD_IMPACT_MS - 200}ms cubic-bezier(0.12, 0.8, 0.3, 1) both;
+        }
+        .${flyClassName}-speed {
+          background: repeating-conic-gradient(from 0deg at var(--fx) var(--fy),
+            transparent 0deg 2.6deg,
+            color-mix(in srgb, var(--signal-negative) 34%, transparent) 2.6deg 3deg);
+          -webkit-mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent 0 26%, #000 75%);
+          mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent 0 26%, #000 75%);
+          animation: ${flyClassName}-speed-a 140ms steps(1, end) infinite;
+        }
+        .${flyClassName}-speed[data-alt] {
+          background: repeating-conic-gradient(from 1.4deg at var(--fx) var(--fy),
+            transparent 0deg 3.4deg,
+            color-mix(in srgb, var(--attack-map-node-label) 22%, transparent) 3.4deg 3.7deg);
+          animation-name: ${flyClassName}-speed-b;
+        }
+        @keyframes ${flyClassName}-speed-a { 0% { opacity: 0.9; } 50% { opacity: 0.25; } }
+        @keyframes ${flyClassName}-speed-b { 0% { opacity: 0.2; } 50% { opacity: 0.8; } }
+        [data-first-blood-overlay="impact"] .${flyClassName}-speed {
+          animation: ${flyClassName}-overlay-out 360ms ease-out both;
+        }
+        @keyframes ${flyClassName}-impact-frame { 0%, 55% { opacity: 0.82; } 100% { opacity: 0; } }
+        .${flyClassName}-impact-frame {
+          background: var(--attack-map-node-label);
+          mix-blend-mode: difference;
+          animation: ${flyClassName}-impact-frame 150ms steps(2, end) both;
+        }
+        @keyframes ${flyClassName}-tint { from { opacity: 0.3; } to { opacity: 0; } }
+        .${flyClassName}-tint { background: var(--signal-negative); animation: ${flyClassName}-tint 420ms ease-out 70ms both; }
         [data-surface-active="false"] * { animation-play-state: paused !important; }
         .${flyClassName}-bolt {
           animation: ${flyClassName}-bolt 1.05s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
@@ -1429,12 +1669,54 @@ export function CyberAttackMap({
   );
 }
 
-function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
+const FIRST_BLOOD_RETICLE = 'M -10 -24 H -24 V -10 M 10 -24 H 24 V -10 M -24 10 V 24 H -10 M 24 10 V 24 H 10';
+// Deterministic impact debris, computed once rather than per render.
+const FIRST_BLOOD_CRACKS = Array.from({ length: 8 }, (_, index) => {
+  const angle = ((index * 45 + (index % 2 ? 14 : -9)) * Math.PI) / 180;
+  const reach = 54 + (index % 3) * 12;
+  return [0, 0.34, 0.66, 1].map((t, step) => {
+    const bend = step === 0 ? 0 : (step % 2 ? 0.2 : -0.14) * (index % 2 ? 1 : -1);
+    const r = t * reach;
+    return `${step ? 'L' : 'M'} ${(Math.sin(angle + bend) * r).toFixed(1)} ${(-Math.cos(angle + bend) * r).toFixed(1)}`;
+  }).join(' ');
+});
+const FIRST_BLOOD_SPARKS = Array.from({ length: 20 }, (_, index) => ({
+  angle: index * 18 + (index % 3) * 7,
+  distance: 62 + ((index * 37) % 50),
+  delay: (index * 23) % 120,
+  size: index % 4 === 0 ? 2.4 : 1.4,
+}));
+const FIRST_BLOOD_EMBERS = Array.from({ length: 7 }, (_, index) => ({
+  x: (index - 3) * 9 + (index % 2 ? 3 : -2),
+  delay: index * 90,
+  rise: 34 + (index % 3) * 14,
+}));
+// Lightning that crackles around the charging core, each bolt on its own beat.
+const FIRST_BLOOD_BOLTS = Array.from({ length: 7 }, (_, index) => {
+  const angle = (index * 360) / 7 + (index % 2 ? 11 : -7);
+  const points = [14, 24, 33, 42, 52].map((radius, step) => {
+    const jitter = step === 0 ? 0 : (step % 2 ? 9 : -8) * (index % 3 === 1 ? -1 : 1);
+    const a = ((angle + jitter) * Math.PI) / 180;
+    return `${step ? 'L' : 'M'} ${(Math.sin(a) * radius).toFixed(1)} ${(-Math.cos(a) * radius).toFixed(1)}`;
+  });
+  return { d: points.join(' '), delay: (index * 53) % 230 };
+});
+// A shake whose amplitude builds through the charge, ending at the launch.
+const FIRST_BLOOD_RUMBLE_KEYFRAMES = Array.from({ length: 21 }, (_, index) => {
+  const amplitude = (index / 20) ** 2 * 3.2;
+  const x = (index % 2 ? 1 : -1) * amplitude;
+  const y = ((index % 3) - 1) * amplitude * 0.7;
+  return `${index * 5}% { transform: translate(${x.toFixed(2)}px, ${y.toFixed(2)}px); }`;
+}).join(' ');
+
+function FirstBloodChoreography({ sequence, arc, nodes, className, motion, glowId, clipId }: {
   sequence: FirstBloodSequence;
   arc?: AttackArc;
   nodes: TeamNode[];
   className: string;
   motion: boolean;
+  glowId: string;
+  clipId: string;
 }): ReactElement | null {
   if (!arc) return null;
   const attacker = nodes.find((node) => node.id === sequence.attack.attacker);
@@ -1442,6 +1724,7 @@ function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
   const { stage } = sequence;
   const intro = stage === 'focus' || stage === 'charge';
   const hit = stage === 'impact';
+  const glow = motion ? `url(#${glowId})` : undefined;
   return (
     <g pointerEvents="none" fill="none" stroke="var(--signal-negative)"
       data-first-blood-effect={intro ? undefined : 'true'}
@@ -1451,27 +1734,48 @@ function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
           <title>First blood submitted by {sequence.attack.attacker}</title>
           {intro ? (
             <>
-              <path d="M -10 -24 H -24 V -10 M 10 -24 H 24 V -10 M -24 10 V 24 H -10 M 24 10 V 24 H 10"
-                strokeWidth="2" className={motion ? `${className}-lock` : undefined} />
+              <path d={FIRST_BLOOD_RETICLE} strokeWidth="2" className={motion ? `${className}-lock` : undefined} />
+              {motion ? <circle r="34" strokeWidth="1.2" strokeDasharray="3 7" className={`${className}-spin`} /> : null}
               {stage === 'charge' ? (
-                <g data-first-blood-charge="true">
+                <g data-first-blood-charge="true" className={motion ? `${className}-rumble` : undefined}>
                   <circle r="44" strokeWidth="2.5" pathLength="1" strokeDasharray="1"
                     className={motion ? `${className}-charge-ring` : undefined} />
-                  <circle r="17" strokeWidth="5" strokeOpacity="0.35"
+                  {motion ? <>
+                    <circle r="60" strokeWidth="1.5" strokeDasharray="14 10" strokeOpacity="0.7" className={`${className}-spin`} />
+                    <circle r="72" strokeWidth="1" strokeDasharray="2 9" strokeOpacity="0.5" className={`${className}-spin-reverse`} />
+                  </> : null}
+                  <circle r="17" strokeWidth="5" strokeOpacity="0.35" filter={glow}
                     className={motion ? `${className}-charge-core` : undefined} />
-                  <circle r="7" fill="var(--signal-negative)" stroke="none" />
-                  {Array.from({ length: 8 }, (_, index) => (
-                    <g key={index} transform={`rotate(${index * 45})`}>
-                      <path d="M 0 -78 V -55" strokeWidth="2"
+                  <circle r="7" fill="var(--signal-negative)" stroke="none" filter={glow}
+                    className={motion ? `${className}-flicker` : undefined} />
+                  {motion ? (
+                    <g className={`${className}-crackle-build`} strokeLinejoin="round" strokeLinecap="round">
+                      {FIRST_BLOOD_BOLTS.map((bolt, index) => (
+                        <path key={index} d={bolt.d} strokeWidth={index % 2 ? 1.2 : 1.8}
+                          stroke={index % 3 ? 'var(--signal-negative)' : 'var(--attack-map-node-label)'}
+                          className={`${className}-crackle`} style={{ animationDelay: `${bolt.delay}ms` }} />
+                      ))}
+                    </g>
+                  ) : null}
+                  {Array.from({ length: motion ? 16 : 8 }, (_, index) => (
+                    <g key={index} transform={`rotate(${index * (motion ? 22.5 : 45)})`}>
+                      <path d={index % 2 && motion ? 'M 0 -92 V -66' : 'M 0 -78 V -55'} strokeWidth={index % 2 && motion ? 1.4 : 2}
                         className={motion ? `${className}-charge-in` : undefined}
-                        style={{ animationDelay: `${index * 70}ms` }} />
+                        style={motion ? { animationDelay: `${(index * 37) % 300}ms` } : undefined} />
                     </g>
                   ))}
                 </g>
               ) : null}
             </>
           ) : (
-            <circle r="28" strokeWidth="3" className={motion && stage === 'flight' ? `${className}-launch` : undefined} opacity={stage === 'flight' ? 1 : 0.35} />
+            <>
+              <circle r="28" strokeWidth="3" className={motion && stage === 'flight' ? `${className}-launch` : undefined} opacity={stage === 'flight' ? 1 : 0.35} />
+              {motion && stage === 'flight' ? Array.from({ length: 8 }, (_, index) => (
+                <g key={index} transform={`rotate(${index * 45 + 22.5})`}>
+                  <path d="M 0 -30 V -46" strokeWidth="2.5" strokeLinecap="round" className={`${className}-burst`} />
+                </g>
+              )) : null}
+            </>
           )}
         </g>
       ) : null}
@@ -1479,22 +1783,59 @@ function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
         <g data-first-blood-strike="true">
           <path d={arc.path} strokeWidth="18" strokeOpacity="0.13" />
           <path d={arc.path} strokeWidth="3" strokeOpacity="0.45" />
+          {motion ? <path d={arc.path} pathLength="1" strokeDasharray="0.22 1" strokeLinecap="round" strokeWidth="16"
+            strokeOpacity="0.5" filter={glow} className={`${className}-strike`} /> : null}
           <path d={arc.path} pathLength="1" strokeDasharray="0.22 1" strokeLinecap="round" strokeWidth="8"
             className={motion ? `${className}-strike` : undefined} />
+          {motion ? [1, 2, 3].map((echo) => (
+            <path key={echo} d={arc.path} pathLength="1" strokeDasharray="0.04 1" strokeLinecap="round"
+              strokeWidth={6 - echo * 1.4} strokeOpacity={0.7 - echo * 0.17}
+              className={`${className}-strike`} style={{ animationDelay: `${echo * 45}ms` }} />
+          )) : null}
           {motion ? <path d={arc.path} pathLength="1" strokeDasharray="0.008 1" strokeLinecap="round" strokeWidth="4"
             stroke="var(--attack-map-node-label)" className={`${className}-strike`} /> : null}
+        </g>
+      ) : null}
+      {motion && hit ? (
+        <g data-first-blood-aftermath="true">
+          <path d={arc.path} strokeWidth="5" strokeLinecap="round" filter={glow} className={`${className}-scorch`} />
+          <g clipPath={`url(#${clipId})`}>
+            <circle cx={arc.endX} cy={arc.endY} r="40" strokeWidth="2.5" className={`${className}-global-shock`} />
+            <circle cx={arc.endX} cy={arc.endY} r="40" strokeWidth="1" strokeOpacity="0.6"
+              className={`${className}-global-shock`} style={{ animationDelay: '180ms' }} />
+          </g>
         </g>
       ) : null}
       {victim?.visible ? (
         <g data-first-blood-endpoint="victim" transform={`translate(${arc.endX} ${arc.endY})`}>
           <title>First blood captured from {sequence.attack.victim}</title>
-          <path d="M -10 -24 H -24 V -10 M 10 -24 H 24 V -10 M -24 10 V 24 H -10 M 24 10 V 24 H 10"
+          <path d={FIRST_BLOOD_RETICLE}
             strokeWidth="1.6" opacity={hit ? 0.2 : 0.8} />
+          {motion && (intro || stage === 'flight') ? (
+            <g data-first-blood-target="true">
+              <circle r="36" strokeWidth="1" strokeDasharray="4 6" className={`${className}-spin-reverse`} />
+              <path d="M -44 0 H -32 M 32 0 H 44 M 0 -44 V -32 M 0 32 V 44" strokeWidth="1.5"
+                className={`${className}-target`} />
+            </g>
+          ) : null}
           {hit ? (
             <g data-first-blood-impact="true">
               <circle r="24" strokeWidth="3" className={motion ? `${className}-shock` : undefined} />
               {motion ? <>
+                <circle r="12" fill="var(--attack-map-node-label)" stroke="none" className={`${className}-core-flash`} />
+                <circle r="30" strokeWidth="10" strokeOpacity="0.5" filter={glow} className={`${className}-shock`} />
+                <g transform="translate(-3 1)" opacity="0.7">
+                  <circle r="26" strokeWidth="2" className={`${className}-shock`} style={{ animationDelay: '40ms' }} />
+                </g>
+                <g transform="translate(3 -1)" opacity="0.7">
+                  <circle r="26" strokeWidth="2" stroke="var(--attack-map-node-label)" className={`${className}-shock`} style={{ animationDelay: '40ms' }} />
+                </g>
                 <circle r="20" strokeWidth="1.5" className={`${className}-shock`} style={{ animationDelay: '130ms' }} />
+                <circle r="22" strokeWidth="1.2" stroke="var(--attack-map-node-label)" className={`${className}-shock`} style={{ animationDelay: '260ms' }} />
+                {FIRST_BLOOD_CRACKS.map((crack, index) => (
+                  <path key={`crack-${index}`} d={crack} pathLength="1" strokeDasharray="1" strokeWidth="1.6"
+                    strokeLinejoin="round" className={`${className}-crack`} />
+                ))}
                 {Array.from({ length: 12 }, (_, index) => {
                   const distance = 48 + (index % 3) * 13;
                   return (
@@ -1505,11 +1846,25 @@ function FirstBloodChoreography({ sequence, arc, nodes, className, motion }: {
                     </g>
                   );
                 })}
+                {FIRST_BLOOD_SPARKS.map((spark, index) => (
+                  <g key={`spark-${index}`} transform={`rotate(${spark.angle})`}>
+                    <circle cy="-10" r={spark.size} fill={index % 3 ? 'var(--signal-negative)' : 'var(--attack-map-node-label)'} stroke="none"
+                      className={`${className}-spark`}
+                      style={{ '--spark-distance': `${spark.distance}px`, animationDelay: `${spark.delay}ms` } as CSSProperties} />
+                  </g>
+                ))}
               </> : null}
-              <path d="M -7 -7 L 7 7 M 7 -7 L -7 7" strokeWidth="3" />
+              <path d="M -7 -7 L 7 7 M 7 -7 L -7 7" strokeWidth="3" className={motion ? `${className}-glitch` : undefined} />
             </g>
           ) : null}
-          {stage === 'recover' ? <circle r="17" strokeWidth="2" className={motion ? `${className}-reform` : undefined} /> : null}
+          {stage === 'recover' ? <>
+            <circle r="17" strokeWidth="2" className={motion ? `${className}-reform` : undefined} />
+            {motion ? FIRST_BLOOD_EMBERS.map((ember, index) => (
+              <circle key={index} cx={ember.x} cy="-6" r="1.6" fill="var(--signal-negative)" stroke="none"
+                className={`${className}-ember`}
+                style={{ '--ember-rise': `${ember.rise}px`, animationDelay: `${ember.delay}ms` } as CSSProperties} />
+            )) : null}
+          </> : null}
         </g>
       ) : null}
     </g>
@@ -1527,8 +1882,9 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
       className={cn('pointer-events-none absolute inset-x-4 bottom-14 z-10 sm:inset-x-6', motionClass)}
       data-first-blood-notice-stage={stage}
       style={{ color: 'var(--attack-map-node-label)' }}>
-      <div className="space-y-3 border-t py-3"
-        style={{ backgroundColor: 'var(--attack-map-background)', borderColor: 'var(--attack-map-legend-border)' }}>
+      {/* A scrim rather than a solid box keeps the globe and impact visible above the text. */}
+      <div className="space-y-3 px-1 pb-3 pt-8"
+        style={{ background: 'linear-gradient(to top, color-mix(in srgb, var(--attack-map-background) 94%, transparent) 0%, color-mix(in srgb, var(--attack-map-background) 78%, transparent) 55%, transparent 100%)' }}>
         {attacks.map((attack) => (
           <div key={attack.id}>
             <h3 className="grid grid-cols-[minmax(0,1fr)_1.75rem_minmax(0,1fr)] items-center gap-2 text-[clamp(1.05rem,2vw,1.65rem)] leading-tight sm:gap-4">
@@ -1540,7 +1896,7 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
             </h3>
             <div className="mt-2 flex items-start justify-between gap-3 text-xs">
               <p className="min-w-0 break-words" style={{ color: 'var(--signal-negative)' }}>First blood · {attack.service}</p>
-              <p className="shrink-0 text-[11px]">{stage === 'charge' ? 'Charging' : stage === 'flight' ? 'Incoming' : stage === 'impact' || stage === 'recover' ? 'Flag captured' : `Tick #${attack.tick}`}</p>
+              <p className="shrink-0 text-[11px]">Tick #{attack.tick}</p>
             </div>
           </div>
         ))}
@@ -2571,6 +2927,33 @@ function normalize(x: number, y: number): { x: number; y: number } {
 
 function normalizeLongitude(value: number): number {
   return ((((value + 180) % 360) + 360) % 360) - 180;
+}
+
+/** The point a fraction `t` of the way along the great circle from `from` to `to`. */
+function interpolateGreatCircle(from: GeoPoint, to: GeoPoint, t: number): GeoPoint {
+  const vector = (point: GeoPoint) => {
+    const lat = toRadians(point.lat);
+    const lon = toRadians(point.lon);
+    return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+  };
+  const a = vector(from);
+  // Exactly antipodal teams have no unique great circle; nudge to pick one.
+  let b = vector(to);
+  let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (dot < -0.9999) {
+    b = vector({ lat: to.lat, lon: to.lon + 1.5 });
+    dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+  const omega = Math.acos(clamp(dot, -1, 1));
+  if (omega < 1e-6) return { lat: from.lat, lon: from.lon };
+  const sin = Math.sin(omega);
+  const k1 = Math.sin((1 - t) * omega) / sin;
+  const k2 = Math.sin(t * omega) / sin;
+  const [x, y, z] = [0, 1, 2].map((axis) => a[axis] * k1 + b[axis] * k2);
+  return {
+    lat: (Math.asin(clamp(z, -1, 1)) * 180) / Math.PI,
+    lon: (Math.atan2(y, x) * 180) / Math.PI,
+  };
 }
 
 function toRadians(value: number): number {

@@ -987,6 +987,12 @@ function createStateForScenario(scenario = "default") {
   }
   if (scenario === "attack-map-dense") {
     nextState.attackItems = denseAttackMapItems.map((item) => ({ ...item }));
+    // A real scoreboard lists every team that attacks; the globe places teams
+    // from this roster, so it must match the seeded attack data.
+    const denseTeams = Array.from(new Set(denseAttackMapItems.flatMap((item) => [item.attacker, item.victim]))).sort();
+    nextState.scoreboard = denseTeams.map((team, index) => ({
+      rank: index + 1, team, attack: 0, defense: 0, sla: 0, total: 0, delta: "0", services: [],
+    }));
     nextState.gameStatus.current_tick = {
       ...nextState.gameStatus.current_tick,
       id: 28,
@@ -1257,7 +1263,10 @@ function writeSSE(res, data) {
 }
 
 function makeRealtimeAttackPage() {
+  // Newest first, like the real feed (ORDER BY created_at DESC): in the burst,
+  // atk-14 was captured after atk-13 and is listed before it.
   const items = [
+    ...(state.streamScenario === 'realtime-first-blood-burst' ? [{ id: 'atk-14', first_blood: true, attacker: 'College Alpha', victim: 'College Gamma', service: 'college-vault', tick: 13, verdict: 'first valid submission accepted' }] : []),
     {
       id: state.streamScenario === "realtime-after-first-blood" ? "atk-14" : "atk-13",
       first_blood: state.streamScenario === "realtime-first-blood" || state.streamScenario === "realtime-first-blood-empty" || state.streamScenario === "realtime-first-blood-burst" || state.streamScenario === "realtime-first-blood-long-names",
@@ -1267,7 +1276,6 @@ function makeRealtimeAttackPage() {
       tick: state.streamScenario === "realtime-after-first-blood" ? 14 : 13,
       verdict: "first valid submission accepted",
     },
-    ...(state.streamScenario === 'realtime-first-blood-burst' ? [{ id: 'atk-14', first_blood: true, attacker: 'College Alpha', victim: 'College Gamma', service: 'college-vault', tick: 13, verdict: 'first valid submission accepted' }] : []),
     ...state.attackItems,
   ];
 

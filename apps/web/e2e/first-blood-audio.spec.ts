@@ -19,13 +19,13 @@ test.beforeAll(() => {
     `--outfile=${output}`,
   ]);
   bundle = readFileSync(output, 'utf8');
-  announcer = readFileSync('public/lol-first-blood.mp3').toString('base64');
+  announcer = readFileSync('public/first-blood-announcer.mp3').toString('base64');
 });
 test.afterAll(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test('real first-blood mix covers every animation phase and closes with the supplied announcer', async ({
+test('real first-blood mix covers every animation phase and lands the announcer on the impact', async ({
   page,
 }, testInfo) => {
   const result = await page.evaluate(
@@ -39,7 +39,10 @@ test('real first-blood mix covers every animation phase and closes with the supp
       const decoder = new OfflineAudioContext(2, 1, sampleRate);
       const bytes = Uint8Array.from(atob(mp3), (value) => value.charCodeAt(0));
       const clip = await decoder.decodeAudioData(bytes.buffer);
-      const duration = 6.45 + clip.duration + 0.15;
+      // Announcer at impact + 120ms (4.12s); the 6.6s score fades under it.
+      const voiceAt = 4.12;
+      // Render until both the 6.6s score and the announcer have finished.
+      const duration = Math.max(6.6, voiceAt + clip.duration) + 0.15;
       async function render(withAnnouncer: boolean) {
         const context = new OfflineAudioContext(
           2,
@@ -78,12 +81,18 @@ test('real first-blood mix covers every animation phase and closes with the supp
       let preAnnouncerDifference = 0;
       for (let index = 0; index < left.length; index += 1) {
         peak = Math.max(peak, Math.abs(left[index]), Math.abs(right[index]));
-        if (index < 6.45 * sampleRate)
+        if (index < voiceAt * sampleRate)
           preAnnouncerDifference = Math.max(
             preAnnouncerDifference,
             Math.abs(left[index] - dry[index]),
           );
       }
+      // After the line and its 0.2s duck release, the score is back at full
+      // level, so its tail matches the effects-only render (still ducked: ~0.55).
+      const releasedAt = voiceAt + clip.duration + 0.25;
+      const postAnnouncerLevel =
+        rms(releasedAt + 0.15, 6.5) / Math.max(1e-9, rms(releasedAt + 0.15, 6.5, dry));
+      // Continuous from the first frame through the announcer's spoken line.
       const windows = Array.from({ length: 25 }, (_, index) =>
         rms(0.04 + index * 0.25, 0.29 + index * 0.25),
       );
@@ -126,7 +135,9 @@ test('real first-blood mix covers every animation phase and closes with the supp
         peak,
         windows,
         preAnnouncerDifference,
-        closingRms: rms(6.65, duration - 0.3),
+        postAnnouncerLevel,
+        releasedAt,
+        closingRms: rms(5.8, 6.3),
         endRms: rms(duration - 0.1, duration),
         duration,
         wav: btoa(binary),
@@ -137,6 +148,8 @@ test('real first-blood mix covers every animation phase and closes with the supp
   expect(result.peak).toBeLessThan(0.98);
   expect(result.windows.every((rms) => rms > 0.001)).toBe(true);
   expect(result.preAnnouncerDifference).toBeLessThan(0.000001);
+  if (result.releasedAt + 0.15 < 6.5)
+    expect(result.postAnnouncerLevel).toBeGreaterThan(0.9);
   expect(result.closingRms).toBeGreaterThan(0.005);
   expect(result.endRms).toBeLessThan(0.0001);
   const preview = Buffer.from(result.wav, 'base64');
