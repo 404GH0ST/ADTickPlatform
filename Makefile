@@ -5,7 +5,7 @@ GOMODCACHE := $(CURDIR)/.cache/go-mod
 
 PROD_ENV ?= deploy/compose/prod.env
 PROD_HOST_OVERRIDE ?= deploy/compose/prod.host-enforcement.yml
-COMPOSE_PARALLEL_LIMIT ?= 1
+COMPOSE_PARALLEL_LIMIT ?= 2
 LINUX_ARM64_TARGETOS ?= linux
 LINUX_ARM64_TARGETARCH ?= arm64
 LINUX_ARM64_PLATFORM ?= linux/arm64
