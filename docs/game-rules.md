@@ -52,7 +52,11 @@ executes only the checker `put` phase for every target, using a real flag whose
 service so the checker path matches a real tick, but the warmup does not persist
 `issued_flags`, checker runs, ticks, or scoreboard rows. With
 `GAME_CORE_WARMUP_REQUIRED=true` (default), match start is blocked unless the
-warmup reaches `GAME_CORE_WARMUP_MIN_SUCCESS_RATE`.
+warmup reaches `GAME_CORE_WARMUP_MIN_SUCCESS_RATE`. This also applies to a
+scheduled start: when `scheduled_start_at` is reached, `game-core` runs the
+warmup and starts the match only after it passes. Until then the match stays
+`not_started` (no ticks, no submissions), the failed result is shown in the
+organizer warmup status, and the warmup is retried every 30 seconds.
 
 When the match first transitions from `not_started` to `running`, `game-core`
 can immediately advance tick 1 (`GAME_CORE_AUTO_TICK_ON_MATCH_START=true` by
@@ -291,6 +295,24 @@ This makes reset a factory restore action that teams can use when a patch breaks
 Recommended default:
 
 - keep unlock status for that `team x service` after reset during the same match
+
+## 8.1.1 Cooldowns
+
+Each owned service has independent participant cooldowns, enforced by the API
+gateway and starting when the request is accepted:
+
+- factory reset: one per 90 seconds
+- restart: one per 30 seconds
+
+A request rejected before anything runs (the service is not in an actionable
+state, or the controller refuses the reset before touching the runtime) does not
+start the cooldown. Once the runtime has been touched, the cooldown stands even
+if the action fails.
+
+A repeated request inside the window returns `429 Too Many Requests` with a
+`Retry-After` header and a detail such as `Factory reset is on cooldown for this
+service. Wait 42 seconds before trying again.` The services page shows the
+remaining time on the button and in the service card.
 
 ## 8.2 Optional Soft Restart
 
