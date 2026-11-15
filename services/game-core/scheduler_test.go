@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -120,5 +121,76 @@ func TestIntervalGameSchedulerRequiresRunningMatch(t *testing.T) {
 
 	if _, err := scheduler.Start(); err != errContestNotStarted {
 		t.Fatalf("expected errContestNotStarted, got %v", err)
+	}
+}
+
+// If reading the match state fails once while restoring a running scheduler
+// at boot, the scheduler must not report "running" with no loop behind it;
+// it retries and resumes ticking.
+func TestIntervalGameSchedulerRetriesFailedRestore(t *testing.T) {
+	previousDelay := schedulerRestoreRetryDelay
+	schedulerRestoreRetryDelay = 10 * time.Millisecond
+	defer func() { schedulerRestoreRetryDelay = previousDelay }()
+
+	store := newMemoryGameStore()
+	if err := store.SaveSchedulerState(context.Background(), apigateway.GameSchedulerStatus{State: "running", IntervalSeconds: 1}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var matchCalls atomic.Int32
+	ticked := make(chan struct{}, 1)
+	scheduler := newIntervalGameScheduler(store, 5*time.Millisecond, false,
+		func(context.Context) (apigateway.GameTickStatus, error) {
+			select {
+			case ticked <- struct{}{}:
+			default:
+			}
+			return apigateway.GameTickStatus{ID: 1}, nil
+		},
+		func(context.Context) (apigateway.GameMatchStatus, error) {
+			if matchCalls.Add(1) == 1 {
+				return apigateway.GameMatchStatus{}, errors.New("connection reset by peer")
+			}
+			return apigateway.GameMatchStatus{State: "running"}, nil
+		})
+	defer scheduler.Close()
+
+	if got := scheduler.Status().State; got != "stopped" {
+		t.Fatalf("failed restore reported state %q, want stopped until retried", got)
+	}
+	select {
+	case <-ticked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler never resumed ticking after a transient restore failure")
+	}
+	if got := scheduler.Status().State; got != "running" {
+		t.Fatalf("state after successful retry = %q", got)
+	}
+}
+
+// A restore refused because the match is not running stops the scheduler
+// outright instead of reporting "running" with no loop.
+func TestIntervalGameSchedulerRestoreStopsWhenMatchPaused(t *testing.T) {
+	store := newMemoryGameStore()
+	if err := store.SaveSchedulerState(context.Background(), apigateway.GameSchedulerStatus{State: "running", IntervalSeconds: 1}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := newIntervalGameScheduler(store, 5*time.Millisecond, false,
+		func(context.Context) (apigateway.GameTickStatus, error) {
+			t.Error("no tick may run while the match is paused")
+			return apigateway.GameTickStatus{}, nil
+		},
+		func(context.Context) (apigateway.GameMatchStatus, error) {
+			return apigateway.GameMatchStatus{State: "paused"}, nil
+		})
+	defer scheduler.Close()
+	if got := scheduler.Status().State; got != "stopped" {
+		t.Fatalf("state = %q, want stopped", got)
+	}
+	persisted, err := store.LoadSchedulerState(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != "stopped" {
+		t.Fatalf("persisted state = %q, want stopped", persisted.State)
 	}
 }

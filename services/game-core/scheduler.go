@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,18 @@ type intervalGameScheduler struct {
 	now      func() time.Time
 	cancel   context.CancelFunc
 	status   apigateway.GameSchedulerStatus
+	// restoring is true while a background retry of a failed start-up restore
+	// is pending. Any explicit Start, Stop, or Close cancels the retry.
+	restoring bool
 }
+
+// Restoring a running scheduler reads the match state; if that read fails
+// transiently at boot, retry in the background instead of leaving a scheduler
+// that reports "running" with no tick loop behind it.
+var (
+	schedulerRestoreRetryDelay = 5 * time.Second
+	schedulerRestoreAttempts   = 24
+)
 
 func newIntervalGameScheduler(store gameStore, interval time.Duration, autoStart bool, advance tickAdvanceFunc, match matchStatusFunc) gameScheduler {
 	scheduler := &intervalGameScheduler{
@@ -54,7 +66,9 @@ func newIntervalGameScheduler(store gameStore, interval time.Duration, autoStart
 	scheduler.mu.Lock()
 	switch {
 	case scheduler.status.State == "running":
-		_, _ = scheduler.startLocked("restore", "scheduler state restored on process start")
+		if _, err := scheduler.startLocked("restore", "scheduler state restored on process start"); err != nil {
+			scheduler.restoreFailedLocked(err)
+		}
 	case autoStart:
 		_, _ = scheduler.startLocked("config", "scheduler started from configuration")
 	}
@@ -72,13 +86,79 @@ func (s *intervalGameScheduler) Status() apigateway.GameSchedulerStatus {
 func (s *intervalGameScheduler) Start() (apigateway.GameSchedulerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.restoring = false
 	return s.startLocked("organizer", "scheduler started by organizer")
 }
 
 func (s *intervalGameScheduler) StartWithSource(source, message string) (apigateway.GameSchedulerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.restoring = false
 	return s.startLocked(source, message)
+}
+
+func isMatchStateError(err error) bool {
+	return errors.Is(err, errContestOver) || errors.Is(err, errContestPaused) || errors.Is(err, errContestNotStarted)
+}
+
+// restoreFailedLocked handles a failed start-up restore. startLocked started
+// no loop, so the scheduler must not keep reporting "running": the match
+// monitor only starts a scheduler that reports otherwise.
+func (s *intervalGameScheduler) restoreFailedLocked(err error) {
+	s.status.State = "stopped"
+	s.status.NextRunAt = ""
+	s.status.LastError = "scheduler restore failed: " + strings.TrimSpace(err.Error())
+	if isMatchStateError(err) {
+		// The match is not running, so the scheduler genuinely should not run.
+		s.recordRestoreStoppedLocked()
+		return
+	}
+	// Transient failure: leave the persisted "running" state so a restart
+	// still restores, and retry in the background.
+	s.restoring = true
+	go s.retryRestore()
+}
+
+func (s *intervalGameScheduler) recordRestoreStoppedLocked() {
+	now := s.now().UTC()
+	s.persistLocked(now)
+	s.appendEventLocked(now, schedulerEventRecord{
+		EventType: "stopped",
+		Source:    "restore",
+		State:     s.status.State,
+		Message:   s.status.LastError,
+	})
+}
+
+func (s *intervalGameScheduler) retryRestore() {
+	for attempt := 0; attempt < schedulerRestoreAttempts; attempt++ {
+		time.Sleep(schedulerRestoreRetryDelay)
+		s.mu.Lock()
+		if !s.restoring {
+			s.mu.Unlock()
+			return
+		}
+		_, err := s.startLocked("restore", "scheduler state restored after retry")
+		if err == nil {
+			s.restoring = false
+			s.mu.Unlock()
+			return
+		}
+		s.status.LastError = "scheduler restore failed: " + strings.TrimSpace(err.Error())
+		if isMatchStateError(err) {
+			s.restoring = false
+			s.recordRestoreStoppedLocked()
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.restoring {
+		s.restoring = false
+		s.recordRestoreStoppedLocked()
+	}
 }
 
 func (s *intervalGameScheduler) startLocked(source, message string) (apigateway.GameSchedulerStatus, error) {
@@ -122,12 +202,14 @@ func (s *intervalGameScheduler) startLocked(source, message string) (apigateway.
 func (s *intervalGameScheduler) Stop() (apigateway.GameSchedulerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.restoring = false
 	return s.stopLocked("organizer", "scheduler stopped by organizer")
 }
 
 func (s *intervalGameScheduler) StopWithSource(source, message string) (apigateway.GameSchedulerStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.restoring = false
 	return s.stopLocked(source, message)
 }
 
@@ -160,9 +242,9 @@ func (s *intervalGameScheduler) Update(interval time.Duration) (apigateway.GameS
 
 	s.interval = interval
 	s.status.IntervalSeconds = int(s.interval / time.Second)
-	
+
 	now := s.now().UTC()
-	
+
 	// If it's running, update the NextRunAt and restart the internal timer
 	if s.status.State == "running" {
 		if s.cancel != nil {
@@ -195,6 +277,7 @@ func (s *intervalGameScheduler) Events(ctx context.Context, query apigateway.Gam
 func (s *intervalGameScheduler) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.restoring = false
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
