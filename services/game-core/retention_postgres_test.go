@@ -229,3 +229,72 @@ func TestPostgresTickTimeoutRecordsRunsAndCompletes(t *testing.T) {
 		t.Fatalf("expected a completed tick with persisted runs, got status=%q runs=%d", status, runs)
 	}
 }
+
+func TestPostgresPassingRetentionKeepsCheckerReportedState(t *testing.T) {
+	db := isolatedSubmissionDB(t)
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+ INSERT INTO teams(id,name,email,join_key) VALUES(101,'Team Alpha','a@test.local','a'),(102,'Team Delta','b@test.local','b');
+ INSERT INTO challenges(id,name,published) VALUES(1,'svc',TRUE);
+ INSERT INTO game_match_state(singleton,state) VALUES(TRUE,'running');
+ INSERT INTO game_ticks(id,status) VALUES(1,'completed');
+ INSERT INTO service_instances(team_id,challenge_id,runtime_kind,runtime_status,container_name,baseline_image,checker_image,endpoint,ssh_host,checker_token)
+ VALUES(101,1,'docker','ready','svc-101','test','checker','10.80.1.11:8080','10.80.1.11','tok');
+ `); err != nil {
+		t.Fatal(err)
+	}
+	store := &postgresGameStore{db: db}
+	now := time.Now().UTC()
+	run := checkerRunRecord{TickID: 1, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "svc", Target: "10.80.1.11:8080", CheckerImage: "checker", CheckedAt: now, Status: "success"}
+	for _, phase := range []string{"put", "get", "check"} {
+		run.Phase = phase
+		if phase == "check" {
+			run.ReportedServiceState = "faulty"
+			run.ReportedStateMessage = "admin panel broken"
+		}
+		if _, err := store.RecordCheckerRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	flag := issuedFlagRecord{Flag: "F1", OwnerTeamID: 101, OwnerTeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "svc", IssuedTick: 1, ExpiresTick: 1, CreatedAt: now, CheckerToken: "tok", NextCheckAt: now}
+	if err := store.IssueFlag(ctx, flag); err != nil {
+		t.Fatal(err)
+	}
+	passing := checkerRunRecord{TickID: 1, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "svc", Phase: "get", Target: "10.80.1.11:8080", CheckerImage: "checker", CheckedAt: now.Add(time.Second), Status: "success", Message: "stored flag passed retention verification"}
+	if applied, err := store.RecordRetentionCheck(ctx, flag, passing, false); err != nil || !applied {
+		t.Fatalf("retention check not applied: %v %v", applied, err)
+	}
+	var state string
+	if err := db.QueryRowContext(ctx, `SELECT service_state FROM checker_service_states WHERE tick_id=1 AND team_id=101 AND challenge_id=1`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "faulty" {
+		t.Fatalf("checker-reported state was overwritten by a passing retention get: %q", state)
+	}
+	rows, err := store.buildScoreboard(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Team == "Team Alpha" && row.SLA != 0 {
+			t.Fatalf("faulty tick earned SLA: %+v", row)
+		}
+	}
+
+	// A failing delayed get still overrides the tick verdict.
+	failing := passing
+	failing.CheckedAt = now.Add(2 * time.Second)
+	failing.Status, failing.ExitCode, failing.Message = "failed", flagMissingExitCode, "stored flag failed retention verification"
+	if applied, err := store.RecordRetentionCheck(ctx, flag, failing, true); err != nil || !applied {
+		t.Fatalf("failing retention check not applied: %v %v", applied, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT service_state FROM checker_service_states WHERE tick_id=1 AND team_id=101 AND challenge_id=1`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "flag_not_found" {
+		t.Fatalf("confirmed missing flag did not override the tick state: %q", state)
+	}
+}

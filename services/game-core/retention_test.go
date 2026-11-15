@@ -389,3 +389,68 @@ func TestStopMatchFinishesWhenFinalRetentionSweepRunsOutOfBudget(t *testing.T) {
 	}
 	t.Fatalf("incomplete final sweep was not reported: %+v", events.Items)
 }
+
+// faultyReportingChecker passes every phase, but its check reports the service
+// faulty through the canonical service-state channel.
+type faultyReportingChecker struct{ retentionTestChecker }
+
+func (c *faultyReportingChecker) Execute(ctx context.Context, r apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
+	result, err := c.retentionTestChecker.Execute(ctx, r)
+	if err == nil && r.Phase == "check" {
+		result.ServiceState = "faulty"
+		result.StateMessage = "admin panel broken"
+	}
+	return result, err
+}
+func (c *faultyReportingChecker) ExecuteBatch(ctx context.Context, r apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
+	return executeBatchViaSingle(ctx, c.Execute, r)
+}
+
+func TestPassingRetentionKeepsCheckerReportedState(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	store.targets = store.targets[:1]
+	now := time.Now().UTC()
+	server := newGameCoreServer("test", store, &faultyReportingChecker{}, newFlagCodec("test-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 1)
+	server.scoringDebounce = time.Hour
+	server.now = func() time.Time { return now }
+	t.Cleanup(func() {
+		server.scoringMu.Lock()
+		if server.scoringTimer != nil {
+			server.scoringTimer.Stop()
+		}
+		server.scoringMu.Unlock()
+	})
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Both delayed paths: a forced sweep, and the get before the next put.
+	if err := server.verifyRetainedFlags(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	store.mu.Lock()
+	state := store.serviceStates[checkerRunKeyFromIDs(1, 101, 1)]
+	gets := 0
+	for _, run := range store.runs {
+		if run.TickID == 1 && run.Phase == "get" && run.Status == "success" {
+			gets++
+		}
+	}
+	store.mu.Unlock()
+	if gets < 3 {
+		t.Fatalf("expected the tick get plus two passing retention gets, got %d", gets)
+	}
+	if state.Status != "faulty" {
+		t.Fatalf("checker-reported state was overwritten by a passing retention get: %+v", state)
+	}
+	if row := retentionTeamScore(t, store); row.SLA != 0 {
+		t.Fatalf("faulty ticks earned SLA: %+v", row)
+	}
+}

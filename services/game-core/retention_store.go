@@ -138,7 +138,11 @@ func (s *memoryGameStore) RecordRetentionCheck(ctx context.Context, f issuedFlag
 	record := apigateway.GameCheckerRun{ID: s.nextRun, TickID: run.TickID, TeamID: run.TeamID, TeamName: run.TeamName, ChallengeID: run.ChallengeID, ChallengeName: run.ChallengeName, Phase: run.Phase, Target: run.Target, CheckerImage: run.CheckerImage, Status: run.Status, ExitCode: run.ExitCode, Message: run.Message, Output: run.Output, CheckedAt: run.CheckedAt.UTC().Format(time.RFC3339)}
 	s.nextRun++
 	s.runs = append([]apigateway.GameCheckerRun{record}, s.runs...)
-	s.refreshMemoryServiceState(run)
+	// A passing delayed get confirms the tick's verdict; it must not replace a
+	// state the checker reported explicitly (see the Postgres store).
+	if _, recorded := s.serviceStates[key]; run.Status != "success" || !recorded {
+		s.refreshMemoryServiceState(run)
+	}
 	for i := range s.ticks {
 		if s.ticks[i].ID == run.TickID {
 			s.ticks[i].TotalCheckerRuns++
@@ -216,8 +220,19 @@ func (s *postgresGameStore) RecordRetentionCheck(ctx context.Context, f issuedFl
 	if err != nil {
 		return false, err
 	}
-	if err = refreshPostgresServiceStateTx(ctx, tx, run); err != nil {
-		return false, err
+	stateRecorded := false
+	if run.Status == "success" {
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM checker_service_states WHERE tick_id=$1 AND team_id=$2 AND challenge_id=$3)`, run.TickID, run.TeamID, run.ChallengeID).Scan(&stateRecorded); err != nil {
+			return false, err
+		}
+	}
+	// A passing delayed get only confirms the issuing tick's verdict. Deriving
+	// that tick's state again from phase exit codes would replace a state the
+	// checker reported explicitly (faulty, recovering, ...) with "ok".
+	if !stateRecorded {
+		if err = refreshPostgresServiceStateTx(ctx, tx, run); err != nil {
+			return false, err
+		}
 	}
 	success, failed := 0, 0
 	if run.Status == "success" {
