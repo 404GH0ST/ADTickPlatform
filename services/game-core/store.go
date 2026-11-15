@@ -2214,7 +2214,10 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id NOT IN (SELECT id FROM teams)`); err != nil {
+	// Drop deleted and deactivated teams. The team list above is read without a
+	// lock, so a deactivation committing mid-recompute can re-upsert its row;
+	// this sweep removes it on the same or the next recompute.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id NOT IN (SELECT id FROM teams WHERE active = TRUE)`); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
