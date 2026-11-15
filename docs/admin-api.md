@@ -332,7 +332,8 @@ Behavior:
 - runs one real tick immediately after the match enters `running` when
   `GAME_CORE_AUTO_TICK_ON_MATCH_START=true` (default)
 - refuses restart after the match has already been finished
-- when a configured schedule is already active, returns the effective running match state without mutating storage
+- when a configured schedule has already started the match, returns the effective running match state without mutating storage
+- while a scheduled start is still waiting for a passing required warmup, the match reports `not_started`; a manual start runs the warmup itself
 
 The immediate startup tick is best-effort. If it fails after the match has
 already entered `running`, the failure is logged by `game-core`; the scheduler
@@ -347,7 +348,7 @@ Behavior:
 - accepts `scheduled_start_at` and `scheduled_end_at` as optional RFC3339 timestamps
 - allows either field to be omitted or cleared independently
 - rejects `scheduled_end_at` earlier than `scheduled_start_at`
-- a background monitor persists `started_at` and `ended_at` automatically when the configured window opens or closes
+- a background monitor persists `started_at` and `ended_at` automatically when the configured window opens or closes; with `GAME_CORE_WARMUP_REQUIRED=true` it opens the match only after the warmup passes, retrying every 30 seconds
 - returns the effective match status after applying the updated window
 
 ### POST `/api/v2/admin/game/match/pause`

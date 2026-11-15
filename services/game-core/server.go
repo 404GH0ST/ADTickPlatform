@@ -232,6 +232,15 @@ func (s *gameCoreServer) matchStatus(ctx context.Context) (apigateway.GameMatchS
 }
 
 func (s *gameCoreServer) applyMatchWindow(status apigateway.GameMatchStatus) apigateway.GameMatchStatus {
+	return s.resolveMatchWindow(status, s.warmupRequired)
+}
+
+// resolveMatchWindow overlays the configured schedule on the persisted match
+// state. With holdForWarmup, reaching the scheduled start does not report the
+// match as running: the window monitor persists that transition only after the
+// required warmup passes, and ticks, submissions and the scheduler all follow
+// the resolved state.
+func (s *gameCoreServer) resolveMatchWindow(status apigateway.GameMatchStatus, holdForWarmup bool) apigateway.GameMatchStatus {
 	now := s.now().UTC()
 	var startAt *time.Time
 	var endAt *time.Time
@@ -285,6 +294,11 @@ func (s *gameCoreServer) applyMatchWindow(status apigateway.GameMatchStatus) api
 	}
 
 	if startAt != nil && !now.Before(startAt.UTC()) {
+		if holdForWarmup {
+			status.State = "not_started"
+			status.AcceptingSubmissions = false
+			return status
+		}
 		status.State = "running"
 		status.AcceptingSubmissions = true
 		if status.StartedAt == "" {

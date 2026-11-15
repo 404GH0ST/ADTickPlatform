@@ -16,7 +16,12 @@ type matchWindowMonitor struct {
 	pendingAccessState    string
 	reconciledAccessState string
 	lastAccessErrorLogAt  time.Time
+	lastWarmupAttemptAt   time.Time
 }
+
+// scheduledWarmupRetryDelay spaces warmup attempts while a scheduled start is
+// blocked: every attempt runs a checker put against every target.
+const scheduledWarmupRetryDelay = 30 * time.Second
 
 func newMatchWindowMonitor(server *gameCoreServer, scheduler gameScheduler, interval time.Duration) *matchWindowMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -76,7 +81,9 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 	if err != nil {
 		return apigateway.GameMatchStatus{}, err
 	}
-	desired := server.applyMatchWindow(current)
+	// The schedule alone decides the target state here; the warmup gate below
+	// decides whether the transition into running may happen.
+	desired := server.resolveMatchWindow(current, false)
 
 	switch {
 	case current.State == desired.State:
@@ -87,6 +94,11 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 			return apigateway.GameMatchStatus{}, err
 		}
 	case desired.State == "running":
+		if server.warmupRequired {
+			if err := m.passScheduledWarmup(ctx, server); err != nil {
+				return apigateway.GameMatchStatus{}, err
+			}
+		}
 		startAt := parseOptionalRFC3339(desired.StartedAt)
 		if startAt == nil {
 			now := server.now().UTC()
@@ -145,6 +157,25 @@ func reconcileMatchWindowState(server *gameCoreServer, m *matchWindowMonitor) (a
 	}
 
 	return server.matchStatus(ctx)
+}
+
+// passScheduledWarmup applies the required warmup gate to a scheduled start, as
+// handleStartMatch does for an organizer start. A failed attempt keeps the
+// match not_started and is retried after scheduledWarmupRetryDelay.
+func (m *matchWindowMonitor) passScheduledWarmup(ctx context.Context, server *gameCoreServer) error {
+	now := server.now()
+	if !m.lastWarmupAttemptAt.IsZero() && now.Sub(m.lastWarmupAttemptAt) < scheduledWarmupRetryDelay {
+		return fmt.Errorf("scheduled match start is waiting for the next warmup attempt")
+	}
+	m.lastWarmupAttemptAt = now
+	warmup, err := server.runWarmup(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduled match start warmup: %w", err)
+	}
+	if warmup.Status != "passed" {
+		return fmt.Errorf("scheduled match start blocked by warmup (%s): %s", warmup.Status, warmup.Message)
+	}
+	return nil
 }
 
 func (m *matchWindowMonitor) reconcilePendingAccess(ctx context.Context, server *gameCoreServer, state string) error {

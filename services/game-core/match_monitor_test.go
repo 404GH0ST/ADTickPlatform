@@ -249,3 +249,46 @@ func waitForCondition(t *testing.T, timeout time.Duration, predicate func() bool
 	}
 	t.Fatal("condition was not satisfied before timeout")
 }
+
+func TestScheduledStartRequiresPassingWarmup(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryGameStore()
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{failPhase: "put"}, newFlagCodec("test-flag-secret", "PLAYIT"), &monitorTestScheduler{}, []string{"put", "get", "check"}, 15)
+	server.autoTickOnMatchStart = false
+	server.warmupPutRetries = 0
+	server.warmupPutRetryDelay = 0
+	start := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	now := start.Add(time.Second)
+	server.matchStartAt = &start
+	server.now = func() time.Time { return now }
+	monitor := &matchWindowMonitor{}
+
+	if _, err := reconcileMatchWindowState(server, monitor); err == nil {
+		t.Fatal("expected a failing warmup to block the scheduled start")
+	}
+	persisted, _ := store.MatchStatus(ctx)
+	resolved, _ := server.matchStatus(ctx)
+	if persisted.State != "not_started" || resolved.State != "not_started" || resolved.AcceptingSubmissions {
+		t.Fatalf("blocked scheduled start leaked into running: persisted=%s resolved=%+v", persisted.State, resolved)
+	}
+	if resolved.Warmup == nil || resolved.Warmup.Status != "failed" {
+		t.Fatalf("expected the failed warmup to be reported, got %+v", resolved.Warmup)
+	}
+	if _, err := server.advanceTick(ctx); !errors.Is(err, errContestNotStarted) {
+		t.Fatalf("ticks must not run while the scheduled start is blocked: %v", err)
+	}
+
+	// The checker is repaired; the next attempt waits for the retry delay.
+	server.checker = testCheckerClient{}
+	if _, err := reconcileMatchWindowState(server, monitor); err == nil {
+		t.Fatal("expected the retry to wait for scheduledWarmupRetryDelay")
+	}
+	now = now.Add(scheduledWarmupRetryDelay)
+	status, err := reconcileMatchWindowState(server, monitor)
+	if err != nil {
+		t.Fatalf("expected the scheduled start after a passing warmup: %v", err)
+	}
+	if status.State != "running" || status.StartedAt != start.Format(time.RFC3339) {
+		t.Fatalf("expected a running match started at the scheduled time, got %+v", status)
+	}
+}

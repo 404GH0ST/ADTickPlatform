@@ -930,6 +930,9 @@ func TestMatchStatusUsesConfiguredWindow(t *testing.T) {
 	start := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
 	end := start.Add(4 * time.Hour)
 	server := newGameCoreServer("dev-admin-token", newMemoryGameStore(), testCheckerClient{}, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15)
+	// Pure window resolution; the required-warmup hold is covered by
+	// TestScheduledStartRequiresPassingWarmup.
+	server.warmupRequired = false
 	server.matchStartAt = &start
 	server.matchEndAt = &end
 	server.now = func() time.Time {
