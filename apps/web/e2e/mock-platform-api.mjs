@@ -1735,7 +1735,13 @@ async function handleParticipantRoutes(ctx) {
         service.unlocked = true;
         service.last_event = "SSH unlocked by accepted enemy flag";
       }
-      return { flag, status: accepted ? "accepted" : "invalid", challenge_id: accepted ? 1 : undefined };
+      if (accepted) {
+        return { flag, status: "accepted", detail: "flag is correct.", challenge_id: 1 };
+      }
+      if (flag === "PLAYIT{already-submitted}") {
+        return { flag, status: "duplicate", detail: "flag already submitted." };
+      }
+      return { flag, status: "invalid", detail: "flag is wrong or expired." };
     });
     const accepted_count = results.filter((v) => v.status === "accepted").length;
     return writeSuccess(res, { results, accepted_count, rejected_count: results.length - accepted_count });

@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from "react";
-import { Flag, LoaderCircle } from "lucide-react";
+import { CircleCheck, CircleMinus, CircleX, Flag, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,38 @@ type Verdict = {
   detail?: string;
   message?: string;
 };
+
+type VerdictOutcome = "accepted" | "duplicate" | "rejected";
+
+const verdictPresentation: Record<
+  VerdictOutcome,
+  { label: string; tone: string; Icon: typeof CircleCheck }
+> = {
+  accepted: { label: "Accepted", tone: "tone-success", Icon: CircleCheck },
+  duplicate: { label: "Duplicate", tone: "tone-warning", Icon: CircleMinus },
+  rejected: { label: "Rejected", tone: "tone-danger", Icon: CircleX },
+};
+
+function verdictOutcome(status: string): VerdictOutcome {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "accepted") {
+    return "accepted";
+  }
+  if (normalized === "duplicate") {
+    return "duplicate";
+  }
+  return "rejected";
+}
+
+function summaryVariant(accepted: number, rejected: number) {
+  if (accepted > 0 && rejected === 0) {
+    return "success" as const;
+  }
+  if (accepted === 0) {
+    return "error" as const;
+  }
+  return "warning" as const;
+}
 
 function parseFlags(raw: string): string[] {
   return raw
@@ -43,7 +75,10 @@ export function FlagSubmitPanel({
   const [rawFlags, setRawFlags] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<{
+    message: string;
+    variant: "success" | "warning" | "error";
+  } | null>(null);
   const [verdicts, setVerdicts] = useState<Verdict[]>([]);
 
   const closed = acceptingSubmissions === false;
@@ -83,11 +118,14 @@ export function FlagSubmitPanel({
         rejected_count?: number;
       };
       const results = payload.results ?? [];
+      const acceptedCount = payload.accepted_count ?? 0;
+      const rejectedCount = payload.rejected_count ?? 0;
       setVerdicts(results);
-      setNote(
-        `Accepted ${payload.accepted_count ?? 0}, rejected ${payload.rejected_count ?? 0}.`,
-      );
-      if ((payload.accepted_count ?? 0) > 0) {
+      setNote({
+        message: `Accepted ${acceptedCount}, rejected ${rejectedCount}.`,
+        variant: summaryVariant(acceptedCount, rejectedCount),
+      });
+      if (acceptedCount > 0) {
         setRawFlags("");
         window.dispatchEvent(new Event("platform:flag-accepted"));
       }
@@ -200,33 +238,37 @@ export function FlagSubmitPanel({
         {hasFeedback ? (
           <div id={feedbackId} className="grid gap-2" aria-live="polite">
             {error ? <StatusBanner message={error} variant="error" /> : null}
-            {note ? <StatusBanner message={note} variant="success" /> : null}
+            {note ? (
+              <div data-testid="flag-submit-summary" data-variant={note.variant}>
+                <StatusBanner message={note.message} variant={note.variant} />
+              </div>
+            ) : null}
             {verdicts.length > 0 ? (
               <ul
-                className="grid max-h-40 gap-1 overflow-y-auto rounded-sm border border-border bg-muted/20 p-2 text-xs"
+                className="grid max-h-40 gap-1 overflow-y-auto text-xs"
                 aria-label="Flag verdicts"
               >
                 {verdicts.map((verdict, index) => {
-                  const accepted = verdict.status
-                    .toLowerCase()
-                    .includes("accept");
+                  const outcome = verdictOutcome(verdict.status);
+                  const { label, tone, Icon } = verdictPresentation[outcome];
+                  const detail = verdict.detail || verdict.message;
                   return (
                     <li
                       key={`${verdict.flag}-${index}`}
-                      className="break-all font-mono leading-5"
+                      data-testid="flag-verdict"
+                      data-verdict={outcome}
+                      className={cn(
+                        "flex items-start gap-2 rounded-sm border px-2 py-1 leading-5",
+                        tone,
+                      )}
                     >
-                      <span
-                        className={
-                          accepted ? "text-positive" : "text-negative"
-                        }
-                      >
-                        {verdict.status}
+                      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span className="min-w-0 break-all">
+                        <span className="font-semibold">{label}</span>
+                        {": "}
+                        <span className="font-mono">{verdict.flag}</span>
+                        {detail ? ` — ${detail}` : ""}
                       </span>
-                      {": "}
-                      {verdict.flag}
-                      {verdict.detail || verdict.message
-                        ? ` — ${verdict.detail || verdict.message}`
-                        : ""}
                     </li>
                   );
                 })}
