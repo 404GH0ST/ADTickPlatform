@@ -133,9 +133,11 @@ type httpGameCoreClient struct {
 	baseURL string
 	token   string
 	client  *http.Client
-	// stopClient serves match stop, which waits for a running tick and then
-	// runs the final retention sweep.
-	stopClient *http.Client
+	// longClient serves the calls that run a whole tick: match stop (waits for
+	// a running tick, then the final retention sweep) and manual tick advance
+	// (can use its full GAME_CORE_TICK_TIMEOUT budget, the same as this
+	// client's default 3m timeout). Game-core finishes both if abandoned.
+	longClient *http.Client
 }
 
 // gameCoreMatchStopTimeout caps one match stop call. Game-core bounds the stop
@@ -175,7 +177,7 @@ func NewHTTPGameCoreClientWithTimeout(baseURL, token string, timeout time.Durati
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		stopClient: &http.Client{
+		longClient: &http.Client{
 			Timeout: max(timeout, gameCoreMatchStopTimeout),
 		},
 	}
@@ -201,12 +203,16 @@ func (c *httpGameCoreClient) ResumeMatch(ctx context.Context) (GameMatchStatus, 
 	return requestGameCoreJSON[GameMatchStatus](ctx, c, http.MethodPost, "/internal/v1/game/match/resume")
 }
 
-func (c *httpGameCoreClient) StopMatch(ctx context.Context) (GameMatchStatus, error) {
-	stop := *c
-	if c.stopClient != nil {
-		stop.client = c.stopClient
+func (c *httpGameCoreClient) withLongClient() *httpGameCoreClient {
+	long := *c
+	if c.longClient != nil {
+		long.client = c.longClient
 	}
-	return requestGameCoreJSON[GameMatchStatus](ctx, &stop, http.MethodPost, "/internal/v1/game/match/stop")
+	return &long
+}
+
+func (c *httpGameCoreClient) StopMatch(ctx context.Context) (GameMatchStatus, error) {
+	return requestGameCoreJSON[GameMatchStatus](ctx, c.withLongClient(), http.MethodPost, "/internal/v1/game/match/stop")
 }
 
 func (c *httpGameCoreClient) UpdateMatchSchedule(ctx context.Context, req UpdateMatchScheduleRequest) (GameMatchStatus, error) {
@@ -214,7 +220,7 @@ func (c *httpGameCoreClient) UpdateMatchSchedule(ctx context.Context, req Update
 }
 
 func (c *httpGameCoreClient) AdvanceTick(ctx context.Context) (GameTickStatus, error) {
-	return requestGameCoreJSON[GameTickStatus](ctx, c, http.MethodPost, "/internal/v1/game/ticks/advance")
+	return requestGameCoreJSON[GameTickStatus](ctx, c.withLongClient(), http.MethodPost, "/internal/v1/game/ticks/advance")
 }
 
 func (c *httpGameCoreClient) CheckerRuns(ctx context.Context, query GameCheckerRunQuery) (GameCheckerRunPage, error) {

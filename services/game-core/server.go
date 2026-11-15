@@ -348,7 +348,11 @@ func (s *gameCoreServer) handleAdvanceTick(w http.ResponseWriter, r *http.Reques
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	tick, err := s.advanceTick(r.Context())
+	// A tick may use its whole GAME_CORE_TICK_TIMEOUT budget, which can outlast
+	// the caller's HTTP deadline. A disconnect must not cancel checkers mid-tick
+	// (that would record the tick as interrupted), so detach like the
+	// match-start auto-tick; the tick timeout still bounds checker execution.
+	tick, err := s.advanceTick(context.WithoutCancel(r.Context()))
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		switch {
@@ -895,12 +899,18 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		return apigateway.GameTickStatus{}, err
 	}
 
-	targets, err := s.store.ListCheckerTargets(ctx)
+	// The tick row now exists and must reach a terminal state. A match pause,
+	// scheduler stop, or interval change cancels ctx mid-tick; that may abort
+	// checker execution, but not persistence: a row left 'running' makes
+	// StartNextTick refuse every later tick until game-core restarts.
+	persistCtx := context.WithoutCancel(ctx)
+
+	targets, err := s.store.ListCheckerTargets(persistCtx)
 	if err != nil {
 		tick.Status = "failed"
 		tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
 		tick.Message = err.Error()
-		_, _ = s.store.CompleteTick(ctx, tick)
+		s.completeFailedTick(persistCtx, tick)
 		return apigateway.GameTickStatus{}, err
 	}
 	// Rotate target order by tick id so a hard timeout does not permanently
@@ -913,14 +923,15 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		runCtx, cancel = context.WithTimeout(ctx, s.tickTimeout)
 		defer cancel()
 	}
-	// runCtx bounds checker execution only. Results are persisted with ctx so a
-	// tick that hits its timeout still records what it covered and completes.
-	results, err := s.runCheckerTargets(ctx, runCtx, tick.ID, targets)
+	// runCtx bounds checker execution only. Results are persisted with
+	// persistCtx so a tick that times out or is interrupted still records what
+	// it covered and completes.
+	results, err := s.runCheckerTargets(persistCtx, runCtx, tick.ID, targets)
 	if err != nil {
 		tick.Status = "failed"
 		tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
 		tick.Message = err.Error()
-		_, _ = s.store.CompleteTick(ctx, tick)
+		s.completeFailedTick(persistCtx, tick)
 		return apigateway.GameTickStatus{}, err
 	}
 	coveredTargets := 0
@@ -936,7 +947,14 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 
 	tick.Status = "completed"
 	tick.CompletedAt = s.now().UTC().Format(time.RFC3339)
-	if s.tickTimeout > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+	if ctx.Err() != nil {
+		tick.Message = fmt.Sprintf(
+			"tick interrupted (match paused or scheduler stopped) after covering %d of %d targets (%d phases configured)",
+			coveredTargets,
+			len(targets),
+			len(s.checkerPhases),
+		)
+	} else if s.tickTimeout > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		tick.Message = fmt.Sprintf(
 			"tick timed out after covering %d of %d targets (%d phases configured)",
 			coveredTargets,
@@ -950,11 +968,11 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 			len(s.checkerPhases),
 		)
 	}
-	completed, err := s.store.CompleteTick(ctx, tick)
+	completed, err := s.store.CompleteTick(persistCtx, tick)
 	if err != nil {
 		return apigateway.GameTickStatus{}, err
 	}
-	if _, err := s.store.RecomputeScoreboard(ctx); err != nil {
+	if _, err := s.store.RecomputeScoreboard(persistCtx); err != nil {
 		return apigateway.GameTickStatus{}, err
 	}
 	// Best-effort: open network (+ WG converge via controller) for challenges whose
@@ -966,6 +984,14 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		}
 	}
 	return completed, nil
+}
+
+// completeFailedTick finalizes a tick that already failed. Its own error is
+// logged rather than returned so the original failure stays the reported one.
+func (s *gameCoreServer) completeFailedTick(ctx context.Context, tick apigateway.GameTickStatus) {
+	if _, err := s.store.CompleteTick(ctx, tick); err != nil {
+		log.Printf("game-core: could not finalize failed tick %d: %v", tick.ID, err)
+	}
 }
 
 // runWarmup executes a pre-match warmup: it lists every checker target and runs
@@ -1352,6 +1378,10 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 		phaseResults[pr.Phase] = pr
 	}
 
+	// The organizer paused the match, stopped the scheduler, or changed its
+	// interval mid-tick. That is not a service failure: every phase is recorded
+	// as skipped, which the service-state summary reports as unknown, not down.
+	interrupted := execErr != nil && errors.Is(execCtx.Err(), context.Canceled)
 	halted := false
 	for _, phase := range s.checkerPhases {
 		runTime := s.now().UTC()
@@ -1369,6 +1399,9 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 		}
 
 		switch {
+		case interrupted:
+			run.Status = "skipped"
+			run.Message = "checker interrupted: tick cancelled before this target finished"
 		case halted:
 			run.Status = "skipped"
 			run.Message = "phase skipped after previous checker failure"
@@ -1556,9 +1589,8 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct.", ChallengeID: issued.ChallengeID})
 		acceptedAny = true
 	}
-	if err := s.recordRejectedSubmissions(ctx, teamID, attackerName, currentTick, results); err != nil {
-		return nil, err
-	}
+	// Accepted captures are already committed. Their follow-up work and the
+	// verdicts must not depend on the best-effort rejected-attempt history.
 	if acceptedAny {
 		s.scheduleScoreboardRecompute()
 		if s.accessReconcile != nil {
@@ -1567,6 +1599,13 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 				log.Printf("access reconcile after accepted flag: %v", err)
 			}
 		}
+	}
+	if err := s.recordRejectedSubmissions(ctx, teamID, attackerName, currentTick, results); err != nil {
+		if acceptedAny {
+			log.Printf("game-core: submission history write failed after accepted capture (team %d): %v", teamID, err)
+			return results, nil
+		}
+		return nil, err
 	}
 	return results, nil
 }

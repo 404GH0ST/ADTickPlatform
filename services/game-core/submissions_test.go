@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"adplatform/internal/services/apigateway"
 )
@@ -132,5 +135,60 @@ func TestSubmissionHistoryRecordsClosedMatchRejections(t *testing.T) {
 	page := decodeResponse[apigateway.SubmissionPage](t, response.Body.Bytes())
 	if page.TotalCount != 1 || page.Items[0].Flag != "closed-match-attempt" {
 		t.Fatalf("closed-match attempt not retained: %+v", page)
+	}
+}
+
+type failingHistoryStore struct {
+	*memoryGameStore
+}
+
+func (failingHistoryStore) RecordSubmission(context.Context, apigateway.AdminSubmission) error {
+	return errors.New("transient submission history failure")
+}
+
+// A capture committed earlier in the batch must still be reported and must
+// still schedule a recompute when writing a rejected attempt to the history
+// fails afterwards.
+func TestHistoryWriteFailureKeepsCommittedCapture(t *testing.T) {
+	store := newMemoryGameStore().(*memoryGameStore)
+	srv := newGameCoreServer("test", failingHistoryStore{store}, testCheckerClient{}, newFlagCodec("test-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 1).
+		WithWarmupRequired(false).WithAutoTickOnMatchStart(false)
+	srv.scoringDebounce = time.Hour
+	ctx := context.Background()
+	if _, err := store.StartMatch(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var victim issuedFlagRecord
+	store.mu.Lock()
+	for _, flag := range store.flags {
+		victim = flag
+		break
+	}
+	store.mu.Unlock()
+	attacker := 0
+	for id := range store.teamNames {
+		if id != victim.OwnerTeamID {
+			attacker = id
+			break
+		}
+	}
+
+	results, err := srv.submitFlags(ctx, attacker, []string{victim.Flag, "PLAYIT{garbage}"})
+	if err != nil {
+		t.Fatalf("committed capture reported as a failed submission: %v", err)
+	}
+	if len(results) != 2 || results[0].Status != "accepted" || results[1].Status != "invalid" {
+		t.Fatalf("unexpected verdicts: %+v", results)
+	}
+	if !srv.snapshotScoringStatus().Pending {
+		t.Fatal("scoreboard recompute not scheduled after accepted capture")
+	}
+
+	// With nothing accepted there is no committed state, so the error surfaces.
+	if _, err := srv.submitFlags(ctx, attacker, []string{"PLAYIT{garbage}"}); err == nil {
+		t.Fatal("history failure with no accepted capture should be returned")
 	}
 }

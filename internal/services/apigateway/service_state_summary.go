@@ -31,6 +31,13 @@ func SummarizeCheckerRunsForTick(runs []GameCheckerRun, tickID int) GameServiceS
 
 	summary := GameServiceStateSummary{TickID: tickID}
 	switch {
+	case noCheckerPhaseRan(phases):
+		// Every recorded phase was skipped without one succeeding or failing,
+		// e.g. the tick was interrupted by a match pause before the checker
+		// finished. Nothing was observed about the service, so it is not down.
+		summary.Status = "unknown"
+		summary.Phase = dominantFailurePhase(phases)
+		summary.Message = phaseMessage(phases[summary.Phase], "checker did not run for this tick")
 	case checkerCycleStillRunning(phases):
 		summary.Status = "unknown"
 		summary.Phase = nextMissingCheckerPhase(phases)
@@ -106,6 +113,21 @@ func collectTickPhaseStates(runs []GameCheckerRun) map[string]tickPhaseState {
 		phases[phase] = state
 	}
 	return phases
+}
+
+func noCheckerPhaseRan(phases map[string]tickPhaseState) bool {
+	if len(phases) == 0 {
+		return false
+	}
+	for _, state := range phases {
+		if state.success || state.failed {
+			return false
+		}
+		if state.run == nil || !strings.EqualFold(strings.TrimSpace(state.run.Status), "skipped") {
+			return false
+		}
+	}
+	return true
 }
 
 func checkerCycleStillRunning(phases map[string]tickPhaseState) bool {
