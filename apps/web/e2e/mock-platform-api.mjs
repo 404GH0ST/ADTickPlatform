@@ -1512,7 +1512,7 @@ async function handleSystemRoutes({ req, res, url, method }) {
     serviceActionCooldowns.clear();
     // Close all active SSE connections so Next.js re-fetches fresh data
     // Clear each stream's timers before ending it (see writeSSEChunk).
-    for (const conn of [...activeSSEConnections]) {
+    for (const conn of activeSSEConnections) {
       closeSSE(conn);
     }
     return writeSuccess(res, { reset: true });
