@@ -1,7 +1,7 @@
 "use client";
 import type { ReactElement, ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, LoaderCircle, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
@@ -18,6 +18,11 @@ import {
   cooldownMessage,
   type ServiceActionFeedback,
 } from "@/lib/service-actions";
+import {
+  describeService,
+  serviceCooldownLabel,
+  serviceLockBadgeLabel,
+} from "@/lib/service-view-model";
 import { Badge } from "@/components/ui/badge";
 import { AttackMapPanel } from "@/components/ui/attack-map-panel";
 import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
@@ -50,7 +55,7 @@ import {
 
 export type { SSHSessionData };
 
-type AttackFilters = {
+export type AttackFilters = {
   limit: string;
   offset: string;
   attacker: string;
@@ -60,7 +65,7 @@ type AttackFilters = {
   tickTo: string;
 };
 
-type ScoreboardPanelProps = {
+export type ScoreboardPanelProps = {
   scoreRows: ScoreRow[];
   currentTeamName?: string;
   frozen?: boolean;
@@ -68,7 +73,7 @@ type ScoreboardPanelProps = {
   unfreezeAt?: string;
 };
 
-type ServicesPanelProps = {
+export type ServicesPanelProps = {
   rows: ServiceRow[];
   pendingAction: string | null;
   overview: PlatformOverview;
@@ -78,7 +83,7 @@ type ServicesPanelProps = {
   onSelectReset: (service: ServiceRow) => void;
 };
 
-type AttacksPanelProps = {
+export type AttacksPanelProps = {
   attackFilters: AttackFilters;
   highlightedAttackIDs: string[];
   attackPage: AttackFeedPage;
@@ -101,7 +106,7 @@ type AttacksPanelProps = {
 const selectClassName =
   "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
-type SSHSessionDialogProps = {
+export type SSHSessionDialogProps = {
   actionError: string | null;
   issuedSession: SSHSessionData | null;
   open: boolean;
@@ -110,7 +115,7 @@ type SSHSessionDialogProps = {
   onConfirm: () => void;
 };
 
-type FactoryResetDialogProps = {
+export type FactoryResetDialogProps = {
   actionError: string | null;
   cooldownSeconds: number;
   open: boolean;
@@ -193,7 +198,23 @@ function formatCountdown(seconds: number): string {
   return `${mins}m ${secs.toString().padStart(2, "0")}s`;
 }
 
-function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
+export type MatchClock = {
+  currentTickLabel: string;
+  stateLabel: string;
+  stateKind: "running" | "paused" | "idle";
+  nextTickLabel: string;
+  countdown: { primary: string; secondary?: string };
+  /** True while a live countdown is ticking (running match, known next tick). */
+  counting: boolean;
+  timeLeft: number | null;
+};
+
+/**
+ * Live tick clock for the participant views: countdown to the next tick,
+ * rolled forward by whole intervals, plus a router refresh while the backend
+ * catches up after a boundary. Shared by the stock card and themed clocks.
+ */
+export function useMatchClock(overview: PlatformOverview): MatchClock {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [overdue, setOverdue] = useState(false);
   const router = useRouter();
@@ -253,16 +274,6 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     matchState === "not_started" ||
     !matchState;
   const stateLabel = formatMatchStateLabel(overview.matchState);
-  const stateTone = isPaused
-    ? "text-highlight"
-    : isRunning
-      ? "text-positive"
-      : "text-muted-foreground";
-  const stateDot = isPaused
-    ? "bg-highlight"
-    : isRunning
-      ? "bg-positive animate-pulse"
-      : "bg-muted-foreground/50";
 
   const countdown = (() => {
     if (isPaused) {
@@ -290,8 +301,44 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
     return { primary: "—", secondary: undefined };
   })();
 
+  return {
+    currentTickLabel:
+      overview.currentTick !== undefined && overview.currentTick !== null
+        ? `#${overview.currentTick}`
+        : "—",
+    stateLabel,
+    stateKind: isRunning ? "running" : isPaused ? "paused" : "idle",
+    nextTickLabel: overview.nextTickAt
+      ? new Date(overview.nextTickAt).toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+      : "—",
+    countdown,
+    counting: isRunning && timeLeft !== null,
+    timeLeft,
+  };
+}
+
+export function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactElement {
+  const clock = useMatchClock(overview);
+  const isPaused = clock.stateKind === "paused";
+  const isRunning = clock.stateKind === "running";
+  const stateTone = isPaused
+    ? "text-highlight"
+    : isRunning
+      ? "text-positive"
+      : "text-muted-foreground";
+  const stateDot = isPaused
+    ? "bg-highlight"
+    : isRunning
+      ? "bg-positive animate-pulse"
+      : "bg-muted-foreground/50";
+  const { stateLabel, countdown } = clock;
   return (
     <section
+      data-slot="card"
       className="overflow-hidden rounded-sm border border-border bg-card"
       data-testid="match-progress"
       aria-label="Match progress"
@@ -309,9 +356,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
             Current tick
           </dt>
           <dd className="mt-1.5 font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground">
-            {overview.currentTick !== undefined && overview.currentTick !== null
-              ? `#${overview.currentTick}`
-              : "—"}
+            {clock.currentTickLabel}
           </dd>
         </div>
 
@@ -332,13 +377,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
             Next tick at
           </dt>
           <dd className="mt-1.5 text-sm font-semibold tabular-nums text-foreground">
-            {overview.nextTickAt
-              ? new Date(overview.nextTickAt).toLocaleTimeString(undefined, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })
-              : "—"}
+            {clock.nextTickLabel}
           </dd>
         </div>
 
@@ -350,7 +389,7 @@ function TickIntervalCard({ overview }: { overview: PlatformOverview }): ReactEl
           <dd className="mt-1.5">
             <span
               className={
-                isRunning && timeLeft !== null
+                clock.counting
                   ? "font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground"
                   : "text-sm font-semibold text-muted-foreground"
               }
@@ -641,21 +680,8 @@ export function SSHSessionDialog({
   onClose,
   onConfirm,
 }: SSHSessionDialogProps): ReactElement {
-  const hasTriggered = useRef(false);
-
-  useEffect(() => {
-    if (open && !issuedSession && !pendingAction && !hasTriggered.current) {
-      hasTriggered.current = true;
-      onConfirm();
-    }
-  }, [open, issuedSession, pendingAction, onConfirm]);
-
-  useEffect(() => {
-    if (!open) {
-      hasTriggered.current = false;
-    }
-  }, [open]);
-
+  // The session request on open is issued by ControlCenter
+  // (useAutoRequestSSHSession), so themed dialogs get it for free.
   return (
     <AppDialog
       body={
@@ -752,80 +778,6 @@ function ErrorBanner({ message }: { message: string }): ReactElement {
 }
 
 /** Resolve lock badge from API lock_reason, match state, or service text fields. */
-function resolveServiceLockReason(
-  service: ServiceRow,
-  matchState?: string | null,
-): "match_paused" | "match_not_started" | "deferred" | "maintenance" {
-  const explicit = (service.lockReason || "").trim();
-  if (
-    explicit === "match_paused" ||
-    explicit === "match_not_started" ||
-    explicit === "deferred" ||
-    explicit === "maintenance"
-  ) {
-    return explicit;
-  }
-
-  const match = (matchState || "").toLowerCase();
-  const last = (service.lastEvent || "").toLowerCase();
-  const reset = (service.resetCooldown || "").toLowerCase();
-  const hint = (service.sshHint || "").toLowerCase();
-
-  // Prefer concrete service text (always set by api-gateway on pause) so a
-  // stale lock_reason or missing overview state cannot mislabel the card.
-  if (
-    match === "paused" ||
-    reset.includes("paused") ||
-    last.includes("paused") ||
-    hint.includes("paused")
-  ) {
-    return "match_paused";
-  }
-  if (
-    match === "not_started" ||
-    reset.includes("not started") ||
-    last.includes("waiting for match start")
-  ) {
-    return "match_not_started";
-  }
-  if (explicit === "deferred" || last.includes("next tick") || reset.includes("next tick")) {
-    return "deferred";
-  }
-  return "maintenance";
-}
-
-function serviceLockBadgeLabel(
-  service: ServiceRow,
-  matchState?: string | null,
-): string {
-  switch (resolveServiceLockReason(service, matchState)) {
-    case "match_paused":
-      return "Match paused";
-    case "match_not_started":
-      return "Match not started";
-    case "deferred":
-      return "Opens next tick";
-    default:
-      return "Under maintenance";
-  }
-}
-
-function serviceLockHelpText(
-  service: ServiceRow,
-  matchState?: string | null,
-): string {
-  switch (resolveServiceLockReason(service, matchState)) {
-    case "match_paused":
-      return "Actions and network access are suspended while the match is paused.";
-    case "match_not_started":
-      return "Service is locked until the organizer starts the match. Network access stays closed.";
-    case "deferred":
-      return "Challenge is warm-redeployed and will reopen on the next tick.";
-    default:
-      return "Actions unavailable while this challenge is under maintenance.";
-  }
-}
-
 function ServiceCard({
   feedback,
   matchState,
@@ -885,22 +837,6 @@ function ServiceCard({
       </CardContent>
     </Card>
   );
-}
-
-/** Live cooldown text when this session knows it; otherwise the API label. */
-function serviceCooldownLabel(
-  service: ServiceRow,
-  feedback: ServiceActionFeedback,
-): string {
-  const parts = [
-    feedback.resetCooldown > 0
-      ? `factory reset cooldown: ${feedback.resetCooldown}s`
-      : null,
-    feedback.restartCooldown > 0
-      ? `restart cooldown: ${feedback.restartCooldown}s`
-      : null,
-  ].filter((part): part is string => part !== null);
-  return parts.length > 0 ? parts.join(" · ") : service.resetCooldown;
 }
 
 function ServiceDetails({
@@ -963,85 +899,76 @@ function ServiceActionBar({
   onSelectPrimaryAction: (service: ServiceRow) => void;
   onSelectReset: (service: ServiceRow) => void;
 }): ReactElement {
-  const isPrimaryPending =
-    pendingAction === `ssh:${service.id}`;
-  const isRestartPending = pendingAction === `restart:${service.id}`;
-  const isResetPending = pendingAction === `reset:${service.id}`;
-  const actionsDisabled = pendingAction !== null || service.maintenance;
+  const view = describeService(service, { feedback, pendingAction, matchState });
 
   return (
     <div className="space-y-3">
-      {feedback.notice ? (
+      {view.notice ? (
         <div data-testid={`service-action-notice-${service.id}`}>
           <StatusBanner
-            message={feedback.notice.message}
-            variant={feedback.notice.variant}
+            message={view.notice.message}
+            variant={view.notice.variant}
           />
         </div>
       ) : null}
-      {!service.unlocked ? <p className="text-sm text-muted-foreground">Submit a correct flag from another team on this challenge to unlock SSH automatically.</p> : null}
+      {view.unlockHint ? <p className="text-sm text-muted-foreground">{view.unlockHint}</p> : null}
       <div className="flex flex-wrap gap-3">
         <Button
-          disabled={actionsDisabled || !service.unlocked}
+          disabled={view.ssh.disabled}
           onClick={() => onSelectPrimaryAction(service)}
         >
-          {isPrimaryPending ? (
+          {view.ssh.pending ? (
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
-          {service.unlocked ? "SSH Access" : "SSH Locked"}
+          {view.ssh.label}
         </Button>
         <Button
-          disabled={actionsDisabled}
+          disabled={view.restart.disabled}
           onClick={() => onRestart(service)}
           variant="secondary"
         >
-          {isRestartPending ? (
+          {view.restart.pending ? (
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
           Restart
-          {feedback.restartCooldown > 0 ? (
+          {view.restart.cooldownSeconds > 0 ? (
             <span className="tabular-nums text-muted-foreground">
-              {` ${feedback.restartCooldown}s`}
+              {` ${view.restart.cooldownSeconds}s`}
             </span>
           ) : null}
         </Button>
-        {service.hasSourceDownload && !service.maintenance ? (
+        {view.sourceHref ? (
           <Button asChild variant="outline">
-            <a
-              href={`/api/platform/challenges/${service.challengeId}/source`}
-              download
-            >
+            <a href={view.sourceHref} download>
               <Download className="h-4 w-4" />
               Download Source
             </a>
           </Button>
         ) : null}
         <Button
-          disabled={actionsDisabled}
+          disabled={view.reset.disabled}
           onClick={() => onSelectReset(service)}
           variant="outline"
         >
-          {isResetPending ? (
+          {view.reset.pending ? (
             <LoaderCircle className="h-4 w-4 animate-spin" />
           ) : null}
           Factory Reset
-          {feedback.resetCooldown > 0 ? (
+          {view.reset.cooldownSeconds > 0 ? (
             <span className="tabular-nums text-muted-foreground">
-              {` ${feedback.resetCooldown}s`}
+              {` ${view.reset.cooldownSeconds}s`}
             </span>
           ) : null}
         </Button>
       </div>
-      {service.maintenance ? (
-        <p className="text-sm text-muted-foreground">
-          {serviceLockHelpText(service, matchState)}
-        </p>
+      {view.lock ? (
+        <p className="text-sm text-muted-foreground">{view.lock.help}</p>
       ) : null}
     </div>
   );
 }
 
-function ResetWarningBlock(): ReactElement {
+export function ResetWarningBlock(): ReactElement {
   return (
     <StatusBanner
       message="Factory reset deletes stored flags. If a flag is outstanding when state removal begins, its tick SLA is forfeited and a severe defense penalty applies even if recovery fails. SSH unlock remains preserved."

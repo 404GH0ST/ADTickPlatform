@@ -1,0 +1,1383 @@
+/* Neubrutalism: white grid paper, black outlines, hard offset shadows, and
+ * three loud fills (electric blue chrome, sunshine yellow headers, aqua
+ * panels).
+ *
+ * Tokens first (light, then dark). The rest restyles the shared primitives
+ * through their data-slot hooks so every stock view (organizer tabs, attacks,
+ * dialogs, docs) speaks the same language as this theme's own views.
+ * Primitive rules are deliberately unlayered: they must beat the 1px/rounded-sm
+ * utilities baked into the stock components. */
+
+:root[data-scheme="neubrutalism"] {
+  color-scheme: light;
+
+  --nb-ink: oklch(0.17 0.01 265);
+  --nb-paper: oklch(0.995 0.002 265);
+  --nb-sheet: oklch(1 0 0);
+  --nb-shadow: var(--nb-ink);
+  --nb-grid: oklch(0.2 0.01 265 / 0.07);
+  --nb-line: 3px;
+  --nb-radius: 10px;
+  --nb-radius-sm: 7px;
+  --nb-zebra: oklch(0.955 0.004 265);
+
+  /* Fills. Blue carries white text; every other fill carries ink text. */
+  --nb-blue: oklch(0.565 0.225 263);
+  --nb-on-blue: oklch(1 0 0);
+  --nb-yellow: oklch(0.95 0.2 108);
+  --nb-aqua: oklch(0.86 0.15 182);
+  --nb-mint: var(--nb-aqua);
+  --nb-lilac: oklch(0.92 0.045 275);
+  --nb-pink: oklch(0.8 0.13 10);
+  --nb-orange: oklch(0.84 0.14 62);
+
+  --background: var(--nb-paper);
+  --foreground: var(--nb-ink);
+  --card: var(--nb-sheet);
+  --card-foreground: var(--nb-ink);
+  --popover: var(--nb-sheet);
+  --popover-foreground: var(--nb-ink);
+  --primary: var(--nb-yellow);
+  --primary-foreground: var(--nb-ink);
+  --secondary: var(--nb-blue);
+  --secondary-foreground: var(--nb-on-blue);
+  --muted: oklch(0.955 0.004 265);
+  --muted-foreground: oklch(0.42 0.012 265);
+  --accent: var(--nb-lilac);
+  --accent-foreground: var(--nb-ink);
+  --border: var(--nb-ink);
+  --input: var(--nb-ink);
+  --ring: var(--nb-blue);
+  --shadow-paper: none;
+
+  --tone-success-background: var(--nb-aqua);
+  --tone-success-border: var(--nb-ink);
+  --tone-success-foreground: oklch(0.22 0.05 185);
+  --tone-warning-background: var(--nb-yellow);
+  --tone-warning-border: var(--nb-ink);
+  --tone-warning-foreground: oklch(0.24 0.05 100);
+  --tone-danger-background: var(--nb-pink);
+  --tone-danger-border: var(--nb-ink);
+  --tone-danger-foreground: oklch(0.28 0.12 20);
+  --tone-info-background: var(--nb-lilac);
+  --tone-info-border: var(--nb-ink);
+  --tone-info-foreground: oklch(0.3 0.12 265);
+  --tone-neutral-background: oklch(0.94 0.005 265);
+  --tone-neutral-border: var(--nb-ink);
+  --tone-neutral-foreground: var(--nb-ink);
+
+  --signal-positive: oklch(0.45 0.11 175);
+  --signal-negative: oklch(0.5 0.2 22);
+  --signal-info: oklch(0.48 0.21 263);
+  --signal-highlight: oklch(0.45 0.1 95);
+
+  --medal-gold-background: var(--nb-yellow);
+  --medal-gold-border: var(--nb-ink);
+  --medal-gold-foreground: var(--nb-ink);
+  --medal-silver-background: var(--nb-lilac);
+  --medal-silver-border: var(--nb-ink);
+  --medal-silver-foreground: var(--nb-ink);
+  --medal-bronze-background: var(--nb-orange);
+  --medal-bronze-border: var(--nb-ink);
+  --medal-bronze-foreground: var(--nb-ink);
+
+  --attack-map-background: var(--nb-sheet);
+  --attack-map-border: var(--nb-ink);
+  --attack-map-grid: oklch(0.2 0.01 265 / 0.12);
+  --attack-map-land: oklch(0.9 0.02 265);
+  --attack-map-outline: var(--nb-ink);
+  --attack-map-node: var(--nb-ink);
+  --attack-map-node-label: var(--nb-ink);
+  --attack-map-node-label-halo: oklch(1 0 0 / 0.95);
+  --attack-map-node-highlight: oklch(0.55 0.2 20);
+  --attack-map-node-highlight-halo: var(--nb-yellow);
+  --attack-map-route-1: oklch(0.55 0.2 20);
+  --attack-map-route-2: var(--nb-blue);
+  --attack-map-route-3: oklch(0.55 0.12 182);
+  --attack-map-route-4: oklch(0.6 0.15 60);
+  --attack-map-route-5: oklch(0.5 0.16 300);
+  --attack-map-route-6: oklch(0.5 0.12 220);
+  --attack-map-route-7: oklch(0.6 0.17 350);
+  --attack-map-route-8: oklch(0.35 0.02 265);
+  --attack-map-legend-background: var(--nb-sheet);
+  --attack-map-legend-border: var(--nb-ink);
+  --attack-map-legend-foreground: var(--nb-ink);
+  --attack-map-scanline: transparent;
+  --attack-map-outer-glow-opacity: 0;
+  --attack-map-rim-opacity: 0.5;
+  --attack-map-rim-width: 2;
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Night mode is a monochrome slate print: warm cream outlines and keys on
+     blue-black, with the light-mode pops kept as softened accents rather
+     than full-bleed fills. */
+  --nb-ink: oklch(0.15 0.012 265);
+  --nb-paper: oklch(0.165 0.014 265);
+  --nb-sheet: oklch(0.215 0.016 265);
+  --nb-chalk: oklch(0.95 0.018 85);
+  --nb-shadow: oklch(0.06 0.01 265);
+  --nb-grid: oklch(0.95 0.018 85 / 0.045);
+  --nb-zebra: oklch(0.245 0.016 265);
+  --nb-yellow: oklch(0.88 0.13 100);
+  --nb-aqua: oklch(0.82 0.11 182);
+  --nb-pink: oklch(0.78 0.1 12);
+  --nb-orange: oklch(0.8 0.1 62);
+  --nb-lilac: oklch(0.84 0.05 275);
+  --nb-blue: oklch(0.55 0.17 263);
+  --nb-on-blue: var(--nb-chalk);
+
+  --background: var(--nb-paper);
+  --foreground: var(--nb-chalk);
+  --card: var(--nb-sheet);
+  --card-foreground: var(--nb-chalk);
+  --popover: var(--nb-sheet);
+  --popover-foreground: var(--nb-chalk);
+  --primary: var(--nb-yellow);
+  --primary-foreground: var(--nb-ink);
+  --muted: oklch(0.27 0.014 265);
+  --muted-foreground: oklch(0.8 0.01 265);
+  --accent: var(--nb-lilac);
+  --accent-foreground: var(--nb-ink);
+  --border: var(--nb-chalk);
+  --input: var(--nb-chalk);
+  --ring: var(--nb-yellow);
+
+  /* Tone fills stay bright; their text is ink, so they read the same in both modes. */
+  --tone-success-border: var(--nb-chalk);
+  --tone-success-foreground: oklch(0.2 0.05 185);
+  --tone-warning-border: var(--nb-chalk);
+  --tone-warning-foreground: oklch(0.2 0.04 100);
+  --tone-danger-border: var(--nb-chalk);
+  --tone-danger-foreground: oklch(0.24 0.1 20);
+  --tone-info-border: var(--nb-chalk);
+  --tone-info-foreground: oklch(0.26 0.1 265);
+  --tone-neutral-background: oklch(0.32 0.014 265);
+  --tone-neutral-border: var(--nb-chalk);
+  --tone-neutral-foreground: var(--nb-chalk);
+
+  --signal-positive: oklch(0.86 0.13 182);
+  --signal-negative: oklch(0.8 0.13 15);
+  --signal-info: oklch(0.8 0.11 263);
+  --signal-highlight: oklch(0.93 0.17 108);
+
+  --medal-gold-border: var(--nb-chalk);
+  --medal-silver-border: var(--nb-chalk);
+  --medal-bronze-border: var(--nb-chalk);
+
+  --attack-map-background: var(--nb-sheet);
+  --attack-map-border: var(--nb-chalk);
+  --attack-map-grid: oklch(0.96 0.006 265 / 0.08);
+  --attack-map-land: oklch(0.32 0.014 265);
+  --attack-map-outline: oklch(0.7 0.01 265);
+  --attack-map-node: var(--nb-chalk);
+  --attack-map-node-label: var(--nb-chalk);
+  --attack-map-node-label-halo: oklch(0.2 0.012 265 / 0.92);
+  --attack-map-node-highlight: var(--nb-yellow);
+  --attack-map-node-highlight-halo: var(--nb-ink);
+  --attack-map-route-1: var(--nb-pink);
+  --attack-map-route-2: oklch(0.72 0.16 263);
+  --attack-map-route-3: var(--nb-aqua);
+  --attack-map-route-4: var(--nb-orange);
+  --attack-map-route-5: var(--nb-lilac);
+  --attack-map-route-6: var(--nb-yellow);
+  --attack-map-route-7: oklch(0.8 0.14 350);
+  --attack-map-route-8: oklch(0.85 0.01 265);
+  --attack-map-legend-background: var(--nb-sheet);
+  --attack-map-legend-border: var(--nb-chalk);
+  --attack-map-legend-foreground: var(--nb-chalk);
+}
+
+/* ---------- Page ---------- */
+
+:root[data-scheme="neubrutalism"] {
+  --nb-display: var(--font-lexend), "Lexend", var(--font-plex), ui-sans-serif, sans-serif;
+  scrollbar-color: var(--foreground) var(--muted);
+  accent-color: var(--nb-yellow);
+}
+
+:root[data-scheme="neubrutalism"] body {
+  background-color: var(--background);
+  /* Graph paper: a 44px grid of hairlines. */
+  background-image:
+    linear-gradient(var(--nb-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--nb-grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+  font-family: var(--nb-display);
+  caret-color: var(--foreground);
+}
+
+:root[data-scheme="neubrutalism"] ::selection {
+  background: var(--nb-yellow);
+  color: var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] :focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+:root[data-scheme="neubrutalism"] h1,
+:root[data-scheme="neubrutalism"] h2,
+:root[data-scheme="neubrutalism"] h3,
+:root[data-scheme="neubrutalism"] [data-slot="card-title"] {
+  font-family: var(--nb-display);
+  letter-spacing: -0.02em;
+}
+
+:root[data-scheme="neubrutalism"] code {
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--nb-yellow) 45%, var(--card));
+  color: var(--nb-ink);
+  padding-inline: 0.3em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] code {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* ---------- Surfaces ---------- */
+
+:root[data-scheme="neubrutalism"] [data-slot="card"] {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius);
+  box-shadow: 6px 6px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="card"] [data-slot="card"] {
+  border-width: 2px;
+  border-radius: var(--nb-radius-sm);
+  box-shadow: none;
+}
+
+/* Inner wells (stock rounded-sm/rounded bordered boxes): one ink line, flat,
+   so a card reads as one object instead of hairline boxes inside a bold frame. */
+:root[data-scheme="neubrutalism"]
+  :is(.rounded-sm, .rounded, .rounded-md).border:not([data-slot], [class*="tone-"], input, textarea, select, button) {
+  border-width: 2px;
+  border-color: var(--border);
+  border-radius: var(--nb-radius-sm);
+}
+
+:root[data-scheme="neubrutalism"] details:is(.rounded-sm, .rounded).border > summary {
+  font-weight: 700;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="card-header"] {
+  border-bottom: var(--nb-line) solid var(--border);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="card-title"] {
+  font-size: 1.125rem;
+  font-weight: 750;
+}
+
+:root[data-scheme="neubrutalism"] .surface-inset,
+:root[data-scheme="neubrutalism"] .surface-workroom {
+  border-width: 2px;
+  border-color: var(--border);
+  border-radius: var(--nb-radius-sm);
+}
+
+:root[data-scheme="neubrutalism"] .surface-inset {
+  background: color-mix(in oklab, var(--muted) 35%, var(--card));
+}
+
+:root[data-scheme="neubrutalism"] .tone-success,
+:root[data-scheme="neubrutalism"] .tone-warning,
+:root[data-scheme="neubrutalism"] .tone-danger,
+:root[data-scheme="neubrutalism"] .tone-info,
+:root[data-scheme="neubrutalism"] .tone-neutral {
+  border-width: 2px;
+  border-radius: var(--nb-radius-sm);
+  font-weight: 600;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="badge"] {
+  border-width: 2px;
+  border-color: var(--border);
+  border-radius: 5px;
+  padding-inline: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Stock page frame (login page and any page that skips the themed shell). */
+:root[data-scheme="neubrutalism"] .workspace-frame {
+  border: 3px solid var(--border);
+  border-radius: var(--nb-radius);
+  box-shadow: 8px 8px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] .frame-reticle {
+  display: none;
+}
+
+/* ---------- Controls ---------- */
+
+:root[data-scheme="neubrutalism"] [data-slot="button"] {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius-sm);
+  font-family: var(--nb-display);
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+  transition:
+    transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    box-shadow 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    background-color 150ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"]:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"]:active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"]:disabled {
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="default"] {
+  background: var(--nb-yellow);
+  color: var(--nb-ink);
+}
+
+/* Night: the primary key is cream, like the active nav key. */
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-slot="button"][data-variant="default"] {
+  border-color: var(--nb-chalk);
+  background: var(--nb-chalk);
+  color: var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--nb-chalk) 88%, var(--nb-yellow));
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--nb-yellow) 85%, white);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="secondary"] {
+  background: var(--nb-blue);
+  color: var(--nb-on-blue);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="outline"] {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="outline"]:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="ghost"] {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--muted);
+  box-shadow: 2px 2px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"].button-danger-solid {
+  background: var(--nb-pink);
+  color: var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="input"],
+:root[data-scheme="neubrutalism"] textarea,
+:root[data-scheme="neubrutalism"] select {
+  border: var(--nb-line) solid var(--input);
+  border-radius: var(--nb-radius-sm);
+  background-color: var(--card);
+  color: var(--foreground);
+  transition: box-shadow 150ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="input"]:focus-visible,
+:root[data-scheme="neubrutalism"] textarea:focus-visible,
+:root[data-scheme="neubrutalism"] select:focus-visible {
+  outline: none;
+  border-color: var(--border);
+  box-shadow: 4px 4px 0 var(--ring);
+}
+
+:root[data-scheme="neubrutalism"] {
+  --nb-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2316181d' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] {
+  --nb-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2f3f6' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* Selects: our own bold chevron instead of the browser's thin one. */
+:root[data-scheme="neubrutalism"] select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: var(--nb-chevron);
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 1rem;
+  padding-right: 2.4rem !important;
+  font-family: var(--nb-display);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* A select sitting in a row of buttons is a button: same face, shadow and press. */
+:root[data-scheme="neubrutalism"] [data-slot="button"] ~ select {
+  font-weight: 700;
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+  transition:
+    transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    box-shadow 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"] ~ select:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="button"] ~ select:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+}
+
+@media (min-width: 640px) {
+  /* Same height and type as the h-8 touch buttons it sits beside. */
+  :root[data-scheme="neubrutalism"] [data-slot="button"] ~ select {
+    height: 2rem;
+    font-size: 0.75rem;
+    background-size: 0.875rem;
+  }
+}
+
+:root[data-scheme="neubrutalism"] select option {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+:root[data-scheme="neubrutalism"] ::placeholder {
+  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+}
+
+/* Appearance picker (stock control kept in every shell). */
+:root[data-scheme="neubrutalism"] .mode-picker > summary {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius-sm);
+  background: var(--card);
+  font-family: var(--nb-display);
+  font-weight: 700;
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] .mode-picker > div {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius);
+  box-shadow: 6px 6px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] .mode-option[aria-checked="true"] {
+  background: var(--nb-yellow);
+  color: var(--nb-ink);
+}
+
+/* ---------- Tables ---------- */
+
+:root[data-scheme="neubrutalism"] [data-slot="table-container"] {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius-sm);
+  background: var(--card);
+}
+
+/* Header: small tracked capitals on white, one heavy rule under it. */
+:root[data-scheme="neubrutalism"] [data-slot="table-header"] {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="table-header"] th {
+  color: var(--foreground);
+  font-family: var(--nb-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="table-header"] tr {
+  border-bottom: 2px solid var(--border);
+}
+
+/* Body: zebra stripes instead of hairlines. */
+:root[data-scheme="neubrutalism"] [data-slot="table-row"] {
+  border-color: transparent;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="table-body"] [data-slot="table-row"]:nth-child(odd) {
+  background: var(--nb-zebra);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="table-row"]:hover,
+:root[data-scheme="neubrutalism"] [data-slot="table-body"] [data-slot="table-row"]:nth-child(odd):hover {
+  background: color-mix(in oklab, var(--nb-yellow) 30%, var(--card));
+}
+
+:root[data-scheme="neubrutalism"] table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Dialogs ---------- */
+
+:root[data-scheme="neubrutalism"] [data-slot="dialog-overlay"] {
+  background: oklch(0.2 0.025 285 / 0.55);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="dialog-content"] {
+  border: 3px solid var(--border);
+  border-radius: var(--nb-radius);
+  background: var(--card);
+  box-shadow: 8px 8px 0 var(--nb-shadow);
+}
+
+/* ---------- Stock in-page tabs and nav ---------- */
+
+:root[data-scheme="neubrutalism"] .section-tabs {
+  gap: 0.5rem;
+  border-bottom: 0;
+  padding: 0.25rem 0.25rem 0.5rem;
+}
+
+:root[data-scheme="neubrutalism"] .section-tab {
+  margin: 0;
+  border: 2px solid transparent;
+  border-radius: var(--nb-radius-sm);
+  padding: 0.375rem 0.9rem;
+  font-family: var(--nb-display);
+  font-weight: 650;
+  color: var(--foreground);
+}
+
+:root[data-scheme="neubrutalism"] .section-tab:hover {
+  border-color: var(--border);
+}
+
+:root[data-scheme="neubrutalism"] .section-tab[data-active="true"] {
+  border-color: var(--nb-ink);
+  background: var(--nb-aqua);
+  color: var(--nb-ink);
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] .section-tab[data-active="true"] {
+  border-color: var(--nb-chalk);
+  background: var(--nb-chalk);
+}
+
+:root[data-scheme="neubrutalism"] .section-tab-count {
+  border: 2px solid var(--nb-ink);
+  border-radius: 999px;
+  background: var(--nb-pink);
+  color: var(--nb-ink);
+  font-weight: 700;
+}
+
+:root[data-scheme="neubrutalism"] details > summary {
+  font-family: var(--nb-display);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-scheme="neubrutalism"] [data-slot="button"]:hover:not(:disabled),
+  :root[data-scheme="neubrutalism"] [data-slot="button"]:active:not(:disabled) {
+    transform: none;
+  }
+
+  :root[data-scheme="neubrutalism"][data-rail-animating] .nb-frame {
+    transition: none !important;
+  }
+}
+
+/* ---------- Theme views (components/) ---------- */
+@layer components {
+  :root[data-scheme="neubrutalism"] .nb-panel {
+    border: var(--nb-line) solid var(--border);
+    border-radius: var(--nb-radius);
+    background: var(--card);
+    box-shadow: 6px 6px 0 var(--nb-shadow);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-display {
+    font-family: var(--nb-display);
+    letter-spacing: -0.03em;
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-sticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 2px solid var(--nb-ink);
+    border-radius: 5px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+    color: var(--nb-ink);
+    white-space: nowrap;
+  }
+
+  /* Pop fills always carry ink text and an ink outline, in both modes. */
+  :root[data-scheme="neubrutalism"] .nb-fill-yellow { --nb-fill: var(--nb-yellow); background: var(--nb-fill); color: var(--nb-ink); }
+  :root[data-scheme="neubrutalism"] .nb-fill-pink { --nb-fill: var(--nb-pink); background: var(--nb-fill); color: var(--nb-ink); }
+  :root[data-scheme="neubrutalism"] .nb-fill-blue { --nb-fill: var(--nb-blue); background: var(--nb-fill); color: var(--nb-on-blue); }
+  :root[data-scheme="neubrutalism"] .nb-fill-aqua { --nb-fill: var(--nb-aqua); background: var(--nb-fill); color: var(--nb-ink); }
+  :root[data-scheme="neubrutalism"] .nb-fill-mint { --nb-fill: var(--nb-mint); background: var(--nb-fill); color: var(--nb-ink); }
+  :root[data-scheme="neubrutalism"] .nb-fill-lilac { --nb-fill: var(--nb-lilac); background: var(--nb-fill); color: var(--nb-ink); }
+  :root[data-scheme="neubrutalism"] .nb-fill-orange { --nb-fill: var(--nb-orange); background: var(--nb-fill); color: var(--nb-ink); }
+
+  :root[data-scheme="neubrutalism"] .nb-pop {
+    border: var(--nb-line) solid var(--nb-ink);
+    box-shadow: 6px 6px 0 var(--nb-shadow);
+  }
+
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-pop {
+    border-color: var(--nb-chalk);
+  }
+
+  /* Icon tile on a colour block: a white chip by day, an outline by night. */
+  :root[data-scheme="neubrutalism"] .nb-tile {
+    background: oklch(1 0 0 / 0.5);
+  }
+
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-tile {
+    background: transparent;
+  }
+
+  /* Night: colour blocks inside a panel (flag form, tick, service header, your
+     standings row) become slate washed with their colour, cream type. */
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-panel [class*="nb-fill-"]:not(.nb-sticker) {
+    background: color-mix(in oklab, var(--nb-fill) 20%, var(--nb-sheet));
+    color: var(--nb-chalk);
+    border-color: var(--nb-chalk);
+  }
+
+  /* Night: big colour blocks turn into slate panels carrying their colour as
+     a thick edge stripe, so a page of them reads calm instead of neon. */
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-pop[class*="nb-fill-"] {
+    background:
+      linear-gradient(90deg, var(--nb-fill) 0 10px, transparent 10px),
+      var(--nb-sheet);
+    color: var(--nb-chalk);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-lift {
+    transition:
+      transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+      box-shadow 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-lift:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 8px 8px 0 var(--nb-shadow);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-lift:active {
+    transform: translate(3px, 3px);
+    box-shadow: 1px 1px 0 var(--nb-shadow);
+  }
+
+  /* Countdown: digits in an aqua display window, like a scoreboard clock. */
+  :root[data-scheme="neubrutalism"] .nb-countdown {
+    display: inline-block;
+    border: var(--nb-line) solid var(--nb-ink);
+    border-radius: var(--nb-radius-sm);
+    background: var(--nb-aqua);
+    color: var(--nb-ink);
+    padding: 0.2rem 0.6rem;
+    font-family: var(--font-mono, ui-monospace), ui-monospace, monospace;
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 4px 4px 0 var(--nb-shadow);
+  }
+
+  /* ---------- Shell ---------- */
+
+  /* Small tracked capitals: eyebrows, field labels, group headings. */
+  :root[data-scheme="neubrutalism"] .nb-eyebrow {
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  /* Blue chrome: the rail. */
+  :root[data-scheme="neubrutalism"] .nb-rail {
+    border: var(--nb-line) solid var(--nb-ink);
+    border-radius: var(--nb-radius);
+    background: var(--nb-blue);
+    color: var(--nb-on-blue);
+    box-shadow: 6px 6px 0 var(--nb-shadow);
+  }
+
+  /* Yellow title banner every page opens with. */
+  :root[data-scheme="neubrutalism"] .nb-banner {
+    border: var(--nb-line) solid var(--nb-ink);
+    border-radius: var(--nb-radius);
+    background: var(--nb-yellow);
+    color: var(--nb-ink);
+    box-shadow: 6px 6px 0 var(--nb-shadow);
+  }
+
+  /* Night: rail and banner become slate panels with cream outlines; the
+     current page is a cream key (a yellow tile stays as the one brand pop). */
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-banner,
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-rail {
+    border-color: var(--nb-chalk);
+    background: var(--nb-sheet);
+    color: var(--nb-chalk);
+  }
+
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-banner {
+    background:
+      linear-gradient(90deg, var(--nb-yellow) 0 8px, transparent 8px),
+      var(--nb-sheet);
+  }
+
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-nav-link[data-active="true"] {
+    border-color: var(--nb-chalk);
+    background: var(--nb-chalk);
+    color: var(--nb-ink);
+    box-shadow: 3px 3px 0 var(--nb-shadow);
+  }
+
+  /* Rail links: white type on blue; the current page is an aqua key. */
+  :root[data-scheme="neubrutalism"] .nb-nav-link {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.625rem;
+    border: var(--nb-line) solid transparent;
+    border-radius: var(--nb-radius-sm);
+    padding: 0.4rem 0.85rem;
+    font-family: var(--nb-display);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--nb-on-blue);
+    white-space: nowrap;
+    transition:
+      transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+      box-shadow 140ms ease-out,
+      background-color 140ms ease-out,
+      border-color 140ms ease-out;
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-nav-link:hover {
+    border-color: color-mix(in oklab, var(--nb-on-blue) 70%, transparent);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-nav-link[data-active="true"] {
+    border-color: var(--nb-ink);
+    background: var(--nb-aqua);
+    color: var(--nb-ink);
+    font-weight: 700;
+    box-shadow: 3px 3px 0 var(--nb-ink);
+  }
+
+  /* Yellow "AD" tile at the head of the rail. */
+  :root[data-scheme="neubrutalism"] .nb-logo {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-shrink: 0;
+    border: var(--nb-line) solid var(--nb-ink);
+    border-radius: var(--nb-radius-sm);
+    background: var(--nb-yellow);
+    color: var(--nb-ink);
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    box-shadow: 3px 3px 0 var(--nb-ink);
+    transform: rotate(-4deg);
+  }
+
+  /* Rail: full width, or collapsed to an icon column (lg and up only). */
+  @media (min-width: 1024px) {
+    :root[data-scheme="neubrutalism"] .nb-frame {
+      grid-template-columns: 15rem minmax(0, 1fr);
+    }
+
+    :root[data-scheme="neubrutalism"][data-rail-animating] .nb-frame {
+      transition: grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-frame {
+      grid-template-columns: 5.75rem minmax(0, 1fr);
+    }
+
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-frame .nb-rail-text {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-frame .nb-rail-brand {
+      justify-content: center;
+      padding-inline: 0 !important;
+    }
+
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-frame .nb-nav-link {
+      justify-content: center;
+      padding-inline: 0;
+    }
+
+    /* Group headings become a short rule so Match/Setup still read as two groups. */
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-frame .nb-rail-group {
+      width: 1.25rem;
+      height: 3px;
+      margin: 0.75rem auto;
+      padding: 0 !important;
+      border-radius: 2px;
+      background: var(--nb-on-blue);
+      opacity: 0.6;
+    }
+
+    :root[data-scheme="neubrutalism"] .nb-rail-group {
+      color: color-mix(in oklab, var(--nb-on-blue) 78%, transparent);
+    }
+
+    :root[data-scheme="neubrutalism"] .nb-rail-toggle {
+      color: color-mix(in oklab, var(--nb-on-blue) 85%, transparent);
+    }
+  }
+
+  @media (max-width: 1023px) {
+    :root[data-scheme="neubrutalism"] .nb-rail-group {
+      display: none;
+    }
+  }
+}
+
+/* Yellow is a fill, never a text colour: primary-tinted icons and text use the blue. */
+:root[data-scheme="neubrutalism"] .text-primary {
+  color: var(--nb-blue);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] .text-primary {
+  color: var(--nb-yellow);
+}
+
+/* In-page section headings sit between card groups: same face as card titles, one step up. */
+:root[data-scheme="neubrutalism"] [data-slot="section-heading"] {
+  font-family: var(--nb-display);
+  font-size: 1.375rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* Page rhythm: one gap between every card in a page, matching the themed views. */
+:root[data-scheme="neubrutalism"] .nb-content,
+:root[data-scheme="neubrutalism"] .nb-content > .grid,
+:root[data-scheme="neubrutalism"] .nb-content > .grid > .grid:has(> [data-slot="card"]),
+:root[data-scheme="neubrutalism"] .nb-content > .grid > section.grid:has(> .grid > [data-slot="card"]) > .grid {
+  gap: 1.5rem !important;
+}
+
+/* Key/value lists (InfoPanel/InfoLine): label left, value right, ruled rows. */
+:root[data-scheme="neubrutalism"] [data-slot="info-panel"] {
+  row-gap: 0 !important;
+  align-content: start;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-panel"]:not([class*="tone-"]):not(dl) {
+  border-width: 2px;
+  border-color: var(--border);
+  border-radius: var(--nb-radius-sm);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-panel"] > * + * {
+  margin-top: 0 !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-line"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding-block: 0.45rem;
+  border-bottom: 1.5px dashed color-mix(in oklab, var(--border) 35%, transparent);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-line"]:last-child {
+  border-bottom: 0;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-label"] {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-colon"] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="info-value"] {
+  font-family: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Theme picker options: bordered choices, the active one filled. */
+:root[data-scheme="neubrutalism"] [data-theme-option] {
+  border: 2px solid var(--border);
+  border-radius: var(--nb-radius-sm);
+  background: var(--card);
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    box-shadow 140ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option]:hover:not(:disabled) {
+  background: var(--card);
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+  transform: translate(-1px, -1px);
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] {
+  background: var(--nb-yellow);
+  color: var(--nb-ink);
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] * {
+  color: var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option] > span:first-child {
+  border: 2px solid var(--nb-ink);
+  border-radius: 6px;
+}
+
+/* Count strips (participant and organizer summary). */
+:root[data-scheme="neubrutalism"] [data-slot="summary-strip"] {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius);
+  background: var(--card);
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="summary-strip"] dt {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="summary-strip"] dd {
+  font-weight: 700;
+}
+
+/* Stock login page: one bold frame, not a card inside a frame. */
+:root[data-scheme="neubrutalism"] .workspace-frame [data-slot="card"] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-scheme="neubrutalism"] .workspace-frame [data-slot="card-header"] {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+:root[data-scheme="neubrutalism"] .workspace-frame [data-slot="card-title"] {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* ---------- Attack map: flat printed globe ---------- */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] {
+  background: var(--attack-map-background) !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-halo"],
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-rim"] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-sphere"] {
+  fill: color-mix(in oklab, var(--nb-blue) 22%, var(--nb-sheet));
+  stroke: var(--nb-ink);
+  stroke-opacity: 1;
+  /* The map's viewBox is scaled down on screen; keep the outline a true 3px
+     like every other ink line instead of letting it shrink with the SVG. */
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(6px 6px 0 var(--nb-shadow)) !important;
+}
+
+/* Land is one mint ink printed in five close shades, map-coloured so two
+   countries that share a border never share a shade: regions separate
+   without turning the globe into confetti that fights the attack arcs. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-land"] {
+  --nb-land-l: 0.86;
+  fill: oklch(var(--nb-land-l) 0.1 182);
+  fill-opacity: 1;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-land"][data-tint="1"] { --nb-land-l: 0.9; }
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-land"][data-tint="2"] { --nb-land-l: 0.82; }
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-land"][data-tint="3"] { --nb-land-l: 0.93; }
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-land"][data-tint="4"] { --nb-land-l: 0.78; }
+
+/* City specks are noise on a flat print. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-landmark"] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-sphere"] {
+  fill: color-mix(in oklab, var(--nb-blue) 30%, var(--card));
+  stroke: var(--nb-chalk);
+  stroke-opacity: 1;
+}
+
+/* Dark mode: the same tints, knocked back so the land doesn't glare. */
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-land"] {
+  fill: oklch(calc(var(--nb-land-l) - 0.24) 0.075 182);
+}
+
+/* Country borders: a true 1px ink line (the stock hairline vanishes once
+   the SVG is scaled); the shades do the separating, the line just crisps it. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-borders"] {
+  stroke: var(--nb-ink);
+  stroke-opacity: 0.55;
+  stroke-width: 1px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-borders"] {
+  stroke-opacity: 0.7;
+}
+
+/* ---------- Team pins: stickers, not glows ---------- */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-halo"] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-ring"] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-ring"][data-emphasized] {
+  display: inline;
+  stroke: var(--nb-ink);
+  stroke-opacity: 1;
+  stroke-width: 2px;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-core"] {
+  fill: var(--nb-sheet);
+  stroke: var(--nb-ink);
+  stroke-width: 2.5px;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(2px 2px 0 var(--nb-shadow)) !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-core"][data-emphasized] {
+  fill: var(--nb-yellow);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="team-core"] {
+  fill: var(--nb-chalk);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="team-core"][data-emphasized] {
+  fill: var(--nb-yellow);
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-leader"] {
+  stroke: var(--nb-ink);
+  stroke-opacity: 1;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-plate"] {
+  rx: 0;
+  fill: var(--nb-sheet);
+  stroke: var(--nb-ink);
+  stroke-opacity: 1;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(3px 3px 0 var(--nb-shadow)) !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-plate"][data-selected] {
+  fill: var(--nb-yellow);
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-name"] {
+  fill: var(--nb-ink);
+  stroke: none;
+  font-weight: 800;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-meta"] {
+  fill: color-mix(in oklab, var(--nb-ink) 70%, transparent);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Dark mode keeps the stickers paper-on-ink: chalk plate, ink type. */
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="team-plate"]:not([data-selected]) {
+  fill: var(--nb-chalk);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="team-leader"] {
+  stroke: var(--nb-chalk);
+}
+
+/* ---------- First blood: comic-panel sequence instead of the cinematic glow ---------- */
+
+/* No soft glows anywhere in the map; strokes stay flat and hard. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [filter] {
+  filter: none;
+}
+
+/* Letterbox bars become hazard tape. */
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="bar"] {
+  height: 9%;
+  border-color: var(--nb-ink);
+  border-style: solid;
+  border-width: 0 0 3px;
+  background: repeating-linear-gradient(-45deg, var(--nb-yellow) 0 16px, var(--nb-ink) 16px 32px);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="bar"][data-edge="bottom"] {
+  border-width: 3px 0 0;
+}
+
+/* Vignette: a flat halftone wash, not a dark radial falloff. */
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="vignette"] {
+  background-color: color-mix(in oklab, var(--nb-pink) 14%, transparent);
+  background-image: radial-gradient(color-mix(in oklab, var(--nb-ink) 26%, transparent) 1.3px, transparent 1.6px);
+  background-size: 9px 9px;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, transparent 34%, #000 78%);
+  mask-image: radial-gradient(ellipse at 50% 50%, transparent 34%, #000 78%);
+}
+
+/* Speed lines: solid ink comic strokes. */
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="speed"] {
+  background: repeating-conic-gradient(from 0deg at var(--fx) var(--fy),
+    transparent 0deg 3deg, var(--nb-ink) 3deg 3.6deg);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="speed"][data-alt] {
+  background: repeating-conic-gradient(from 1.6deg at var(--fx) var(--fy),
+    transparent 0deg 4.2deg, color-mix(in oklab, var(--nb-yellow) 85%, transparent) 4.2deg 4.8deg);
+}
+
+/* Impact: a POW starburst at the hit point. The ink burst sits behind the
+ * yellow one, so together they read as an outlined sticker. */
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="impact-frame"],
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="flash"] {
+  --r: 15vmin;
+  mix-blend-mode: normal;
+  transform-origin: var(--fx) var(--fy);
+  clip-path: polygon(
+    calc(var(--fx) + 0 * var(--r)) calc(var(--fy) - 1 * var(--r)),
+    calc(var(--fx) + 0.24 * var(--r)) calc(var(--fy) - 0.48 * var(--r)),
+    calc(var(--fx) + 0.71 * var(--r)) calc(var(--fy) - 0.71 * var(--r)),
+    calc(var(--fx) + 0.5 * var(--r)) calc(var(--fy) - 0.2 * var(--r)),
+    calc(var(--fx) + 1 * var(--r)) calc(var(--fy) + 0 * var(--r)),
+    calc(var(--fx) + 0.48 * var(--r)) calc(var(--fy) + 0.24 * var(--r)),
+    calc(var(--fx) + 0.71 * var(--r)) calc(var(--fy) + 0.71 * var(--r)),
+    calc(var(--fx) + 0.2 * var(--r)) calc(var(--fy) + 0.5 * var(--r)),
+    calc(var(--fx) + 0 * var(--r)) calc(var(--fy) + 1 * var(--r)),
+    calc(var(--fx) - 0.24 * var(--r)) calc(var(--fy) + 0.48 * var(--r)),
+    calc(var(--fx) - 0.71 * var(--r)) calc(var(--fy) + 0.71 * var(--r)),
+    calc(var(--fx) - 0.5 * var(--r)) calc(var(--fy) + 0.2 * var(--r)),
+    calc(var(--fx) - 1 * var(--r)) calc(var(--fy) + 0 * var(--r)),
+    calc(var(--fx) - 0.48 * var(--r)) calc(var(--fy) - 0.24 * var(--r)),
+    calc(var(--fx) - 0.71 * var(--r)) calc(var(--fy) - 0.71 * var(--r)),
+    calc(var(--fx) - 0.2 * var(--r)) calc(var(--fy) - 0.5 * var(--r))
+  );
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="impact-frame"] {
+  /* Same burst, offset: the starburst's hard shadow. */
+  translate: 9px 9px;
+  background: var(--nb-ink);
+  animation: nb-first-blood-pow 1100ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="flash"] {
+  background: var(--nb-yellow);
+  animation: nb-first-blood-pow 1100ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-overlay] [data-fx="tint"] {
+  background: var(--nb-pink);
+}
+
+@keyframes nb-first-blood-pow {
+  0% { opacity: 1; transform: scale(0.2) rotate(-18deg); }
+  28% { opacity: 1; transform: scale(1.08) rotate(4deg); }
+  40% { opacity: 1; transform: scale(1) rotate(0deg); }
+  82% { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(1.06) rotate(2deg); }
+}
+
+/* Live notice: a speech-bubble sticker instead of a dark scrim. */
+:root[data-scheme="neubrutalism"] [data-first-blood-notice-panel] {
+  border: 3px solid var(--nb-ink);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  background: oklch(0.975 0.02 92) !important;
+  color: var(--nb-ink);
+  box-shadow: 5px 5px 0 var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-notice-panel] h3 {
+  font-family: var(--nb-display);
+  font-weight: 800;
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-notice-tag] {
+  justify-self: start;
+  border: 2px solid var(--nb-ink);
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem;
+  background: var(--nb-pink);
+  color: var(--nb-ink) !important;
+  font-weight: 700;
+}
+
+/* Closing banner: a stamped sticker card. */
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"] {
+  color: var(--nb-ink) !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] {
+  overflow: visible;
+  border: 3px solid var(--nb-ink) !important;
+  border-radius: 18px;
+  background-color: oklch(0.975 0.02 92) !important;
+  box-shadow: 9px 9px 0 var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] h3 {
+  justify-self: center;
+  width: fit-content;
+  border: 3px solid var(--nb-ink);
+  border-radius: 12px;
+  padding: 0.35rem 0.9rem;
+  background: var(--nb-pink);
+  color: var(--nb-ink) !important;
+  font-family: var(--nb-display);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 4px 4px 0 var(--nb-ink);
+  transform: rotate(-4deg);
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner-team"] {
+  font-family: var(--nb-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner-challenge"] {
+  border: 2px solid var(--nb-ink);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  background: var(--nb-yellow);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-banner-shine] {
+  display: none;
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-banner-slash] {
+  top: auto;
+  bottom: -3px;
+  height: 10px;
+  /* Ink rule along the top edge of the tape; same look as the theme's outlines. */
+  box-shadow: inset 0 3px 0 var(--nb-ink);
+  border-radius: 0 0 16px 16px;
+  background: repeating-linear-gradient(-45deg, var(--nb-yellow) 0 10px, var(--nb-ink) 10px 20px) !important;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-reduced-motion="false"] [data-first-blood-banner-panel] {
+  animation:
+    nb-first-blood-slam 460ms cubic-bezier(0.2, 1.5, 0.4, 1) both,
+    nb-first-blood-bob 1800ms ease-in-out 900ms infinite;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-reduced-motion="false"] [data-first-blood-banner-panel] h3 {
+  animation: nb-first-blood-stamp 420ms cubic-bezier(0.2, 1.6, 0.4, 1) 160ms both;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-reduced-motion="false"] [data-first-blood-banner-body] > * {
+  animation-name: nb-first-blood-rise;
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-banner-phase="exit"][data-reduced-motion="false"] [data-first-blood-banner-panel] {
+  animation: nb-first-blood-exit 360ms cubic-bezier(0.6, -0.4, 0.8, 0.4) both;
+}
+
+@keyframes nb-first-blood-slam {
+  0% { opacity: 0; transform: translate(-24px, -40px) rotate(-6deg) scale(1.18); box-shadow: 0 0 0 var(--nb-ink); }
+  60% { opacity: 1; transform: translate(4px, 4px) rotate(1deg) scale(0.98); box-shadow: 2px 2px 0 var(--nb-ink); }
+  100% { opacity: 1; transform: none; box-shadow: 9px 9px 0 var(--nb-ink); }
+}
+
+@keyframes nb-first-blood-bob {
+  0%, 100% { transform: none; box-shadow: 9px 9px 0 var(--nb-ink); }
+  50% { transform: translate(-2px, -2px); box-shadow: 11px 11px 0 var(--nb-ink); }
+}
+
+@keyframes nb-first-blood-stamp {
+  0% { opacity: 0; transform: rotate(-14deg) scale(2.4); }
+  70% { opacity: 1; transform: rotate(-3deg) scale(0.92); }
+  100% { opacity: 1; transform: rotate(-4deg) scale(1); }
+}
+
+@keyframes nb-first-blood-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes nb-first-blood-exit {
+  0% { opacity: 1; transform: none; }
+  30% { opacity: 1; transform: translate(-4px, -6px) rotate(-1deg); }
+  100% { opacity: 0; transform: translate(40px, 120px) rotate(10deg); }
+}

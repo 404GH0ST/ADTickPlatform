@@ -21,10 +21,6 @@ export default async function AdminAttacksPage() {
       title="Attacks"
     >
       <div className="grid gap-4">
-        <ExportDataPanel
-          scoreboard={dashboard.scoreboard}
-          attacks={dashboard.attackPage.items}
-        />
         <OrganizerDashboard
           attackPage={dashboard.attackPage}
           challenges={dashboard.challenges}
@@ -37,6 +33,10 @@ export default async function AdminAttacksPage() {
           scoreboard={dashboard.scoreboard}
           teams={dashboard.teams}
           initialTab="attacks"
+        />
+        <ExportDataPanel
+          scoreboard={dashboard.scoreboard}
+          attacks={dashboard.attackPage.items}
         />
       </div>
     </OrganizerShell>

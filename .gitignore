@@ -11,6 +11,7 @@ coverage.out
 .omo/
 apps/web/playwright-report/
 apps/web/test-results/
+apps/web/themes/fixtures.generated.ts
 
 .env
 .env.local

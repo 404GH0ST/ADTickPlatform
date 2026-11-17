@@ -4,22 +4,22 @@ import { cn } from '@/lib/utils';
 
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
-    <div className="relative w-full overflow-x-auto">
+    <div data-slot="table-container" className="relative w-full overflow-x-auto">
       <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
     </div>
   );
 }
 
 function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
-  return <thead className={cn('bg-muted/70 [&_tr]:border-b [&_tr]:border-border', className)} {...props} />;
+  return <thead data-slot="table-header" className={cn('bg-muted/70 [&_tr]:border-b [&_tr]:border-border', className)} {...props} />;
 }
 
 function TableBody({ className, ...props }: React.ComponentProps<'tbody'>) {
-  return <tbody className={cn('[&_tr:last-child]:border-0', className)} {...props} />;
+  return <tbody data-slot="table-body" className={cn('[&_tr:last-child]:border-0', className)} {...props} />;
 }
 
 function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
-  return <tr className={cn('border-b border-border/80 transition-colors hover:bg-muted/55', className)} {...props} />;
+  return <tr data-slot="table-row" className={cn('border-b border-border/80 transition-colors hover:bg-muted/55', className)} {...props} />;
 }
 
 function TableHead({ className, ...props }: React.ComponentProps<'th'>) {

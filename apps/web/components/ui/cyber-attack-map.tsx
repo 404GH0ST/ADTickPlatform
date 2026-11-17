@@ -76,7 +76,11 @@ type CountryRing = {
   id: string;
   name: string;
   points: GeoPoint[];
+  /** 0-4, chosen so countries that share a border never share a tint. */
+  tint: number;
 };
+
+const COUNTRY_TINT_COUNT = 5;
 
 type TeamNode = ProjectedPoint & {
   id: string;
@@ -1198,17 +1202,17 @@ export function CyberAttackMap({
           <div aria-hidden="true" data-first-blood-overlay={firstBloodSequence.stage}
             className="pointer-events-none absolute inset-0 overflow-hidden"
             style={{ '--fx': `${fx}%`, '--fy': `${fy}%` } as CSSProperties}>
-            <div className={`${flyClassName}-vignette absolute inset-0`} />
+            <div data-fx="vignette" className={`${flyClassName}-vignette absolute inset-0`} />
             {firstBloodSequence.stage === 'flight' || firstBloodSequence.stage === 'impact' ? <>
-              <div className={`${flyClassName}-speed absolute inset-0`} />
-              <div className={`${flyClassName}-speed absolute inset-0`} data-alt="true" />
+              <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} />
+              <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} data-alt="true" />
             </> : null}
-            <div className={`${flyClassName}-bar absolute inset-x-0 top-0`} data-edge="top" />
-            <div className={`${flyClassName}-bar absolute inset-x-0 bottom-0`} data-edge="bottom" />
+            <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 top-0`} data-edge="top" />
+            <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 bottom-0`} data-edge="bottom" />
             {firstBloodSequence.stage === 'impact' ? <>
-              <div className={`${flyClassName}-impact-frame absolute inset-0`} />
-              <div className={`${flyClassName}-tint absolute inset-0`} />
-              <div className={`${flyClassName}-flash absolute inset-0`} />
+              <div data-fx="impact-frame" className={`${flyClassName}-impact-frame absolute inset-0`} />
+              <div data-fx="tint" className={`${flyClassName}-tint absolute inset-0`} />
+              <div data-fx="flash" className={`${flyClassName}-flash absolute inset-0`} />
             </> : null}
           </div>
         );
@@ -1883,7 +1887,7 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
       data-first-blood-notice-stage={stage}
       style={{ color: 'var(--attack-map-node-label)' }}>
       {/* A scrim rather than a solid box keeps the globe and impact visible above the text. */}
-      <div className="space-y-3 px-1 pb-3 pt-8"
+      <div data-first-blood-notice-panel="true" className="space-y-3 px-1 pb-3 pt-8"
         style={{ background: 'linear-gradient(to top, color-mix(in srgb, var(--attack-map-background) 94%, transparent) 0%, color-mix(in srgb, var(--attack-map-background) 78%, transparent) 55%, transparent 100%)' }}>
         {attacks.map((attack) => (
           <div key={attack.id}>
@@ -1895,7 +1899,7 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
               <span className="min-w-0 break-words text-right font-normal">{attack.victim}</span>
             </h3>
             <div className="mt-2 flex items-start justify-between gap-3 text-xs">
-              <p className="min-w-0 break-words" style={{ color: 'var(--signal-negative)' }}>First blood · {attack.service}</p>
+              <p data-first-blood-notice-tag="true" className="min-w-0 break-words" style={{ color: 'var(--signal-negative)' }}>First blood · {attack.service}</p>
               <p className="shrink-0 text-[11px]">Tick #{attack.tick}</p>
             </div>
           </div>
@@ -1920,6 +1924,7 @@ const GlobeSurface = memo(function GlobeSurface({
         cx={CENTER_X}
         cy={CENTER_Y}
         r={GLOBE_RADIUS + 14}
+        data-fx="globe-halo"
         fill="var(--attack-map-node-highlight-halo)"
         fillOpacity="var(--attack-map-outer-glow-opacity)"
       />
@@ -1927,6 +1932,7 @@ const GlobeSurface = memo(function GlobeSurface({
         cx={CENTER_X}
         cy={CENTER_Y}
         r={GLOBE_RADIUS}
+        data-fx="globe-sphere"
         fill={`url(#${mapId}-sphere)`}
         stroke="var(--attack-map-border)"
         strokeOpacity="0.92"
@@ -1945,6 +1951,8 @@ const GlobeSurface = memo(function GlobeSurface({
               {fillPath !== '' ? (
                 <path
                   d={fillPath}
+                  data-fx="globe-land"
+                  data-tint={country.tint}
                   fill="var(--attack-map-land)"
                   fillOpacity="0.18"
                   stroke="none"
@@ -1952,6 +1960,7 @@ const GlobeSurface = memo(function GlobeSurface({
               ) : null}
               <path
                 d={outlinePath}
+                data-fx="globe-borders"
                 fill="none"
                 stroke="var(--attack-map-outline)"
                 strokeOpacity="0.46"
@@ -1968,6 +1977,7 @@ const GlobeSurface = memo(function GlobeSurface({
           return (
             <circle
               key={landmark.code}
+              data-fx="globe-landmark"
               cx={point.x}
               cy={point.y}
               r="1.6"
@@ -1981,6 +1991,7 @@ const GlobeSurface = memo(function GlobeSurface({
         cx={CENTER_X}
         cy={CENTER_Y}
         r={GLOBE_RADIUS}
+        data-fx="globe-rim"
         fill="none"
         stroke="var(--attack-map-node-highlight)"
         strokeOpacity="var(--attack-map-rim-opacity)"
@@ -2301,6 +2312,7 @@ function TeamNodeLabel({
       pointerEvents="none"
     >
       <line
+        data-fx="team-leader"
         x1={node.x}
         x2={node.labelX}
         y1={node.y}
@@ -2313,6 +2325,7 @@ function TeamNodeLabel({
       <text
         x={node.labelX}
         y={node.labelY - 7}
+        data-fx="team-name"
         textAnchor={node.labelAnchor}
         fill={node.selected ? 'var(--foreground)' : 'var(--attack-map-node-label)'}
         stroke="var(--attack-map-node-label-halo)"
@@ -2328,6 +2341,7 @@ function TeamNodeLabel({
       <text
         x={node.labelX}
         y={node.labelY + 7}
+        data-fx="team-meta"
         textAnchor={node.labelAnchor}
         fill="var(--attack-map-node-label)"
         fontSize="9.5"
@@ -2386,6 +2400,7 @@ function TeamNodeDot({
         cx={node.x}
         cy={node.y}
         r={ringRadius}
+        data-fx="team-halo"
         fill="var(--attack-map-node-highlight-halo)"
         fillOpacity={emphasized ? '0.3' : '0.08'}
         className={emphasized ? haloClassName : undefined}
@@ -2394,6 +2409,8 @@ function TeamNodeDot({
         cx={node.x}
         cy={node.y}
         r={ringRadius}
+        data-fx="team-ring"
+        data-emphasized={emphasized ? 'true' : undefined}
         fill="none"
         stroke="var(--attack-map-node-highlight)"
         strokeOpacity={emphasized ? '0.5' : '0.16'}
@@ -2402,6 +2419,8 @@ function TeamNodeDot({
         cx={node.x}
         cy={node.y}
         r={coreRadius}
+        data-fx="team-core"
+        data-emphasized={emphasized ? 'true' : undefined}
         fill={emphasized ? 'var(--attack-map-node-highlight)' : 'var(--attack-map-node)'}
         stroke="var(--attack-map-background)"
         strokeWidth="2"
@@ -2416,6 +2435,8 @@ function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
 
   return (
     <rect
+      data-fx="team-plate"
+      data-selected={node.selected ? 'true' : undefined}
       x={box.left}
       y={node.labelY - 23}
       width={width}
@@ -2591,9 +2612,12 @@ function buildProjectedLinePath(points: GeoPoint[], rotation: GlobeRotation): st
 }
 
 function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
+  const featurePolygons = collection.features.map((feature) => getFeaturePolygons(feature.geometry));
+  const tints = assignCountryTints(featurePolygons);
   return collection.features.flatMap((feature, featureIndex) => {
     const name = feature.properties?.name ?? `country-${featureIndex}`;
-    const polygons = getFeaturePolygons(feature.geometry);
+    const polygons = featurePolygons[featureIndex] ?? [];
+    const tint = tints[featureIndex] ?? 0;
     return polygons.flatMap((polygon, polygonIndex) => {
       const outerRing = polygon[0];
       if (!outerRing || outerRing.length < 3) {
@@ -2604,10 +2628,59 @@ function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
           id: `${featureIndex}-${polygonIndex}`,
           name,
           points: outerRing.map(([lon, lat]) => ({ lat, lon })),
+          tint,
         },
       ];
     });
   });
+}
+
+/**
+ * Map-colours the countries: two countries whose outlines meet (on a half
+ * degree grid) get different tints, and ties go to the least used tint so the
+ * palette stays balanced. Deterministic, so server and client agree.
+ */
+function assignCountryTints(featurePolygons: Array<Array<Array<Array<[number, number]>>>>): number[] {
+  const cells = new Map<string, Set<number>>();
+  featurePolygons.forEach((polygons, index) => {
+    for (const polygon of polygons) {
+      for (const [lon, lat] of polygon[0] ?? []) {
+        const key = `${Math.round(lon * 2)}:${Math.round(lat * 2)}`;
+        let members = cells.get(key);
+        if (!members) {
+          members = new Set();
+          cells.set(key, members);
+        }
+        members.add(index);
+      }
+    }
+  });
+  const neighbours = featurePolygons.map(() => new Set<number>());
+  for (const members of cells.values()) {
+    for (const a of members) {
+      for (const b of members) {
+        if (a !== b) neighbours[a]?.add(b);
+      }
+    }
+  }
+  const order = featurePolygons
+    .map((_, index) => index)
+    .sort((a, b) => (neighbours[b]?.size ?? 0) - (neighbours[a]?.size ?? 0) || a - b);
+  const tints = Array.from({ length: featurePolygons.length }, () => -1);
+  const usage = Array.from({ length: COUNTRY_TINT_COUNT }, () => 0);
+  for (const index of order) {
+    const taken = new Set<number>();
+    for (const other of neighbours[index] ?? []) taken.add(tints[other] ?? -1);
+    let best = -1;
+    for (let tint = 0; tint < COUNTRY_TINT_COUNT; tint += 1) {
+      if (taken.has(tint)) continue;
+      if (best === -1 || (usage[tint] ?? 0) < (usage[best] ?? 0)) best = tint;
+    }
+    const chosen = best === -1 ? index % COUNTRY_TINT_COUNT : best;
+    tints[index] = chosen;
+    usage[chosen] = (usage[chosen] ?? 0) + 1;
+  }
+  return tints;
 }
 
 function getFeaturePolygons(
@@ -2801,10 +2874,16 @@ function projectGlobePoint(point: GeoPoint, rotation: GlobeRotation): ProjectedP
   return {
     ...point,
     visible: z > -0.04,
-    x: CENTER_X + x,
-    y: CENTER_Y - rawY,
+    // Rounded so server (Node) and browser trig agree on the SSR'd SVG paths;
+    // last-bit differences in Math.sin/cos otherwise cause hydration mismatches.
+    x: roundCoord(CENTER_X + x),
+    y: roundCoord(CENTER_Y - rawY),
     z,
   };
+}
+
+function roundCoord(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function getLabelPlacement(point: ProjectedPoint): {

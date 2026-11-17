@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
-import {
-  RefreshSubmissions,
-  SubmissionsTable,
-} from '@/components/admin/submissions-table';
+import { RefreshSubmissions } from '@/components/admin/submissions-table';
+import { ThemedSubmissionsTable } from '@/components/admin/themed-organizer-views';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -88,6 +86,7 @@ export default async function AdminSubmissionsPage({
     >
       <section
         className="min-w-0 rounded-sm border bg-card"
+        data-slot="card"
         aria-labelledby="submission-history-title"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
@@ -205,7 +204,7 @@ export default async function AdminSubmissionsPage({
           </span>
           <span>First blood is awarded once per challenge.</span>
         </div>
-        <SubmissionsTable page={page} error={result.error} />
+        <ThemedSubmissionsTable page={page} error={result.error} />
         <div className="flex justify-end gap-2 border-t p-3">
           {page.has_prev ? (
             <Button asChild variant="outline">

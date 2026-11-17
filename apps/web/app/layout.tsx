@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
-import { IBM_Plex_Sans } from 'next/font/google';
+import { IBM_Plex_Sans, Lexend } from 'next/font/google';
 import { cookies } from 'next/headers';
+
+import { ActiveThemeProvider } from '@/components/theme/active-theme-provider';
+import { getActiveThemeId } from '@/lib/platform-appearance';
+import { getTheme } from '@/lib/themes';
 import './globals.css';
 
 const ibmPlexSans = IBM_Plex_Sans({
@@ -10,37 +14,41 @@ const ibmPlexSans = IBM_Plex_Sans({
   display: 'swap',
 });
 
+// Face for the Neubrutalism theme. Not preloaded: only pages whose theme CSS
+// references --font-lexend ever download it.
+const lexend = Lexend({
+  subsets: ['latin'],
+  variable: '--font-lexend',
+  display: 'swap',
+  preload: false,
+});
+
 export const metadata: Metadata = {
   title: 'AD Platform',
   description: 'Attack-Defense Tick platform control surface',
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // SSR paints explicit light/dark + scheme so router.refresh() does not flash.
+  // The theme (data-scheme) is the organizer's choice, read from the gateway.
+  // SSR also paints an explicit light/dark so router.refresh() does not flash;
   // System mode and first visit still resolve in the inline FOUC script.
-  const cookieStore = await cookies();
+  const [cookieStore, themeId] = await Promise.all([cookies(), getActiveThemeId()]);
   const storedTheme = cookieStore.get('ad-platform-theme')?.value;
-  const storedScheme = cookieStore.get('ad-platform-scheme')?.value;
+  // A theme may pick the mode used until the participant chooses one.
+  const themeDefaultMode = getTheme(themeId).defaultMode ?? 'system';
 
   const preference =
     storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
       ? storedTheme
-      : 'system';
-  const scheme =
-    storedScheme === 'graphite' ||
-    storedScheme === 'ink' ||
-    storedScheme === 'paper' ||
-    storedScheme === 'moss'
-      ? storedScheme
-      : 'graphite';
+      : themeDefaultMode;
   // Only bake an explicit light/dark into SSR; system resolves in FOUC script.
   const theme = preference === 'dark' || preference === 'light' ? preference : undefined;
 
   return (
     <html
       lang="en"
-      className={ibmPlexSans.variable}
-      data-scheme={scheme}
+      className={`${ibmPlexSans.variable} ${lexend.variable}`}
+      data-scheme={themeId}
       data-theme={theme}
       data-theme-preference={preference}
       suppressHydrationWarning
@@ -50,12 +58,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           dangerouslySetInnerHTML={{
             __html: `(() => {
   const themeKey = "ad-platform-theme";
-  const schemeKey = "ad-platform-scheme";
+  const themeDefaultMode = ${JSON.stringify(themeDefaultMode)};
   const root = document.documentElement;
-  const schemes = { graphite: 1, ink: 1, paper: 1, moss: 1 };
 
   function readCookie(name) {
-    const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=(graphite|ink|paper|moss|dark|light|system)"));
+    const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=(dark|light|system)"));
     return match ? match[1] : null;
   }
 
@@ -63,39 +70,30 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   if (!themeStored) {
     try { themeStored = window.localStorage.getItem(themeKey); } catch {}
   }
-  let schemeStored = readCookie(schemeKey);
-  if (!schemeStored) {
-    try { schemeStored = window.localStorage.getItem(schemeKey); } catch {}
-  }
 
   const hasTheme = themeStored === "dark" || themeStored === "light" || themeStored === "system";
-  const hasScheme = schemeStored && schemes[schemeStored];
-  const preference = hasTheme ? themeStored : "system";
-  const scheme = hasScheme ? schemeStored : "graphite";
+  const preference = hasTheme ? themeStored : themeDefaultMode;
   const resolved =
     preference === "system"
       ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : preference;
 
-  root.dataset.scheme = scheme;
   root.dataset.theme = resolved;
   root.dataset.themePreference = preference;
-
-  /*
-   * First visit: do not persist theme. Absence means System and keeps
-   * following OS day/night. Only explicit Light/Dark/System clicks write
-   * storage (see AppearanceControls). Scheme still defaults to Graphite
-   * without locking mode.
-   */
-  if (!hasScheme) {
-    try { window.localStorage.setItem(schemeKey, scheme); } catch {}
-    document.cookie = schemeKey + "=" + scheme + "; path=/; max-age=31536000; samesite=lax";
-  }
+  // Shells with a collapsible sidebar read this before first paint, so
+  // navigating never flashes the expanded rail.
+  try {
+    if (window.localStorage.getItem("ad-platform-rail") === "collapsed") root.dataset.rail = "collapsed";
+  } catch {}
+  // First visit writes nothing: absence means the theme's default mode (System
+  // unless the theme says otherwise). Only explicit clicks persist.
 })();`,
           }}
         />
       </head>
-      <body className={ibmPlexSans.className}>{children}</body>
+      <body className={ibmPlexSans.className}>
+        <ActiveThemeProvider themeId={themeId}>{children}</ActiveThemeProvider>
+      </body>
     </html>
   );
 }

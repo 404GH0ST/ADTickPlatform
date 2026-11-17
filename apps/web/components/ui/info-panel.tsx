@@ -43,6 +43,7 @@ export function InfoPanel({
 }: InfoPanelProps): ReactElement {
   return (
     <div
+      data-slot="info-panel"
       className={cn(
         layoutClassName[layout],
         compact ? 'p-3' : 'p-4',
@@ -64,9 +65,12 @@ export function InfoLine({
   valueClassName,
 }: InfoLineProps): ReactElement {
   return (
-    <p className={className}>
-      {label}:{' '}
-      <span className={cn('text-foreground', valueClassName)}>
+    <p data-slot="info-line" className={className}>
+      <span data-slot="info-label">
+        {label}
+        <span data-slot="info-colon">:</span>
+      </span>{' '}
+      <span data-slot="info-value" className={cn('text-foreground', valueClassName)}>
         {value}
       </span>
     </p>

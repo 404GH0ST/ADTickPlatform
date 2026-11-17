@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useEffect, useRef, type ReactElement } from "react";
 import type { PlatformOverview } from "@/lib/dashboard-types";
 
 import {
@@ -11,6 +11,8 @@ import {
   SSHSessionDialog,
 } from "@/components/dashboard/control-center-sections";
 import { FlagSubmitPanel } from "@/components/dashboard/flag-submit-panel";
+import { ThemeSlot } from "@/components/theme/theme-slot";
+import type { ServicesViewProps } from "@/lib/theme-contract";
 import {
   type ControlCenterOptions,
   useControlCenter,
@@ -35,6 +37,12 @@ export function ControlCenter({
     realtimeBaseUrl,
     scores,
     services,
+  });
+  useAutoRequestSSHSession({
+    open: state.sessionTarget !== null,
+    issued: state.issuedSession !== null,
+    pending: state.pendingAction !== null,
+    request: state.requestSSHSession,
   });
 
   return (
@@ -73,29 +81,35 @@ export function ControlCenter({
         onSetAttackVictim: state.setAttackVictim,
       })}
 
-      <SSHSessionDialog
-        actionError={state.actionError}
-        issuedSession={state.issuedSession}
-        open={state.sessionTarget !== null}
-        pendingAction={state.pendingAction}
-        onClose={state.closeSSHSessionDialog}
-        onConfirm={() => {
-          void state.requestSSHSession();
+      <ThemeSlot
+        name="SSHSessionDialog"
+        fallback={SSHSessionDialog}
+        props={{
+          actionError: state.actionError,
+          issuedSession: state.issuedSession,
+          open: state.sessionTarget !== null,
+          pendingAction: state.pendingAction,
+          onClose: state.closeSSHSessionDialog,
+          onConfirm: () => {
+            void state.requestSSHSession();
+          },
         }}
       />
-      <FactoryResetDialog
-        actionError={state.actionError}
-        cooldownSeconds={
-          state.resetTarget
+      <ThemeSlot
+        name="FactoryResetDialog"
+        fallback={FactoryResetDialog}
+        props={{
+          actionError: state.actionError,
+          cooldownSeconds: state.resetTarget
             ? state.serviceFeedback(state.resetTarget).resetCooldown
-            : 0
-        }
-        open={state.resetTarget !== null}
-        pendingAction={state.pendingAction}
-        target={state.resetTarget}
-        onClose={state.closeFactoryResetDialog}
-        onConfirm={() => {
-          void state.requestFactoryReset();
+            : 0,
+          open: state.resetTarget !== null,
+          pendingAction: state.pendingAction,
+          target: state.resetTarget,
+          onClose: state.closeFactoryResetDialog,
+          onConfirm: () => {
+            void state.requestFactoryReset();
+          },
         }}
       />
     </div>
@@ -167,12 +181,16 @@ function renderControlCenterPanel({
 }): ReactElement {
   if (initialTab === "scoreboard") {
     return (
-      <ScoreboardPanel
-        scoreRows={scoreRows}
-        currentTeamName={currentTeamName}
-        frozen={overview.scoreboardFrozen}
-        freezeAt={overview.scoreboardFreezeAt}
-        unfreezeAt={overview.scoreboardUnfreezeAt}
+      <ThemeSlot
+        name="Scoreboard"
+        fallback={ScoreboardPanel}
+        props={{
+          scoreRows,
+          currentTeamName,
+          frozen: overview.scoreboardFrozen,
+          freezeAt: overview.scoreboardFreezeAt,
+          unfreezeAt: overview.scoreboardUnfreezeAt,
+        }}
       />
     );
   }
@@ -183,22 +201,22 @@ function renderControlCenterPanel({
       overview.role !== "organizer" &&
       (overview.teamID ?? 0) > 0;
     return (
-      <div className="grid gap-4">
-        {showFlagSubmit ? (
-          <FlagSubmitPanel
-            acceptingSubmissions={overview.acceptingSubmissions}
-          />
-        ) : null}
-        <ServicesPanel
-          rows={rows}
-          pendingAction={pendingAction}
-          overview={overview}
-          serviceFeedback={serviceFeedback}
-          onSelectPrimaryAction={onSelectPrimaryAction}
-          onRestart={onRequestRestart}
-          onSelectReset={onSelectResetTarget}
-        />
-      </div>
+      <ThemeSlot
+        name="Services"
+        fallback={DefaultServicesView}
+        props={{
+          flagSubmit: showFlagSubmit ? (
+            <FlagSubmitPanel acceptingSubmissions={overview.acceptingSubmissions} />
+          ) : null,
+          rows,
+          pendingAction,
+          overview,
+          serviceFeedback,
+          onSelectPrimaryAction,
+          onRestart: onRequestRestart,
+          onSelectReset: onSelectResetTarget,
+        }}
+      />
     );
   }
 
@@ -206,24 +224,70 @@ function renderControlCenterPanel({
   const serviceOptions = rows.map((row) => row.name);
 
   return (
-    <AttacksPanel
-      attackFilters={attackFilters}
-      highlightedAttackIDs={highlightedAttackIDs}
-      attackPage={attackPage}
-      attackLiveMode={attackLiveMode}
-      pendingAction={pendingAction}
-      currentTeamName={currentTeamName}
-      serviceOptions={serviceOptions}
-      teamOptions={teamOptions}
-      onAttackerChange={onSetAttackAttacker}
-      onLimitChange={onSetAttackLimit}
-      onApplyFilters={onApplyAttackFilters}
-      onResetFilters={onResetAttackFilters}
-      onServiceChange={onSetAttackService}
-      onTickFromChange={onSetAttackTickFrom}
-      onTickToChange={onSetAttackTickTo}
-      onVictimChange={onSetAttackVictim}
-      onPage={onPageAttackFeed}
+    <ThemeSlot
+      name="Attacks"
+      fallback={AttacksPanel}
+      props={{
+        attackFilters,
+        highlightedAttackIDs,
+        attackPage,
+        attackLiveMode,
+        pendingAction,
+        currentTeamName,
+        serviceOptions,
+        teamOptions,
+        onAttackerChange: onSetAttackAttacker,
+        onLimitChange: onSetAttackLimit,
+        onApplyFilters: onApplyAttackFilters,
+        onResetFilters: onResetAttackFilters,
+        onServiceChange: onSetAttackService,
+        onTickFromChange: onSetAttackTickFrom,
+        onTickToChange: onSetAttackTickTo,
+        onVictimChange: onSetAttackVictim,
+        onPage: onPageAttackFeed,
+      }}
     />
+  );
+}
+
+/**
+ * Opening the SSH dialog requests the session once (credentials are fetched
+ * on open, not on a second click). Kept out of the dialog view so a themed
+ * dialog only has to render.
+ */
+function useAutoRequestSSHSession({
+  open,
+  issued,
+  pending,
+  request,
+}: {
+  open: boolean;
+  issued: boolean;
+  pending: boolean;
+  request: () => Promise<unknown> | void;
+}) {
+  const triggered = useRef(false);
+  const requestRef = useRef(request);
+  requestRef.current = request;
+
+  useEffect(() => {
+    if (!open) {
+      triggered.current = false;
+      return;
+    }
+    if (!issued && !pending && !triggered.current) {
+      triggered.current = true;
+      void requestRef.current();
+    }
+  }, [open, issued, pending]);
+}
+
+/** Stock services page body: flag form on top, then service cards. */
+export function DefaultServicesView({ flagSubmit, ...panel }: ServicesViewProps): ReactElement {
+  return (
+    <div className="grid gap-4">
+      {flagSubmit}
+      <ServicesPanel {...panel} />
+    </div>
   );
 }

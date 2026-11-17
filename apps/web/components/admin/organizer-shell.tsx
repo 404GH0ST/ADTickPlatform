@@ -36,6 +36,7 @@ export function OrganizerShell({
 }: Props) {
   return (
     <AppShell
+      surface="organizer"
       activePath={activePath}
       navItems={navItems}
       secondaryNavItems={secondaryNavItems}
@@ -45,7 +46,7 @@ export function OrganizerShell({
           <a href="/">Participant</a>
         </Button>
       }
-      summarySection={<OrganizerStatusSummary overview={overview} />}
+      summarySection={<OrganizerStatusSummary overview={overview} showStats={activePath === '/admin'} />}
     >
       {children}
     </AppShell>

@@ -3,17 +3,19 @@
 import type { ReactElement } from "react";
 
 import {
-  ChallengesTab,
-  DeploymentsTab,
   EntityFormDialog,
   ErrorBanner,
-  GameAttacksCard,
-  GameTab,
   NoteBanner,
-  PlayersTab,
-  ScoreboardTab,
-  TeamsTab,
 } from "@/components/admin/organizer-dashboard-sections";
+import {
+  ThemedAttacksCard,
+  ThemedChallengesTab,
+  ThemedDeploymentsTab,
+  ThemedGameTab,
+  ThemedPlayersTab,
+  ThemedScoreboardTab,
+  ThemedTeamsTab,
+} from "@/components/admin/themed-organizer-views";
 import {
   type OrganizerDashboardOptions,
   type OrganizerDashboardState,
@@ -459,7 +461,7 @@ function renderOrganizerPanel({
 }): ReactElement {
   if (initialTab === "teams") {
     return (
-      <TeamsTab
+      <ThemedTeamsTab
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
         teamRows={teamRows}
@@ -475,7 +477,7 @@ function renderOrganizerPanel({
 
   if (initialTab === "players") {
     return (
-      <PlayersTab
+      <ThemedPlayersTab
         accessStatus={accessStatus}
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
@@ -506,7 +508,7 @@ function renderOrganizerPanel({
 
   if (initialTab === "challenges") {
     return (
-      <ChallengesTab
+      <ThemedChallengesTab
         challengeRows={challengeRows}
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
@@ -525,7 +527,7 @@ function renderOrganizerPanel({
 
   if (initialTab === "deployments") {
     return (
-      <DeploymentsTab
+      <ThemedDeploymentsTab
         deleteTarget={deleteTarget}
         deploymentRows={deploymentRows}
         pendingAction={pendingAction}
@@ -538,7 +540,7 @@ function renderOrganizerPanel({
 
   if (initialTab === "scoreboard") {
     return (
-      <ScoreboardTab
+      <ThemedScoreboardTab
         pendingAction={pendingAction}
         scoringAudit={scoringAudit}
         scoreRows={scoreRows}
@@ -550,7 +552,7 @@ function renderOrganizerPanel({
 
   if (initialTab === "attacks") {
     return (
-      <GameAttacksCard
+      <ThemedAttacksCard
         attackPage={attackPage}
         attacksLiveMode={attacksLiveMode}
         highlightedAttackIDs={highlightedAttackIDs}
@@ -569,7 +571,7 @@ function renderOrganizerPanel({
   }
 
   return (
-      <GameTab
+      <ThemedGameTab
         attackPage={attackPage}
         attacksLiveMode={attacksLiveMode}
         highlightedAttackIDs={highlightedAttackIDs}

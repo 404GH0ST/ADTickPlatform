@@ -19,7 +19,7 @@ Name: Tactical Workroom
 Core traits:
 - Modern minimal product chrome: hard 1px borders, compact controls, no gradients/glass/neon.
 - **Default scheme: Graphite** — strict cool neutrals, near-monochrome primary.
-- Additional curated schemes (Ink, Paper, Moss), each with independent light/dark.
+- Additional schemes (Paper, Neubrutalism), each with independent light/dark.
 - Soft field grid only on the **Paper** scheme outer canvas gutter; content panels and other schemes stay solid (no body-wide notebook grid).
 - Dense operational tables and summaries that stay readable.
 
@@ -46,14 +46,13 @@ Use one family across product UI. It is readable for tables, labels, code-adjace
 
 ### Color
 
-Use OKLCH for custom values. Schemes live in `apps/web/app/globals.css` under `data-scheme`.
+Use OKLCH for custom values. Themes live in `apps/web/themes/<id>/theme.css` under `data-scheme` (see `apps/web/themes/README.md`).
 
 | Scheme | Feel | Primary |
 |--------|------|---------|
 | **Graphite** (default) | Strict neutral minimal | Near-black / near-white ink |
-| **Ink** | Cool modern ops | Restrained slate blue |
 | **Paper** | Warm workroom desk | Deep brass |
-| **Moss** | Calm technical | Muted sage |
+| **Neubrutalism** | Full redesign: ink outlines, hard offset shadows, pop fills (light default) | Sunflower yellow |
 
 Semantics (success / warning / danger / info) stay meaning-stable across schemes. Medals and signals use dedicated tokens; prefer `text-positive` / `tone-*` over raw Tailwind palette utilities.
 
@@ -64,23 +63,23 @@ Rules:
 - State colors always pair with text or labels.
 - No pure black/white, no neon, no gradients, no glassmorphism.
 - **Highlight as text:** `--signal-highlight` must stay ≥4.5:1 on `--background` and `--card` in every scheme × mode. Prefer `text-highlight` for attention (paused, pending, SLA soft-fail), not body copy.
-- **Medals:** `medal-gold|silver|bronze` chips only. Number color ≥4.5:1 on medal background; border ≥3:1 on card. Paper scheme uses warmer brass/copper medal ramps; Graphite/Ink/Moss share the default medal ramp.
+- **Medals:** `medal-gold|silver|bronze` chips only. Number color ≥4.5:1 on medal background; border ≥3:1 on card. Paper scheme uses warmer brass/copper medal ramps; Graphite shares the default medal ramp; Neubrutalism uses flat pop fills with ink numbers.
 
-### Appearance (scheme × mode)
+### Appearance (theme × mode)
 
-Two independent axes:
+Two independent axes, owned by different people:
 
-1. **Scheme** — `graphite | ink | paper | moss` (`ad-platform-scheme` cookie + localStorage).
-2. **Mode** — light / dark / **system** (`ad-platform-theme`).
+1. **Theme**: `graphite | paper | neubrutalism | …`, one folder per theme in `apps/web/themes/`. The **organizer** picks it platform-wide (Organizer → Game → Theme card). It is stored in `platform_settings.theme_id` and rendered server-side, so there is no per-user cookie and no flash.
+2. **Mode**: light / dark / **system** (`ad-platform-theme`), chosen by each **participant**.
 
 **Default mode is System.** First visit does not persist a mode cookie; absence means follow `prefers-color-scheme`. Explicit Light, Dark, or System clicks write storage. Multi-day CTFs can track day/night without re-picking.
 
 DOM:
-- `data-scheme` — active scheme
-- `data-theme` — resolved `light|dark` (never store the resolved value as preference)
-- `data-theme-preference` — `light | dark | system`
+- `data-scheme`: active theme id (server-rendered from the organizer setting)
+- `data-theme`: resolved `light|dark` (never store the resolved value as preference)
+- `data-theme-preference`: `light | dark | system`
 
-Controls: `AppearanceControls` in the shell header (expand pickers for scheme + mode).
+Controls: `AppearanceControls` in the shell header (mode only). A theme may replace the shell and any participant view (home, scoreboard, services, flag form, attacks, SSH/reset dialogs, login) through `components` in its `theme.ts`; views get the same state and callbacks as the stock ones, so features are unchanged. See `apps/web/themes/README.md`.
 
 ### Shape
 

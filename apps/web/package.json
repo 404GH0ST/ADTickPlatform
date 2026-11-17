@@ -3,13 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
+    "themes": "bun scripts/generate-themes.mjs",
+    "dev": "bun run themes && next dev",
+    "build": "bun run themes && next build --webpack",
     "start": "next start",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "bun run themes && next typegen && tsc --noEmit",
     "e2e": "bun run build && playwright test",
     "e2e:smoke": "bun run build && playwright test e2e/participant-auth.spec.ts e2e/admin-game.spec.ts e2e/realtime-updates.spec.ts",
-    "test": "bun test ./lib",
+    "test": "bun run themes && bun test ./lib",
     "ui:add": "bunx --bun shadcn@latest add",
     "lint": "oxlint --deny-warnings",
     "lint:fix": "oxlint --fix"

@@ -12,6 +12,8 @@ import { processApiResponse } from '@/lib/api-utils';
 
 type Props = {
   overview: AdminOverview;
+  /** Show the count strip. Alerts always render; the counts only belong on the overview. */
+  showStats?: boolean;
 };
 
 function SummaryItem({
@@ -27,7 +29,7 @@ function SummaryItem({
 }) {
   return (
     <div
-      className="border-b px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0"
+      className="border-b border-r border-border px-3 py-2.5 xl:border-b-0 xl:last:border-r-0"
       data-testid={testId}
     >
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
@@ -38,7 +40,7 @@ function SummaryItem({
   );
 }
 
-export function OrganizerStatusSummary({ overview }: Props) {
+export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
   const [operationsStatus, setOperationsStatus] = useState<
     AdminOperationsStatus | undefined
   >(overview.operationsStatus);
@@ -85,46 +87,48 @@ export function OrganizerStatusSummary({ overview }: Props) {
 
   return (
     <>
-      <section className="surface-inset overflow-hidden rounded-sm border" data-testid="organizer-summary">
-        <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-9">
-          <SummaryItem label="Teams" value={String(overview.teamCount)} />
-          <SummaryItem label="Players" value={String(overview.playerCount)} />
-          <SummaryItem
-            label="Challenges"
-            value={String(overview.challengeCount)}
-          />
-          <SummaryItem
-            label="Published Challenges"
-            value={String(overview.publishedChallengeCount)}
-          />
-          <SummaryItem
-            label="Deployments"
-            value={String(overview.deploymentCount)}
-          />
-          <SummaryItem
-            label="Pending Deployments"
-            value={
-              overview.pendingDeploymentCount > 0 ? (
-                <span className="text-highlight">{overview.pendingDeploymentCount}</span>
-              ) : (
-                String(overview.pendingDeploymentCount)
-              )
-            }
-          />
-          <SummaryItem
-            label="Ops Alerts"
-            value={
-              operationsAlertCount > 0 ? (
-                <span className="text-negative">{operationsAlertCount}</span>
-              ) : (
-                String(operationsAlertCount)
-              )
-            }
-          />
-          <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
-          <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
-        </dl>
-      </section>
+      {showStats ? (
+        <section className="surface-inset overflow-hidden rounded-sm border" data-slot="summary-strip" data-testid="organizer-summary">
+          <dl className="grid grid-cols-2 gap-0 sm:grid-cols-3 xl:grid-cols-6">
+            <SummaryItem label="Teams" value={String(overview.teamCount)} />
+            <SummaryItem label="Players" value={String(overview.playerCount)} />
+            <SummaryItem
+              label="Challenges"
+              value={
+                <>
+                  {overview.publishedChallengeCount}
+                  <span className="font-normal text-muted-foreground"> / {overview.challengeCount} published</span>
+                </>
+              }
+            />
+            <SummaryItem
+              label="Deployments"
+              value={
+                <>
+                  {overview.deploymentCount}
+                  {overview.pendingDeploymentCount > 0 ? (
+                    <span className="font-normal text-highlight"> · {overview.pendingDeploymentCount} pending</span>
+                  ) : null}
+                </>
+              }
+            />
+            <SummaryItem
+              label="Ops Alerts"
+              value={
+                operationsAlertCount > 0 ? (
+                  <span className="text-negative">{operationsAlertCount}</span>
+                ) : (
+                  String(operationsAlertCount)
+                )
+              }
+            />
+            <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
+          </dl>
+          <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+            API base <span className="font-mono text-foreground">{overview.apiBaseUrl}</span>
+          </p>
+        </section>
+      ) : null}
 
       {overview.message ? (
         <StatusBanner message={overview.message} variant="warning" />

@@ -1,0 +1,142 @@
+/* ── Paper: warm workroom (previous default, optional) ────────────────── */
+:root[data-scheme="paper"] {
+  color-scheme: light;
+  --background: oklch(0.975 0.012 75);
+  --foreground: oklch(0.18 0.015 55);
+  --card: oklch(0.992 0.008 80);
+  --card-foreground: oklch(0.18 0.015 55);
+  --popover: oklch(0.992 0.008 80);
+  --popover-foreground: oklch(0.18 0.015 55);
+  --primary: oklch(0.36 0.07 52);
+  --primary-foreground: oklch(0.985 0.008 75);
+  --secondary: oklch(0.945 0.012 75);
+  --secondary-foreground: oklch(0.25 0.014 62);
+  --muted: oklch(0.945 0.01 75);
+  --muted-foreground: oklch(0.42 0.015 60);
+  --accent: oklch(0.92 0.03 135);
+  --accent-foreground: oklch(0.26 0.05 130);
+  --border: oklch(0.86 0.015 70);
+  --input: oklch(0.82 0.015 70);
+  --ring: oklch(0.36 0.07 52);
+  --surface-grid: oklch(0.79 0.01 74 / 0.1);
+  --surface-ruled: oklch(0.88 0.012 74 / 0.62);
+  --canvas-line: oklch(0.7 0.012 74 / 0.12);
+  --frame-mark: color-mix(in oklab, var(--foreground) 40%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 30%, var(--card));
+  --reticle-dot: var(--foreground);
+  --shadow-paper: 0 1px 0 oklch(0.77 0.013 74), 0 10px 22px oklch(0.36 0.022 60 / 0.08);
+  /* Brass highlight as text (was L≈0.5 — tight on paper; darken for AA margin) */
+  --signal-highlight: oklch(0.42 0.11 68);
+  --medal-gold-background: oklch(0.94 0.045 78);
+  --medal-gold-border: oklch(0.5 0.12 70);
+  --medal-gold-foreground: oklch(0.4 0.12 68);
+  --medal-silver-background: oklch(0.94 0.012 70);
+  --medal-silver-border: oklch(0.52 0.02 65);
+  --medal-silver-foreground: oklch(0.4 0.02 60);
+  --medal-bronze-background: oklch(0.95 0.035 48);
+  --medal-bronze-border: oklch(0.5 0.1 45);
+  --medal-bronze-foreground: oklch(0.4 0.11 45);
+  --attack-map-background: oklch(0.948 0.014 78);
+  --attack-map-border: oklch(0.8 0.014 74);
+  --attack-map-grid: oklch(0.73 0.012 74);
+  --attack-map-land: oklch(0.68 0.026 104);
+  --attack-map-outline: oklch(0.47 0.02 70);
+  --attack-map-node: oklch(0.48 0.018 76);
+  --attack-map-node-label: oklch(0.31 0.014 62);
+  --attack-map-node-label-halo: oklch(0.96 0.004 72 / 0.92);
+  --attack-map-node-highlight: oklch(0.72 0.16 80);
+  --attack-map-node-highlight-halo: oklch(0.98 0.01 90);
+  --attack-map-route-1: oklch(0.56 0.12 68);
+  --attack-map-route-2: oklch(0.52 0.08 105);
+  --attack-map-route-3: oklch(0.48 0.08 48);
+  --attack-map-route-4: oklch(0.6 0.1 82);
+  --attack-map-route-5: oklch(0.44 0.07 62);
+  --attack-map-route-6: oklch(0.55 0.07 125);
+  --attack-map-route-7: oklch(0.5 0.09 32);
+  --attack-map-route-8: oklch(0.64 0.08 96);
+  --attack-map-legend-background: oklch(0.99 0.003 72 / 0.9);
+  --attack-map-legend-border: oklch(0.84 0.01 72);
+  --attack-map-legend-foreground: oklch(0.35 0.01 72);
+  --attack-map-scanline: oklch(0.2 0.01 72 / 0.08);
+  --attack-map-outer-glow-opacity: 0.1;
+  --attack-map-rim-opacity: 0.2;
+  --attack-map-rim-width: 1.6;
+}
+
+:root[data-scheme="paper"][data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.15 0.015 60);
+  --foreground: oklch(0.92 0.012 78);
+  --card: oklch(0.19 0.015 60);
+  --card-foreground: oklch(0.92 0.012 78);
+  --popover: oklch(0.19 0.015 60);
+  --popover-foreground: oklch(0.92 0.012 78);
+  --primary: oklch(0.76 0.07 60);
+  --primary-foreground: oklch(0.15 0.015 60);
+  --secondary: oklch(0.24 0.012 60);
+  --secondary-foreground: oklch(0.88 0.012 78);
+  --muted: oklch(0.24 0.012 60);
+  --muted-foreground: oklch(0.72 0.012 78);
+  --accent: oklch(0.24 0.04 135);
+  --accent-foreground: oklch(0.82 0.04 135);
+  --border: oklch(0.3 0.015 60);
+  --input: oklch(0.32 0.015 60);
+  --ring: oklch(0.76 0.07 60);
+  --surface-grid: oklch(0.55 0.014 74 / 0.07);
+  --surface-ruled: oklch(0.34 0.012 62 / 0.68);
+  --canvas-line: oklch(0.55 0.012 62 / 0.1);
+  --frame-mark: color-mix(in oklab, var(--foreground) 38%, var(--border));
+  --reticle-line: color-mix(in oklab, var(--foreground) 45%, transparent);
+  --reticle-dot: oklch(0.95 0.01 78);
+  --shadow-paper: 0 1px 0 oklch(0.39 0.012 62), 0 12px 24px oklch(0.09 0.006 62 / 0.36);
+  --signal-highlight: oklch(0.86 0.12 78);
+  --medal-gold-background: oklch(0.3 0.05 75);
+  --medal-gold-border: oklch(0.64 0.1 70);
+  --medal-gold-foreground: oklch(0.9 0.1 80);
+  --medal-silver-background: oklch(0.28 0.015 60);
+  --medal-silver-border: oklch(0.62 0.02 60);
+  --medal-silver-foreground: oklch(0.9 0.015 70);
+  --medal-bronze-background: oklch(0.3 0.04 48);
+  --medal-bronze-border: oklch(0.64 0.08 48);
+  --medal-bronze-foreground: oklch(0.9 0.08 55);
+  --attack-map-background: oklch(0.215 0.014 62);
+  --attack-map-border: oklch(0.35 0.014 62);
+  --attack-map-grid: oklch(0.43 0.014 68);
+  --attack-map-land: oklch(0.42 0.028 105);
+  --attack-map-outline: oklch(0.48 0.02 72);
+  --attack-map-node: oklch(0.62 0.018 76);
+  --attack-map-node-label: oklch(0.76 0.01 80);
+  --attack-map-node-label-halo: oklch(0.18 0.01 72 / 0.9);
+  --attack-map-node-highlight: oklch(0.76 0.14 80);
+  --attack-map-node-highlight-halo: oklch(0.97 0.005 90);
+  --attack-map-route-1: oklch(0.76 0.12 68);
+  --attack-map-route-2: oklch(0.7 0.08 105);
+  --attack-map-route-3: oklch(0.72 0.09 48);
+  --attack-map-route-4: oklch(0.82 0.1 82);
+  --attack-map-route-5: oklch(0.66 0.07 62);
+  --attack-map-route-6: oklch(0.74 0.07 125);
+  --attack-map-route-7: oklch(0.7 0.09 32);
+  --attack-map-route-8: oklch(0.84 0.08 96);
+  --attack-map-legend-background: oklch(0.24 0.01 72 / 0.9);
+  --attack-map-legend-border: oklch(0.35 0.01 72);
+  --attack-map-legend-foreground: oklch(0.86 0.01 80);
+  --attack-map-scanline: oklch(0.08 0.004 72 / 0.18);
+  --attack-map-outer-glow-opacity: 0.055;
+  --attack-map-rim-opacity: 0.14;
+  --attack-map-rim-width: 1.15;
+}
+
+@layer components {
+  /*
+   * Paper only: soft grid on the outer canvas gutter (outside the
+   * solid work panel). Other schemes stay solid so dense tables stay calm.
+   */
+  :root[data-scheme="paper"] .workspace-canvas {
+    background-color: var(--background);
+    background-image:
+      linear-gradient(var(--surface-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--surface-grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+}

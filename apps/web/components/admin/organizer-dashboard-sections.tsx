@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ReactElement, ReactNode } from "react";
 import { useCallback, useMemo, useState, useEffect } from "react";
 import {
+  Ban,
   Copy,
   Download,
   Flag,
@@ -15,6 +17,7 @@ import {
   Power,
   PowerOff,
   RefreshCw,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 
@@ -48,6 +51,7 @@ import { AttackSliceSummaryGrid } from "@/components/ui/attack-slice-summary";
 import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
 import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
 import { PlatformSettingsCard } from "@/components/admin/platform-settings-card";
+import { ThemeSettingsCard } from "@/components/admin/theme-settings-card";
 import { Badge } from "@/components/ui/badge";
 import { AdminTable, AdminTableHeader } from "@/components/ui/admin-table";
 import { Button } from "@/components/ui/button";
@@ -367,6 +371,21 @@ function withUpdatedTimePart(currentValue: string, nextTime: string): string {
   return `${datePart}T${nextTime}`;
 }
 
+/** Image refs and paths have no spaces; let them wrap after each "/" instead of mid-word. */
+function breakAtSlashes(value: string): ReactNode {
+  const parts = value.split("/");
+  return parts.map((part, index) => (
+    <span key={index}>
+      {part}
+      {index < parts.length - 1 ? (
+        <>
+          /<wbr />
+        </>
+      ) : null}
+    </span>
+  ));
+}
+
 function CardActionRow({
   children,
   className,
@@ -538,6 +557,22 @@ export function PlayersTab({
   return (
     <>
       <div className="grid gap-4">
+        <PlayerRegistryCard
+          pendingAction={pendingAction}
+          playerRows={playerRows}
+          onOpenCreateDialog={onOpenCreateDialog}
+          onOpenEditDialog={onOpenEditDialog}
+          onInspectWireGuard={onInspectWireGuard}
+          onRevokeWireGuard={onRevokeWireGuard}
+          onRotateWireGuard={onRotateWireGuard}
+          onSelectDeleteTarget={onSelectDeleteTarget}
+          onSetPlayerActiveState={onSetPlayerActiveState}
+        />
+
+        <section className="grid gap-3" aria-labelledby="players-network-heading">
+          <h2 id="players-network-heading" data-slot="section-heading" className="text-sm font-semibold text-foreground">
+            Network runtime
+          </h2>
         <div className="grid items-start gap-4 xl:grid-cols-2">
           <WireGuardGatewayCard
             pendingAction={pendingAction}
@@ -555,18 +590,7 @@ export function PlayersTab({
             onTeardownAccess={onTeardownAccess}
           />
         </div>
-
-        <PlayerRegistryCard
-          pendingAction={pendingAction}
-          playerRows={playerRows}
-          onOpenCreateDialog={onOpenCreateDialog}
-          onOpenEditDialog={onOpenEditDialog}
-          onInspectWireGuard={onInspectWireGuard}
-          onRevokeWireGuard={onRevokeWireGuard}
-          onRotateWireGuard={onRotateWireGuard}
-          onSelectDeleteTarget={onSelectDeleteTarget}
-          onSetPlayerActiveState={onSetPlayerActiveState}
-        />
+        </section>
       </div>
 
       <WireGuardDialog
@@ -640,7 +664,7 @@ function WireGuardGatewayCard({
   return (
     <AdminRuntimeCard
       title="WireGuard Gateway"
-      description="Maintenance surface for applying player peer changes to the gateway runtime after create, rotate, and revoke operations."
+      description="Applies player peer changes after create, rotate, and revoke."
     >
         <RuntimeStatusBlock
           tone={getGatewayTone(wireGuardGatewayStatus?.state)}
@@ -674,7 +698,7 @@ function AccessPolicyCard({
   return (
     <AdminRuntimeCard
       title="Service Access Policy"
-      description="Maintenance surface for controller-side SSH allowlists rendered from unlock state plus active team peer addresses."
+      description="Controller SSH allowlists built from unlock state and active team peers."
     >
         <RuntimeStatusBlock
           tone={getGatewayTone(accessStatus?.state)}
@@ -947,10 +971,8 @@ function PlayerRegistryCard({
             { label: "Name" },
             { label: "Team" },
             { label: "Role" },
-            { label: "Peer" },
-            { label: "Address" },
-            { label: "Status" },
-            { label: "Active" },
+            { label: "WireGuard peer" },
+            { label: "Account" },
             { label: "Action" },
           ]} />
           <TableBody>
@@ -970,15 +992,11 @@ function PlayerRegistryCard({
                       </p>
                     </div>
                   </TableCell>
-                  <TableCell>{player.team_name || "Unjoined"}</TableCell>
+                  <TableCell className="whitespace-nowrap">{player.team_name || "Unjoined"}</TableCell>
                   <TableCell>{player.role}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {player.wireguard_peer || "—"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {player.wireguard_address || "—"}
-                  </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs">{player.wireguard_peer || "—"}</span>
                     {hasWireGuardPeer ? (
                       <Badge
                         className={
@@ -991,8 +1009,12 @@ function PlayerRegistryCard({
                         {player.wireguard_status}
                       </Badge>
                     ) : (
-                      <span className="text-sm text-muted-foreground">pending</span>
+                      <span className="text-xs text-muted-foreground">pending</span>
                     )}
+                    </div>
+                    <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                      {player.wireguard_address || "—"}
+                    </p>
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -1003,7 +1025,7 @@ function PlayerRegistryCard({
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-nowrap items-center gap-1.5">
                       <Button
                         disabled={pendingAction !== null}
                         size="sm"
@@ -1046,8 +1068,10 @@ function PlayerRegistryCard({
                       <Button
                         disabled={pendingAction !== null || !hasWireGuardPeer}
                         size="sm"
-                        variant="outline"
+                        variant="ghost"
                         data-testid={`rotate-wireguard-${player.id}`}
+                        title="Rotate WireGuard key"
+                        aria-label="Rotate WireGuard key"
                         onClick={() => onRotateWireGuard(player)}
                       >
                         {pendingAction === `wireguard:rotate:${player.id}` ? (
@@ -1055,7 +1079,6 @@ function PlayerRegistryCard({
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
-                        Rotate
                       </Button>
                       <Button
                         disabled={
@@ -1064,14 +1087,18 @@ function PlayerRegistryCard({
                           player.wireguard_status === "revoked"
                         }
                         size="sm"
-                        variant="outline"
+                        variant="ghost"
+                        className="button-danger-subtle"
                         data-testid={`revoke-wireguard-${player.id}`}
+                        title="Revoke WireGuard peer"
+                        aria-label="Revoke WireGuard peer"
                         onClick={() => onRevokeWireGuard(player)}
                       >
                         {pendingAction === `wireguard:revoke:${player.id}` ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : null}
-                        Revoke
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
                       </Button>
                       <Button
                         disabled={pendingAction !== null}
@@ -1134,15 +1161,12 @@ function ChallengeCatalogCard({
     >
       <AdminTable>
           <AdminTableHeader columns={[
-            { label: "ID", className: "w-[80px]" },
-            { label: "Name" },
-            { label: "Images" },
+            { label: "ID", className: "w-[56px]" },
+            { label: "Challenge" },
             { label: "Status" },
             { label: "Validation" },
             { label: "Network" },
-            { label: "Egress" },
-            { label: "Replication" },
-            { label: "Runtime" },
+            { label: "Instances" },
             { label: "Action" },
           ]} />
           <TableBody>
@@ -1194,7 +1218,7 @@ function ChallengeCatalogRow({
       <TableCell className="font-semibold">#{challenge.id}</TableCell>
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
-          <span>{challenge.name}</span>
+          <span className="font-medium">{challenge.name}</span>
           {challenge.maintenance ? (
             <Badge
               className="tone-warning"
@@ -1217,13 +1241,11 @@ function ChallengeCatalogRow({
             </Badge>
           ) : null}
         </div>
-      </TableCell>
-      <TableCell>
-        <div className="max-w-[20rem] text-xs text-muted-foreground">
-          <p>{challenge.baseline_image}</p>
-          <p>{challenge.checker_image}</p>
+        <div className="mt-1.5 min-w-[11.5rem] max-w-[16rem] space-y-0.5 font-mono text-[0.6875rem] leading-4 text-muted-foreground">
+          <p title="Service image">{breakAtSlashes(challenge.baseline_image)}</p>
+          <p title="Checker image">{breakAtSlashes(challenge.checker_image)}</p>
           {challenge.source_bundle_path ? (
-            <p>{challenge.source_bundle_path}</p>
+            <p title="Source bundle">{breakAtSlashes(challenge.source_bundle_path)}</p>
           ) : null}
         </div>
       </TableCell>
@@ -1255,13 +1277,13 @@ function ChallengeCatalogRow({
           ) : null}
         </div>
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        <div>
-          <p>10.80.{challenge.service_subnet_octet}.0/24</p>
-          <p>port {challenge.service_port}</p>
-        </div>
-      </TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+        <div className="space-y-1.5">
+          <p>
+            10.80.{challenge.service_subnet_octet}.0/24
+            <br />
+            port {challenge.service_port}
+          </p>
         <Badge
           className={
             challenge.egress_enabled
@@ -1272,15 +1294,18 @@ function ChallengeCatalogRow({
         >
           {challenge.egress_enabled ? "internet" : "air-gapped"}
         </Badge>
+        </div>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <p className="font-medium tabular-nums">
+          {challenge.deployed_teams}/{challenge.total_teams}
+        </p>
+        <p className="text-xs text-muted-foreground tabular-nums">
+          ready {challenge.ready_teams} / queued {challenge.queued_teams}
+        </p>
       </TableCell>
       <TableCell>
-        {challenge.deployed_teams}/{challenge.total_teams}
-      </TableCell>
-      <TableCell className="text-sm text-muted-foreground">
-        ready {challenge.ready_teams} / queued {challenge.queued_teams}
-      </TableCell>
-      <TableCell>
-        <CardActionRow>
+        <CardActionRow className="flex-nowrap">
           <Button
             disabled={pendingAction !== null}
             size="sm"
@@ -1293,14 +1318,17 @@ function ChallengeCatalogRow({
           <Button
             disabled={pendingAction !== null}
             size="sm"
-            variant="outline"
+            variant="ghost"
             data-testid={`validate-challenge-${challenge.id}`}
+            title="Validate images"
+            aria-label="Validate images"
             onClick={() => onValidateChallenge(challenge)}
           >
             {pendingAction === `validate:${challenge.id}` ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            Validate
+            ) : (
+              <ShieldCheck className="h-4 w-4" />
+            )}
           </Button>
           <Button
             disabled={pendingAction !== null}
@@ -1564,141 +1592,205 @@ export function GameTab({
     );
   }
 
+  const alertCount = operationsStatus?.alerts.length ?? 0;
+
   return (
-    <div className="grid gap-8">
-      <section className="grid gap-4">
-        <div className="border-b border-border pb-3">
-          <h2 className="text-base font-semibold text-foreground">
-            Incident Response
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Trusted runtime truth first, then the supporting signals that explain
-            why reconcile can or cannot be trusted.
-          </p>
-        </div>
-        <RuntimeHealthCard
-          accessStatus={accessStatus}
-          deploymentRows={deploymentRows}
-          operationsStatus={operationsStatus}
-          pendingAction={pendingAction}
-          serviceMetrics={serviceMetrics}
-          wireGuardGatewayStatus={wireGuardGatewayStatus}
-          onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
-          onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
-          onRefreshDeploymentRows={onRefreshDeploymentRows}
-          onRefreshOperationsStatus={onRefreshOperationsStatus}
-          onRefreshRuntimeHealth={onRefreshRuntimeHealth}
-        />
-        <OperationsSupportPanel
-          operationsStatus={operationsStatus}
-          pendingAction={pendingAction}
-          serviceMetrics={serviceMetrics}
-          onRefreshAlerts={onRefreshOperationsStatus}
-          onRefreshMetrics={onRefreshServiceMetrics}
-        />
-      </section>
-
-      <section className="grid gap-4">
-        <div className="border-b border-border pb-3">
-          <h2 className="text-base font-semibold text-foreground">
-            Match Controls
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Manual match, schedule, and scoring controls that change live state.
-          </p>
-        </div>
-        <GameControlCard
-          gameState={gameState}
-          pendingAction={pendingAction}
-          scoringAudit={scoringAudit}
-          scoreRowCount={scoreRows.length}
-          onAuditScores={onAuditScores}
-          onAdvanceTick={onAdvanceTick}
-          onRefreshGameStatus={onRefreshGameStatus}
-          onRecomputeScores={onRecomputeScores}
-          onStartMatch={onStartMatch}
-          onPauseMatch={onPauseMatch}
-          onResumeMatch={onResumeMatch}
-          onStopMatch={onStopMatch}
-          onUpdateMatchSchedule={onUpdateMatchSchedule}
-        />
-        <PlatformSettingsCard />
-      </section>
-
-      <section className="grid gap-4">
-        <div className="border-b border-border pb-3">
-          <h2 className="text-base font-semibold text-foreground">
-            Match Observation
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Current tick progress and a compact scoreboard snapshot before you
-            drill into the full ranking view.
-          </p>
-        </div>
-        <div className="grid items-start gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-          <CurrentTickCard currentTick={gameState.current_tick} />
-          <ScoreboardSnapshotCard
-            pendingAction={pendingAction}
-            scoreRows={scoreRows}
-            onRefresh={onRefreshGameScoreboard}
-          />
-        </div>
-      </section>
-
-      <section className="grid gap-4">
-        <div className="border-b border-border pb-3">
-          <h2 className="text-base font-semibold text-foreground">
-            Diagnostics
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Scheduler state and checker evidence stay available, but only expand
-            when you need to investigate the runtime path.
-          </p>
-        </div>
-        <div className="grid gap-4">
-          <SchedulerCard
-            filters={filters.schedulerEvent}
-            pendingAction={pendingAction}
-            scheduler={gameState.scheduler}
-            schedulerEventPage={schedulerEventPage}
-            schedulerEventsLiveMode={schedulerEventsLiveMode}
-            onApplyFilters={onApplySchedulerEventFilters}
-            onFilterChange={onSchedulerEventFilterChange}
-            onPage={onPageSchedulerEvents}
-            onRefresh={onRefreshSchedulerEvents}
-            onResetFilters={onResetSchedulerEventFilters}
-            onStartScheduler={onStartScheduler}
-            onStopScheduler={onStopScheduler}
-            onUpdateScheduler={onUpdateScheduler}
-          />
-          <details
-            className="rounded-sm border border-border/70 bg-muted/10 p-3"
-            data-testid="checker-investigation-disclosure"
-            open={checkerAttentionActive}
-          >
-            <summary className="cursor-pointer font-medium text-foreground">
-              Checker investigation
-            </summary>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Phase-level checker evidence stays available here when runtime
-              health or alerts point to checker drift.
-            </p>
-            <div className="mt-3">
-              <CheckerRunsCard
-                checkerRunPage={checkerRunPage}
-                checkerRunsLiveMode={checkerRunsLiveMode}
-                filters={filters.checkerRun}
+    <GameViewTabs alertCount={alertCount}>
+      {(view) => {
+        if (view === "health") {
+          return (
+            <div className="grid gap-4">
+              <RuntimeHealthCard
+                accessStatus={accessStatus}
+                deploymentRows={deploymentRows}
+                operationsStatus={operationsStatus}
                 pendingAction={pendingAction}
-                onApplyFilters={onApplyCheckerRunFilters}
-                onFilterChange={onCheckerRunFilterChange}
-                onPage={onPageCheckerRuns}
-                onRefresh={onRefreshCheckerRuns}
-                onResetFilters={onResetCheckerRunFilters}
+                serviceMetrics={serviceMetrics}
+                wireGuardGatewayStatus={wireGuardGatewayStatus}
+                onCopyRuntimeHealthSummary={onCopyRuntimeHealthSummary}
+                onDownloadRuntimeHealthReport={onDownloadRuntimeHealthReport}
+                onRefreshDeploymentRows={onRefreshDeploymentRows}
+                onRefreshOperationsStatus={onRefreshOperationsStatus}
+                onRefreshRuntimeHealth={onRefreshRuntimeHealth}
+              />
+              <OperationsSupportPanel
+                operationsStatus={operationsStatus}
+                pendingAction={pendingAction}
+                serviceMetrics={serviceMetrics}
+                onRefreshAlerts={onRefreshOperationsStatus}
+                onRefreshMetrics={onRefreshServiceMetrics}
               />
             </div>
-          </details>
-        </div>
-      </section>
+          );
+        }
+
+        if (view === "diagnostics") {
+          return (
+            <div className="grid gap-4">
+              <SchedulerCard
+                filters={filters.schedulerEvent}
+                pendingAction={pendingAction}
+                scheduler={gameState.scheduler}
+                schedulerEventPage={schedulerEventPage}
+                schedulerEventsLiveMode={schedulerEventsLiveMode}
+                onApplyFilters={onApplySchedulerEventFilters}
+                onFilterChange={onSchedulerEventFilterChange}
+                onPage={onPageSchedulerEvents}
+                onRefresh={onRefreshSchedulerEvents}
+                onResetFilters={onResetSchedulerEventFilters}
+                onStartScheduler={onStartScheduler}
+                onStopScheduler={onStopScheduler}
+                onUpdateScheduler={onUpdateScheduler}
+              />
+              <details
+                className="rounded-sm border border-border/70 bg-muted/10 p-3"
+                data-testid="checker-investigation-disclosure"
+                open={checkerAttentionActive}
+              >
+                <summary className="cursor-pointer font-medium text-foreground">
+                  Checker investigation
+                </summary>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Phase-level checker evidence for when runtime health or alerts
+                  point to checker drift.
+                </p>
+                <div className="mt-3">
+                  <CheckerRunsCard
+                    checkerRunPage={checkerRunPage}
+                    checkerRunsLiveMode={checkerRunsLiveMode}
+                    filters={filters.checkerRun}
+                    pendingAction={pendingAction}
+                    onApplyFilters={onApplyCheckerRunFilters}
+                    onFilterChange={onCheckerRunFilterChange}
+                    onPage={onPageCheckerRuns}
+                    onRefresh={onRefreshCheckerRuns}
+                    onResetFilters={onResetCheckerRunFilters}
+                  />
+                </div>
+              </details>
+            </div>
+          );
+        }
+
+        if (view === "settings") {
+          return (
+            <div className="grid gap-4">
+              <PlatformSettingsCard />
+              <ThemeSettingsCard />
+            </div>
+          );
+        }
+
+        return (
+          <div className="grid gap-4">
+            <GameControlCard
+              gameState={gameState}
+              pendingAction={pendingAction}
+              scoringAudit={scoringAudit}
+              scoreRowCount={scoreRows.length}
+              onAuditScores={onAuditScores}
+              onAdvanceTick={onAdvanceTick}
+              onRefreshGameStatus={onRefreshGameStatus}
+              onRecomputeScores={onRecomputeScores}
+              onStartMatch={onStartMatch}
+              onPauseMatch={onPauseMatch}
+              onResumeMatch={onResumeMatch}
+              onStopMatch={onStopMatch}
+              onUpdateMatchSchedule={onUpdateMatchSchedule}
+            />
+            <div className="grid items-start gap-4 xl:grid-cols-2">
+              <CurrentTickCard currentTick={gameState.current_tick} />
+              <ScoreboardSnapshotCard
+                pendingAction={pendingAction}
+                scoreRows={scoreRows}
+                onRefresh={onRefreshGameScoreboard}
+              />
+            </div>
+          </div>
+        );
+      }}
+    </GameViewTabs>
+  );
+}
+
+export const GAME_VIEWS = [
+  { id: "match", label: "Match" },
+  { id: "health", label: "Health" },
+  { id: "diagnostics", label: "Scheduler & checks" },
+  { id: "settings", label: "Settings" },
+] as const;
+
+export type GameView = (typeof GAME_VIEWS)[number]["id"];
+
+function isGameView(value: string | null): value is GameView {
+  return GAME_VIEWS.some((view) => view.id === value);
+}
+
+/**
+ * Splits /admin/game into focused views. The active view lives in `?view=`
+ * so a reload or shared link lands on the same view; switching uses
+ * history.replaceState, so it does not re-run the server page.
+ */
+function GameViewTabs({
+  alertCount,
+  children,
+}: {
+  alertCount: number;
+  children: (view: GameView) => ReactNode;
+}): ReactElement {
+  const searchParams = useSearchParams();
+  const requested = searchParams.get("view");
+  const [view, setView] = useState<GameView>(isGameView(requested) ? requested : "match");
+
+  useEffect(() => {
+    if (isGameView(requested)) {
+      setView(requested);
+    }
+  }, [requested]);
+
+  function select(next: GameView) {
+    setView(next);
+    const url = new URL(window.location.href);
+    if (next === "match") {
+      url.searchParams.delete("view");
+    } else {
+      url.searchParams.set("view", next);
+    }
+    window.history.replaceState(window.history.state, "", url);
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div
+        role="tablist"
+        aria-label="Game views"
+        className="section-tabs flex max-w-full gap-1 overflow-x-auto border-b border-border"
+        data-testid="game-view-tabs"
+      >
+        {GAME_VIEWS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`game-tab-${item.id}`}
+            aria-selected={view === item.id}
+            aria-controls="game-view-panel"
+            data-active={view === item.id ? "true" : "false"}
+            className="section-tab"
+            onClick={() => select(item.id)}
+          >
+            {item.label}
+            {item.id === "health" && alertCount > 0 ? (
+              <span className="section-tab-count" aria-label={`${alertCount} alerts`}>
+                {alertCount}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="game-view-panel" aria-labelledby={`game-tab-${view}`}>
+        {children(view)}
+      </div>
     </div>
   );
 }
@@ -1737,27 +1829,25 @@ function CategoryLeaderCard({
   scoreFormatter: (n: number) => string;
 }): ReactElement {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{caption}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {leaders.length === 0 ? (
-          <EmptyStateText message="No team has a score yet. Rankings will appear after the first scored tick; verify the match and scheduler are running if this remains empty." />
-        ) : (
-          <ol className="grid gap-2" aria-label={title}>
-            {leaders.map((leader) => (
-              <CategoryLeaderRow
-                key={leader.team}
-                leader={leader}
-                scoreFormatter={scoreFormatter}
-              />
-            ))}
-          </ol>
-        )}
-      </CardContent>
-    </Card>
+    <section className="grid content-start gap-3 p-4 sm:p-5">
+      <div>
+        <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+        <p className="text-xs text-muted-foreground">{caption}</p>
+      </div>
+      {leaders.length === 0 ? (
+        <EmptyStateText message="No team has a score yet. Rankings will appear after the first scored tick; verify the match and scheduler are running if this remains empty." />
+      ) : (
+        <ol className="grid gap-2" aria-label={title}>
+          {leaders.map((leader) => (
+            <CategoryLeaderRow
+              key={leader.team}
+              leader={leader}
+              scoreFormatter={scoreFormatter}
+            />
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -1780,27 +1870,25 @@ export function ScoreboardCategoryLeadersPanel({
       <CardHeader>
         <CardTitle>Team Award Candidates</CardTitle>
         <CardDescription>
-          Top {topN} teams in each cumulative score category (attack, defense,
-          SLA). Source data for Best Attacker, Best Defender, and Best
-          Availability awards—all awarded to teams, not individual players.
+          Top {topN} teams per cumulative category. Awards go to teams, not players.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-3">
+      <CardContent className="grid p-0 sm:p-0 md:grid-cols-3 md:divide-x divide-y md:divide-y-0 divide-border">
         <CategoryLeaderCard
           title="Best Attacker"
-          caption="Cumulative attack points from all captured flags."
+          caption="Attack points from captured flags."
           leaders={summary.attacker}
           scoreFormatter={formatScore}
         />
         <CategoryLeaderCard
           title="Best Defender"
-          caption="Cumulative defense points (fewest penalties from stolen flags)."
+          caption="Defense points; fewest stolen-flag penalties."
           leaders={summary.defender}
           scoreFormatter={formatScore}
         />
         <CategoryLeaderCard
           title="Best Availability"
-          caption="Cumulative SLA points from service uptime checks."
+          caption="SLA points from uptime checks."
           leaders={summary.availability}
           scoreFormatter={formatScore}
         />
@@ -1826,7 +1914,7 @@ function freezeStateLabel(status: AdminScoreboardFreeze | null): {
 // window directly through the admin proxy routes rather than threading state
 // through the organizer dashboard hook. The participant board freezes; this
 // organizer view (and the admin SSE stream) stay live.
-function ScoreboardFreezeControl(): ReactElement {
+export function ScoreboardFreezeControl(): ReactElement {
   const [status, setStatus] = useState<AdminScoreboardFreeze | null>(null);
   const [freezeAt, setFreezeAt] = useState("");
   const [unfreezeAt, setUnfreezeAt] = useState("");
@@ -1937,7 +2025,7 @@ function ScoreboardFreezeControl(): ReactElement {
             </span>
           )}
         </div>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
           <Field label="Freeze at" htmlFor="scoreboard-freeze-at">
             <Input
               id="scoreboard-freeze-at"
@@ -1956,7 +2044,7 @@ function ScoreboardFreezeControl(): ReactElement {
               onChange={(event) => setUnfreezeAt(event.target.value)}
             />
           </Field>
-          <div className="flex gap-2">
+          <div className="flex gap-2 sm:col-span-2">
             <Button
               type="button"
               disabled={busy}
@@ -2004,41 +2092,41 @@ export function ScoreboardTab({
 
   return (
     <div className="grid gap-4">
-      <ScoreboardFreezeControl />
-      <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
-      <Card>
-        <CardHeader>
-          <CardTitle>Scoreboard View</CardTitle>
-          <CardDescription>
-            Filter authoritative rankings without leaving this page. Click on headers to sort the table below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px] md:items-end">
-          <Field label="Team Filter" htmlFor="scoreboard-team-filter">
-            <Input
-              id="scoreboard-team-filter"
-              placeholder="Search team name"
-              value={teamFilter}
-              onChange={(event) => setTeamFilter(event.target.value)}
-            />
-          </Field>
-          <InfoPanel className="h-fit">
-            <p className="text-sm text-muted-foreground">
-              Showing {filteredRows.length} of {scoreRows.length} teams.
-            </p>
-          </InfoPanel>
-        </CardContent>
-      </Card>
-      <ScoringAuditCard
-        pendingAction={pendingAction}
-        scoringAudit={scoringAudit}
-        onAudit={onAudit}
-      />
       <GameScoreboardCard
         pendingAction={pendingAction}
         scoreRows={filteredRows}
         onRefresh={onRefresh}
+        toolbar={
+          <div className="flex items-center gap-2">
+            <label htmlFor="scoreboard-team-filter" className="sr-only">
+              Team Filter
+            </label>
+            <Input
+              id="scoreboard-team-filter"
+              className="h-8 w-44 sm:w-56"
+              placeholder="Filter teams"
+              value={teamFilter}
+              onChange={(event) => setTeamFilter(event.target.value)}
+            />
+            <span
+              role="status"
+              aria-live="polite"
+              className="whitespace-nowrap text-xs text-muted-foreground tabular-nums"
+            >
+              Showing {filteredRows.length} of {scoreRows.length} teams.
+            </span>
+          </div>
+        }
       />
+      <div className="grid items-start gap-4 xl:grid-cols-2">
+        <ScoreboardFreezeControl />
+        <ScoringAuditCard
+          pendingAction={pendingAction}
+          scoringAudit={scoringAudit}
+          onAudit={onAudit}
+        />
+      </div>
+      <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
     </div>
   );
 }
@@ -2972,15 +3060,15 @@ function OperationsSupportPanel({
 }): ReactElement {
   return (
     <div className="grid gap-4">
-      <div className="mb-4 flex flex-col gap-1">
-        <h3 className="text-sm font-semibold text-foreground">
+      <div className="flex flex-col gap-1">
+        <h3 data-slot="section-heading" className="text-sm font-semibold text-foreground">
           Operational Signals
         </h3>
         <p className="text-sm text-muted-foreground">
           Alert pressure and live service health in one operator band.
         </p>
       </div>
-      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid items-start gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <OperationsAlertsCard
           operationsStatus={operationsStatus}
           pendingAction={pendingAction}
@@ -3008,18 +3096,11 @@ function OperationsAlertsCard({
   const alerts = operationsStatus?.alerts ?? [];
 
   return (
-    <section
-      data-testid="operations-alerts-card"
-      className="rounded-sm border border-border/50 bg-muted/5 p-4"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">
-            Runtime Alerts
-          </h4>
-          <p className="text-sm text-muted-foreground">
-            Scheduler, checker, deployment, gateway, and access warnings.
-          </p>
+    <Card data-testid="operations-alerts-card">
+      <CardHeader className="flex-row items-start justify-between gap-3">
+        <div className="grid gap-1.5">
+          <CardTitle>Runtime Alerts</CardTitle>
+          <CardDescription>Scheduler, checker, deployment, gateway, and access warnings.</CardDescription>
         </div>
         <Button
           disabled={pendingAction !== null}
@@ -3034,8 +3115,8 @@ function OperationsAlertsCard({
           )}
           Refresh
         </Button>
-      </div>
-      <div className="mt-4">
+      </CardHeader>
+      <CardContent>
         {alerts.length === 0 ? (
           <StatusBanner
             message="No runtime alerts are currently active."
@@ -3083,8 +3164,8 @@ function OperationsAlertsCard({
             })}
           </div>
         )}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3105,19 +3186,13 @@ function OperationsMetricsCard({
   ).length;
 
   return (
-    <section
-      data-testid="operations-metrics-card"
-      className="rounded-sm border border-border/50 bg-muted/5 p-4"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">
-            Service Metrics
-          </h4>
-          <p className="text-sm text-muted-foreground">
-            Live counters from game-core, submission, controller, realtime, and
-            WireGuard.
-          </p>
+    <Card data-testid="operations-metrics-card">
+      <CardHeader className="flex-row items-start justify-between gap-3">
+        <div className="grid gap-1.5">
+          <CardTitle>Service Metrics</CardTitle>
+          <CardDescription>
+            Live counters from game-core, submission, controller, realtime, and WireGuard.
+          </CardDescription>
         </div>
         <Button
           disabled={pendingAction !== null}
@@ -3132,8 +3207,8 @@ function OperationsMetricsCard({
           )}
           Refresh
         </Button>
-      </div>
-      <div className="mt-4 space-y-4">
+      </CardHeader>
+      <CardContent className="space-y-4">
         {serviceMetrics === null ? (
           <StatusBanner
             message="Live service metrics are currently unavailable."
@@ -3401,8 +3476,8 @@ function OperationsMetricsCard({
             </details>
           </>
         )}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3735,8 +3810,8 @@ function SchedulerStateBadge({
   state?: string;
 }): ReactElement {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span>State</span>
+    <div data-slot="info-line" className="flex items-center justify-between gap-3">
+      <span data-slot="info-label">State</span>
       <Badge
         className={state === "running" ? challengeTone.ready : challengeTone.draft}
         variant="outline"
@@ -3766,8 +3841,8 @@ function SchedulerIntervalControl({
     pendingAction !== null || !intervalChanged || Number.isNaN(parsedInterval);
 
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-muted-foreground">Interval</span>
+    <div data-slot="info-line" className="flex items-center justify-between gap-3">
+      <span data-slot="info-label" className="text-sm text-muted-foreground">Interval</span>
       <div className="flex items-center gap-2">
         <div className="flex h-8 items-center rounded-sm border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
           <input
@@ -4080,18 +4155,12 @@ function CurrentTickCard({
   currentTick?: AdminGameTickStatus;
 }): ReactElement {
   return (
-    <section
-      className="rounded-sm border border-border/70 bg-muted/10 p-4"
-      data-testid="current-tick-card"
-      id="current-tick-card"
-    >
-      <div className="mb-4">
-        <h3 className="text-sm font-semibold text-foreground">Current Tick</h3>
-        <p className="text-sm text-muted-foreground">
-          The latest persisted tick snapshot from game-core.
-        </p>
-      </div>
-      <div>
+    <Card data-testid="current-tick-card" id="current-tick-card">
+      <CardHeader>
+        <CardTitle>Current Tick</CardTitle>
+        <CardDescription>The latest persisted tick snapshot from game-core.</CardDescription>
+      </CardHeader>
+      <CardContent>
         {currentTick ? (
           <InfoPanel layout="grid" tone="surface">
             <div className="flex items-center justify-between gap-3">
@@ -4128,8 +4197,8 @@ function CurrentTickCard({
         ) : (
           <EmptyStateText message="No tick has been persisted yet. Start the match and scheduler, or use the manual intervention only after confirming runtime health." />
         )}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -4146,14 +4215,12 @@ function ScoreboardSnapshotCard({
   const lastPlace = scoreRows[scoreRows.length - 1];
 
   return (
-    <section className="rounded-sm border border-border/70 bg-muted/10 p-4">
-      <div className="mb-4">
-        <h3 className="text-sm font-semibold text-foreground">Scoreboard</h3>
-        <p className="text-sm text-muted-foreground">
-          The full authoritative ranking now lives on its own organizer page.
-        </p>
-      </div>
-      <div className="space-y-4">
+    <Card>
+      <CardHeader>
+        <CardTitle>Scoreboard</CardTitle>
+        <CardDescription>The full authoritative ranking now lives on its own organizer page.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
         <InfoPanel layout="grid">
           <InfoLine
             label="Rows"
@@ -4190,8 +4257,8 @@ function ScoreboardSnapshotCard({
             </Link>
           </Button>
         </CardActionRow>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -4396,7 +4463,7 @@ export function GameAttacksCard({
   );
 }
 
-function ScoringAuditCard({
+export function ScoringAuditCard({
   pendingAction,
   scoringAudit,
   onAudit,
@@ -4522,21 +4589,25 @@ function GameScoreboardCard({
   pendingAction,
   scoreRows,
   onRefresh,
+  toolbar,
 }: {
   pendingAction: string | null;
   scoreRows: AdminGameScoreRow[];
   onRefresh: () => void;
+  toolbar?: ReactNode;
 }): ReactElement {
   return (
     <Card data-testid="authoritative-scoreboard-card">
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle>Authoritative Scoreboard</CardTitle>
             <CardDescription>
-              Service-by-service rankings from persisted game-core scoring state.
+              Live rankings from game-core. Organizers always see the unfrozen board.
             </CardDescription>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {toolbar}
           <Button
             disabled={pendingAction !== null}
             size="sm"
@@ -4550,6 +4621,7 @@ function GameScoreboardCard({
             )}
             Refresh
           </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -4965,29 +5037,31 @@ function RuntimeStatusBlock({
   error?: string;
 }): ReactElement {
   return (
-    <InfoPanel layout="grid">
+    <div className="surface-inset grid gap-2 rounded-sm border p-3 text-sm">
       <div className="flex items-center justify-between gap-3">
-        <span>Runtime status</span>
+        <span className="font-medium text-foreground">Runtime status</span>
         <Badge className={tone} variant="outline">
           {state}
         </Badge>
       </div>
-      {rows.map((row) => {
-        if (!row.value) {
-          return null;
-        }
-
-        return (
-          <InfoLine
-            key={row.label}
-            label={row.label}
-            value={row.value}
-            valueClassName="font-mono"
-          />
-        );
-      })}
+      <dl data-slot="info-panel" className="grid gap-y-1">
+        {rows.map((row) =>
+          row.value ? (
+            <div
+              key={row.label}
+              data-slot="info-line"
+              className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-4"
+            >
+              <dt data-slot="info-label" className="text-muted-foreground">{row.label}</dt>
+              <dd data-slot="info-value" className="min-w-0 break-words font-mono text-[0.8125rem]">
+                {row.value}
+              </dd>
+            </div>
+          ) : null,
+        )}
+      </dl>
       {error ? <p className="text-danger">Last error: {error}</p> : null}
-    </InfoPanel>
+    </div>
   );
 }
 

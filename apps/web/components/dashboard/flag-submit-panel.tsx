@@ -1,32 +1,21 @@
 "use client";
 
-import {
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-  type ReactElement,
-} from "react";
+import type { ReactElement } from "react";
 import { CircleCheck, CircleMinus, CircleX, Flag, LoaderCircle } from "lucide-react";
 
+import { ThemeSlot } from "@/components/theme/theme-slot";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBanner } from "@/components/ui/status-banner";
-import { parseApiError } from "@/lib/api-utils";
+import {
+  type FlagSubmitState,
+  type FlagVerdictOutcome,
+  useFlagSubmit,
+} from "@/components/dashboard/use-flag-submit";
 import { cn } from "@/lib/utils";
 
-type Verdict = {
-  flag: string;
-  status: string;
-  detail?: string;
-  message?: string;
-};
-
-type VerdictOutcome = "accepted" | "duplicate" | "rejected";
-
 const verdictPresentation: Record<
-  VerdictOutcome,
+  FlagVerdictOutcome,
   { label: string; tone: string; Icon: typeof CircleCheck }
 > = {
   accepted: { label: "Accepted", tone: "tone-success", Icon: CircleCheck },
@@ -34,128 +23,36 @@ const verdictPresentation: Record<
   rejected: { label: "Rejected", tone: "tone-danger", Icon: CircleX },
 };
 
-function verdictOutcome(status: string): VerdictOutcome {
-  const normalized = status.trim().toLowerCase();
-  if (normalized === "accepted") {
-    return "accepted";
-  }
-  if (normalized === "duplicate") {
-    return "duplicate";
-  }
-  return "rejected";
-}
-
-function summaryVariant(accepted: number, rejected: number) {
-  if (accepted > 0 && rejected === 0) {
-    return "success" as const;
-  }
-  if (accepted === 0) {
-    return "error" as const;
-  }
-  return "warning" as const;
-}
-
-function parseFlags(raw: string): string[] {
-  return raw
-    .split(/[\n,]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-}
-
 /**
  * Global attack-flag entry: sits under the participant nav so submit is always
- * reachable (not buried under service controls).
+ * reachable (not buried under service controls). Logic lives in useFlagSubmit;
+ * themes can replace the view through the FlagSubmit slot.
  */
 export function FlagSubmitPanel({
   acceptingSubmissions,
 }: {
   acceptingSubmissions?: boolean;
 }): ReactElement {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [rawFlags, setRawFlags] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<{
-    message: string;
-    variant: "success" | "warning" | "error";
-  } | null>(null);
-  const [verdicts, setVerdicts] = useState<Verdict[]>([]);
+  const state = useFlagSubmit({ acceptingSubmissions });
+  return <ThemeSlot name="FlagSubmit" fallback={DefaultFlagSubmitView} props={state} />;
+}
 
-  const closed = acceptingSubmissions === false;
-  const flagCount = useMemo(() => parseFlags(rawFlags).length, [rawFlags]);
-  const hasFeedback = Boolean(error || note || verdicts.length > 0);
+export function DefaultFlagSubmitView({
+  rawFlags,
+  setRawFlags,
+  pending,
+  closed,
+  error,
+  note,
+  verdicts,
+  hasFeedback,
+  hint,
+  onSubmit,
+  onKeyDown,
+  inputRef,
+}: FlagSubmitState): ReactElement {
   const feedbackId = "flag-submit-feedback";
   const hintId = "flag-submit-hint";
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const flags = parseFlags(rawFlags);
-    if (flags.length === 0) {
-      setError("Paste at least one flag.");
-      setNote(null);
-      setVerdicts([]);
-      textareaRef.current?.focus();
-      return;
-    }
-
-    setPending(true);
-    setError(null);
-    setNote(null);
-    setVerdicts([]);
-
-    try {
-      const response = await fetch("/api/platform/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ flags }),
-      });
-      if (!response.ok) {
-        throw new Error(await parseApiError(response, "/api/platform/submit"));
-      }
-      const payload = (await response.json()) as {
-        results?: Verdict[];
-        accepted_count?: number;
-        rejected_count?: number;
-      };
-      const results = payload.results ?? [];
-      const acceptedCount = payload.accepted_count ?? 0;
-      const rejectedCount = payload.rejected_count ?? 0;
-      setVerdicts(results);
-      setNote({
-        message: `Accepted ${acceptedCount}, rejected ${rejectedCount}.`,
-        variant: summaryVariant(acceptedCount, rejectedCount),
-      });
-      if (acceptedCount > 0) {
-        setRawFlags("");
-        window.dispatchEvent(new Event("platform:flag-accepted"));
-      }
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Flag submit failed.",
-      );
-    } finally {
-      setPending(false);
-    }
-  }
-
-  function onTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) {
-      return;
-    }
-    event.preventDefault();
-    if (pending || closed) {
-      return;
-    }
-    event.currentTarget.form?.requestSubmit();
-  }
-
-  const railHint = closed
-    ? "Scoring is not accepting flags right now."
-    : flagCount > 0
-      ? `${flagCount} flag${flagCount === 1 ? "" : "s"} ready · ⌘/Ctrl+Enter`
-      : "One per line or comma-separated · ⌘/Ctrl+Enter";
 
   return (
     <section
@@ -192,19 +89,14 @@ export function FlagSubmitPanel({
               Flags
             </label>
             <textarea
-              ref={textareaRef}
+              ref={inputRef}
               id="flag-batch"
               className="min-h-11 w-full resize-y border-0 bg-transparent px-3 py-2 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
               rows={2}
               placeholder="PLAYIT{...}"
               value={rawFlags}
-              onChange={(event) => {
-                setRawFlags(event.target.value);
-                if (error) {
-                  setError(null);
-                }
-              }}
-              onKeyDown={onTextareaKeyDown}
+              onChange={(event) => setRawFlags(event.target.value)}
+              onKeyDown={onKeyDown}
               disabled={pending || closed}
               spellCheck={false}
               autoComplete="off"
@@ -218,7 +110,7 @@ export function FlagSubmitPanel({
                 id={hintId}
                 className="min-w-0 text-xs leading-5 text-muted-foreground"
               >
-                {railHint}
+                {hint}
               </p>
               <Button
                 type="submit"
@@ -249,7 +141,7 @@ export function FlagSubmitPanel({
                 aria-label="Flag verdicts"
               >
                 {verdicts.map((verdict, index) => {
-                  const outcome = verdictOutcome(verdict.status);
+                  const outcome = verdict.outcome;
                   const { label, tone, Icon } = verdictPresentation[outcome];
                   const detail = verdict.detail || verdict.message;
                   return (

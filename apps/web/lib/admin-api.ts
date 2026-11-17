@@ -843,6 +843,16 @@ export async function updateAdminPlatformSettings(
   );
 }
 
+export async function updateAdminPlatformAppearance(themeID: string) {
+  return adminFetch<{ theme_id: string; updated_at?: string }>(
+    "/api/v2/admin/platform/appearance",
+    {
+      method: "PUT",
+      body: JSON.stringify({ theme_id: themeID }),
+    },
+  );
+}
+
 export async function reloadAdminFlagFormat() {
   return adminFetch<AdminPlatformSettings>(
     "/api/v2/admin/platform/settings/reload",

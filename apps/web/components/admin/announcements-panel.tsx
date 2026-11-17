@@ -1,14 +1,10 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useState,
-  type FormEvent,
-  type ReactElement,
-} from "react";
+import type { ReactElement } from "react";
 import { LoaderCircle, Megaphone } from "lucide-react";
 
+import { type AnnouncementsState, useAnnouncements } from "@/components/admin/use-announcements";
+import { ThemeSlot } from "@/components/theme/theme-slot";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,95 +14,23 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
-import { processApiResponse, parseApiError } from "@/lib/api-utils";
-import type { AdminMatchAnnouncement } from "@/lib/admin-dashboard-types";
 
+/** Organizer match announcements. Logic in useAnnouncements; themeable via OrganizerAnnouncements. */
 export function AnnouncementsPanel(): ReactElement {
-  const [items, setItems] = useState<AdminMatchAnnouncement[]>([]);
-  const [body, setBody] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  return <ThemeSlot name="OrganizerAnnouncements" fallback={DefaultAnnouncementsView} props={useAnnouncements()} />;
+}
 
-  const refresh = useCallback(async () => {
-    const response = await fetch("/api/admin/announcements", {
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error(await parseApiError(response, "/api/admin/announcements"));
-    }
-    setItems(
-      await processApiResponse<AdminMatchAnnouncement[]>(
-        response,
-        "/api/admin/announcements",
-      ),
-    );
-  }, []);
-
-  useEffect(() => {
-    void refresh().catch((loadError: unknown) => {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "failed to load announcements",
-      );
-    });
-  }, [refresh]);
-
-  async function createAnnouncement(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
-    setNote(null);
-    try {
-      const response = await fetch("/api/admin/announcements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body }),
-      });
-      if (!response.ok) {
-        throw new Error(
-          await parseApiError(response, "/api/admin/announcements"),
-        );
-      }
-      setBody("");
-      setNote("Announcement published to participants.");
-      await refresh();
-    } catch (createError) {
-      setError(
-        createError instanceof Error
-          ? createError.message
-          : "create announcement failed",
-      );
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function removeAnnouncement(id: number) {
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/admin/announcements/${id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(
-          await parseApiError(response, `/api/admin/announcements/${id}`),
-        );
-      }
-      await refresh();
-    } catch (deleteError) {
-      setError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : "delete announcement failed",
-      );
-    } finally {
-      setPending(false);
-    }
-  }
-
+export function DefaultAnnouncementsView({
+  items,
+  body,
+  setBody,
+  pending,
+  error,
+  note,
+  maxLength,
+  onPublish,
+  onDelete,
+}: AnnouncementsState): ReactElement {
   return (
     <Card data-testid="announcements-panel">
       <CardHeader>
@@ -119,20 +43,23 @@ export function AnnouncementsPanel(): ReactElement {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
-        <form className="grid gap-2" onSubmit={createAnnouncement}>
+        <form className="flex flex-col gap-2 sm:flex-row sm:items-start" onSubmit={onPublish}>
+          <label htmlFor="announcement-body" className="sr-only">
+            Announcement
+          </label>
           <textarea
-            className="min-h-20 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            id="announcement-body"
+            rows={2}
+            className="min-h-11 w-full flex-1 resize-y rounded-sm border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             value={body}
             onChange={(event) => setBody(event.target.value)}
             placeholder="Warmup starts in 10 minutes. WireGuard must be up."
-            maxLength={4000}
+            maxLength={maxLength}
           />
-          <div>
-            <Button type="submit" disabled={pending || body.trim() === ""}>
-              {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-              Publish
-            </Button>
-          </div>
+          <Button type="submit" className="shrink-0" disabled={pending || body.trim() === ""}>
+            {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+            Publish
+          </Button>
         </form>
         {error ? <StatusBanner message={error} variant="error" /> : null}
         {note ? <StatusBanner message={note} variant="success" /> : null}
@@ -151,7 +78,7 @@ export function AnnouncementsPanel(): ReactElement {
                 variant="outline"
                 size="sm"
                 disabled={pending}
-                onClick={() => void removeAnnouncement(item.id)}
+                onClick={() => onDelete(item.id)}
               >
                 Delete
               </Button>

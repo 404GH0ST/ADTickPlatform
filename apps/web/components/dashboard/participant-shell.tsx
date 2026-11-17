@@ -51,6 +51,7 @@ export function ParticipantShell({
 
   return (
     <AppShell
+      surface="participant"
       activePath={activePath}
       navItems={navItems}
       title={title}
@@ -97,7 +98,7 @@ export function ParticipantShell({
         </>
       }
       summarySection={
-        <section className="surface-inset overflow-hidden rounded-sm border" data-testid="participant-summary">
+        <section className="surface-inset overflow-hidden rounded-sm border" data-slot="summary-strip" data-testid="participant-summary">
           <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-6">
             <SummaryItem label="Challenge Catalog" value={String(overview.challengeCount)} />
             <SummaryItem label="Owned Services" value={String(overview.ownServiceCount)} />
