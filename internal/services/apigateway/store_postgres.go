@@ -3033,6 +3033,41 @@ func (s *postgresStore) SetActiveFlagFormat(ctx context.Context, format string, 
 	return s.GetPlatformSettings(ctx)
 }
 
+func (s *postgresStore) GetPlatformAppearance(ctx context.Context) (platformAppearance, error) {
+	var appearance platformAppearance
+	var updatedAt time.Time
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT theme_id, updated_at
+		FROM platform_settings
+		WHERE id = 1
+	`).Scan(&appearance.ThemeID, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return platformAppearance{ThemeID: defaultPlatformThemeID}, nil
+		}
+		return platformAppearance{}, err
+	}
+	appearance.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return appearance, nil
+}
+
+func (s *postgresStore) SetPlatformTheme(ctx context.Context, themeID string, actor string, now time.Time) (platformAppearance, error) {
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return platformAppearance{}, fmt.Errorf("theme_id must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO platform_settings (id, theme_id, updated_at, updated_by)
+		VALUES (1, $1, $2, $3)
+		ON CONFLICT (id) DO UPDATE SET
+			theme_id = EXCLUDED.theme_id,
+			updated_at = EXCLUDED.updated_at,
+			updated_by = EXCLUDED.updated_by
+	`, themeID, now.UTC(), strings.TrimSpace(actor)); err != nil {
+		return platformAppearance{}, err
+	}
+	return s.GetPlatformAppearance(ctx)
+}
+
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
 			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, COALESCE(c.unlock_proof_epoch, 1)

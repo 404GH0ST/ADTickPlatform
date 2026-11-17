@@ -114,6 +114,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/v2/scoreboard/freeze", s.handleScoreboardFreezeStatus)
 	mux.HandleFunc("GET /api/v2/game/status", s.handleGameStatus)
+	mux.HandleFunc("GET /api/v2/platform/appearance", s.handlePlatformAppearance)
 	mux.HandleFunc("GET /api/v2/attacks", s.handleAttacks)
 	mux.HandleFunc("GET /api/v2/team/services", s.handleTeamServices)
 	mux.HandleFunc("POST /api/v2/submit", s.handleSubmit)
@@ -180,6 +181,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/rate-limit/metrics", s.handleRateLimitMetrics)
 	mux.HandleFunc("GET /api/v2/admin/platform/settings", s.handleAdminGetPlatformSettings)
 	mux.HandleFunc("PUT /api/v2/admin/platform/settings", s.handleAdminUpdatePlatformSettings)
+	mux.HandleFunc("PUT /api/v2/admin/platform/appearance", s.handleAdminUpdatePlatformAppearance)
 	mux.HandleFunc("POST /api/v2/admin/platform/settings/reload", s.handleAdminReloadFlagFormat)
 }
 

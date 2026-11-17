@@ -282,6 +282,20 @@ type adminPlatformSettings struct {
 	UpdatedBy        string `json:"updated_by,omitempty"`
 }
 
+// platformAppearance is the public, unauthenticated view of the organizer's
+// theme choice. The web app owns the theme catalogue; the gateway only stores
+// a slug so adding a theme folder never needs a backend change.
+const defaultPlatformThemeID = "graphite"
+
+type platformAppearance struct {
+	ThemeID   string `json:"theme_id"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type adminUpdatePlatformAppearanceRequest struct {
+	ThemeID string `json:"theme_id"`
+}
+
 type adminUpdatePlatformSettingsRequest struct {
 	FlagFormatPrefix string `json:"flag_format_prefix"`
 	MaxTeamMembers   *int   `json:"max_team_members,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1323,6 +1324,48 @@ func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *htt
 		"max_team_members":   settings.MaxTeamMembers,
 	})
 	writeData(w, http.StatusOK, settings)
+}
+
+// themeIDPattern bounds what the gateway will store. The web app validates the
+// slug against its own theme registry; the gateway only guards the shape.
+var themeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
+
+// handlePlatformAppearance is intentionally unauthenticated and not
+// client-rate-limited: the login page needs it, and the web server fetches it
+// on behalf of every visitor (and caches it briefly), so per-client limits
+// would throttle the web server itself.
+func (s *Server) handlePlatformAppearance(w http.ResponseWriter, r *http.Request) {
+	appearance, err := s.store.GetPlatformAppearance(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, appearance)
+}
+
+func (s *Server) handleAdminUpdatePlatformAppearance(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	var req adminUpdatePlatformAppearanceRequest
+	if err := httpapi.DecodeJSON(r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "could not parse platform appearance payload.")
+		return
+	}
+	themeID := strings.TrimSpace(req.ThemeID)
+	if !themeIDPattern.MatchString(themeID) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "theme_id must be a lowercase slug (a-z, 0-9, -), at most 48 characters.")
+		return
+	}
+	appearance, err := s.store.SetPlatformTheme(r.Context(), themeID, "organizer", time.Now().UTC())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(r.Context(), "platform.appearance.update", "platform_settings", "platform_settings:1", "updated platform theme", map[string]any{
+		"theme_id": appearance.ThemeID,
+	})
+	writeData(w, http.StatusOK, appearance)
 }
 
 func (s *Server) handleAdminReloadFlagFormat(w http.ResponseWriter, r *http.Request) {

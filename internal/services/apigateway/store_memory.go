@@ -58,6 +58,7 @@ type memoryStore struct {
 	scoreboard         []scoreRow
 	attackFeed         []attackEvent
 	platformSettings   adminPlatformSettings
+	platformAppearance platformAppearance
 	announcements      []matchAnnouncement
 	nextPlayerID       int
 	nextChallengeID    int
@@ -103,12 +104,13 @@ func NewMemoryStore(teamID int) Store {
 			{Rank: 3, Team: "Team Sigma", Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "0"},
 			{Rank: 4, Team: "Team Orchid", Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "0"},
 		},
-		attackFeed:       []attackEvent{},
-		platformSettings: adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 3, UpdatedBy: "system"},
-		nextPlayerID:     5,
-		nextChallengeID:  4,
-		nextDeploymentID: 1,
-		nextAuditLogID:   1,
+		attackFeed:         []attackEvent{},
+		platformSettings:   adminPlatformSettings{FlagFormatPrefix: "PLAYIT", FlagFormatActive: "PLAYIT", MaxTeamMembers: 3, UpdatedBy: "system"},
+		platformAppearance: platformAppearance{ThemeID: defaultPlatformThemeID},
+		nextPlayerID:       5,
+		nextChallengeID:    4,
+		nextDeploymentID:   1,
+		nextAuditLogID:     1,
 	}
 
 	for teamID := range store.teams {
@@ -1735,6 +1737,24 @@ func (s *memoryStore) SetActiveFlagFormat(_ context.Context, format string, now 
 	s.platformSettings.FlagFormatActive = active
 	s.platformSettings.UpdatedAt = now.UTC().Format(time.RFC3339)
 	return s.platformSettings, nil
+}
+
+func (s *memoryStore) GetPlatformAppearance(_ context.Context) (platformAppearance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.platformAppearance, nil
+}
+
+func (s *memoryStore) SetPlatformTheme(_ context.Context, themeID string, actor string, now time.Time) (platformAppearance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	themeID = strings.TrimSpace(themeID)
+	if themeID == "" {
+		return platformAppearance{}, fmt.Errorf("theme_id must not be empty")
+	}
+	s.platformAppearance = platformAppearance{ThemeID: themeID, UpdatedAt: now.UTC().Format(time.RFC3339)}
+	s.platformSettings.UpdatedBy = strings.TrimSpace(actor)
+	return s.platformAppearance, nil
 }
 
 func (s *memoryStore) ListControllerRuntimeTasks(_ context.Context) ([]ControllerRuntimeTask, error) {

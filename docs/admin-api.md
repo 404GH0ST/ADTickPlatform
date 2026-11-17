@@ -685,3 +685,20 @@ and `DELETE /api/v2/admin/submissions/{id}`. Deleting an accepted first-blood
 capture clears the award for the next accepted capture, without promoting an
 older capture. See [Organizer submission history](organizer-submissions.md) for
 filters, response fields, deletion effects, and historical data coverage.
+
+## Platform theme
+
+The organizer picks one theme for the whole web app (**Organizer → Game →
+Theme**). Participants can only switch light/dark/system on top of it. Themes
+are folders in `apps/web/themes/`; see `apps/web/themes/README.md`.
+
+- `GET /api/v2/platform/appearance` (public, no auth): returns
+  `{"theme_id": "graphite", "updated_at": "..."}`. The web server reads this on
+  each render and caches it for 5 s (`AD_PLATFORM_THEME_CACHE_MS`).
+- `PUT /api/v2/admin/platform/appearance` (admin): body `{"theme_id": "paper"}`.
+  The gateway only checks the slug shape (`^[a-z0-9][a-z0-9-]{0,47}$`); the web
+  route `/api/admin/platform/appearance` additionally rejects ids that have no
+  theme folder. Recorded in the audit log as `platform.appearance.update`.
+
+If the stored id no longer has a folder (e.g. a theme was removed), the web app
+falls back to `graphite`.

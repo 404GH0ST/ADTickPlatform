@@ -141,6 +141,8 @@ type Store interface {
 	GetPlatformSettings(ctx context.Context) (adminPlatformSettings, error)
 	UpdatePlatformSettings(ctx context.Context, input adminUpdatePlatformSettingsRequest, actor string, now time.Time) (adminPlatformSettings, error)
 	SetActiveFlagFormat(ctx context.Context, format string, now time.Time) (adminPlatformSettings, error)
+	GetPlatformAppearance(ctx context.Context) (platformAppearance, error)
+	SetPlatformTheme(ctx context.Context, themeID string, actor string, now time.Time) (platformAppearance, error)
 	Close() error
 }
 
