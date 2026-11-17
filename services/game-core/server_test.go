@@ -37,19 +37,30 @@ type explicitStateCheckerClient struct {
 }
 
 type testGameScheduler struct {
+	// mu guards status and events: checker targets run in parallel and read
+	// the interval through Status, like the real intervalGameScheduler.
+	mu     sync.Mutex
 	status apigateway.GameSchedulerStatus
 	events []apigateway.GameSchedulerEvent
 }
 
-func (s *testGameScheduler) Status() apigateway.GameSchedulerStatus {
+func (s *testGameScheduler) currentLocked() apigateway.GameSchedulerStatus {
 	if s.status.State == "" {
 		s.status = apigateway.GameSchedulerStatus{State: "stopped", IntervalSeconds: 60}
 	}
 	return s.status
 }
 
+func (s *testGameScheduler) Status() apigateway.GameSchedulerStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentLocked()
+}
+
 func (s *testGameScheduler) Start() (apigateway.GameSchedulerStatus, error) {
-	status := s.Status()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status := s.currentLocked()
 	status.State = "running"
 	status.NextRunAt = "2026-03-10T10:02:00Z"
 	s.status = status
@@ -57,7 +68,9 @@ func (s *testGameScheduler) Start() (apigateway.GameSchedulerStatus, error) {
 }
 
 func (s *testGameScheduler) Stop() (apigateway.GameSchedulerStatus, error) {
-	status := s.Status()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status := s.currentLocked()
 	status.State = "stopped"
 	status.NextRunAt = ""
 	s.status = status
@@ -65,13 +78,17 @@ func (s *testGameScheduler) Stop() (apigateway.GameSchedulerStatus, error) {
 }
 
 func (s *testGameScheduler) Update(interval time.Duration) (apigateway.GameSchedulerStatus, error) {
-	status := s.Status()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status := s.currentLocked()
 	status.IntervalSeconds = int(interval / time.Second)
 	s.status = status
 	return status, nil
 }
 
 func (s *testGameScheduler) Events(_ context.Context, query apigateway.GameSchedulerEventQuery) (apigateway.GameSchedulerEventPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.events) == 0 {
 		s.events = []apigateway.GameSchedulerEvent{
 			{ID: 2, EventType: "tick_completed", Source: "scheduler", State: "running", TickID: 1, Message: "scheduled tick completed successfully", CreatedAt: "2026-03-10T10:01:12Z"},
