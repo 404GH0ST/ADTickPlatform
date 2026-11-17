@@ -1098,6 +1098,10 @@ export function CyberAttackMap({
             <stop offset="58%" stopColor="var(--attack-map-background)" stopOpacity="0.1" />
             <stop offset="100%" stopColor="var(--foreground)" stopOpacity="0.2" />
           </radialGradient>
+          {/* Halftone ocean: unused unless a theme shows [data-fx="globe-texture"]. */}
+          <pattern id={`${mapId}-dots`} width="7" height="7" patternUnits="userSpaceOnUse">
+            <circle cx="3.5" cy="3.5" r="1.05" data-fx="globe-dot" fill="var(--attack-map-grid)" />
+          </pattern>
           <marker
             id={markerId}
             markerHeight="8"
@@ -1242,6 +1246,7 @@ export function CyberAttackMap({
         {services.map((service) => (
           <div
             key={service.name}
+            data-fx="map-legend"
             className="flex items-center gap-1.5 rounded-sm border px-2 py-1"
             style={{
               backgroundColor: 'var(--attack-map-legend-background)',
@@ -1269,6 +1274,7 @@ export function CyberAttackMap({
             <button
               key={preset.label}
               type="button"
+              data-fx="map-control"
               className="min-h-9 rounded-sm border px-3 py-1.5 text-[11px] font-semibold sm:min-h-0 sm:px-2 sm:py-1 sm:text-[10px]"
               onClick={(event) => {
                 event.stopPropagation();
@@ -1300,6 +1306,7 @@ export function CyberAttackMap({
             aria-label={control.aria}
             title={control.aria}
             disabled={control.disabled}
+            data-fx="map-control"
             className="flex h-9 w-9 items-center justify-center rounded-sm border text-base font-semibold leading-none disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(event) => {
               event.stopPropagation();
@@ -1938,6 +1945,14 @@ const GlobeSurface = memo(function GlobeSurface({
         strokeOpacity="0.92"
         strokeWidth="1.4"
       />
+      <circle
+        cx={CENTER_X}
+        cy={CENTER_Y}
+        r={GLOBE_RADIUS}
+        data-fx="globe-texture"
+        display="none"
+        fill={`url(#${mapId}-dots)`}
+      />
       <g clipPath={`url(#${clipId})`}>
         <ProjectedGraticule rotation={rotation} />
         {COUNTRY_RINGS.map((country) => {
@@ -2015,6 +2030,8 @@ function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactEle
             rotation,
           )}
           fill="none"
+          data-fx="globe-graticule"
+          data-equator={lat === 0 ? 'true' : undefined}
           stroke="var(--attack-map-grid)"
           strokeOpacity={lat === 0 ? '0.42' : '0.22'}
         />
@@ -2030,6 +2047,7 @@ function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactEle
             rotation,
           )}
           fill="none"
+          data-fx="globe-graticule"
           stroke="var(--attack-map-grid)"
           strokeOpacity="0.18"
         />
@@ -2116,9 +2134,26 @@ function AttackArcPath({
           strokeWidth={arc.partial ? '12' : '15'}
         />
       ) : null}
+      {/* Ink outline under the route: hidden unless a theme shows it. */}
+      <path
+        d={arc.path}
+        data-fx="arc-casing"
+        data-dimmed={dimmed ? 'true' : undefined}
+        data-emphasized={emphasized ? 'true' : undefined}
+        data-fresh={arc.fresh ? 'true' : undefined}
+        display="none"
+        fill="none"
+        pointerEvents="none"
+        stroke="var(--attack-map-border)"
+        strokeDasharray={arc.partial && !arc.featured ? serviceStyle.partialDash : undefined}
+        strokeLinecap="round"
+        strokeWidth={Number(strokeWidth) + 3}
+      />
       <path
         id={arc.domId}
         data-attack-arc="true"
+        data-dimmed={dimmed ? 'true' : undefined}
+        data-emphasized={emphasized ? 'true' : undefined}
         data-first-blood={arc.firstBlood ? 'true' : 'false'}
         data-attack-count={String(arc.count)}
         data-attack-id={arc.id}

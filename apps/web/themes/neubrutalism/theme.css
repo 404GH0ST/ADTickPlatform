@@ -1022,7 +1022,18 @@
 
 /* ---------- Attack map: flat printed globe ---------- */
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] {
-  background: var(--attack-map-background) !important;
+  --nb-map-dot: color-mix(in oklab, var(--nb-ink) 16%, transparent);
+  border: var(--nb-line) solid var(--nb-ink);
+  border-radius: var(--nb-radius);
+  /* A halftone print sheet behind the globe, so it sits on paper, not void. */
+  background:
+    radial-gradient(var(--nb-map-dot) 1.1px, transparent 1.6px) 0 0 / 14px 14px,
+    var(--attack-map-background) !important;
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] {
+  --nb-map-dot: color-mix(in oklab, var(--nb-chalk) 11%, transparent);
+  border-color: var(--nb-chalk);
 }
 
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-halo"],
@@ -1038,7 +1049,40 @@
      like every other ink line instead of letting it shrink with the SVG. */
   stroke-width: 3px;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(6px 6px 0 var(--nb-shadow)) !important;
+  filter: drop-shadow(8px 8px 0 var(--nb-shadow)) !important;
+}
+
+/* Halftone ocean: a second blue ink printed as dots over the flat fill. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-texture"] {
+  display: inline;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-dot"] {
+  fill: color-mix(in oklab, var(--nb-blue) 30%, transparent);
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-dot"] {
+  fill: color-mix(in oklab, var(--nb-chalk) 10%, transparent);
+}
+
+/* Graticule: a crisp ink grid that gives the flat disc its curvature. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-graticule"] {
+  stroke: var(--nb-ink);
+  stroke-opacity: 0.38;
+  stroke-width: 1px;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-graticule"][data-equator] {
+  stroke-opacity: 0.5;
+  stroke-width: 1.5px;
+  stroke-dasharray: 6 4;
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-graticule"] {
+  stroke: var(--nb-chalk);
+  stroke-opacity: 0.3;
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-graticule"][data-equator] {
+  stroke-opacity: 0.32;
 }
 
 /* Land is one mint ink printed in five close shades, map-coloured so two
@@ -1082,6 +1126,90 @@
 
 :root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="globe-borders"] {
   stroke-opacity: 0.7;
+}
+
+/* ---------- Attack routes: inked strokes, not faint glows ---------- */
+/* Each route is drawn over an ink casing so it reads on land and ocean
+   alike; resting routes stay solid enough to follow, focus dims the rest. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="arc-casing"] {
+  display: inline;
+  stroke: var(--nb-ink);
+  stroke-opacity: 0.8;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-attack-arc]:not([data-fresh="true"]) {
+  stroke-opacity: 1;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="arc-casing"][data-emphasized],
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-attack-arc][data-emphasized]:not([data-fresh="true"]) {
+  stroke-opacity: 1;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="arc-casing"][data-fresh],
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="arc-casing"][data-dimmed] {
+  display: none;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-attack-arc][data-dimmed] {
+  stroke-opacity: 0.1;
+}
+
+/* ---------- Map chrome: region jumps, zoom and legend as hard-edged keys ---------- */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"] {
+  border: 2px solid var(--nb-ink) !important;
+  border-radius: var(--nb-radius-sm);
+  background-color: var(--nb-sheet) !important;
+  color: var(--nb-ink) !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:hover:not(:disabled) {
+  background-color: var(--nb-yellow) !important;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--nb-shadow);
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:disabled {
+  box-shadow: none;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:focus-visible {
+  outline: 3px solid var(--nb-blue);
+  outline-offset: 2px;
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] {
+  border: 2px solid var(--nb-ink) !important;
+  border-radius: var(--nb-radius-sm);
+  background-color: var(--nb-sheet) !important;
+  box-shadow: 2px 2px 0 var(--nb-shadow);
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] > span:first-child {
+  outline: 1.5px solid var(--nb-ink);
+}
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] > span:last-child {
+  color: var(--nb-ink) !important;
+  font-weight: 800;
+}
+
+/* Dark: chalk keys on slate, like the rail. */
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-control"],
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] {
+  border-color: var(--nb-chalk) !important;
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-control"] {
+  color: var(--nb-chalk) !important;
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:hover:not(:disabled) {
+  background-color: var(--nb-chalk) !important;
+  color: var(--nb-ink) !important;
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] > span:first-child {
+  outline-color: var(--nb-chalk);
+}
+:root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="map-legend"] > span:last-child {
+  color: var(--nb-chalk) !important;
 }
 
 /* ---------- Team pins: stickers, not glows ---------- */
