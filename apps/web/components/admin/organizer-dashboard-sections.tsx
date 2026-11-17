@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { ReactElement, ReactNode } from "react";
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { Fragment, useCallback, useMemo, useState, useEffect } from "react";
 import {
   Ban,
   Copy,
@@ -399,6 +399,26 @@ function CardActionRow({
     </div>
   );
 }
+
+/**
+ * Row actions as related groups split by a hairline rule: labelled commands
+ * keep a little air between their key shadows, icon tools sit tight.
+ */
+function RowActions({ groups }: { groups: ReactNode[] }): ReactElement {
+  return (
+    <div className="flex flex-nowrap items-center justify-end gap-2">
+      {groups.map((group, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" /> : null}
+          <div className="flex flex-nowrap items-center gap-1.5">{group}</div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/** Fixed-width status chip so the text beside it lines up row to row. */
+const statusChipClass = "min-w-[5.25rem] justify-center";
 
 export function TeamsTab({
   deleteTarget,
@@ -970,10 +990,9 @@ function PlayerRegistryCard({
             { label: "ID", className: "w-[60px]" },
             { label: "Name" },
             { label: "Team" },
-            { label: "Role" },
             { label: "WireGuard peer" },
             { label: "Account" },
-            { label: "Action" },
+            { label: "Action", className: "text-right" },
           ]} />
           <TableBody>
             {playerRows.map((player) => {
@@ -983,140 +1002,156 @@ function PlayerRegistryCard({
                 Boolean(player.wireguard_status);
               return (
                 <TableRow key={player.id} data-testid={`player-row-${player.id}`}>
-                  <TableCell className="font-semibold text-muted-foreground">#{player.id}</TableCell>
+                  <TableCell className="font-semibold text-muted-foreground tabular-nums">#{player.id}</TableCell>
                   <TableCell>
-                    <div>
-                      <p>{player.display_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {player.email}
-                      </p>
-                    </div>
+                    <p className="font-medium">{player.display_name}</p>
+                    <p className="text-xs text-muted-foreground">{player.email}</p>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">{player.team_name || "Unjoined"}</TableCell>
-                  <TableCell>{player.role}</TableCell>
                   <TableCell className="whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs">{player.wireguard_peer || "—"}</span>
-                    {hasWireGuardPeer ? (
-                      <Badge
-                        className={
-                          player.wireguard_status === "active"
-                            ? peerTone.active
-                            : peerTone.revoked
-                        }
-                        variant="outline"
-                      >
-                        {player.wireguard_status}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">pending</span>
-                    )}
-                    </div>
-                    <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                      {player.wireguard_address || "—"}
+                    <p>
+                      {player.team_name || <span className="text-muted-foreground">Unjoined</span>}
                     </p>
+                    <p className="text-xs text-muted-foreground">{player.role}</p>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <div className="flex items-center gap-3">
+                      {hasWireGuardPeer ? (
+                        <Badge
+                          className={cn(
+                            statusChipClass,
+                            player.wireguard_status === "active"
+                              ? peerTone.active
+                              : peerTone.revoked,
+                          )}
+                          variant="outline"
+                        >
+                          {player.wireguard_status}
+                        </Badge>
+                      ) : (
+                        <Badge className={statusChipClass} variant="secondary">
+                          pending
+                        </Badge>
+                      )}
+                      <div className="font-mono text-xs leading-5">
+                        <p>{player.wireguard_peer || "—"}</p>
+                        <p className="text-muted-foreground">
+                          {player.wireguard_address || "—"}
+                        </p>
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge
-                      className={player.active ? "tone-success" : "tone-danger"}
+                      className={cn(statusChipClass, player.active ? "tone-success" : "tone-danger")}
                       data-testid={`player-status-${player.id}`}
                     >
                       {player.active ? "Active" : "Inactive"}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-nowrap items-center gap-1.5">
-                      <Button
-                        disabled={pendingAction !== null}
-                        size="sm"
-                        variant="ghost"
-                        className={player.active ? "button-danger-subtle" : undefined}
-                        data-testid={`toggle-player-active-${player.id}`}
-                        title={player.active ? "Deactivate player" : "Reactivate player"}
-                        aria-label={player.active ? "Deactivate player" : "Reactivate player"}
-                        onClick={() => onSetPlayerActiveState(player, !player.active)}
-                      >
-                        {player.active ? (
-                          <PowerOff className="h-4 w-4" />
-                        ) : (
-                          <Power className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        disabled={pendingAction !== null}
-                        size="sm"
-                        variant="ghost"
-                        data-testid={`edit-player-${player.id}`}
-                        onClick={() => onOpenEditDialog(player.id)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        disabled={pendingAction !== null || !hasWireGuardPeer}
-                        size="sm"
-                        variant="outline"
-                        data-testid={`inspect-wireguard-${player.id}`}
-                        onClick={() => onInspectWireGuard(player)}
-                      >
-                        {pendingAction === `wireguard:get:${player.id}` ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                        Config
-                      </Button>
-                      <Button
-                        disabled={pendingAction !== null || !hasWireGuardPeer}
-                        size="sm"
-                        variant="ghost"
-                        data-testid={`rotate-wireguard-${player.id}`}
-                        title="Rotate WireGuard key"
-                        aria-label="Rotate WireGuard key"
-                        onClick={() => onRotateWireGuard(player)}
-                      >
-                        {pendingAction === `wireguard:rotate:${player.id}` ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        disabled={
-                          pendingAction !== null ||
-                          !hasWireGuardPeer ||
-                          player.wireguard_status === "revoked"
-                        }
-                        size="sm"
-                        variant="ghost"
-                        className="button-danger-subtle"
-                        data-testid={`revoke-wireguard-${player.id}`}
-                        title="Revoke WireGuard peer"
-                        aria-label="Revoke WireGuard peer"
-                        onClick={() => onRevokeWireGuard(player)}
-                      >
-                        {pendingAction === `wireguard:revoke:${player.id}` ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Ban className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        disabled={pendingAction !== null}
-                        size="sm"
-                        variant="ghost"
-                        className="button-danger-subtle"
-                        data-testid={`delete-player-${player.id}`}
-                        onClick={() =>
-                          onSelectDeleteTarget({
-                            kind: "player",
-                            id: player.id,
-                            label: player.display_name,
-                          })
-                        }
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    <RowActions
+                      groups={[
+                        <Button
+                          key="config"
+                          disabled={pendingAction !== null || !hasWireGuardPeer}
+                          size="sm"
+                          variant="outline"
+                          data-testid={`inspect-wireguard-${player.id}`}
+                          onClick={() => onInspectWireGuard(player)}
+                        >
+                          {pendingAction === `wireguard:get:${player.id}` ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                          Config
+                        </Button>,
+                        <Fragment key="peer">
+                          <Button
+                            disabled={pendingAction !== null || !hasWireGuardPeer}
+                            size="icon"
+                            variant="ghost"
+                            data-testid={`rotate-wireguard-${player.id}`}
+                            title="Rotate WireGuard key"
+                            aria-label="Rotate WireGuard key"
+                            onClick={() => onRotateWireGuard(player)}
+                          >
+                            {pendingAction === `wireguard:rotate:${player.id}` ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            disabled={
+                              pendingAction !== null ||
+                              !hasWireGuardPeer ||
+                              player.wireguard_status === "revoked"
+                            }
+                            size="icon"
+                            variant="ghost"
+                            className="button-danger-subtle"
+                            data-testid={`revoke-wireguard-${player.id}`}
+                            title="Revoke WireGuard peer"
+                            aria-label="Revoke WireGuard peer"
+                            onClick={() => onRevokeWireGuard(player)}
+                          >
+                            {pendingAction === `wireguard:revoke:${player.id}` ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Ban className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </Fragment>,
+                        <Fragment key="account">
+                          <Button
+                            disabled={pendingAction !== null}
+                            size="icon"
+                            variant="ghost"
+                            data-testid={`edit-player-${player.id}`}
+                            title="Edit player"
+                            aria-label="Edit player"
+                            onClick={() => onOpenEditDialog(player.id)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            disabled={pendingAction !== null}
+                            size="icon"
+                            variant="ghost"
+                            className={player.active ? "button-danger-subtle" : undefined}
+                            data-testid={`toggle-player-active-${player.id}`}
+                            title={player.active ? "Deactivate player" : "Reactivate player"}
+                            aria-label={player.active ? "Deactivate player" : "Reactivate player"}
+                            onClick={() => onSetPlayerActiveState(player, !player.active)}
+                          >
+                            {player.active ? (
+                              <PowerOff className="h-4 w-4" />
+                            ) : (
+                              <Power className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            disabled={pendingAction !== null}
+                            size="icon"
+                            variant="ghost"
+                            className="button-danger-subtle"
+                            data-testid={`delete-player-${player.id}`}
+                            title="Delete player"
+                            aria-label="Delete player"
+                            onClick={() =>
+                              onSelectDeleteTarget({
+                                kind: "player",
+                                id: player.id,
+                                label: player.display_name,
+                              })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </Fragment>,
+                      ]}
+                    />
                   </TableCell>
                 </TableRow>
               );
@@ -1163,11 +1198,10 @@ function ChallengeCatalogCard({
           <AdminTableHeader columns={[
             { label: "ID", className: "w-[56px]" },
             { label: "Challenge" },
-            { label: "Status" },
+            { label: "Runtime" },
             { label: "Validation" },
             { label: "Network" },
-            { label: "Instances" },
-            { label: "Action" },
+            { label: "Action", className: "text-right" },
           ]} />
           <TableBody>
             {challengeRows.map((challenge) => (
@@ -1214,11 +1248,16 @@ function ChallengeCatalogRow({
   const validationStatus = validation?.status ?? "unchecked";
 
   return (
-    <TableRow data-testid={`challenge-row-${challenge.id}`}>
-      <TableCell className="font-semibold">#{challenge.id}</TableCell>
+    <TableRow
+      className="[&>td]:align-top [&>td]:py-3.5"
+      data-testid={`challenge-row-${challenge.id}`}
+    >
+      <TableCell className="font-semibold text-muted-foreground tabular-nums leading-6">
+        #{challenge.id}
+      </TableCell>
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{challenge.name}</span>
+          <span className="font-semibold leading-6">{challenge.name}</span>
           {challenge.maintenance ? (
             <Badge
               className="tone-warning"
@@ -1241,153 +1280,167 @@ function ChallengeCatalogRow({
             </Badge>
           ) : null}
         </div>
-        <div className="mt-1.5 min-w-[11.5rem] max-w-[16rem] space-y-0.5 font-mono text-[0.6875rem] leading-4 text-muted-foreground">
-          <p title="Service image">{breakAtSlashes(challenge.baseline_image)}</p>
-          <p title="Checker image">{breakAtSlashes(challenge.checker_image)}</p>
+        <dl className="mt-2 grid min-w-[12.5rem] max-w-[24rem] grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[0.6875rem] leading-4">
+          <dt className="text-muted-foreground">Service</dt>
+          <dd className="font-mono">{breakAtSlashes(challenge.baseline_image)}</dd>
+          <dt className="text-muted-foreground">Checker</dt>
+          <dd className="font-mono">{breakAtSlashes(challenge.checker_image)}</dd>
           {challenge.source_bundle_path ? (
-            <p title="Source bundle">{breakAtSlashes(challenge.source_bundle_path)}</p>
+            <>
+              <dt className="text-muted-foreground">Bundle</dt>
+              <dd className="font-mono">{breakAtSlashes(challenge.source_bundle_path)}</dd>
+            </>
           ) : null}
-        </div>
+        </dl>
       </TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap">
         <Badge
-          className={getChallengeRuntimeTone(challenge.runtime_status)}
+          className={cn(statusChipClass, getChallengeRuntimeTone(challenge.runtime_status))}
           variant="outline"
         >
           {challenge.runtime_status}
         </Badge>
-      </TableCell>
-      <TableCell>
-        <div className="space-y-2">
-          <Badge
-            className={getValidationStatusTone(validationStatus)}
-            variant="outline"
-          >
-            {validationStatus}
-          </Badge>
-          <p className="max-w-[18rem] text-xs leading-5 text-muted-foreground">
-            {validation?.message ?? "No runtime preflight recorded yet."}
-          </p>
-          {validation ? (
-            <p className="text-xs leading-5 text-muted-foreground">
-              baseline {validation.baseline_ssh_contract_ok ? "ok" : "fail"} /
-              checker {validation.checker_contract_ok ? "ok" : "fail"} /
-              state {validation.service_state_contract_ok ? "ok" : "fail"}
-            </p>
-          ) : null}
-        </div>
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-        <div className="space-y-1.5">
-          <p>
-            10.80.{challenge.service_subnet_octet}.0/24
-            <br />
-            port {challenge.service_port}
-          </p>
-        <Badge
-          className={
-            challenge.egress_enabled
-              ? "tone-success"
-              : "tone-warning"
-          }
-          variant="outline"
-        >
-          {challenge.egress_enabled ? "internet" : "air-gapped"}
-        </Badge>
-        </div>
-      </TableCell>
-      <TableCell className="whitespace-nowrap">
-        <p className="font-medium tabular-nums">
+        <p className="mt-2 text-sm font-semibold leading-5 tabular-nums">
           {challenge.deployed_teams}/{challenge.total_teams}
+          <span className="ml-1 text-xs font-normal text-muted-foreground">teams</span>
         </p>
-        <p className="text-xs text-muted-foreground tabular-nums">
+        <p className="text-xs leading-5 text-muted-foreground tabular-nums">
           ready {challenge.ready_teams} / queued {challenge.queued_teams}
         </p>
       </TableCell>
       <TableCell>
-        <CardActionRow className="flex-nowrap">
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant="ghost"
-            data-testid={`edit-challenge-${challenge.id}`}
-            onClick={() => onOpenEditDialog(challenge.id)}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant="ghost"
-            data-testid={`validate-challenge-${challenge.id}`}
-            title="Validate images"
-            aria-label="Validate images"
-            onClick={() => onValidateChallenge(challenge)}
-          >
-            {pendingAction === `validate:${challenge.id}` ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant={challenge.published ? "outline" : "default"}
-            data-testid={`deploy-challenge-${challenge.id}`}
-            onClick={() => onDeployChallenge(challenge)}
-          >
-            {pendingAction === `deploy:${challenge.id}` ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <Network className="h-4 w-4" />
-            )}
-            {challenge.published ? "Redeploy" : "Deploy"}
-          </Button>
-          <Button
-            disabled={pendingAction !== null || !challenge.published}
-            size="sm"
-            variant="outline"
-            className={challenge.maintenance ? undefined : "button-danger-subtle"}
-            data-testid={`toggle-challenge-maintenance-${challenge.id}`}
-            title={
-              challenge.maintenance
-                ? "Resume challenge after maintenance"
-                : "Put challenge under maintenance"
-            }
-            aria-label={
-              challenge.maintenance
-                ? "Resume challenge after maintenance"
-                : "Put challenge under maintenance"
-            }
-            onClick={() =>
-              onSetChallengeMaintenanceState(challenge, !challenge.maintenance)
-            }
-          >
-            {pendingAction === `challenge:maintenance:${challenge.id}` ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : null}
-            {challenge.maintenance ? "Resume" : "Maintain"}
-          </Button>
-          <Button
-            disabled={pendingAction !== null}
-            size="sm"
-            variant="ghost"
-            className="button-danger-subtle"
-            data-testid={`delete-challenge-${challenge.id}`}
-            onClick={() =>
-              onSelectDeleteTarget({
-                kind: "challenge",
-                id: challenge.id,
-                label: challenge.name,
-                warning:
-                  "This will also delete all associated service instances.",
-              })
-            }
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </CardActionRow>
+        <Badge
+          className={cn(statusChipClass, getValidationStatusTone(validationStatus))}
+          variant="outline"
+        >
+          {validationStatus}
+        </Badge>
+        <p className="mt-2 min-w-[10rem] max-w-[18rem] text-xs leading-5 text-muted-foreground">
+          {validation?.message ?? "No runtime preflight recorded yet."}
+        </p>
+        {validation ? (
+          <p className="mt-1 font-mono text-[0.6875rem] leading-4 text-muted-foreground">
+            <span className="whitespace-nowrap">
+              baseline {validation.baseline_ssh_contract_ok ? "ok" : "fail"} /
+            </span>{" "}
+            <span className="whitespace-nowrap">
+              checker {validation.checker_contract_ok ? "ok" : "fail"} /
+            </span>{" "}
+            <span className="whitespace-nowrap">
+              state {validation.service_state_contract_ok ? "ok" : "fail"}
+            </span>
+          </p>
+        ) : null}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <Badge
+          className={cn(
+            statusChipClass,
+            challenge.egress_enabled ? "tone-success" : "tone-warning",
+          )}
+          variant="outline"
+        >
+          {challenge.egress_enabled ? "internet" : "air-gapped"}
+        </Badge>
+        <div className="mt-2 font-mono text-xs leading-5 text-muted-foreground">
+          <p>10.80.{challenge.service_subnet_octet}.0/24</p>
+          <p>port {challenge.service_port}</p>
+        </div>
+      </TableCell>
+      <TableCell>
+        <RowActions
+          groups={[
+            <Fragment key="runtime">
+              <Button
+                disabled={pendingAction !== null}
+                size="sm"
+                variant={challenge.published ? "outline" : "default"}
+                data-testid={`deploy-challenge-${challenge.id}`}
+                onClick={() => onDeployChallenge(challenge)}
+              >
+                {pendingAction === `deploy:${challenge.id}` ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Network className="h-4 w-4" />
+                )}
+                {challenge.published ? "Redeploy" : "Deploy"}
+              </Button>
+              <Button
+                disabled={pendingAction !== null || !challenge.published}
+                size="sm"
+                variant="outline"
+                className={challenge.maintenance ? undefined : "button-danger-subtle"}
+                data-testid={`toggle-challenge-maintenance-${challenge.id}`}
+                title={
+                  challenge.maintenance
+                    ? "Resume challenge after maintenance"
+                    : "Put challenge under maintenance"
+                }
+                aria-label={
+                  challenge.maintenance
+                    ? "Resume challenge after maintenance"
+                    : "Put challenge under maintenance"
+                }
+                onClick={() =>
+                  onSetChallengeMaintenanceState(challenge, !challenge.maintenance)
+                }
+              >
+                {pendingAction === `challenge:maintenance:${challenge.id}` ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : null}
+                {challenge.maintenance ? "Resume" : "Maintain"}
+              </Button>
+            </Fragment>,
+            <Fragment key="manage">
+              <Button
+                disabled={pendingAction !== null}
+                size="icon"
+                variant="ghost"
+                data-testid={`validate-challenge-${challenge.id}`}
+                title="Validate images"
+                aria-label="Validate images"
+                onClick={() => onValidateChallenge(challenge)}
+              >
+                {pendingAction === `validate:${challenge.id}` ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                disabled={pendingAction !== null}
+                size="icon"
+                variant="ghost"
+                data-testid={`edit-challenge-${challenge.id}`}
+                title="Edit challenge"
+                aria-label="Edit challenge"
+                onClick={() => onOpenEditDialog(challenge.id)}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                disabled={pendingAction !== null}
+                size="icon"
+                variant="ghost"
+                className="button-danger-subtle"
+                data-testid={`delete-challenge-${challenge.id}`}
+                title="Delete challenge"
+                aria-label="Delete challenge"
+                onClick={() =>
+                  onSelectDeleteTarget({
+                    kind: "challenge",
+                    id: challenge.id,
+                    label: challenge.name,
+                    warning:
+                      "This will also delete all associated service instances.",
+                  })
+                }
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </Fragment>,
+          ]}
+        />
       </TableCell>
     </TableRow>
   );
