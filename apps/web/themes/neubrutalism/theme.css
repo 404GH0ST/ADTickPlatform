@@ -21,6 +21,12 @@
   --nb-radius-sm: 7px;
   --nb-zebra: oklch(0.955 0.004 265);
 
+  /* Hover: one snap curve for every lift, and two washes so a hovered row
+     and a hovered key read as the same family without matching exactly. */
+  --nb-snap: cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --nb-hover-wash: color-mix(in oklab, var(--nb-yellow) 24%, var(--nb-sheet));
+  --nb-hover-fill: color-mix(in oklab, var(--nb-yellow) 55%, var(--nb-sheet));
+
   /* Fills. Blue carries white text; every other fill carries ink text. */
   --nb-blue: oklch(0.565 0.225 263);
   --nb-on-blue: oklch(1 0 0);
@@ -121,6 +127,8 @@
   --nb-shadow: oklch(0.06 0.01 265);
   --nb-grid: oklch(0.95 0.018 85 / 0.045);
   --nb-zebra: oklch(0.245 0.016 265);
+  --nb-hover-wash: color-mix(in oklab, var(--nb-chalk) 7%, var(--nb-sheet));
+  --nb-hover-fill: color-mix(in oklab, var(--nb-chalk) 16%, var(--nb-sheet));
   --nb-yellow: oklch(0.88 0.13 100);
   --nb-aqua: oklch(0.82 0.11 182);
   --nb-pink: oklch(0.78 0.1 12);
@@ -330,9 +338,11 @@
   letter-spacing: 0;
   box-shadow: 4px 4px 0 var(--nb-shadow);
   transition:
-    transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
-    box-shadow 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
-    background-color 150ms ease-out;
+    transform 120ms var(--nb-snap),
+    box-shadow 120ms var(--nb-snap),
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="button"]:hover:not(:disabled) {
@@ -381,7 +391,7 @@
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="outline"]:hover:not(:disabled) {
-  background: var(--muted);
+  background: var(--nb-hover-fill);
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="ghost"] {
@@ -391,8 +401,21 @@
 
 :root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="ghost"]:hover:not(:disabled) {
   border-color: var(--border);
-  background: var(--muted);
+  background: var(--nb-hover-fill);
   box-shadow: 2px 2px 0 var(--nb-shadow);
+}
+
+/* A ghost key only carries a 2px shadow, so it presses 2px, not 4px. */
+:root[data-scheme="neubrutalism"] [data-slot="button"][data-variant="ghost"]:active:not(:disabled) {
+  transform: translate(2px, 2px);
+}
+
+/* Destructive keys stay quiet at rest and turn pink the moment they are
+   targeted, so delete and deactivate never look like their neighbours. */
+:root[data-scheme="neubrutalism"] [data-slot="button"].button-danger-subtle:hover:not(:disabled) {
+  border-color: var(--nb-ink);
+  background: var(--nb-pink);
+  color: var(--nb-ink);
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="button"].button-danger-solid {
@@ -445,8 +468,8 @@
   font-weight: 700;
   box-shadow: 4px 4px 0 var(--nb-shadow);
   transition:
-    transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
-    box-shadow 120ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    transform 120ms var(--nb-snap),
+    box-shadow 120ms var(--nb-snap);
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="button"] ~ select:hover {
@@ -480,13 +503,50 @@
 }
 
 /* Appearance picker (stock control kept in every shell). */
+/* The summary is a <details> toggle, not a [data-slot="button"], so it
+   restates the key behaviour: same shadow, lift and press as its header
+   neighbours, and a lit (yellow, pressed-in) face while the menu is open. */
 :root[data-scheme="neubrutalism"] .mode-picker > summary {
   border: var(--nb-line) solid var(--border);
   border-radius: var(--nb-radius-sm);
   background: var(--card);
   font-family: var(--nb-display);
   font-weight: 700;
-  box-shadow: 3px 3px 0 var(--nb-shadow);
+  box-shadow: 4px 4px 0 var(--nb-shadow);
+  transition:
+    transform 120ms var(--nb-snap),
+    box-shadow 120ms var(--nb-snap),
+    background-color 140ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] .mode-picker > summary:hover {
+  background: var(--nb-hover-fill);
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] .mode-picker > summary:active,
+:root[data-scheme="neubrutalism"] .mode-picker[open] > summary {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] .mode-picker[open] > summary {
+  background: var(--nb-yellow);
+  color: var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"][data-theme="dark"] .mode-picker[open] > summary {
+  border-color: var(--nb-chalk);
+  background: var(--nb-chalk);
+}
+
+:root[data-scheme="neubrutalism"] .mode-option {
+  transition: background-color 140ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] .mode-option[aria-checked="false"]:hover {
+  background: var(--nb-hover-fill);
 }
 
 :root[data-scheme="neubrutalism"] .mode-picker > div {
@@ -538,7 +598,7 @@
 
 :root[data-scheme="neubrutalism"] [data-slot="table-row"]:hover,
 :root[data-scheme="neubrutalism"] [data-slot="table-body"] [data-slot="table-row"]:nth-child(odd):hover {
-  background: color-mix(in oklab, var(--nb-yellow) 30%, var(--card));
+  background: var(--nb-hover-wash);
 }
 
 :root[data-scheme="neubrutalism"] table {
@@ -578,6 +638,7 @@
 
 :root[data-scheme="neubrutalism"] .section-tab:hover {
   border-color: var(--border);
+  background: var(--nb-hover-wash);
 }
 
 :root[data-scheme="neubrutalism"] .section-tab[data-active="true"] {
@@ -603,6 +664,23 @@
 :root[data-scheme="neubrutalism"] details > summary {
   font-family: var(--nb-display);
   font-weight: 650;
+}
+
+/* Touch screens fire :hover on tap and keep it; a key left floating after a
+   tap reads as stuck, so lifts only happen under a real pointer. */
+@media (hover: none) {
+  :root[data-scheme="neubrutalism"] [data-slot="button"]:hover:not(:disabled):not(:active),
+  :root[data-scheme="neubrutalism"] [data-theme-option]:hover:not(:disabled),
+  :root[data-scheme="neubrutalism"] .mode-picker:not([open]) > summary:hover:not(:active),
+  :root[data-scheme="neubrutalism"] .nb-lift:hover:not(:active) {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-scheme="neubrutalism"] .mode-picker > summary {
+    transform: none !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -690,8 +768,8 @@
 
   :root[data-scheme="neubrutalism"] .nb-lift {
     transition:
-      transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
-      box-shadow 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+      transform 160ms var(--nb-snap),
+      box-shadow 160ms var(--nb-snap);
   }
 
   :root[data-scheme="neubrutalism"] .nb-lift:hover {
@@ -784,7 +862,7 @@
     color: var(--nb-on-blue);
     white-space: nowrap;
     transition:
-      transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+      transform 140ms var(--nb-snap),
       box-shadow 140ms ease-out,
       background-color 140ms ease-out,
       border-color 140ms ease-out;
@@ -792,6 +870,7 @@
 
   :root[data-scheme="neubrutalism"] .nb-nav-link:hover {
     border-color: color-mix(in oklab, var(--nb-on-blue) 70%, transparent);
+    background: color-mix(in oklab, var(--nb-on-blue) 12%, transparent);
   }
 
   :root[data-scheme="neubrutalism"] .nb-nav-link[data-active="true"] {
@@ -958,7 +1037,7 @@
   border-radius: var(--nb-radius-sm);
   background: var(--card);
   transition:
-    transform 140ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    transform 140ms var(--nb-snap),
     box-shadow 140ms ease-out;
 }
 
@@ -1161,7 +1240,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   box-shadow: 3px 3px 0 var(--nb-shadow);
-  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+  transition: transform 120ms var(--nb-snap), box-shadow 120ms var(--nb-snap), background-color 140ms ease-out;
 }
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:hover:not(:disabled) {
   background-color: var(--nb-yellow) !important;
