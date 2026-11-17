@@ -649,6 +649,8 @@ function createInitialState() {
     checkerRuns: checkerRuns.map((run) => ({ ...run })),
     scoreboard: scoreboard.map((row) => ({ ...row })),
     scoringAudit: buildScoringAudit(),
+    platformAppearance: { theme_id: "graphite", updated_at: "2026-03-10T10:00:00Z" },
+    adminAnnouncements: [],
     platformSettings: {
       flag_format_prefix: "PLAYIT",
       flag_format_active: "PLAYIT",
@@ -1244,22 +1246,56 @@ function renderWireguardMetrics(snapshot) {
   ].join("\n")}\n`;
 }
 
+/**
+ * Writes to an SSE response only while it is still open. /__reset ends
+ * streams with res.end(), but the response's "close" event (which clears the
+ * timers below) arrives asynchronously; a heartbeat or follow-up firing in
+ * that gap would write after end, and an unhandled ERR_STREAM_WRITE_AFTER_END
+ * kills the whole mock process, failing every later test.
+ */
+function writeSSEChunk(res, chunk) {
+  if (res.writableEnded || res.destroyed) {
+    return;
+  }
+  res.write(chunk);
+}
+
+/** Cleanup callbacks per open SSE response; run on close and on /__reset. */
+const sseCleanups = new Map();
+
+function onSSECleanup(res, cleanup) {
+  const list = sseCleanups.get(res) ?? [];
+  list.push(cleanup);
+  sseCleanups.set(res, list);
+}
+
+function closeSSE(res) {
+  for (const cleanup of sseCleanups.get(res) ?? []) {
+    cleanup();
+  }
+  sseCleanups.delete(res);
+  activeSSEConnections.delete(res);
+  if (!res.writableEnded) {
+    res.end();
+  }
+}
+
 function writeSSE(res, data) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
   });
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  // A client disconnect mid-write must not crash the mock either.
+  res.on("error", () => {});
+  writeSSEChunk(res, `data: ${JSON.stringify(data)}\n\n`);
   const heartbeat = setInterval(() => {
-    res.write(": keep-alive\n\n");
+    writeSSEChunk(res, ": keep-alive\n\n");
   }, 15_000);
+  onSSECleanup(res, () => clearInterval(heartbeat));
 
   activeSSEConnections.add(res);
-  res.on("close", () => {
-    clearInterval(heartbeat);
-    activeSSEConnections.delete(res);
-  });
+  res.on("close", () => closeSSE(res));
 }
 
 function makeRealtimeAttackPage() {
@@ -1332,12 +1368,9 @@ function writeScenarioSSE(res, pathname, initialData) {
   }
 
   const timer = setTimeout(() => {
-    res.write(`data: ${JSON.stringify(followUpData)}\n\n`);
+    writeSSEChunk(res, `data: ${JSON.stringify(followUpData)}\n\n`);
   }, 250);
-
-  res.on("close", () => {
-    clearTimeout(timer);
-  });
+  onSSECleanup(res, () => clearTimeout(timer));
 }
 
 async function readJsonBody(req) {
@@ -1478,10 +1511,10 @@ async function handleSystemRoutes({ req, res, url, method }) {
     state = createStateForScenario(body?.scenario);
     serviceActionCooldowns.clear();
     // Close all active SSE connections so Next.js re-fetches fresh data
-    for (const conn of activeSSEConnections) {
-      conn.end();
+    // Clear each stream's timers before ending it (see writeSSEChunk).
+    for (const conn of [...activeSSEConnections]) {
+      closeSSE(conn);
     }
-    activeSSEConnections.clear();
     return writeSuccess(res, { reset: true });
   }
 
@@ -1723,6 +1756,7 @@ async function handleParticipantRoutes(ctx) {
     "/api/v2/scoreboard": () => state.scoreboard,
     "/api/v2/scoreboard/freeze": () => scoreboardFreezeStatus(),
     "/api/v2/game/status": () => state.gameStatus,
+    "/api/v2/platform/appearance": () => state.platformAppearance,
     "/api/v2/services": () => state.serviceMap,
     "/api/v2/team/services": () => state.teamServiceStates,
   });
@@ -2361,6 +2395,54 @@ async function handleAdminDeploymentRoutes({ req, res, url, method }) {
       updated_at: new Date().toISOString(),
     };
     return writeSuccess(res, state.platformSettings);
+  }
+
+  if (url.pathname === "/api/v2/admin/announcements") {
+    if (method === "GET") {
+      return writeSuccess(res, state.adminAnnouncements);
+    }
+    if (method === "POST") {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        return writeFailure(res, 400, "could not parse announcement payload.");
+      }
+      const text = typeof body?.body === "string" ? body.body.trim() : "";
+      if (!text) {
+        return writeFailure(res, 400, "body is required.");
+      }
+      const created = {
+        id: state.adminAnnouncements.reduce((max, item) => Math.max(max, item.id), 0) + 1,
+        body: text,
+        created_by: "organizer",
+        created_at: new Date().toISOString(),
+      };
+      state.adminAnnouncements = [created, ...state.adminAnnouncements];
+      return writeSuccess(res, created);
+    }
+  }
+
+  const announcementMatch = url.pathname.match(/^\/api\/v2\/admin\/announcements\/(\d+)$/);
+  if (method === "DELETE" && announcementMatch) {
+    const id = Number(announcementMatch[1]);
+    state.adminAnnouncements = state.adminAnnouncements.filter((item) => item.id !== id);
+    return writeSuccess(res, { deleted: true });
+  }
+
+  if (method === "PUT" && url.pathname === "/api/v2/admin/platform/appearance") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      return writeFailure(res, 400, "could not parse platform appearance payload.");
+    }
+    const themeID = typeof body?.theme_id === "string" ? body.theme_id.trim() : "";
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(themeID)) {
+      return writeFailure(res, 400, "theme_id must be a lowercase slug.");
+    }
+    state.platformAppearance = { theme_id: themeID, updated_at: new Date().toISOString() };
+    return writeSuccess(res, state.platformAppearance);
   }
 
   if (method === "PUT" && url.pathname === "/api/v2/admin/platform/settings") {

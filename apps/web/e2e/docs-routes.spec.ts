@@ -24,8 +24,10 @@ test("participant API page exposes the raw YAML route and manual link", async ({
 }) => {
   await page.goto("/docs/platform-api");
 
+  // Exact match: once Swagger UI loads from its CDN it renders its own <h1>
+  // ("AD Platform Participant API"), which a substring filter also matches.
   await expect(
-    page.locator("h1", { hasText: "Participant API" }),
+    page.getByRole("heading", { level: 1, name: "Participant API", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Swagger Explorer")).toBeVisible();
   await expect(

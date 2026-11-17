@@ -90,6 +90,10 @@ export default defineConfig({
       command: [
         "sh -lc '",
         `export AD_PLATFORM_API_URL=${mockApiUrl};`,
+        // Theme reads are cached in-process for 5s in prod; tests reset the mock per test.
+        "export AD_PLATFORM_THEME_CACHE_MS=0;",
+        // Registers test-only themes from themes/_fixtures (e.g. a crashing theme).
+        "export AD_PLATFORM_THEME_FIXTURES=1;",
         `export AD_PLATFORM_GAME_CORE_URL=${mockApiUrl}/game-core;`,
         `export AD_PLATFORM_SUBMISSION_SERVICE_URL=${mockApiUrl}/submission-service;`,
         `export AD_PLATFORM_REALTIME_URL=${mockApiUrl};`,

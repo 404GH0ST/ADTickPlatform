@@ -8,7 +8,8 @@ test("organizer attacks page renders the paginated accepted-attack feed", async 
 
   await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
   await expect(page.getByText("Accepted Attacks")).toBeVisible();
-  await expect(page.getByText("Showing 1-13 of 13")).toBeVisible();
+  // The default mock seeds 12 accepted attacks (atk-01..atk-12).
+  await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
   await expect(
     page.getByRole("cell", { name: "College Alpha" }).first(),
   ).toBeVisible();

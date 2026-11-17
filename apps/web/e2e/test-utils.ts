@@ -100,22 +100,41 @@ export async function resetMockApi(
   expect(response.ok()).toBeTruthy();
 }
 
+/*
+ * Shared fixtures are declared with base.extend() rather than top-level
+ * test.use()/test.beforeEach() calls. Hooks registered at module scope attach
+ * only to the spec file that first imports this module in a worker, so later
+ * spec files silently skipped the mock reset and the viewport override.
+ * Options and auto fixtures declared in extend() apply to every test.
+ */
+const desktopViewport = { width: 1280, height: 900 };
+
 /**
  * Pre-configured test fixture for admin spec files.
  * Sets viewport to 1280×900 and resets the mock API before each test.
  */
-export const adminTest = base.extend({});
-adminTest.use({ viewport: { width: 1280, height: 900 } });
-adminTest.beforeEach(async ({ request }) => {
-  await resetMockApi(request);
+export const adminTest = base.extend<{ resetMock: void }>({
+  viewport: desktopViewport,
+  resetMock: [
+    async ({ request }, use) => {
+      await resetMockApi(request);
+      await use();
+    },
+    { auto: true },
+  ],
 });
 
 /**
  * Pre-configured test fixture for realtime spec files.
  * Sets viewport to 1280×900 and resets the mock API with `realtime-updates` scenario.
  */
-export const realtimeTest = base.extend({});
-realtimeTest.use({ viewport: { width: 1280, height: 900 } });
-realtimeTest.beforeEach(async ({ request }) => {
-  await resetMockApi(request, "realtime-updates");
+export const realtimeTest = base.extend<{ resetMock: void }>({
+  viewport: desktopViewport,
+  resetMock: [
+    async ({ request }, use) => {
+      await resetMockApi(request, "realtime-updates");
+      await use();
+    },
+    { auto: true },
+  ],
 });

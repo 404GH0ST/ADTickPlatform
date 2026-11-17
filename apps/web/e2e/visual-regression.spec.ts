@@ -203,7 +203,7 @@ test.describe("presentation attack map visual baselines", () => {
 
 test.describe("admin visual baselines", () => {
   test("scheduler card keeps its visual baseline", async ({ page }) => {
-    await page.goto("/admin/game");
+    await page.goto("/admin/game?view=diagnostics");
 
     const schedulerCard = page.getByTestId("scheduler-card");
     await expect(schedulerCard).toBeVisible();

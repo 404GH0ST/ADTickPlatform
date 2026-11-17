@@ -33,7 +33,7 @@ test("participant services page stays readable without horizontal overflow on mo
 test("organizer game scheduler filters stay inside the page width on mobile", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
   await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));

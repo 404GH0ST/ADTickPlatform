@@ -15,7 +15,7 @@ async function expectActionNote(page: any, pattern: RegExp | string) {
 test("organizer game page keeps scheduler audit filters inside the card width", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
 
   await expect(page.locator("h1", { hasText: "Game" })).toBeVisible();
   await expect(
@@ -31,7 +31,7 @@ test("organizer game page keeps scheduler audit filters inside the card width", 
 test("organizer game page renders mocked scheduler audit data", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
   await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
 
   await expect(page.getByText("scheduler started")).toBeVisible();
@@ -45,7 +45,7 @@ test("organizer game page renders mocked scheduler audit data", async ({
 test("organizer game page shows checker history with faust service state summaries", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
   await openDisclosureIfNeeded(
     page.getByTestId("checker-investigation-disclosure"),
   );
@@ -68,7 +68,7 @@ test("organizer game page shows explicit empty states for scheduler and checker 
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "empty-game-history" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
 
   await expect(
     page.getByTestId("scheduler-audit-disclosure").locator("summary"),
@@ -93,7 +93,7 @@ test("organizer game page shows degraded warning when scheduler and checker hist
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "degraded-game-history" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
 
   await openDisclosureIfNeeded(page.getByTestId("scheduler-audit-disclosure"));
   await openDisclosureIfNeeded(
@@ -120,7 +120,7 @@ test("organizer game page surfaces runtime alerts with direct action links", asy
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "ops-alerts" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   const alertsCard = page.getByTestId("operations-alerts-card");
   await expect(alertsCard).toBeVisible();
@@ -145,7 +145,7 @@ test("organizer game page refreshes runtime alerts on focus", async ({
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "default" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   const alertsCard = page.getByTestId("operations-alerts-card");
   await expect(alertsCard).toContainText("No runtime alerts are currently active.");
@@ -169,7 +169,7 @@ test("organizer game page refreshes runtime alerts on focus", async ({
 test("organizer game page can copy a concise runtime summary", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   await page.getByTestId("copy-runtime-health-summary").click();
 
@@ -185,7 +185,7 @@ test("organizer game page shows live service metrics and refreshes derived healt
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "default" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   const metricsCard = page.getByTestId("operations-metrics-card");
   await expect(metricsCard).toBeVisible();
@@ -226,7 +226,7 @@ test("organizer game page shows live service metrics and refreshes derived healt
 test("organizer scheduler controls can start, update, and stop with visible notes", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=diagnostics");
 
   const schedulerCard = page.getByTestId("scheduler-card");
 
@@ -273,6 +273,8 @@ test("organizer match controls start the game and auto-start the scheduler", asy
   );
   await expect(matchCard.getByText("running").first()).toBeVisible();
   await expect(matchCard.getByText("open").first()).toBeVisible();
+  await page.getByRole("tab", { name: "Scheduler & checks" }).click();
+  await expect(page).toHaveURL(/view=diagnostics/);
   await expect(
     schedulerCard.getByRole("button", { name: "Stop Scheduler" }),
   ).toBeEnabled();
@@ -386,7 +388,7 @@ test("organizer game page shows aggregated runtime drift warnings and refreshes 
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "default" },
   });
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   const runtimeHealthCard = page.getByTestId("runtime-health-card");
   await expect(runtimeHealthCard).toContainText(
@@ -426,7 +428,7 @@ test("organizer game page shows aggregated runtime drift warnings and refreshes 
 test("organizer game page can download a runtime evidence report", async ({
   page,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -461,7 +463,7 @@ test("organizer game page names missing sections in partial runtime evidence", a
   page,
   request,
 }) => {
-  await page.goto("/admin/game");
+  await page.goto("/admin/game?view=health");
   await request.post(`${mockApiBaseUrl}/__reset`, {
     data: { scenario: "runtime-report-partial" },
   });
