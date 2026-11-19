@@ -100,3 +100,94 @@ func TestPostgresSecurityAndAllocationInvariants(t *testing.T) {
 		t.Fatalf("expected correct password to reveal deactivated state, got %v", err)
 	}
 }
+
+func TestPostgresLoginUpgradesLegacyPassword(t *testing.T) {
+	db := dbtest.IsolatedSchema(t, "TEST_POSTGRES_DSN", "password_upgrade_test")
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatalf("migrate postgres: %v", err)
+	}
+	store := NewPostgresStore(db)
+	const password = "legacy-test-password"
+	player, err := store.RegisterPlayer(ctx, participantRegisterRequest{
+		DisplayName: "Legacy Player",
+		Email:       "legacy-player@example.com",
+		Password:    password,
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("register player: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE players SET password_hash = $2 WHERE id = $1`, player.PlayerID, legacyMD5Secret(password)); err != nil {
+		t.Fatalf("set legacy credential: %v", err)
+	}
+	loggedIn, err := store.AuthenticatePlayer(ctx, player.Email, password)
+	if err != nil || loggedIn.PlayerID != player.PlayerID || loggedIn.SessionVersion != player.SessionVersion {
+		t.Fatalf("login returned %+v, %v", loggedIn, err)
+	}
+	var hash string
+	if err := db.QueryRowContext(ctx, `SELECT password_hash FROM players WHERE id = $1`, player.PlayerID).Scan(&hash); err != nil {
+		t.Fatalf("read current credential: %v", err)
+	}
+	if passwordHashNeedsUpgrade(hash) || !passwordMatches(hash, password) {
+		t.Fatal("expected a modern hash for the same password")
+	}
+}
+
+func TestPostgresTeamMembershipLifecycle(t *testing.T) {
+	db := dbtest.IsolatedSchema(t, "TEST_POSTGRES_DSN", "membership_test")
+	t.Setenv("WIREGUARD_SERVER_PUBLIC_KEY", "integration-test-server-public-key")
+	ctx := context.Background()
+	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
+		t.Fatalf("migrate postgres: %v", err)
+	}
+	store := NewPostgresStore(db)
+	now := time.Now()
+	team, err := store.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: "Test Team", ContactEmail: "team@example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	join := func(name, email, role string) authenticatedPlayer {
+		t.Helper()
+		player, err := store.RegisterPlayer(ctx, participantRegisterRequest{DisplayName: name, Email: email, Password: "test-participant-password"}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ValidatePlayerSession(ctx, player.PlayerID, 0, "member", player.SessionVersion); err != nil {
+			t.Fatalf("validate teamless session: %v", err)
+		}
+		joined, err := store.JoinExistingPlayerTeam(ctx, player.PlayerID, team.JoinKey, now)
+		if err != nil || joined.TeamID != team.ID || joined.Role != role {
+			t.Fatalf("joined player = %+v, %v; want team %d, role %q", joined, err, team.ID, role)
+		}
+		return joined
+	}
+	captain := join("First Player", "first@example.test", "captain")
+	member := join("Second Player", "second@example.test", "member")
+	if _, err := store.RegisterPlayer(ctx, participantRegisterRequest{
+		DisplayName: "Duplicate Email", Email: " SECOND@EXAMPLE.TEST ", Password: "test-participant-password",
+	}, now); !errors.Is(err, ErrDuplicateResource) {
+		t.Fatalf("duplicate registration returned %v", err)
+	}
+	if _, err := store.UpdateParticipantProfile(ctx, captain.PlayerID, participantUpdateProfileRequest{
+		DisplayName: "First Player", Email: captain.Email, TeamName: "Renamed Team", TeamContactEmail: "new@example.test",
+	}); err != nil {
+		t.Fatalf("update captain profile: %v", err)
+	}
+	if _, err := store.UpdateParticipantProfile(ctx, member.PlayerID, participantUpdateProfileRequest{
+		DisplayName: "Renamed Player", Email: member.Email,
+	}); err != nil {
+		t.Fatalf("update member profile: %v", err)
+	}
+	previousCaptain, err := store.TransferTeamCaptain(ctx, captain.PlayerID, member.PlayerID)
+	if err != nil || previousCaptain.Role != "member" || previousCaptain.TeamName != "Renamed Team" {
+		t.Fatalf("transferred captain = %+v, %v", previousCaptain, err)
+	}
+	newCaptain, err := store.ValidatePlayerSession(ctx, member.PlayerID, team.ID, "captain", member.SessionVersion+1)
+	if err != nil || newCaptain.TeamContactEmail != "new@example.test" || newCaptain.DisplayName != "Renamed Player" {
+		t.Fatalf("validate captain session = %+v, %v", newCaptain, err)
+	}
+	members, err := store.ListTeamMembers(ctx, team.ID)
+	if err != nil || len(members) != 2 || members[0].Role != "member" || members[1].Role != "captain" {
+		t.Fatalf("list team members = %+v, %v", members, err)
+	}
+}

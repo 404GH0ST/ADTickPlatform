@@ -93,16 +93,12 @@ func instrumentHandler(info ServiceInfo, next http.Handler) http.Handler {
 		recorder := &statusCapturingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		defer func() {
 			durationSec := time.Since(started).Seconds()
-			pattern := strings.TrimSpace(r.Pattern)
-			if pattern == "" {
-				pattern = r.URL.Path
-			}
 
 			metrics.mu.Lock()
 			metrics.inFlight--
 			key := requestMetricKey{
-				Method:     r.Method,
-				Pattern:    pattern,
+				Method:     requestMetricMethod(r.Method),
+				Pattern:    requestMetricPattern(r),
 				StatusCode: recorder.statusCode,
 			}
 			value := metrics.requests[key]
@@ -114,6 +110,24 @@ func instrumentHandler(info ServiceInfo, next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r)
 	})
+}
+
+func requestMetricMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+		http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace:
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+func requestMetricPattern(r *http.Request) string {
+	// ServeMux may put the raw redirect path in Pattern for CONNECT requests.
+	if r.Pattern == "" || r.Method == http.MethodConnect {
+		return "unmatched"
+	}
+	return r.Pattern
 }
 
 type statusCapturingResponseWriter struct {

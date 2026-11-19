@@ -122,7 +122,10 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 	}
 	if passwordHashNeedsUpgrade(passwordHash) {
 		if upgradedHash, hashErr := hashPassword(password); hashErr == nil {
-			_, _ = s.db.ExecContext(ctx, `UPDATE players SET password_hash = $2 WHERE id = $1`, player.PlayerID, upgradedHash)
+			// Only migrate the credential this login verified. A password change may have won the race.
+			_, _ = s.db.ExecContext(ctx, `
+				UPDATE players SET password_hash = $2 WHERE id = $1 AND password_hash = $3
+			`, player.PlayerID, upgradedHash, passwordHash)
 		}
 	}
 	return player, nil
