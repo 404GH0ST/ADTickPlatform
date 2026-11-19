@@ -2,7 +2,6 @@ package apigateway
 
 import (
 	"crypto/ecdh"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -45,15 +44,8 @@ func newWireGuardPeerState(playerID, teamID int, teamName, displayName, wireGuar
 	if strings.TrimSpace(address) == "" {
 		return wireGuardPeerState{}, ErrPlayerAddressPool
 	}
-	clientPrivateKey, clientPublicKey, err := generateX25519Keypair()
-	if err != nil {
-		return wireGuardPeerState{}, err
-	}
-
-	presharedKey, err := generateWireGuardSecret()
-	if err != nil {
-		return wireGuardPeerState{}, err
-	}
+	clientPrivateKey, clientPublicKey := generateX25519Keypair()
+	presharedKey := generateWireGuardSecret()
 
 	serverPublicKey, err := wireGuardServerPublicKey()
 	if err != nil {
@@ -278,31 +270,31 @@ func allowDevWireGuardServerKeyFallback() bool {
 }
 
 func wireGuardDevKeypair() (string, string) {
-	curve := ecdh.X25519()
 	seed := sha256.Sum256([]byte("adplatform-dev-wireguard-server"))
-	privateKey, err := curve.NewPrivateKey(seed[:])
-	if err != nil {
-		encodedSeed := base64.StdEncoding.EncodeToString(seed[:])
-		return encodedSeed, encodedSeed
-	}
-	return base64.StdEncoding.EncodeToString(privateKey.Bytes()), base64.StdEncoding.EncodeToString(privateKey.PublicKey().Bytes())
+	return encodeX25519Keypair(mustX25519Key(seed[:]))
 }
 
-func generateX25519Keypair() (string, string, error) {
-	curve := ecdh.X25519()
-	privateKey, err := curve.GenerateKey(rand.Reader)
-	if err != nil {
-		return "", "", err
-	}
-	return base64.StdEncoding.EncodeToString(privateKey.Bytes()), base64.StdEncoding.EncodeToString(privateKey.PublicKey().Bytes()), nil
+func generateX25519Keypair() (string, string) {
+	return encodeX25519Keypair(mustX25519Key(randomBytes(32)))
 }
 
-func generateWireGuardSecret() (string, error) {
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return "", err
+func encodeX25519Keypair(key *ecdh.PrivateKey) (string, string) {
+	return base64.StdEncoding.EncodeToString(key.Bytes()), base64.StdEncoding.EncodeToString(key.PublicKey().Bytes())
+}
+
+// mustX25519Key builds a private key from a 32-byte seed. Every 32-byte
+// string is a valid X25519 private key (the scalar is clamped when used), so
+// only a wrong-length seed, a programming error, can fail.
+func mustX25519Key(seed []byte) *ecdh.PrivateKey {
+	key, err := ecdh.X25519().NewPrivateKey(seed)
+	if err != nil {
+		panic(fmt.Sprintf("x25519 private key: %v", err))
 	}
-	return base64.StdEncoding.EncodeToString(secret), nil
+	return key
+}
+
+func generateWireGuardSecret() string {
+	return base64.StdEncoding.EncodeToString(randomBytes(32))
 }
 
 func x25519PublicKeyFromBase64(privateKey string) (string, error) {

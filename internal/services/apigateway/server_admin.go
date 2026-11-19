@@ -237,7 +237,7 @@ func (s *Server) handleAdminDeletePlayer(w http.ResponseWriter, r *http.Request)
 	}
 	player, err := s.store.SetPlayerActive(r.Context(), playerID, false, s.now())
 	if err != nil {
-		writeStoreFailure(w, err)
+		writeDomainFailure(w, err)
 		return
 	}
 	operationContext, cancel := lifecycleOperationContext(r.Context())
@@ -251,7 +251,7 @@ func (s *Server) handleAdminDeletePlayer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.store.DeleteAdminPlayer(operationContext, playerID); err != nil {
-		writeStoreFailure(w, err)
+		writeDomainFailure(w, err)
 		return
 	}
 
@@ -302,7 +302,7 @@ func (s *Server) handleAdminSetPlayerActive(w http.ResponseWriter, r *http.Reque
 	}
 	player, err := s.store.SetPlayerActive(r.Context(), playerID, active, s.now())
 	if err != nil {
-		writeStoreFailure(w, err)
+		writeDomainFailure(w, err)
 		return
 	}
 	operationContext, cancel := lifecycleOperationContext(r.Context())

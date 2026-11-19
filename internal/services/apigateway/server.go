@@ -218,7 +218,7 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	token, err := issueToken(s.teamTokenSecret, player, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Authentication failed", "team authentication token could not be issued.")
 		return
@@ -282,7 +282,7 @@ func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	token, err := issueToken(s.teamTokenSecret, player, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Registration failed", "team authentication token could not be issued.")
 		return
@@ -324,7 +324,7 @@ func (s *Server) handleJoinExistingTeam(w http.ResponseWriter, r *http.Request) 
 	}
 	s.reconcileWireGuardGatewayBestEffort(r.Context(), "participant team join")
 
-	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Team join failed", "team authentication token could not be issued.")
 		return
@@ -374,7 +374,7 @@ func (s *Server) handleTransferTeamCaptain(w http.ResponseWriter, r *http.Reques
 		"to_player_id":   req.PlayerID,
 		"team_id":        player.TeamID,
 	})
-	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		// The transfer already committed and invalidated the caller's previous
 		// token, so this is not a failed transfer. Report it honestly so the
@@ -469,7 +469,7 @@ func (s *Server) handleUpdateParticipantProfile(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, err := issueTeamJWT(s.teamTokenSecret, updatedPlayer, s.now())
+	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Profile update failed", "team authentication token could not be issued.")
 		return
@@ -582,20 +582,32 @@ func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
 
 // sanitizePublicGameStatus strips diagnostics that belong only on organizer
 // endpoints. Summary counters stay so participants can see match readiness.
+// Scheduler last_error and the tick message carry raw internal err.Error()
+// text (database and upstream failures), so they are organizer-only too.
 func sanitizePublicGameStatus(status GameStatus) GameStatus {
-	if status.Match == nil || status.Match.Warmup == nil {
-		return status
-	}
 	public := status
+	if status.Scheduler != nil {
+		schedulerCopy := *status.Scheduler
+		schedulerCopy.LastError = ""
+		public.Scheduler = &schedulerCopy
+	}
+	if status.CurrentTick != nil {
+		tickCopy := *status.CurrentTick
+		tickCopy.Message = ""
+		public.CurrentTick = &tickCopy
+	}
+	if status.Match == nil || status.Match.Warmup == nil {
+		return public
+	}
 	matchCopy := *status.Match
 	warmupCopy := *status.Match.Warmup
 	warmupCopy.Failures = nil
-	if containsSensitiveCheckerDetail(warmupCopy.Message) {
-		if strings.EqualFold(strings.TrimSpace(warmupCopy.Status), "failed") {
-			warmupCopy.Message = "warmup put phase failed for one or more targets"
-		} else {
-			warmupCopy.Message = ""
-		}
+	// The warmup message is raw diagnostic text too (checker output, database
+	// and network errors), so the public view gets only a fixed summary.
+	if strings.EqualFold(strings.TrimSpace(warmupCopy.Status), "failed") {
+		warmupCopy.Message = "warmup failed for one or more targets"
+	} else {
+		warmupCopy.Message = ""
 	}
 	matchCopy.Warmup = &warmupCopy
 	public.Match = &matchCopy
@@ -1233,16 +1245,10 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 	finalizeCtx, finalizeCancel := context.WithTimeout(operationCtx, 20*time.Second)
 	defer finalizeCancel()
 	var data resetData
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 1; ; attempt++ {
 		data, err = s.store.CompleteFactoryResetService(finalizeCtx, teamID, challengeID)
-		if err == nil {
+		if err == nil || attempt == 3 || !sleepContext(finalizeCtx, 250*time.Millisecond) {
 			break
-		}
-		if attempt < 2 {
-			select {
-			case <-finalizeCtx.Done():
-			case <-time.After(250 * time.Millisecond):
-			}
 		}
 	}
 	if err != nil {
@@ -1250,7 +1256,11 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 		defer fallbackCancel()
 		if markErr := s.store.MarkFactoryResetCompletionFailure(fallbackCtx, teamID, challengeID); markErr != nil {
 			log.Printf("factory reset completion recovery failed for team %d challenge %d: %v", teamID, challengeID, markErr)
-			go s.retryFactoryResetCompletionFailure(teamID, challengeID)
+			go func() {
+				retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer retryCancel()
+				s.retryFactoryResetCompletionFailure(retryCtx, teamID, challengeID, time.Second)
+			}()
 		}
 		writeDomainFailure(w, err)
 		return
@@ -1264,20 +1274,22 @@ func (s *Server) handleFactoryReset(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, data)
 }
 
-func (s *Server) retryFactoryResetCompletionFailure(teamID, challengeID int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		if err := s.store.MarkFactoryResetCompletionFailure(ctx, teamID, challengeID); err == nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
+// retryFactoryResetCompletionFailure keeps trying to record a reset whose
+// completion could not be stored, until it succeeds or ctx ends.
+func (s *Server) retryFactoryResetCompletionFailure(ctx context.Context, teamID, challengeID int, interval time.Duration) {
+	for s.store.MarkFactoryResetCompletionFailure(ctx, teamID, challengeID) != nil && sleepContext(ctx, interval) {
+	}
+}
+
+// sleepContext waits for d and reports whether ctx was still live afterwards.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

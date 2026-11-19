@@ -113,63 +113,46 @@ func NewMemoryStore(teamID int) Store {
 		nextAuditLogID:     1,
 	}
 
-	for teamID := range store.teams {
-		store.teamStates[teamID] = make(map[int]*serviceState)
-		store.instances[teamID] = make(map[int]*serviceInstanceRecord)
-		for challengeID, challenge := range store.challenges {
-			if challenge.Published {
-				store.teamStates[teamID][challengeID] = defaultServiceStateForConfig(challengeID, teamID, challenge.Name, challenge.ServicePort, challenge.ServiceSubnetOctet)
-				store.instances[teamID][challengeID] = &serviceInstanceRecord{
-					TeamID:        teamID,
-					ChallengeID:   challengeID,
-					ChallengeName: challenge.Name,
-					RuntimeKind:   "docker",
-					RuntimeStatus: "ready",
-					ContainerName: serviceContainerName(challenge.Name, teamID),
-					StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
-					BaselineImage: challenge.BaselineImage,
-					CheckerImage:  challenge.CheckerImage,
-					CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", teamID, challengeID),
-					Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
-					SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, teamID),
-					ServicePort:   challenge.ServicePort,
-					UpdatedAt:     now.Format(time.RFC3339),
-				}
-			}
-		}
-	}
-
 	if _, ok := store.teams[teamID]; !ok {
 		teamName := fmt.Sprintf("Team %d", teamID)
 		store.teams[teamID] = &adminTeam{ID: teamID, Name: teamName, ContactEmail: fmt.Sprintf("team-%d@example.com", teamID), JoinKey: fmt.Sprintf("TEAM-%d-JOIN", teamID)}
 		store.teamNames[teamID] = teamName
-		store.teamStates[teamID] = make(map[int]*serviceState)
-		store.instances[teamID] = make(map[int]*serviceInstanceRecord)
-		for challengeID, challenge := range store.challenges {
-			if challenge.Published {
-				store.teamStates[teamID][challengeID] = defaultServiceStateForConfig(challengeID, teamID, challenge.Name, challenge.ServicePort, challenge.ServiceSubnetOctet)
-				store.instances[teamID][challengeID] = &serviceInstanceRecord{
-					TeamID:        teamID,
-					ChallengeID:   challengeID,
-					ChallengeName: challenge.Name,
-					RuntimeKind:   "docker",
-					RuntimeStatus: "ready",
-					ContainerName: serviceContainerName(challenge.Name, teamID),
-					StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
-					BaselineImage: challenge.BaselineImage,
-					CheckerImage:  challenge.CheckerImage,
-					CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", teamID, challengeID),
-					Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
-					SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, teamID),
-					ServicePort:   challenge.ServicePort,
-					UpdatedAt:     now.Format(time.RFC3339),
-				}
-			}
-		}
 		store.scoreboard = append(store.scoreboard, scoreRow{Rank: len(store.scoreboard) + 1, Team: teamName, Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "new"})
+	}
+	for id := range store.teams {
+		store.seedReadyServicesLocked(id, now)
 	}
 
 	return store
+}
+
+// seedReadyServicesLocked gives a seeded team a ready instance of every
+// published challenge.
+func (s *memoryStore) seedReadyServicesLocked(teamID int, now time.Time) {
+	s.teamStates[teamID] = make(map[int]*serviceState)
+	s.instances[teamID] = make(map[int]*serviceInstanceRecord)
+	for challengeID, challenge := range s.challenges {
+		if !challenge.Published {
+			continue
+		}
+		s.teamStates[teamID][challengeID] = defaultServiceStateForConfig(challengeID, teamID, challenge.Name, challenge.ServicePort, challenge.ServiceSubnetOctet)
+		s.instances[teamID][challengeID] = &serviceInstanceRecord{
+			TeamID:        teamID,
+			ChallengeID:   challengeID,
+			ChallengeName: challenge.Name,
+			RuntimeKind:   "docker",
+			RuntimeStatus: "ready",
+			ContainerName: serviceContainerName(challenge.Name, teamID),
+			StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
+			BaselineImage: challenge.BaselineImage,
+			CheckerImage:  challenge.CheckerImage,
+			CheckerToken:  fmt.Sprintf("dev-checker-token-%d-%d", teamID, challengeID),
+			Endpoint:      ServiceEndpointFor(challenge.ServiceSubnetOctet, challenge.ServicePort, teamID),
+			SSHHost:       ServiceIP(challenge.ServiceSubnetOctet, teamID),
+			ServicePort:   challenge.ServicePort,
+			UpdatedAt:     now.Format(time.RFC3339),
+		}
+	}
 }
 
 func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password string) (authenticatedPlayer, error) {
@@ -192,7 +175,7 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 			return authenticatedPlayer{}, err
 		}
 		if passwordHashNeedsUpgrade(record.PasswordHash) {
-			record.PasswordHash = mustHashPassword(password)
+			record.PasswordHash = hashPassword(password)
 		}
 		teamName := teamNameForID(s.teamNames, record.Player.TeamID)
 		teamContactEmail := ""
@@ -201,7 +184,7 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 		} else if team := s.teams[record.Player.TeamID]; team != nil {
 			teamContactEmail = team.ContactEmail
 		}
-		return authenticatedPlayer{
+		return canonicalSessionPlayer(authenticatedPlayer{
 			PlayerID:         record.Player.ID,
 			TeamID:           record.Player.TeamID,
 			TeamName:         teamName,
@@ -210,7 +193,7 @@ func (s *memoryStore) AuthenticatePlayer(_ context.Context, email, password stri
 			Email:            record.Player.Email,
 			Role:             record.Player.Role,
 			SessionVersion:   max(record.SessionVersion, 1),
-		}, nil
+		}), nil
 	}
 
 	return authenticatedPlayer{}, consumeUnknownPlayerPassword(password)
@@ -244,7 +227,7 @@ func (s *memoryStore) RegisterPlayer(_ context.Context, input participantRegiste
 		WireGuardPeer: wireGuardPeer,
 		CreatedAt:     now.UTC().Format(time.RFC3339),
 	}
-	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), SessionVersion: 1}
+	s.players[id] = &adminPlayerRecord{Player: player, PasswordHash: hashPassword(input.Password), SessionVersion: 1}
 	return authenticatedPlayer{
 		PlayerID:       id,
 		TeamID:         0,
@@ -394,20 +377,13 @@ func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, 
 	}, nil
 }
 
-func (s *memoryStore) ListChallenges(ctx context.Context) ([]challenge, error) {
-	started, err := s.IsMatchStarted(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	started, paused := s.matchStateLocked()
 	if !started {
 		return []challenge{}, nil
 	}
-	paused, err := s.IsMatchPaused(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	result := make([]challenge, 0, len(s.challenges))
 	for _, item := range s.challenges {
@@ -426,23 +402,12 @@ func (s *memoryStore) ListChallenges(ctx context.Context) ([]challenge, error) {
 	return result, nil
 }
 
-func (s *memoryStore) ListPublicServices(ctx context.Context) (map[string]map[string][]string, error) {
-	started, err := s.IsMatchStarted(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !started {
-		return map[string]map[string][]string{}, nil
-	}
-	paused, err := s.IsMatchPaused(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if paused {
-		return map[string]map[string][]string{}, nil
-	}
+func (s *memoryStore) ListPublicServices(_ context.Context) (map[string]map[string][]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if started, paused := s.matchStateLocked(); !started || paused {
+		return map[string]map[string][]string{}, nil
+	}
 
 	services := make(map[string]map[string][]string)
 	for teamID, challengeStates := range s.teamStates {
@@ -534,30 +499,19 @@ func (s *memoryStore) ListAttackFeed(_ context.Context) ([]attackEvent, error) {
 	return append([]attackEvent(nil), s.attackFeed...), nil
 }
 
-func (s *memoryStore) ListTeamServices(ctx context.Context, teamID int) ([]serviceState, error) {
-	started, err := s.IsMatchStarted(ctx)
-	if err != nil {
-		return nil, err
-	}
-	paused, err := s.IsMatchPaused(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (s *memoryStore) ListTeamServices(_ context.Context, teamID int) ([]serviceState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	started, paused := s.matchStateLocked()
 
-	challengeStates, ok := s.teamStates[teamID]
-	if !ok {
-		return nil, nil
-	}
-
+	challengeStates := s.teamStates[teamID]
 	states := make([]serviceState, 0, len(challengeStates))
 	for challengeID, state := range challengeStates {
 		challengeMeta := s.challenges[challengeID]
 		if challengeMeta == nil || !challengeMeta.Published {
 			continue
 		}
-		cloned := *cloneServiceState(state)
+		cloned := *state
 		switch {
 		case !started:
 			cloned.Maintenance = true
@@ -592,84 +546,60 @@ func (s *memoryStore) SubmitFlags(_ context.Context, teamID int, flags []string)
 	return nil, ErrSubmissionUnavailable
 }
 
-func (s *memoryStore) ValidateServiceAction(ctx context.Context, teamID, challengeID int) error {
-	started, err := s.IsMatchStarted(ctx)
-	if err != nil {
-		return err
-	}
-	if !started {
-		return ErrMatchNotStarted
-	}
-	paused, err := s.IsMatchPaused(ctx)
-	if err != nil {
-		return err
-	}
-	if paused {
-		return ErrMatchPaused
-	}
+func (s *memoryStore) ValidateServiceAction(_ context.Context, teamID, challengeID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_, _, err := s.validateServiceActionLocked(teamID, challengeID)
+	return err
+}
 
-	if _, err := s.lookupTeamStateLocked(teamID, challengeID); err != nil {
-		return err
+// validateServiceActionLocked checks, under the store lock, everything a
+// participant service action requires and returns the service's state and
+// instance, so each action checks and acts atomically.
+func (s *memoryStore) validateServiceActionLocked(teamID, challengeID int) (*serviceState, *serviceInstanceRecord, error) {
+	started, paused := s.matchStateLocked()
+	if !started {
+		return nil, nil, ErrMatchNotStarted
+	}
+	if paused {
+		return nil, nil, ErrMatchPaused
+	}
+	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	if err != nil {
+		return nil, nil, err
 	}
 	if s.deactivatedTeams[teamID] {
-		return ErrTeamNotFound
+		return nil, nil, ErrTeamNotFound
 	}
 	if team, ok := s.teams[teamID]; ok && team != nil && team.PlayFromTick > 0 {
-		return ErrChallengeDeferred
+		return nil, nil, ErrChallengeDeferred
 	}
 	challenge, ok := s.challenges[challengeID]
 	if !ok || !challenge.Published {
-		return ErrChallengeNotFound
+		return nil, nil, ErrChallengeNotFound
 	}
 	if challenge.Maintenance {
-		return ErrChallengeMaintenance
+		return nil, nil, ErrChallengeMaintenance
 	}
 	if challenge.PlayFromTick > 0 {
-		return ErrChallengeDeferred
-	}
-	instances, ok := s.instances[teamID]
-	if !ok {
-		return ErrChallengeNotFound
-	}
-	instance, ok := instances[challengeID]
-	if !ok {
-		return ErrChallengeNotFound
-	}
-	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
-		return ErrServiceUnavailable
-	}
-	return nil
-}
-
-func (s *memoryStore) UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error) {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
-		return unlockData{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	state, err := s.lookupTeamStateLocked(teamID, challengeID)
-	if err != nil {
-		return unlockData{}, err
-	}
-	challenge, ok := s.challenges[challengeID]
-	if !ok || !challenge.Published || challenge.Maintenance || challenge.PlayFromTick > 0 {
-		if ok && challenge.Maintenance {
-			return unlockData{}, ErrChallengeMaintenance
-		}
-		if ok && challenge.PlayFromTick > 0 {
-			return unlockData{}, ErrChallengeDeferred
-		}
-		return unlockData{}, ErrChallengeNotFound
+		return nil, nil, ErrChallengeDeferred
 	}
 	instance, ok := s.instances[teamID][challengeID]
 	if !ok {
-		return unlockData{}, ErrChallengeNotFound
+		return nil, nil, ErrChallengeNotFound
 	}
 	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
-		return unlockData{}, ErrServiceUnavailable
+		return nil, nil, ErrServiceUnavailable
+	}
+	return state, instance, nil
+}
+
+func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) (unlockData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, _, err := s.validateServiceActionLocked(teamID, challengeID)
+	if err != nil {
+		return unlockData{}, err
 	}
 	state.Unlocked = true
 	state.Status = demoteStatus(state.Status)
@@ -679,27 +609,12 @@ func (s *memoryStore) UnlockService(ctx context.Context, teamID, challengeID int
 	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
 }
 
-func (s *memoryStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
-		return sshSessionData{}, err
-	}
+func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	state, _, err := s.validateServiceActionLocked(teamID, challengeID)
 	if err != nil {
 		return sshSessionData{}, err
-	}
-	challenge, ok := s.challenges[challengeID]
-	if !ok || !challenge.Published {
-		return sshSessionData{}, ErrChallengeNotFound
-	}
-	instance, ok := s.instances[teamID][challengeID]
-	if !ok {
-		return sshSessionData{}, ErrChallengeNotFound
-	}
-	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
-		return sshSessionData{}, ErrServiceUnavailable
 	}
 	if !state.Unlocked {
 		return sshSessionData{}, ErrServiceLocked
@@ -733,51 +648,37 @@ func (s *memoryStore) LockServiceLifecycle(ctx context.Context, teamID, challeng
 	return lock.Unlock, nil
 }
 
-func (s *memoryStore) ValidateRestartService(ctx context.Context, teamID, challengeID int) error {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
-		return err
-	}
+func (s *memoryStore) ValidateRestartService(_ context.Context, teamID, challengeID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, err := s.lookupTeamStateLocked(teamID, challengeID)
-	if err != nil {
-		return err
-	}
-	if state.Status == "resetting" {
-		return ErrServiceUnavailable
-	}
-	return nil
+	_, err := s.validateRestartLocked(teamID, challengeID)
+	return err
 }
 
-func (s *memoryStore) PrepareFactoryResetService(ctx context.Context, teamID, challengeID int) (resetData, error) {
-	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
-		return resetData{}, err
+// validateRestartLocked is validateServiceActionLocked for actions that a
+// running factory reset must exclude.
+func (s *memoryStore) validateRestartLocked(teamID, challengeID int) (*serviceState, error) {
+	state, _, err := s.validateServiceActionLocked(teamID, challengeID)
+	if err != nil {
+		return nil, err
 	}
+	if state.Status == "resetting" {
+		return nil, ErrServiceUnavailable
+	}
+	return state, nil
+}
+
+func (s *memoryStore) PrepareFactoryResetService(_ context.Context, teamID, challengeID int) (resetData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	state, instance, err := s.validateServiceActionLocked(teamID, challengeID)
 	if err != nil {
 		return resetData{}, err
-	}
-	challenge, ok := s.challenges[challengeID]
-	if !ok || !challenge.Published {
-		return resetData{}, ErrChallengeNotFound
-	}
-	instance, ok := s.instances[teamID][challengeID]
-	if !ok {
-		return resetData{}, ErrChallengeNotFound
-	}
-	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
-		return resetData{}, ErrServiceUnavailable
 	}
 	if state.Status == "resetting" {
 		return resetData{}, ErrServiceUnavailable
 	}
-	checkerToken, err := newCheckerToken()
-	if err != nil {
-		return resetData{}, err
-	}
+	checkerToken := newCheckerToken()
 	prepared := resetData{ChallengeID: challengeID, TeamID: teamID, Action: "factory_reset", UnlockPreserved: state.Unlocked,
 		previousToken: instance.CheckerToken, resetToken: checkerToken, previousStatus: state.Status,
 		previousChecker: state.Checker, previousEvent: state.LastEvent, previousCooldown: state.ResetCooldown}
@@ -858,27 +759,12 @@ func (s *memoryStore) MarkFactoryResetCompletionFailure(_ context.Context, teamI
 	return nil
 }
 
-func (s *memoryStore) RestartService(ctx context.Context, teamID, challengeID int) (resetData, error) {
-	if err := s.ValidateRestartService(ctx, teamID, challengeID); err != nil {
-		return resetData{}, err
-	}
+func (s *memoryStore) RestartService(_ context.Context, teamID, challengeID int) (resetData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	state, err := s.lookupTeamStateLocked(teamID, challengeID)
+	state, err := s.validateRestartLocked(teamID, challengeID)
 	if err != nil {
 		return resetData{}, err
-	}
-	challenge, ok := s.challenges[challengeID]
-	if !ok || !challenge.Published {
-		return resetData{}, ErrChallengeNotFound
-	}
-	instance, ok := s.instances[teamID][challengeID]
-	if !ok {
-		return resetData{}, ErrChallengeNotFound
-	}
-	if strings.TrimSpace(instance.RuntimeStatus) != "ready" {
-		return resetData{}, ErrServiceUnavailable
 	}
 	state.Status = "warming"
 	state.Checker = "warning"
@@ -923,10 +809,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 	if err != nil {
 		return adminTeam{}, err
 	}
-	joinKey, err := NewTeamJoinKey()
-	if err != nil {
-		return adminTeam{}, err
-	}
+	joinKey := NewTeamJoinKey()
 	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail, JoinKey: joinKey}
 	s.teams[id] = team
 	s.teamNames[id] = name
@@ -942,10 +825,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 			state.ResetCooldown = "deploying"
 			s.teamStates[id][challengeID] = state
 
-			checkerToken, err := newCheckerToken()
-			if err != nil {
-				return adminTeam{}, err
-			}
+			checkerToken := newCheckerToken()
 			s.instances[id][challengeID] = &serviceInstanceRecord{
 				TeamID:        id,
 				ChallengeID:   challengeID,
@@ -1047,7 +927,7 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 		WireGuardPeer: wireGuardPeer,
 		CreatedAt:     now.UTC().Format(time.RFC3339),
 	}
-	record := &adminPlayerRecord{Player: player, PasswordHash: mustHashPassword(input.Password), SessionVersion: 1}
+	record := &adminPlayerRecord{Player: player, PasswordHash: hashPassword(input.Password), SessionVersion: 1}
 	if player.TeamID > 0 || player.Role == "organizer" {
 		address, err := s.allocateWireGuardPeerAddressLocked()
 		if err != nil {
@@ -1159,15 +1039,7 @@ func (s *memoryStore) ListTeamMembers(_ context.Context, teamID int) ([]teamMemb
 			Role:        record.Player.Role,
 		})
 	}
-	slices.SortFunc(members, func(a, b teamMember) int {
-		if a.PlayerID == b.PlayerID {
-			return 0
-		}
-		if a.PlayerID < b.PlayerID {
-			return -1
-		}
-		return 1
-	})
+	slices.SortFunc(members, func(a, b teamMember) int { return a.PlayerID - b.PlayerID })
 	return members, nil
 }
 
@@ -1229,7 +1101,7 @@ func (s *memoryStore) TransferTeamCaptain(_ context.Context, captainPlayerID, ta
 
 func (s *memoryStore) teamMemberLimitReachedLocked(teamID int) bool {
 	limit := s.platformSettings.MaxTeamMembers
-	if teamID <= 0 || limit <= 0 {
+	if limit <= 0 {
 		return false
 	}
 	count := 0
@@ -1354,6 +1226,7 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 			Status:          record.WireGuard.Status,
 			ClientPublicKey: record.WireGuard.ClientPublicKey,
 			PresharedKey:    record.WireGuard.PresharedKey,
+			Organizer:       strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer"),
 		})
 	}
 	return peers, nil
@@ -1362,10 +1235,8 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 func (s *memoryStore) IsMatchPaused(_ context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.matchPaused == nil {
-		return false, nil
-	}
-	return *s.matchPaused, nil
+	_, paused := s.matchStateLocked()
+	return paused, nil
 }
 
 // IsMatchStarted defaults true in memory so unit tests keep a live catalog; set
@@ -1373,10 +1244,14 @@ func (s *memoryStore) IsMatchPaused(_ context.Context) (bool, error) {
 func (s *memoryStore) IsMatchStarted(_ context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.matchStarted == nil {
-		return true, nil
-	}
-	return *s.matchStarted, nil
+	started, _ := s.matchStateLocked()
+	return started, nil
+}
+
+// matchStateLocked reports whether the match has started and whether it is
+// paused. Callers must hold s.mu.
+func (s *memoryStore) matchStateLocked() (started, paused bool) {
+	return s.matchStarted == nil || *s.matchStarted, s.matchPaused != nil && *s.matchPaused
 }
 
 func (s *memoryStore) setMatchStartedForTest(started bool) {
@@ -1449,10 +1324,8 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 	if err := validateChallengeRuntimeConfig(servicePort, serviceSubnetOctet); err != nil {
 		return adminChallenge{}, err
 	}
-	for existingID, challenge := range s.challenges {
-		if existingID == id {
-			continue
-		}
+	// The new challenge is not in the map yet, so every entry is another one.
+	for _, challenge := range s.challenges {
 		if challenge.ServiceSubnetOctet == serviceSubnetOctet {
 			return adminChallenge{}, fmt.Errorf("%w: service_subnet_octet %d is already assigned to challenge %d", ErrInvalidRuntimeConfig, serviceSubnetOctet, challenge.ID)
 		}
@@ -1492,21 +1365,13 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 	queuedCount := 0
 	readyCount := 0
 	createdAt := time.Now().UTC().Format(time.RFC3339)
+	// Every team gets its state and instance maps when it is created.
 	for teamID := range s.teams {
-		if _, ok := s.teamStates[teamID]; !ok {
-			s.teamStates[teamID] = make(map[int]*serviceState)
-		}
-		if _, ok := s.instances[teamID]; !ok {
-			s.instances[teamID] = make(map[int]*serviceInstanceRecord)
-		}
 		if jobID == 0 {
 			jobID = s.nextDeploymentID
 			s.nextDeploymentID++
 		}
-		checkerToken, err := newCheckerToken()
-		if err != nil {
-			return adminDeployment{}, err
-		}
+		checkerToken := newCheckerToken()
 		instance := &serviceInstanceRecord{
 			TeamID:          teamID,
 			ChallengeID:     challengeID,
@@ -1785,11 +1650,7 @@ func (s *memoryStore) GetControllerRuntimeTask(_ context.Context, teamID, challe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	challengeInstances, ok := s.instances[teamID]
-	if !ok {
-		return ControllerRuntimeTask{}, ErrChallengeNotFound
-	}
-	instance, ok := challengeInstances[challengeID]
+	instance, ok := s.instances[teamID][challengeID]
 	if !ok {
 		return ControllerRuntimeTask{}, ErrChallengeNotFound
 	}
@@ -1837,11 +1698,7 @@ func (s *memoryStore) GetControllerServiceAccessPolicy(_ context.Context, teamID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	challengeStates, ok := s.teamStates[teamID]
-	if !ok {
-		return ControllerServiceAccessPolicy{}, ErrChallengeNotFound
-	}
-	state, ok := challengeStates[challengeID]
+	state, ok := s.teamStates[teamID][challengeID]
 	if !ok {
 		return ControllerServiceAccessPolicy{}, ErrChallengeNotFound
 	}
@@ -2072,14 +1929,26 @@ func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input admin
 	if !ok {
 		return adminTeam{}, ErrTeamNotFound
 	}
-	if name := strings.TrimSpace(input.Name); name != "" {
-		team.Name = name
-		s.teamNames[teamID] = name
+	// Mirror the Postgres store: both fields are required and neither may be
+	// taken by another team.
+	name := strings.TrimSpace(input.Name)
+	email := strings.ToLower(strings.TrimSpace(input.ContactEmail))
+	if name == "" || email == "" {
+		return adminTeam{}, fmt.Errorf("%w: name and contact_email are required", ErrDuplicateResource)
 	}
-	if email := strings.TrimSpace(input.ContactEmail); email != "" {
-		team.ContactEmail = strings.ToLower(email)
+	for id, other := range s.teams {
+		if id != teamID && (strings.EqualFold(other.Name, name) || strings.EqualFold(other.ContactEmail, email)) {
+			return adminTeam{}, ErrDuplicateResource
+		}
 	}
-	s.teams[teamID] = team
+	for index := range s.scoreboard {
+		if s.scoreboard[index].Team == team.Name {
+			s.scoreboard[index].Team = name
+		}
+	}
+	team.Name = name
+	team.ContactEmail = email
+	s.teamNames[teamID] = name
 	return *team, nil
 }
 
@@ -2137,16 +2006,12 @@ func (s *memoryStore) RequeueTeamServices(_ context.Context, teamID int) error {
 	return nil
 }
 
-func (s *memoryStore) ChallengePlayBlocked(ctx context.Context, challengeID int) (bool, error) {
-	started, err := s.IsMatchStarted(ctx)
-	if err != nil {
-		return false, err
-	}
-	if !started {
-		return true, nil
-	}
+func (s *memoryStore) ChallengePlayBlocked(_ context.Context, challengeID int) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if started, _ := s.matchStateLocked(); !started {
+		return true, nil
+	}
 	challenge, ok := s.challenges[challengeID]
 	if !ok || challenge == nil || !challenge.Published {
 		return false, ErrChallengeNotFound
@@ -2227,12 +2092,20 @@ func (s *memoryStore) UpdateAdminPlayer(_ context.Context, playerID int, input a
 	if !ok {
 		return adminPlayer{}, ErrPlayerNotFound
 	}
-	if name := strings.TrimSpace(input.DisplayName); name != "" {
-		record.Player.DisplayName = name
+	// Mirror the Postgres store: both fields are required and the email must
+	// not belong to another player.
+	name := strings.TrimSpace(input.DisplayName)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	if name == "" || email == "" {
+		return adminPlayer{}, fmt.Errorf("%w: display_name and email are required", ErrDuplicateResource)
 	}
-	if email := strings.TrimSpace(input.Email); email != "" {
-		record.Player.Email = strings.ToLower(email)
+	for id, other := range s.players {
+		if id != playerID && strings.EqualFold(other.Player.Email, email) {
+			return adminPlayer{}, ErrDuplicateResource
+		}
 	}
+	record.Player.DisplayName = name
+	record.Player.Email = email
 	record.Player.Role = normalizedRole(input.Role)
 	s.players[playerID] = record
 	return record.Player, nil
@@ -2272,9 +2145,6 @@ func (s *memoryStore) SetPlayerActive(_ context.Context, playerID int, active bo
 // teamHasOtherActiveCaptainLocked reports whether the team has an active captain
 // other than excludePlayerID. Callers must hold s.mu.
 func (s *memoryStore) teamHasOtherActiveCaptainLocked(teamID, excludePlayerID int) bool {
-	if teamID <= 0 {
-		return false
-	}
 	for _, record := range s.players {
 		if record.Player.ID == excludePlayerID || record.Player.TeamID != teamID {
 			continue
@@ -2296,9 +2166,17 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	if !ok {
 		return adminChallenge{}, ErrChallengeNotFound
 	}
-	if name := strings.TrimSpace(input.Name); name != "" {
-		challenge.Name = name
+	// Mirror the Postgres store: a name is required and must be unique.
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return adminChallenge{}, fmt.Errorf("%w: name is required", ErrDuplicateResource)
 	}
+	for id, other := range s.challenges {
+		if id != challengeID && strings.EqualFold(other.Name, name) {
+			return adminChallenge{}, ErrDuplicateResource
+		}
+	}
+	challenge.Name = name
 	if img := strings.TrimSpace(input.BaselineImage); img != "" {
 		challenge.BaselineImage = img
 	}
@@ -2319,37 +2197,11 @@ func (s *memoryStore) Close() error {
 }
 
 func (s *memoryStore) lookupTeamStateLocked(teamID, challengeID int) (*serviceState, error) {
-	challengeStates, ok := s.teamStates[teamID]
-	if !ok {
-		return nil, ErrChallengeNotFound
-	}
-	state, ok := challengeStates[challengeID]
+	state, ok := s.teamStates[teamID][challengeID]
 	if !ok {
 		return nil, ErrChallengeNotFound
 	}
 	return state, nil
-}
-
-func (s *memoryStore) prependAttackEvent(event attackEvent) {
-	s.attackFeed = append([]attackEvent{event}, s.attackFeed...)
-	if len(s.attackFeed) > 12 {
-		s.attackFeed = s.attackFeed[:12]
-	}
-}
-
-func cloneServiceState(state *serviceState) *serviceState {
-	if state == nil {
-		return nil
-	}
-	clone := *state
-	return &clone
-}
-
-func (s *memoryStore) challengeName(challengeID int) string {
-	if challenge, ok := s.challenges[challengeID]; ok {
-		return challenge.Name
-	}
-	return fmt.Sprintf("challenge-%d", challengeID)
 }
 
 func (s *memoryStore) playerCountForTeamLocked(teamID int) int {
@@ -2446,7 +2298,7 @@ func mustNewAdminPlayerRecord(id, teamID int, teamName, displayName, email, role
 			WireGuardRevokedAt: wireGuardState.RevokedAt,
 			CreatedAt:          createdAt.UTC().Format(time.RFC3339),
 		},
-		PasswordHash:   mustHashPassword(password),
+		PasswordHash:   hashPassword(password),
 		WireGuard:      wireGuardState,
 		SessionVersion: 1,
 	}

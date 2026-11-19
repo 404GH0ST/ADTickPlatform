@@ -141,17 +141,23 @@ type Store interface {
 	Close() error
 }
 
-func NewTeamJoinKey() (string, error) {
-	var raw [12]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
+// randomBytes returns n bytes from crypto/rand. Since Go 1.24 rand.Read never
+// returns an error: it crashes the program rather than hand out weak bytes,
+// so callers need no error path.
+func randomBytes(n int) []byte {
+	buf := make([]byte, n)
+	_, _ = rand.Read(buf)
+	return buf
+}
+
+func NewTeamJoinKey() string {
+	raw := randomBytes(12)
 	return fmt.Sprintf(
 		"TEAM-%s-%s-%s",
 		strings.ToUpper(hex.EncodeToString(raw[:4])),
 		strings.ToUpper(hex.EncodeToString(raw[4:8])),
 		strings.ToUpper(hex.EncodeToString(raw[8:])),
-	), nil
+	)
 }
 
 func DefaultServicePort(challengeID int) int {
@@ -201,24 +207,8 @@ func validateChallengeRuntimeConfig(servicePort, serviceSubnetOctet int) error {
 	return nil
 }
 
-func challengePort(challengeID int) int {
-	return DefaultServicePort(challengeID)
-}
-
-func serviceEndpoint(challengeID, teamID int) string {
-	return ServiceEndpointFor(DefaultServiceSubnetOctet(challengeID), DefaultServicePort(challengeID), teamID)
-}
-
-func sshHost(challengeID, teamID int) string {
-	return ServiceIP(DefaultServiceSubnetOctet(challengeID), teamID)
-}
-
 func sshUsername() string {
 	return "root"
-}
-
-func sshConnectionHint(challengeID, teamID int) string {
-	return fmt.Sprintf("ssh %s@%s", sshUsername(), sshHost(challengeID, teamID))
 }
 
 func stableRootPassword(secret string, teamID, challengeID int) string {
@@ -230,14 +220,6 @@ func stableRootPassword(secret string, teamID, challengeID int) string {
 	fmt.Fprintf(mac, "ssh-root:%d:%d", teamID, challengeID)
 	encoded := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return fmt.Sprintf("Adp-%s-Aa1!", encoded[:18])
-}
-
-func issueOneTimeRootPassword() (string, error) {
-	buffer := make([]byte, 18)
-	if _, err := rand.Read(buffer); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
 
 func hashSecret(value string) string {
@@ -259,7 +241,7 @@ const (
 	minimumPasswordLength  = 8
 )
 
-var invalidCredentialsPasswordHash = mustHashPassword("invalid-credentials-dummy-password")
+var invalidCredentialsPasswordHash = hashPassword("invalid-credentials-dummy-password")
 
 func validPassword(value string) bool {
 	return len(value) >= minimumPasswordLength && strings.TrimSpace(value) != ""
@@ -280,30 +262,21 @@ func consumeUnknownPlayerPassword(password string) error {
 	return ErrInvalidCredentials
 }
 
-func hashPassword(value string) (string, error) {
-	salt := make([]byte, passwordHashSaltBytes)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key, err := pbkdf2.Key(sha256.New, value, salt, passwordHashIterations, passwordHashKeyBytes)
-	if err != nil {
-		return "", err
-	}
+func hashPassword(value string) string {
+	salt := randomBytes(passwordHashSaltBytes)
+	// pbkdf2.Key only fails for a non-positive or overlong key, or, in FIPS
+	// 140-only mode, a key under 112 bits, a salt under 128 bits or a non-SHA-2
+	// hash; these fixed parameters are valid in every mode. Were it ever to fail
+	// the empty key would format as "h=", which verifyPBKDF2Password rejects, so
+	// the failure would be closed.
+	key, _ := pbkdf2.Key(sha256.New, value, salt, passwordHashIterations, passwordHashKeyBytes)
 	return fmt.Sprintf(
 		"%s$i=%d$s=%s$h=%s",
 		passwordHashScheme,
 		passwordHashIterations,
 		base64.RawURLEncoding.EncodeToString(salt),
 		base64.RawURLEncoding.EncodeToString(key),
-	), nil
-}
-
-func mustHashPassword(value string) string {
-	hashed, err := hashPassword(value)
-	if err != nil {
-		panic(err)
-	}
-	return hashed
+	)
 }
 
 func passwordMatches(storedHash, password string) bool {
@@ -466,10 +439,6 @@ func demoteStatus(current string) string {
 		return "warming"
 	}
 	return current
-}
-
-func defaultServiceState(challengeID, teamID int, challengeName string) *serviceState {
-	return defaultServiceStateForConfig(challengeID, teamID, challengeName, DefaultServicePort(challengeID), DefaultServiceSubnetOctet(challengeID))
 }
 
 func defaultServiceStateForConfig(challengeID, teamID int, challengeName string, servicePort, serviceSubnetOctet int) *serviceState {

@@ -107,7 +107,7 @@ func (s *Server) handleChangeParticipantPassword(w http.ResponseWriter, r *http.
 		return
 	}
 	player.SessionVersion = sessionVersion
-	token, err := issueTeamJWT(s.teamTokenSecret, player, s.now())
+	token, err := issueToken(s.teamTokenSecret, player, s.now())
 	if err != nil {
 		writeStoreFailure(w, err)
 		return

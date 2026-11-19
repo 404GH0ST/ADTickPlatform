@@ -133,6 +133,9 @@ type WireGuardGatewayPeer struct {
 	Status          string `json:"status"`
 	ClientPublicKey string `json:"client_public_key"`
 	PresharedKey    string `json:"preshared_key"`
+	// Organizer comes from the player's role. Network policy must use it, never
+	// TeamName, which team captains can set to any value (including "Organizer").
+	Organizer bool `json:"organizer,omitempty"`
 }
 
 type WireGuardGatewayStatus struct {

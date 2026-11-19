@@ -204,9 +204,6 @@ func (c *httpControllerClient) postJSON(ctx context.Context, path string, body a
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if resp.StatusCode == http.StatusNoContent {
-			return nil
-		}
 		return nil
 	}
 	problem, err := decodeProblemDetails(resp.Body)
@@ -285,8 +282,12 @@ func decodeProblemDetails(body io.Reader) (httpapi.ProblemDetails, error) {
 	if err != nil {
 		return httpapi.ProblemDetails{}, err
 	}
+	// Any JSON object decodes as problem details, so only one that names a
+	// title or detail is taken as one; otherwise fall back to a legacy
+	// {"message": ...} body. An object with neither leaves the caller to
+	// report the status code.
 	var problem httpapi.ProblemDetails
-	if err := json.Unmarshal(data, &problem); err == nil {
+	if err := json.Unmarshal(data, &problem); err == nil && (strings.TrimSpace(problem.Title) != "" || strings.TrimSpace(problem.Detail) != "") {
 		return problem, nil
 	}
 	var payload struct {
@@ -295,8 +296,5 @@ func decodeProblemDetails(body io.Reader) (httpapi.ProblemDetails, error) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return httpapi.ProblemDetails{}, err
 	}
-	return httpapi.ProblemDetails{
-		Title:  "Controller request failed",
-		Detail: strings.TrimSpace(payload.Message),
-	}, nil
+	return httpapi.ProblemDetails{Detail: strings.TrimSpace(payload.Message)}, nil
 }

@@ -78,7 +78,7 @@ func (s *Server) handleChallengeSourceDownload(w http.ResponseWriter, r *http.Re
 		serveChallengeSourceDirectory(w, resolvedPath, descriptor.Name)
 		return
 	}
-	serveChallengeSourceFile(w, r, resolvedPath, info, descriptor.Name)
+	serveChallengeSourceFile(w, r, resolvedPath, info)
 }
 
 func (s *Server) lookupChallengeSourceDescriptor(ctx context.Context, challengeID int) (challengeSourceDescriptor, error) {
@@ -150,30 +150,22 @@ func resolveChallengeSourcePath(sourceBundlePath string) (string, fs.FileInfo, e
 	if err != nil {
 		return "", nil, err
 	}
-	candidate := filepath.Join(absRoot, cleanRelative)
-	absCandidate, err := filepath.Abs(candidate)
+	// Both paths are absolute and fully resolved, so containment is a prefix
+	// test. The root itself is never a challenge's source.
+	resolvedCandidate, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, cleanRelative))
 	if err != nil {
 		return "", nil, err
 	}
-	resolvedCandidate, err := filepath.EvalSymlinks(absCandidate)
-	if err != nil {
-		return "", nil, err
-	}
-	relToRoot, err := filepath.Rel(resolvedRoot, resolvedCandidate)
-	if err != nil {
-		return "", nil, err
-	}
-	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+	rootPrefix := strings.TrimSuffix(resolvedRoot, string(filepath.Separator)) + string(filepath.Separator)
+	info, statErr := os.Stat(resolvedCandidate)
+	if statErr != nil || !strings.HasPrefix(resolvedCandidate, rootPrefix) {
+		// Outside the root, or gone since it was resolved: fail closed.
 		return "", nil, errChallengeSourceUnavailable
-	}
-	info, err := os.Stat(resolvedCandidate)
-	if err != nil {
-		return "", nil, err
 	}
 	return resolvedCandidate, info, nil
 }
 
-func serveChallengeSourceFile(w http.ResponseWriter, r *http.Request, path string, info fs.FileInfo, challengeName string) {
+func serveChallengeSourceFile(w http.ResponseWriter, r *http.Request, path string, info fs.FileInfo) {
 	file, err := openResolvedChallengeSource(path, info)
 	if err != nil {
 		writeProblem(w, http.StatusNotFound, "Source unavailable", "challenge source is unavailable.")
@@ -181,10 +173,8 @@ func serveChallengeSourceFile(w http.ResponseWriter, r *http.Request, path strin
 	}
 	defer file.Close()
 
+	// path is strictly inside the source root, so it has a real base name.
 	filename := filepath.Base(path)
-	if filename == "" || filename == "." {
-		filename = fmt.Sprintf("%s-source", sanitizeArchiveName(challengeName))
-	}
 	contentType := mime.TypeByExtension(filepath.Ext(filename))
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -205,58 +195,63 @@ func serveChallengeSourceDirectory(w http.ResponseWriter, root string, challenge
 	tarWriter := tar.NewWriter(gzipWriter)
 	defer tarWriter.Close()
 
-	base := filepath.Base(root)
-	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, statErr := entry.Info()
-		if statErr != nil {
-			return statErr
-		}
-		if !(info.Mode().IsRegular() || info.IsDir()) {
-			return nil
-		}
-		relPath, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		tarPath := filepath.ToSlash(filepath.Join(base, relPath))
-		header, headerErr := tar.FileInfoHeader(info, "")
-		if headerErr != nil {
-			return headerErr
-		}
-		header.Name = tarPath
-		header.ModTime = info.ModTime().UTC().Truncate(time.Second)
-		if info.IsDir() && !strings.HasSuffix(header.Name, "/") {
-			header.Name += "/"
-		}
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		file, openErr := openResolvedChallengeSource(path, info)
-		if openErr != nil {
-			return openErr
-		}
-		_, copyErr := io.Copy(tarWriter, file)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	}); err != nil {
+	archive := sourceArchive{root: root, base: filepath.Base(root), tar: tarWriter}
+	if err := filepath.WalkDir(root, archive.add); err != nil {
 		http.Error(w, "challenge source archive failed", http.StatusInternalServerError)
 		return
 	}
+}
+
+// sourceArchive writes a challenge's source tree into a tar stream. Only
+// regular files and directories are archived: symlinks and special files are
+// skipped so the archive can never reach outside the resolved source root.
+type sourceArchive struct {
+	root string
+	base string
+	tar  *tar.Writer
+}
+
+func (a sourceArchive) add(path string, entry fs.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	if path == a.root || entry.Type()&os.ModeSymlink != 0 {
+		return nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() && !info.IsDir() {
+		return nil
+	}
+	// The header is built by hand rather than from the FileInfo so the
+	// archive carries no server uid, gid or owner names.
+	header := &tar.Header{
+		Name:     filepath.ToSlash(filepath.Join(a.base, strings.TrimPrefix(path, a.root+string(filepath.Separator)))),
+		Mode:     int64(info.Mode().Perm()),
+		ModTime:  info.ModTime().UTC().Truncate(time.Second),
+		Typeflag: tar.TypeReg,
+		Size:     info.Size(),
+	}
+	if info.IsDir() {
+		header.Name += "/"
+		header.Typeflag = tar.TypeDir
+		header.Size = 0
+	}
+	if err := a.tar.WriteHeader(header); err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	file, err := openResolvedChallengeSource(path, info)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(a.tar, file)
+	return err
 }
 
 func openResolvedChallengeSource(path string, expected fs.FileInfo) (*os.File, error) {
@@ -264,12 +259,10 @@ func openResolvedChallengeSource(path string, expected fs.FileInfo) (*os.File, e
 	if err != nil {
 		return nil, err
 	}
+	// The opened file must be the regular file that was resolved: anything
+	// swapped in since (or a handle that cannot be inspected) is refused.
 	actual, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, err
-	}
-	if !actual.Mode().IsRegular() || !os.SameFile(expected, actual) {
+	if err != nil || !actual.Mode().IsRegular() || !os.SameFile(expected, actual) {
 		file.Close()
 		return nil, errChallengeSourceUnavailable
 	}

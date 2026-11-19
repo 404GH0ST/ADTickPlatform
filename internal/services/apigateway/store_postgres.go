@@ -24,33 +24,18 @@ func NewPostgresStore(db *sql.DB) Store {
 }
 
 func (s *postgresStore) beginTx(ctx context.Context) (*sql.Tx, error) {
-	var (
-		tx  *sql.Tx
-		err error
-	)
-	for range 2 {
-		tx, err = s.db.BeginTx(ctx, nil)
-		if err == nil {
-			return tx, nil
-		}
-		if !isBadConnectionError(err) {
-			return nil, err
-		}
-	}
-	return nil, err
+	return retryBadConnection(func() (*sql.Tx, error) { return s.db.BeginTx(ctx, nil) })
 }
 
 func (s *postgresStore) queryRowScan(ctx context.Context, query string, args []any, dest ...any) error {
-	var err error
-	for range 2 {
-		err = s.db.QueryRowContext(ctx, query, args...).Scan(dest...)
-		if err == nil || !isBadConnectionError(err) {
-			return err
-		}
-	}
+	_, err := retryBadConnection(func() (struct{}, error) {
+		return struct{}{}, s.db.QueryRowContext(ctx, query, args...).Scan(dest...)
+	})
 	return err
 }
 
+// retryBadConnection runs fn once more when it fails on a broken pooled
+// connection, which database/sql may surface after its own retries.
 func retryBadConnection[T any](fn func() (T, error)) (T, error) {
 	var (
 		value T
@@ -65,10 +50,9 @@ func retryBadConnection[T any](fn func() (T, error)) (T, error) {
 	return value, err
 }
 
+// isBadConnectionError reports whether a non-nil err came from a broken
+// connection.
 func isBadConnectionError(err error) bool {
-	if err == nil {
-		return false
-	}
 	if errors.Is(err, driver.ErrBadConn) {
 		return true
 	}
@@ -121,12 +105,10 @@ func (s *postgresStore) AuthenticatePlayer(ctx context.Context, email, password 
 		return authenticatedPlayer{}, err
 	}
 	if passwordHashNeedsUpgrade(passwordHash) {
-		if upgradedHash, hashErr := hashPassword(password); hashErr == nil {
-			// Only migrate the credential this login verified. A password change may have won the race.
-			_, _ = s.db.ExecContext(ctx, `
-				UPDATE players SET password_hash = $2 WHERE id = $1 AND password_hash = $3
-			`, player.PlayerID, upgradedHash, passwordHash)
-		}
+		// Only migrate the credential this login verified. A password change may have won the race.
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE players SET password_hash = $2 WHERE id = $1 AND password_hash = $3
+		`, player.PlayerID, hashPassword(password), passwordHash)
 	}
 	return player, nil
 }
@@ -157,10 +139,7 @@ func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantReg
 	if err != nil {
 		return authenticatedPlayer{}, err
 	}
-	passwordHash, err := hashPassword(password)
-	if err != nil {
-		return authenticatedPlayer{}, err
-	}
+	passwordHash := hashPassword(password)
 	wireGuardPeer := wireguardPeerName(0, playerID)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
@@ -315,9 +294,8 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 				return authenticatedPlayer{}, fmt.Errorf("update participant scoreboard team name: %w", err)
 			}
 		} else if err := tx.QueryRowContext(ctx, `SELECT name, email FROM teams WHERE id = $1`, teamID).Scan(&teamName, &teamContactEmail); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return authenticatedPlayer{}, ErrTeamNotFound
-			}
+			// The player row is locked FOR UPDATE and team deletion cascades
+			// to it, so the team cannot vanish within this transaction.
 			return authenticatedPlayer{}, err
 		}
 		player.TeamID = teamID
@@ -872,10 +850,7 @@ func (s *postgresStore) PrepareFactoryResetService(ctx context.Context, teamID, 
 	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
 		return resetData{}, err
 	}
-	checkerToken, err := newCheckerToken()
-	if err != nil {
-		return resetData{}, err
-	}
+	checkerToken := newCheckerToken()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return resetData{}, err
@@ -1191,10 +1166,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 		if err != nil {
 			return adminTeam{}, fmt.Errorf("allocate team id: %w", err)
 		}
-		joinKey, err := NewTeamJoinKey()
-		if err != nil {
-			return adminTeam{}, fmt.Errorf("generate team join key: %w", err)
-		}
+		joinKey := NewTeamJoinKey()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO teams (id, name, email, join_key) VALUES ($1, $2, $3, $4)`, teamID, name, contactEmail, joinKey); err != nil {
 			return adminTeam{}, fmt.Errorf("insert team: %w", err)
 		}
@@ -1256,10 +1228,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 
 		deployedChallenges := 0
 		for _, challengeConfig := range challenges {
-			checkerToken, err := newCheckerToken()
-			if err != nil {
-				return adminTeam{}, err
-			}
+			checkerToken := newCheckerToken()
 			state := defaultServiceStateForConfig(challengeConfig.ID, teamID, challengeConfig.Name, challengeConfig.ServicePort, challengeConfig.ServiceSubnetOctet)
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO team_service_states (team_id, challenge_id, endpoint, status, checker, unlocked, ssh_hint, last_event, reset_cooldown)
@@ -1444,10 +1413,7 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	if player.TeamID > 0 {
 		dbTeamID = sql.NullInt64{Int64: int64(player.TeamID), Valid: true}
 	}
-	passwordHash, err := hashPassword(input.Password)
-	if err != nil {
-		return adminPlayer{}, err
-	}
+	passwordHash := hashPassword(input.Password)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO players (id, team_id, display_name, email, password_hash, role, wireguard_peer, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1580,10 +1546,8 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	return player, nil
 }
 
+// teamMemberLimitReachedTx reports whether an existing team is full.
 func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool, error) {
-	if teamID <= 0 {
-		return false, nil
-	}
 	var limit int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT max_team_members
@@ -1615,9 +1579,6 @@ func teamMemberLimitReachedTx(ctx context.Context, tx *sql.Tx, teamID int) (bool
 // active captain. Callers should hold a lock on the team row so the result
 // stays stable while they decide whether to promote a joining/added player.
 func teamHasActiveCaptainTx(ctx context.Context, tx *sql.Tx, teamID int) (bool, error) {
-	if teamID <= 0 {
-		return false, nil
-	}
 	var hasCaptain bool
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS(
@@ -1843,7 +1804,8 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id, p.team_id, t.name, p.display_name, p.wireguard_peer,
-		       wp.address, wp.status, wp.public_key, wp.preshared_key
+		       wp.address, wp.status, wp.public_key, wp.preshared_key,
+		       LOWER(TRIM(p.role)) = 'organizer'
 		FROM players p
 		LEFT JOIN teams t ON t.id = p.team_id
 		JOIN wireguard_peers wp ON wp.player_id = p.id
@@ -1874,6 +1836,7 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 			&peer.Status,
 			&peer.ClientPublicKey,
 			&peer.PresharedKey,
+			&peer.Organizer,
 		); err != nil {
 			return nil, err
 		}
@@ -2121,7 +2084,10 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 		       COALESCE((SELECT COUNT(*) FROM players p WHERE p.team_id = t.id), 0),
 		       COALESCE((SELECT COUNT(DISTINCT si.challenge_id) FROM service_instances si WHERE si.team_id = t.id AND si.runtime_status = 'ready'), 0)
 		FROM teams t WHERE t.id = $1
-	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); err != nil {
+	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); errors.Is(err, sql.ErrNoRows) {
+		// The updates matched nothing: there is no such team.
+		return adminTeam{}, ErrTeamNotFound
+	} else if err != nil {
 		return adminTeam{}, fmt.Errorf("read updated team: %w", err)
 	}
 	return team, nil
@@ -2435,6 +2401,7 @@ func demoteReactivatedDuplicateCaptainTx(ctx context.Context, tx *sql.Tx, player
 		FROM players
 		WHERE id = $1
 	`, playerID).Scan(&role, &teamID); err != nil {
+		// The caller's UPDATE matches no row for an unknown ID without error.
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrPlayerNotFound
 		}
@@ -2613,10 +2580,7 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 			return adminDeployment{}, err
 		}
 
-		checkerToken, err := newCheckerToken()
-		if err != nil {
-			return adminDeployment{}, err
-		}
+		checkerToken := newCheckerToken()
 		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO service_instances (
 					team_id, challenge_id, deployment_job_id, runtime_kind, runtime_status, container_name,

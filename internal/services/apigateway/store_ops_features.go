@@ -39,10 +39,7 @@ func (s *postgresStore) ChangeParticipantPassword(ctx context.Context, playerID 
 	if !passwordMatches(storedHash, currentPassword) {
 		return 0, ErrInvalidCredentials
 	}
-	hashed, err := hashPassword(newPassword)
-	if err != nil {
-		return 0, err
-	}
+	hashed := hashPassword(newPassword)
 	var sessionVersion int
 	err = tx.QueryRowContext(ctx, `
 		UPDATE players
@@ -131,29 +128,9 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 			continue
 		}
 
-		players := make([]adminCreatePlayerRequest, 0, len(teamInput.Players))
-		playerFailed := false
-		for playerIndex, playerInput := range teamInput.Players {
-			displayName := strings.TrimSpace(playerInput.DisplayName)
-			playerEmail := strings.TrimSpace(playerInput.Email)
-			password := playerInput.Password
-			role := strings.TrimSpace(playerInput.Role)
-			if role == "" {
-				role = "member"
-			}
-			if displayName == "" || playerEmail == "" || !validPassword(password) {
-				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", index+1, playerIndex+1, minimumPasswordLength))
-				playerFailed = true
-				break
-			}
-			players = append(players, adminCreatePlayerRequest{
-				DisplayName: displayName,
-				Email:       playerEmail,
-				Password:    password,
-				Role:        role,
-			})
-		}
-		if playerFailed {
+		players, rosterErr := validateBulkImportRoster(index, teamInput.Players)
+		if rosterErr != "" {
+			result.Errors = append(result.Errors, rosterErr)
 			continue
 		}
 
@@ -169,6 +146,45 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 	}
 
 	return result, nil
+}
+
+// validateBulkImportRoster normalizes one team's roster rows. Rosters are
+// usually assembled from participant-supplied registration data, so a row may
+// only carry a team role: an "organizer"/"admin" value would otherwise mint an
+// account the web tier maps to the full admin token, and a second "captain"
+// would break the single-captain invariant the join and add paths keep.
+// Organizers are created through the dedicated player endpoint instead.
+// It returns the normalized rows, or a non-empty error describing the first
+// bad row.
+func validateBulkImportRoster(teamIndex int, rows []adminBulkImportPlayer) ([]adminCreatePlayerRequest, string) {
+	players := make([]adminCreatePlayerRequest, 0, len(rows))
+	captains := 0
+	for playerIndex, row := range rows {
+		displayName := strings.TrimSpace(row.DisplayName)
+		playerEmail := strings.TrimSpace(row.Email)
+		if displayName == "" || playerEmail == "" || !validPassword(row.Password) {
+			return nil, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", teamIndex+1, playerIndex+1, minimumPasswordLength)
+		}
+		role := strings.ToLower(strings.TrimSpace(row.Role))
+		switch role {
+		case "", "member":
+			role = "member"
+		case "captain":
+			captains++
+			if captains > 1 {
+				return nil, fmt.Sprintf("row %d player %d: a team roster may name at most one captain", teamIndex+1, playerIndex+1)
+			}
+		default:
+			return nil, fmt.Sprintf("row %d player %d: role %q is not allowed in a team roster; use member or captain", teamIndex+1, playerIndex+1, strings.TrimSpace(row.Role))
+		}
+		players = append(players, adminCreatePlayerRequest{
+			DisplayName: displayName,
+			Email:       playerEmail,
+			Password:    row.Password,
+			Role:        role,
+		})
+	}
+	return players, ""
 }
 
 func (s *postgresStore) importOneTeam(
@@ -214,7 +230,7 @@ func (s *memoryStore) ChangeParticipantPassword(_ context.Context, playerID int,
 	if !passwordMatches(record.PasswordHash, currentPassword) {
 		return 0, ErrInvalidCredentials
 	}
-	record.PasswordHash = mustHashPassword(newPassword)
+	record.PasswordHash = hashPassword(newPassword)
 	record.SessionVersion = max(record.SessionVersion, 1) + 1
 	return record.SessionVersion, nil
 }
@@ -273,29 +289,9 @@ func (s *memoryStore) ImportAdminTeams(ctx context.Context, teams []adminBulkImp
 			continue
 		}
 
-		players := make([]adminCreatePlayerRequest, 0, len(teamInput.Players))
-		playerFailed := false
-		for playerIndex, playerInput := range teamInput.Players {
-			displayName := strings.TrimSpace(playerInput.DisplayName)
-			playerEmail := strings.TrimSpace(playerInput.Email)
-			password := playerInput.Password
-			role := strings.TrimSpace(playerInput.Role)
-			if role == "" {
-				role = "member"
-			}
-			if displayName == "" || playerEmail == "" || !validPassword(password) {
-				result.Errors = append(result.Errors, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", index+1, playerIndex+1, minimumPasswordLength))
-				playerFailed = true
-				break
-			}
-			players = append(players, adminCreatePlayerRequest{
-				DisplayName: displayName,
-				Email:       playerEmail,
-				Password:    password,
-				Role:        role,
-			})
-		}
-		if playerFailed {
+		players, rosterErr := validateBulkImportRoster(index, teamInput.Players)
+		if rosterErr != "" {
+			result.Errors = append(result.Errors, rosterErr)
 			continue
 		}
 

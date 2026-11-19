@@ -63,9 +63,6 @@ func SummarizeCheckerRunsForTick(runs []GameCheckerRun, tickID int) GameServiceS
 		summary.Phase = dominantFailurePhase(phases)
 		summary.Message = dominantFailureMessage(phases)
 	}
-	if strings.TrimSpace(summary.Message) == "" {
-		summary.Message = "service state unavailable for the latest checker tick"
-	}
 	return summary
 }
 
@@ -105,10 +102,6 @@ func collectTickPhaseStates(runs []GameCheckerRun) map[string]tickPhaseState {
 			state.success = true
 		case "failed":
 			state.failed = true
-		default:
-			if state.run == nil {
-				state.run = run
-			}
 		}
 		phases[phase] = state
 	}
@@ -153,9 +146,6 @@ func nextMissingCheckerPhase(phases map[string]tickPhaseState) string {
 }
 
 func shouldReplacePhaseRun(current, candidate *GameCheckerRun) bool {
-	if candidate == nil {
-		return false
-	}
 	if current == nil {
 		return true
 	}

@@ -82,8 +82,10 @@ export function BulkImportPanel(): ReactElement {
         </div>
         <CardDescription id={csvDescription} className="wrap-anywhere">
           CSV columns: team_name, contact_email, optional player_display_name,
-          player_email, player_password, player_role. Each team is created
-          atomically with its players; a bad player row rolls that team back.
+          player_email, player_password, player_role (member or captain, at
+          most one captain per team). Each team is created atomically with its
+          players; a bad player row rolls that team back. Create organizer
+          accounts from the player registry, not from a roster.
         </CardDescription>
       </CardHeader>
       <CardContent>

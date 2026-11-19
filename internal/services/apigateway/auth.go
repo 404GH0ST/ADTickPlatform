@@ -26,25 +26,27 @@ type teamTokenClaims struct {
 	ExpiresAt        int64  `json:"exp"`
 }
 
+// teamJWTHeaderPart is the encoded {"alg":"HS256","typ":"JWT"} header every
+// team token carries.
+var teamJWTHeaderPart = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+
+// issueToken is a seam over issueTeamJWT so handlers' token-failure responses
+// can be tested; signing only fails for an empty secret, which the session
+// check rejects first.
+var issueToken = issueTeamJWT
+
 func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (string, error) {
 	if strings.TrimSpace(secret) == "" {
 		return "", fmt.Errorf("team token secret is empty")
 	}
 	player = canonicalSessionPlayer(player)
 
-	headerJSON, err := json.Marshal(map[string]string{
-		"alg": "HS256",
-		"typ": "JWT",
-	})
-	if err != nil {
-		return "", err
-	}
-
 	sessionVersion := player.SessionVersion
 	if sessionVersion < 1 {
 		sessionVersion = 1
 	}
-	claimsJSON, err := json.Marshal(teamTokenClaims{
+	// The claims are plain strings and integers, which always marshal.
+	claimsJSON, _ := json.Marshal(teamTokenClaims{
 		TeamID:           player.TeamID,
 		PlayerID:         player.PlayerID,
 		TeamName:         player.TeamName,
@@ -56,13 +58,9 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 		IssuedAt:         now.UTC().Unix(),
 		ExpiresAt:        now.UTC().Add(24 * time.Hour).Unix(),
 	})
-	if err != nil {
-		return "", err
-	}
 
-	headerPart := base64.RawURLEncoding.EncodeToString(headerJSON)
 	claimsPart := base64.RawURLEncoding.EncodeToString(claimsJSON)
-	signingInput := headerPart + "." + claimsPart
+	signingInput := teamJWTHeaderPart + "." + claimsPart
 
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(signingInput))
