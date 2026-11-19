@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Flag, LoaderCircle } from "lucide-react";
+import { useId } from "react";
 
 import { Button, cn, ScrollableRegion, StatusBanner, type FlagSubmitState } from "@/components/theme/kit";
 
@@ -23,6 +24,8 @@ export function NbFlagSubmit({
   onKeyDown,
   inputRef,
 }: FlagSubmitState) {
+  const hintId = useId();
+  const errorId = useId();
   return (
     <section data-testid="flag-submit-panel" aria-label="Submit flags" className="nb-panel overflow-hidden">
       <form onSubmit={onSubmit} aria-busy={pending || undefined} className="grid grid-cols-1 gap-0 md:grid-cols-[13rem_minmax(0,1fr)]">
@@ -53,6 +56,7 @@ export function NbFlagSubmit({
               spellCheck={false}
               autoComplete="off"
               aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `${hintId} ${errorId}` : hintId}
               className="min-h-14 min-w-0 flex-1 resize-y px-3 py-2.5 font-mono text-sm disabled:opacity-60"
             />
             <Button type="submit" size="lg" disabled={pending || closed} className="h-auto min-h-12 px-3 text-base sm:px-6">
@@ -60,9 +64,9 @@ export function NbFlagSubmit({
               {pending ? "Submitting…" : "Submit"}
             </Button>
           </div>
-          <p className="text-xs font-medium text-muted-foreground">{hint}</p>
+          <p id={hintId} className="text-xs font-medium text-muted-foreground">{hint}</p>
           <div aria-live="polite" className="grid gap-2">
-            {error ? <StatusBanner message={error} variant="error" /> : null}
+            {error ? <div id={errorId}><StatusBanner message={error} variant="error" /></div> : null}
             {note ? (
               <div data-testid="flag-submit-summary" data-variant={note.variant}>
                 <StatusBanner message={note.message} variant={note.variant} />

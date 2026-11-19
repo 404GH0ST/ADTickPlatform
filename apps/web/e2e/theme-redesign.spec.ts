@@ -90,6 +90,7 @@ test.describe("as a participant", () => {
 
       await page.goto("/services");
       const field = page.getByRole("textbox", { name: "Flags", exact: true });
+      await expect(field).toHaveAccessibleDescription(/One per line or comma-separated/);
       const flag = "PLAYIT{audit-invalid-0}";
       await field.fill(flag);
       await field.press("Control+Enter");
@@ -124,6 +125,15 @@ test.describe("as a participant", () => {
       await expect(results).toHaveAttribute("tabindex", "0");
       await results.press("End");
       await expect.poll(() => results.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+      await page.unroute("**/api/platform/submit");
+      await page.route("**/api/platform/submit", (route) => route.fulfill({
+        status: 503,
+        json: { detail: "Flag submission temporarily unavailable" },
+      }));
+      await field.fill(flag);
+      await field.press("Control+Enter");
+      await expect(field).toHaveAccessibleDescription(/Flag submission temporarily unavailable/);
     } finally {
       await browser.close();
     }
