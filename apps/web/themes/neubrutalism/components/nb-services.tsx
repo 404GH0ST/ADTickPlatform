@@ -49,18 +49,22 @@ export function NbServices({
   onSelectReset,
 }: ServicesViewProps) {
   return (
-    <div className="grid gap-6">
+    // Mobile: flag form, then your services, then the clock. From sm up the
+    // clock sits under the form, where a wide strip reads at a glance.
+    <div className="flex flex-col gap-6">
       {flagSubmit}
-      <NbMatchClock overview={overview} />
-      <section data-testid="nb-services" aria-label="Services" className="grid gap-4">
-        <h2 className="text-2xl font-extrabold">Your services</h2>
+      <div className="order-last sm:order-none">
+        <NbMatchClock overview={overview} />
+      </div>
+      <section data-testid="nb-services" aria-label="Services" className="grid grid-cols-1 gap-4">
+        <h2 className="wrap-anywhere text-2xl font-extrabold">Your services</h2>
         {rows.length === 0 ? (
           <p className="nb-panel p-6 text-sm text-muted-foreground">
             No services are assigned to your team yet. This page refreshes on its own once an organizer deploys a
             challenge.
           </p>
         ) : (
-          <ul className="grid gap-6 xl:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-6 xl:grid-cols-2">
             {rows.map((service) => {
               const view = describeService(service, {
                 feedback: serviceFeedback(service),
@@ -76,15 +80,15 @@ export function NbServices({
                 >
                   <div
                     className={cn(
-                      "flex flex-wrap items-start justify-between gap-3 border-b-[3px] border-[var(--nb-ink)] px-5 py-4",
+                      "flex flex-wrap items-start justify-between gap-3 border-b-[3px] border-border px-5 py-4",
                       statusFill(service, Boolean(view.lock)),
                     )}
                   >
                     <div className="grid min-w-0 gap-0.5">
-                      <h3 className="truncate text-2xl font-extrabold leading-tight">{service.name}</h3>
-                      <p className="font-mono text-sm font-medium">{service.endpoint}</p>
+                      <h3 className="wrap-anywhere text-2xl font-extrabold leading-tight">{service.name}</h3>
+                      <p className="wrap-anywhere font-mono text-sm font-medium">{service.endpoint}</p>
                     </div>
-                    <span className="nb-sticker bg-white">
+                    <span className={cn("nb-sticker nb-status-chip", statusFill(service, Boolean(view.lock)))}>
                       {view.lock ? <Lock className="size-3.5" strokeWidth={2.6} aria-hidden /> : null}
                       {statusLabel}
                     </span>
@@ -125,9 +129,15 @@ export function NbServices({
                   </div>
 
                   <div className="flex flex-wrap gap-2.5 border-t-2 border-dashed border-border px-5 py-4">
-                    <Button disabled={view.ssh.disabled} onClick={() => onSelectPrimaryAction(service)}>
+                    <Button
+                      disabled={view.ssh.disabled}
+                      className={cn(!service.unlocked && view.ssh.disabled && "nb-key-locked")}
+                      onClick={() => onSelectPrimaryAction(service)}
+                    >
                       {view.ssh.pending ? (
                         <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                      ) : !service.unlocked && view.ssh.disabled ? (
+                        <Lock className="size-4" strokeWidth={2.4} aria-hidden />
                       ) : (
                         <KeyRound className="size-4" strokeWidth={2.4} aria-hidden />
                       )}

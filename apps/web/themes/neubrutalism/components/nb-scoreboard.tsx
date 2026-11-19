@@ -10,30 +10,32 @@ function format(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
+// DOM order is rank order (mobile stack and screen readers read 1, 2, 3);
+// sm:order-* lays out the classic 2-1-3 podium. Fills follow the medal ramp.
 const PODIUM = [
-  { place: 2, fill: "nb-fill-blue", height: "sm:min-h-[11rem]" },
-  { place: 1, fill: "nb-fill-yellow", height: "sm:min-h-[14rem]" },
-  { place: 3, fill: "nb-fill-orange", height: "sm:min-h-[9.5rem]" },
+  { place: 1, fill: "nb-fill-yellow", height: "sm:order-2 sm:min-h-[14rem]" },
+  { place: 2, fill: "nb-fill-lilac", height: "sm:order-1 sm:min-h-[11rem]" },
+  { place: 3, fill: "nb-fill-orange", height: "sm:order-3 sm:min-h-[9.5rem]" },
 ] as const;
 
 function PodiumBlock({ row, fill, height, mine }: { row: ScoreRow; fill: string; height: string; mine: boolean }) {
   const first = row.rank === 1;
   return (
     <li
-      className={cn("nb-pop flex flex-col justify-between gap-4 rounded-[var(--nb-radius)] p-4 sm:p-5", fill, height, first && "sm:-translate-y-1")}
+      className={cn("nb-pop flex min-w-0 flex-col justify-between gap-4 rounded-[var(--nb-radius)] p-4 sm:p-5", fill, height, first && "sm:-translate-y-1")}
       data-podium-current={mine ? "true" : undefined}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="nb-display text-5xl font-extrabold leading-none">#{row.rank}</span>
         {first ? <Crown className="size-7" strokeWidth={2.4} aria-label="Leader" /> : null}
       </div>
-      <div className="grid gap-1">
-        <p className="nb-display truncate text-xl font-bold">
+      <div className="grid grid-cols-1 gap-1">
+        <p className="nb-display wrap-anywhere text-xl font-bold">
           {row.team}
-          {mine ? <span className="nb-sticker nb-fill-lilac ml-2 align-middle">You</span> : null}
+          {mine ? <span className="nb-sticker nb-status-chip ml-2 align-middle">You</span> : null}
         </p>
-        <p className="nb-display text-3xl font-extrabold tabular-nums leading-none">{format(row.total)}</p>
-        <p className="text-xs font-semibold tabular-nums opacity-80">
+        <p className="nb-display wrap-anywhere text-3xl font-extrabold tabular-nums leading-none">{format(row.total)}</p>
+        <p className="text-xs font-semibold tabular-nums">
           A {format(row.attack)} · D {format(row.defense)} · SLA {format(row.sla)}
         </p>
       </div>
@@ -53,7 +55,7 @@ export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt }: S
         <p
           role="status"
           data-testid="scoreboard-frozen-banner"
-          className="nb-pop nb-fill-blue flex items-center gap-3 rounded-[var(--nb-radius)] px-4 py-3 text-sm"
+          className="nb-frozen flex items-center gap-3 rounded-[var(--nb-radius)] px-4 py-3 text-sm"
         >
           <Snowflake className="size-5 shrink-0" strokeWidth={2.4} aria-hidden />
           <span>

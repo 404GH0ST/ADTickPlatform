@@ -30,7 +30,7 @@ export function NbOrganizerScoreboard({
   const rows = query === "" ? scoreRows : scoreRows.filter((row) => row.team.toLowerCase().includes(query));
 
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-1 gap-6">
       <NbStandings
         testId="authoritative-scoreboard-card"
         title="Live standings"
@@ -44,12 +44,12 @@ export function NbOrganizerScoreboard({
         }
         toolbar={
           <>
-            <label htmlFor="scoreboard-team-filter" className="sr-only">
-              Team Filter
+            <label htmlFor="scoreboard-team-filter" className="nb-eyebrow text-[0.6875rem] text-muted-foreground">
+              Team filter
             </label>
             <Input
               id="scoreboard-team-filter"
-              className="h-9 w-44 sm:w-56"
+              className="h-9 w-44 max-w-full sm:w-56"
               placeholder="Filter teams"
               value={teamFilter}
               onChange={(event) => setTeamFilter(event.target.value)}
@@ -65,7 +65,7 @@ export function NbOrganizerScoreboard({
           </>
         }
       />
-      <div className="grid items-start gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
         <ScoreboardFreezeControl />
         <ScoringAuditCard pendingAction={pendingAction} scoringAudit={scoringAudit} onAudit={onAudit} />
       </div>

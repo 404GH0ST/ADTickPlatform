@@ -24,7 +24,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--tone-danger-foreground);
+  --color-destructive: var(--signal-negative);
   --color-destructive-foreground: var(--background);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -358,6 +358,7 @@
   /* In-page view switcher (e.g. /admin/game): underline tabs, one row. */
   .section-tab {
     display: inline-flex;
+    max-inline-size: 100%;
     flex-shrink: 0;
     align-items: center;
     gap: 0.5rem;
@@ -492,6 +493,16 @@
   color: var(--swagger-fg);
 }
 
+.swagger-shell .swagger-ui .info .title {
+  overflow-wrap: anywhere;
+}
+
+.swagger-shell .swagger-ui .info .title > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  vertical-align: middle;
+}
+
 .swagger-shell .swagger-ui :is(.info a, .info .link, .info .url) {
   color: var(--swagger-fg);
   text-decoration: underline;
@@ -567,6 +578,40 @@
   border-color: var(--swagger-border);
 }
 
+.swagger-shell .swagger-ui .opblock-summary-control,
+.swagger-shell .swagger-ui .opblock-summary-path-description-wrapper {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.swagger-shell .swagger-ui .opblock .opblock-summary > .view-line-link.copy-to-clipboard {
+  flex: 0 0 2rem;
+  min-inline-size: 2rem;
+  block-size: 2rem;
+  transition: none;
+}
+
+.swagger-shell .swagger-ui .opblock .opblock-summary:hover > .view-line-link.copy-to-clipboard {
+  margin: 0;
+}
+
+.swagger-shell .swagger-ui .opblock-summary > .copy-to-clipboard button {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.swagger-shell .swagger-ui .operation-permalink {
+  display: inline-grid;
+  min-width: 2rem;
+  min-height: 2rem;
+  flex-shrink: 0;
+  place-items: center;
+  color: var(--swagger-fg);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .swagger-shell .swagger-ui :is(
   .opblock.opblock-get, .opblock.opblock-post, .opblock.opblock-put, .opblock.opblock-patch,
   .opblock.opblock-delete, .opblock.opblock-head, .opblock.opblock-options
@@ -609,6 +654,59 @@
 .swagger-shell .swagger-ui :is(section.models .model-container, .model-box, .json-schema-2020-12) {
   background: var(--swagger-sunken);
 }
+.swagger-shell .swagger-ui .json-schema-2020-12-expand-deep-button {
+  color: var(--swagger-fg);
+  min-height: 1.5rem;
+}
+
+.swagger-shell .swagger-ui .json-schema-2020-12__title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (width < 40rem) {
+  .swagger-shell .swagger-ui .opblock-summary-control {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.375rem;
+  }
+
+  .swagger-shell .swagger-ui .opblock-summary-method {
+    min-width: 3.25rem;
+  }
+
+  .swagger-shell .swagger-ui .opblock-section-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .swagger-shell .swagger-ui .try-out__btn {
+    white-space: nowrap;
+  }
+
+  .swagger-shell .swagger-ui .responses-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .swagger-shell .swagger-ui .responses-table :is(.response-col_status, .response-col_links) {
+    width: 2.75rem;
+    min-width: 0;
+    padding-inline: 0.25rem;
+    overflow-wrap: anywhere;
+  }
+
+  .swagger-shell .swagger-ui .responses-table .response-col_description {
+    width: auto;
+    padding-inline: 0.25rem;
+    overflow-wrap: anywhere;
+  }
+
+  .swagger-shell .swagger-ui :is(.examples-select, .response-control-media-type, .response-control-examples, select) {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
 .swagger-shell .swagger-ui section.models .model-container:hover {
   background: color-mix(in oklab, var(--swagger-fg) 8%, var(--swagger-surface));
 }
@@ -641,8 +739,9 @@
   color: oklch(0.74 0.14 25) !important;
 }
 
-.swagger-shell .swagger-ui :is(.parameter__name.required span, .parameter__name.required::after, .opblock-section-request-body .required, .required) {
-  color: var(--tone-danger-foreground, oklch(0.55 0.2 25));
+.swagger-shell .swagger-ui :is(.parameter__name.required span, .required),
+.swagger-shell .swagger-ui .parameter__name.required::after {
+  color: var(--signal-negative);
 }
 
 /* Code inside a block is part of the block, never an inline chip. */
@@ -696,6 +795,13 @@
   box-shadow: none;
 }
 
+@media (forced-colors: active) {
+  :root[data-scheme="neubrutalism"] .swagger-shell .swagger-ui select {
+    appearance: auto;
+    background-image: none;
+  }
+}
+
 .swagger-shell .swagger-ui :is(input, select, textarea)[disabled] {
   background-color: var(--swagger-sunken);
   color: var(--swagger-muted);
@@ -716,11 +822,21 @@
 }
 
 /* Swagger Dialog / Modal overrides */
-.swagger-shell .swagger-ui .dialog-ux .backdrop-ux {
-  background: rgba(0, 0, 0, 0.65) !important;
+.swagger-shell .swagger-ui .dialog-ux .modal-ux::backdrop {
+  background: rgb(0 0 0 / 65%);
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux {
+  position: fixed;
+  inset: 0;
+  width: min(40rem, calc(100% - 2 * clamp(8px, 4vw, 16px)));
+  min-width: 0;
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  transform: none;
+  color: var(--foreground);
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
   border-radius: 8px !important;
@@ -728,12 +844,16 @@
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-header {
+  display: flow-root;
   background: var(--card) !important;
   border-bottom: 1px solid var(--border) !important;
-  padding: 16px 20px !important;
+  padding: 16px min(20px, 4vw) !important;
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-header h3 {
+  padding: 0;
+  overflow-wrap: break-word;
+  line-height: 1.25;
   color: var(--foreground) !important;
   font-family: var(--font-sans) !important;
   font-size: 1.125rem !important;
@@ -741,14 +861,27 @@
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-header .close-modal {
+  display: grid;
+  float: inline-end;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  margin-inline-start: 0.5rem;
+  place-items: center;
   fill: var(--foreground) !important;
   color: var(--foreground) !important;
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-content {
+  max-height: none;
+  overflow: visible;
   background: var(--card) !important;
   color: var(--foreground) !important;
-  padding: 20px !important;
+  padding: 20px min(20px, 4vw) !important;
+  overflow-wrap: anywhere;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .auth-container {
+  padding-inline: min(20px, 4vw);
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-content h4 {
@@ -772,6 +905,9 @@
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-content input[type="text"] {
+  box-sizing: border-box;
+  min-inline-size: min(230px, 100%);
+  max-inline-size: 100%;
   background: var(--background) !important;
   border: 1px solid var(--input) !important;
   color: var(--foreground) !important;
@@ -783,10 +919,13 @@
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-content .auth-btn-wrapper {
   gap: 12px !important;
   display: flex !important;
+  flex-wrap: wrap;
   margin-top: 16px !important;
 }
 
 .swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn {
+  max-inline-size: 100%;
+  white-space: normal;
   border-radius: 6px !important;
   font-family: var(--font-sans) !important;
   font-size: 0.875rem !important;
@@ -795,25 +934,29 @@
   box-shadow: none !important;
 }
 
-.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth {
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .auth-btn-wrapper .btn-done {
+  margin-inline-start: 0;
+}
+
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth:not(.btn-done) {
   background: var(--primary) !important;
   border: 1px solid var(--primary) !important;
   color: var(--primary-foreground) !important;
 }
 
-.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth:hover {
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn.auth:not(.btn-done):hover {
   background: color-mix(in oklab, var(--primary) 90%, black 10%) !important;
   border-color: color-mix(in oklab, var(--primary) 90%, black 10%) !important;
 }
 
-.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:not(.auth) {
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:is(.btn-done, :not(.auth)) {
   background: var(--secondary) !important;
   border: 1px solid var(--border) !important;
-  color: var(--foreground) !important;
+  color: var(--secondary-foreground) !important;
 }
 
-.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:not(.auth):hover {
-  background: color-mix(in oklab, var(--secondary) 90%, black 10%) !important;
+.swagger-shell .swagger-ui .dialog-ux .modal-ux-content .btn:is(.btn-done, :not(.auth)):hover {
+  background: color-mix(in oklab, var(--secondary) 90%, var(--secondary-foreground) 10%) !important;
 }
 
 /* Swagger main page Authorize button overrides */

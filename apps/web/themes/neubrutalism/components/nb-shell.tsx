@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   BookOpen,
   Boxes,
@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 
 import { AppearanceControls, type AppShellProps, type NavItem } from "@/components/theme/kit";
+
+import { NbMenu } from "./nb-menu";
 
 const ICONS: Record<string, LucideIcon> = {
   "/": LayoutGrid,
@@ -60,9 +62,6 @@ function useRailCollapsed() {
   const toggle = () => {
     const root = document.documentElement;
     const next = !readRailCollapsed();
-    // Animate only user toggles, never page loads or navigation.
-    root.dataset.railAnimating = "true";
-    window.setTimeout(() => delete root.dataset.railAnimating, 260);
     if (next) root.dataset.rail = "collapsed";
     else delete root.dataset.rail;
     try {
@@ -105,7 +104,7 @@ function NavGroup({
             title={collapsed ? item.label : undefined}
           >
             <Icon className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
-            <span className="nb-rail-text">{item.label}</span>
+            <span className="nb-rail-text min-w-0 wrap-anywhere">{item.label}</span>
           </Link>
         );
       })}
@@ -116,20 +115,20 @@ function NavGroup({
 function Brand({ organizer }: { organizer: boolean }) {
   return (
     <span className="flex items-center gap-3">
-      <span className="nb-logo" aria-hidden>
+      <span className="nb-logo shrink-0" aria-hidden>
         AD
       </span>
-      <span className="nb-rail-text grid leading-tight">
+      <span className="nb-rail-text grid min-w-0 wrap-anywhere leading-tight">
         <span className="text-lg font-bold">AD Platform</span>
-        <span className="text-xs font-medium opacity-85">{organizer ? "Organizer desk" : "Team console"}</span>
+        <span className="text-xs font-semibold">{organizer ? "Organizer desk" : "Team console"}</span>
       </span>
     </span>
   );
 }
 
 /**
- * One layout for both surfaces: a collapsible blue rail, a row of header
- * controls, then the yellow title banner. Same props as the stock shell, so
+ * One layout for both surfaces: a collapsible blue rail, then the yellow
+ * title banner with the header controls beside it. Same props as the stock shell, so
  * every page keeps its behavior; below lg the rail becomes a scrolling strip.
  */
 export function NbShell({
@@ -140,6 +139,7 @@ export function NbShell({
   title,
   children,
   headerActions,
+  primaryHeaderAction,
   navActions,
   belowNav,
   summarySection,
@@ -147,69 +147,99 @@ export function NbShell({
 }: AppShellProps) {
   const organizer = surface === "organizer";
   const rail = useRailCollapsed();
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || nav.scrollWidth <= nav.clientWidth || nav.matches(":focus-within")) return;
+    nav.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activePath]);
   return (
     <div data-testid="nb-shell" className="nb-frame min-h-dvh text-foreground lg:grid">
-      <div className="p-3 lg:sticky lg:top-0 lg:h-dvh lg:p-4 lg:pr-0">
-        <aside
-          id="nb-rail"
-          className="nb-rail lg:flex lg:h-full lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden"
-        >
-          <div className="nb-rail-brand flex items-center px-4 pb-2 pt-4 lg:px-5 lg:pb-5 lg:pt-5">
-            <Link href={organizer ? "/admin" : "/"} aria-label={organizer ? "Organizer overview" : "Overview"}>
-              <Brand organizer={organizer} />
-            </Link>
-          </div>
-          <nav
-            aria-label="Primary"
-            className="flex gap-1.5 overflow-x-auto px-3 pb-3 pt-1 lg:grid lg:gap-1 lg:overflow-visible lg:px-3 lg:pb-6"
+      <a href="#nb-main" className="nb-skip">
+        Skip to content
+      </a>
+      <div className="nb-rail-column p-3 lg:sticky lg:top-0 lg:h-dvh lg:p-0">
+        <div className="nb-rail-motion">
+          <aside
+            id="nb-rail"
+            className="nb-rail lg:flex lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden"
           >
-            <NavGroup
-              label={organizer ? "Match" : undefined}
-              items={navItems}
-              activePath={activePath}
-              collapsed={rail.collapsed}
-            />
-            {secondaryNavItems.length > 0 ? (
-              <>
-                <span aria-hidden className="mx-1 my-2 w-[3px] shrink-0 self-stretch bg-[var(--nb-on-blue)] opacity-60 lg:hidden" />
-                <NavGroup label="Setup" items={secondaryNavItems} activePath={activePath} collapsed={rail.collapsed} />
-              </>
-            ) : null}
-          </nav>
-          <div className="mt-auto hidden px-3 pb-4 lg:block">
-            <button
-              type="button"
-              className="nb-nav-link nb-rail-toggle w-full"
-              aria-controls="nb-rail"
-              aria-expanded={!rail.collapsed}
-              aria-label={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              title={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={rail.toggle}
+            <div className="nb-rail-brand flex items-center px-4 pb-2 pt-4 lg:px-5 lg:pb-5 lg:pt-5">
+              <Link href={organizer ? "/admin" : "/"} className="min-w-0">
+                <Brand organizer={organizer} />
+              </Link>
+            </div>
+            <nav
+              ref={navRef}
+              aria-label="Primary"
+              className="flex gap-1.5 overflow-x-auto scroll-px-3 px-3 pb-3 pt-2 lg:grid lg:gap-1 lg:overflow-visible lg:px-3 lg:pb-6 lg:pt-1"
+              onFocus={(event) => {
+                const nav = event.currentTarget;
+                const link = event.target.closest<HTMLAnchorElement>("a.nb-nav-link");
+                if (nav.scrollWidth <= nav.clientWidth || !link?.matches(":focus-visible")) return;
+                requestAnimationFrame(() => {
+                  if (document.activeElement === link) {
+                    link.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+                  }
+                });
+              }}
             >
-              {rail.collapsed ? (
-                <PanelLeftOpen className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
-              ) : (
-                <PanelLeftClose className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
-              )}
-              <span className="nb-rail-text">Collapse</span>
-            </button>
-          </div>
-        </aside>
+              <NavGroup
+                label={organizer ? "Match" : undefined}
+                items={navItems}
+                activePath={activePath}
+                collapsed={rail.collapsed}
+              />
+              {secondaryNavItems.length > 0 ? (
+                <>
+                  <span aria-hidden className="mx-1 my-2 w-[3px] shrink-0 self-stretch bg-[var(--nb-on-blue)] opacity-60 lg:hidden" />
+                  <NavGroup label="Setup" items={secondaryNavItems} activePath={activePath} collapsed={rail.collapsed} />
+                </>
+              ) : null}
+            </nav>
+            <div className="mt-auto hidden px-3 pb-4 lg:block">
+              <button
+                type="button"
+                className="nb-nav-link nb-rail-toggle w-full"
+                aria-controls="nb-rail"
+                aria-expanded={!rail.collapsed}
+                aria-label={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                title={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                onClick={rail.toggle}
+              >
+                {rail.collapsed ? (
+                  <PanelLeftOpen className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
+                ) : (
+                  <PanelLeftClose className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
+                )}
+                <span className="nb-rail-text">Collapse</span>
+              </button>
+            </div>
+          </aside>
+        </div>
       </div>
 
       <div className="flex min-w-0 flex-col gap-6 px-3 pb-10 pt-1 sm:px-6 lg:px-8 lg:pt-4">
-        <div className="flex flex-wrap items-center gap-2.5 lg:justify-end">
-          <AppearanceControls />
-          {headerActions}
+        {/* Title banner and header keys share one row when there is room, so
+            content starts one banner-height from the top, not two. */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
+          <header className="nb-banner flex min-w-[min(100%,20rem)] flex-1 flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6 sm:py-4">
+            <h1 className="min-w-0 max-w-full wrap-anywhere text-balance text-3xl font-extrabold leading-none tracking-[-0.03em] sm:text-4xl">{title}</h1>
+            {navActions ? <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">{navActions}</div> : null}
+          </header>
+          <div className="nb-header-actions relative flex max-w-full flex-wrap items-center gap-2.5">
+            <AppearanceControls />
+            {organizer || !headerActions ? headerActions : <NbMenu>{headerActions}</NbMenu>}
+            {primaryHeaderAction}
+          </div>
         </div>
-        <header className="nb-banner flex flex-wrap items-center justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6">
-          <h1 className="text-balance text-4xl font-extrabold leading-none tracking-[-0.03em] sm:text-5xl">{title}</h1>
-          {navActions ? <div className="flex flex-wrap items-center gap-2.5">{navActions}</div> : null}
-        </header>
-        {belowNav}
-        {organizer || activePath === "/" ? summarySection : null}
-        {alertSection}
-        <div className="nb-content flex min-h-0 flex-1 flex-col gap-6">{children}</div>
+        <main id="nb-main" tabIndex={-1} className="flex min-h-0 flex-1 flex-col gap-6 outline-none">
+          {belowNav}
+          {organizer || activePath === "/" ? summarySection : null}
+          {alertSection}
+          <div className="nb-content flex min-h-0 flex-1 flex-col gap-6">{children}</div>
+        </main>
       </div>
     </div>
   );

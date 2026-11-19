@@ -25,7 +25,7 @@ export function NbLogin({
       <div
         role="group"
         aria-label="Account mode"
-        className="grid grid-cols-2 gap-1 rounded-[var(--nb-radius)] border-[3px] border-border bg-muted p-1"
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-1 rounded-[var(--nb-radius)] border-[3px] border-border bg-muted p-1"
       >
         {(["login", "register"] as const).map((option) => (
           <button
@@ -34,13 +34,13 @@ export function NbLogin({
             onClick={() => setMode(option)}
             aria-pressed={mode === option}
             className={cn(
-              "nb-display rounded-[var(--nb-radius-sm)] border-2 px-3 py-1.5 text-sm font-bold transition-colors",
+              "nb-display min-h-11 rounded-[var(--nb-radius-sm)] border-2 px-0.5 py-1.5 text-sm font-bold wrap-anywhere transition-colors sm:px-2",
               mode === option
-                ? "nb-fill-aqua border-[var(--nb-ink)] shadow-[2px_2px_0_var(--nb-shadow)]"
+                ? "nb-selected shadow-[2px_2px_0_var(--nb-shadow)]"
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
-            {option === "login" ? "Sign In" : "Register"}
+            {option === "login" ? "Have an account" : "New member"}
           </button>
         ))}
       </div>
@@ -80,12 +80,13 @@ export function NbLogin({
           type="password"
           autoComplete={register ? "new-password" : "current-password"}
           minLength={register ? minPasswordLength : undefined}
+          aria-describedby={register ? "participant-password-requirements" : undefined}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           required
         />
         {register ? (
-          <p className="text-xs text-muted-foreground">At least {minPasswordLength} characters.</p>
+          <p id="participant-password-requirements" className="text-xs text-muted-foreground">At least {minPasswordLength} characters.</p>
         ) : null}
       </div>
       {error ? <StatusBanner message={error} variant="error" /> : null}
