@@ -15,7 +15,8 @@ test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard 
   await expect(playerRow).toContainText("wg-alpha");
   await expect(playerRow).toContainText("10.70.11.20/32");
 
-  await page.getByTestId("inspect-wireguard-1001").click();
+  const configButton = page.getByTestId("inspect-wireguard-1001");
+  await configButton.press("Enter");
   const wireGuardDialog = page.getByRole("dialog", { name: "WireGuard Config" });
   await expect(wireGuardDialog).toBeVisible();
   await expect(
@@ -24,8 +25,10 @@ test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard 
   await expect(wireGuardDialog).toContainText("10.70.11.20/32");
   await expect(wireGuardDialog).toContainText("vpn.college.local:51820");
   await wireGuardDialog.getByRole("button", { name: "Close" }).first().click();
+  await expect(configButton).toBeFocused();
 
-  await page.getByTestId("rotate-wireguard-1001").click();
+  const rotateButton = page.getByTestId("rotate-wireguard-1001");
+  await rotateButton.click();
   await expectWireGuardNote(
     page,
     /Rotated WireGuard config for Alpha Captain\./,
@@ -34,6 +37,7 @@ test("organizer can inspect, rotate, revoke, and reconcile a player's WireGuard 
   await expect(playerRow).toContainText("10.70.15.21/32");
   await expect(wireGuardDialog).toContainText("10.70.15.21/32");
   await wireGuardDialog.getByRole("button", { name: "Close" }).first().click();
+  await expect(rotateButton).toBeFocused();
 
   await page.getByTestId("revoke-wireguard-1001").click();
   await expectWireGuardNote(

@@ -170,6 +170,107 @@ test("seeded dense attack globe keeps idle featured routes solid", async ({
   expect(dashPattern).toBeNull();
 });
 
+test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, request }) => {
+  const appearance = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+    data: { theme_id: "neubrutalism" },
+  });
+  expect(appearance.ok()).toBeTruthy();
+  await page.setViewportSize({ width: 320, height: 660 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/attacks/map");
+
+  await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
+  const globe = page.getByTestId("cyber-attack-map");
+  await expect(globe).toHaveAttribute("data-keyboard-mode", "jump");
+  for (const [region, longitude] of [["Americas", "-82.00"], ["APAC", "118.00"], ["EMEA", "34.00"]]) {
+    await globe.getByRole("button", { name: region, exact: true }).click();
+    await expect(globe).toHaveAttribute("data-rotation-lon", longitude);
+  }
+
+  await globe.getByRole("button", { name: "Rotate up" }).press("Enter");
+  await expect(globe).toHaveAttribute("data-rotation-lat", "6.00");
+  await globe.getByRole("button", { name: "Rotate right" }).press("Space");
+  await expect(globe).toHaveAttribute("data-rotation-lon", "22.00");
+  await globe.getByRole("combobox", { name: "Jump to team" }).selectOption({ index: 1 });
+  await expect(page.getByText("Clear team focus")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+});
+
+test("pausing the automatic camera holds its view through manual input, maximize, and reload", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/attacks/map");
+  const globe = page.getByRole("region", { name: "Interactive attack globe" });
+  const autoCamera = globe.getByRole("button", { name: "Auto camera", pressed: true });
+  await globe.locator('[data-fx="map-canvas"]').scrollIntoViewIfNeeded();
+  await expect(globe).toHaveAttribute("data-surface-active", "true");
+  await page.clock.fastForward(11_000);
+  await expect(globe).toHaveAttribute("data-featured-attack-id", /.+/);
+
+  await autoCamera.press("Enter");
+  await expect(globe).toHaveAttribute("data-auto-camera", "paused");
+  const longitude = await globe.getAttribute("data-rotation-lon");
+  const featured = await globe.getAttribute("data-featured-attack-id");
+  await page.clock.fastForward(20_000);
+  await expect(globe).toHaveAttribute("data-rotation-lon", longitude!);
+  await expect(globe).toHaveAttribute("data-featured-attack-id", featured!);
+
+  await globe.getByRole("button", { name: "Rotate right" }).press("Enter");
+  await expect(globe).not.toHaveAttribute("data-rotation-lon", longitude!);
+  const manualLongitude = await globe.getAttribute("data-rotation-lon");
+  await page.clock.fastForward(20_000);
+  await expect(globe).toHaveAttribute("data-rotation-lon", manualLongitude!);
+
+  await page.getByRole("button", { name: "Maximize" }).press("Enter");
+  const dialog = page.getByTestId("attack-map-maximize-dialog");
+  await expect(dialog.getByRole("button", { name: "Auto camera", pressed: false })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await page.reload();
+  await expect(globe.getByRole("button", { name: "Auto camera", pressed: false })).toBeVisible();
+});
+
+test("reduced motion starts with a stationary camera and allows an explicit resume", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.clock.install();
+  await page.goto("/attacks/map");
+  const globe = page.getByRole("region", { name: "Interactive attack globe" });
+  const autoCamera = globe.getByRole("button", { name: "Auto camera" });
+  const canvas = globe.locator('[data-fx="map-canvas"]');
+  await expect(autoCamera).toHaveAttribute("aria-pressed", "false");
+  await canvas.scrollIntoViewIfNeeded();
+  await expect(globe).toHaveAttribute("data-surface-active", "true");
+  await page.clock.fastForward(18_000);
+  await expect(globe).toHaveAttribute("data-rotation-lon", "34.00");
+  await expect(globe).not.toHaveAttribute("data-featured-attack-id");
+
+  await autoCamera.press("Enter");
+  await expect(autoCamera).toHaveAttribute("aria-pressed", "true");
+  await canvas.scrollIntoViewIfNeeded();
+  await expect(globe).toHaveAttribute("data-surface-active", "true");
+  await page.clock.fastForward(11_000);
+  await expect(globe).toHaveAttribute("data-featured-attack-id", /.+/);
+  await expect(globe).toHaveAttribute("data-motion-enabled", "false");
+});
+
+test("attack feed selection is exposed and retains its check in forced colors", async ({ page, request }) => {
+  const appearance = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+    data: { theme_id: "neubrutalism" },
+  });
+  expect(appearance.ok()).toBeTruthy();
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
+  await page.goto("/attacks/map");
+  const group = page.getByRole("group", { name: "View", exact: true });
+  for (const label of ["Recent", "Current Tick", "All Feed"]) {
+    const option = group.getByRole("button", { name: label, exact: true });
+    await option.press("Enter");
+    await page.getByRole("textbox", { name: "Focus team" }).focus();
+    await expect(option).toHaveAttribute("aria-pressed", "true");
+    await expect(option.locator(".lucide-check")).toBeVisible();
+    await expect(group.getByRole("button", { pressed: true })).toHaveCount(1);
+    await expect(group.getByRole("button", { pressed: false }).locator(".lucide-check:visible")).toHaveCount(0);
+  }
+});
+
 test("seeded dense attack globe keeps partial featured routes solid", async ({
   page,
 }) => {

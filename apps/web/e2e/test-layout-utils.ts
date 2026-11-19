@@ -26,7 +26,7 @@ export async function openDisclosureIfNeeded(disclosure: Locator) {
 
 export async function assertEmptyAttacksState(page: Page) {
   await expect(
-    page.getByTestId('attack-map-waiting'),
+    page.getByRole("region", { name: "Interactive attack globe" }).getByTestId("attack-map-waiting"),
   ).toBeVisible();
   await expect(
     page.getByText("No accepted attacks in this view"),

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { chromium, expect, test, type APIRequestContext } from "@playwright/test";
 
 import { mockApiBaseUrl, participantStorageState, resetMockApi } from "./test-utils";
 
@@ -74,6 +74,82 @@ test.describe("as a participant", () => {
     await expect(card.getByText(/factory reset cooldown: \d+s/)).toBeVisible();
   });
 
+  test("enlarged flag verdicts show the reason and support keyboard retries", async ({ baseURL }) => {
+    const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+    try {
+      const page = await browser.newPage({ baseURL, storageState: participantStorageState, viewport: { width: 320, height: 700 } });
+      let releaseSubmission!: () => void;
+      const pendingSubmission = new Promise<void>((resolve) => {
+        releaseSubmission = resolve;
+      });
+      await page.route("**/api/platform/submit", async (route) => {
+        await pendingSubmission;
+        await route.continue();
+      });
+
+      await page.goto("/services");
+      const field = page.getByRole("textbox", { name: "Flags", exact: true });
+      const flag = "PLAYIT{audit-invalid-0}";
+      await field.fill(flag);
+      await field.press("Control+Enter");
+      try {
+        await expect(field).toBeFocused();
+        await expect(field).not.toBeEditable();
+      } finally {
+        releaseSubmission();
+      }
+
+      const verdicts = page.getByRole("list", { name: "Flag verdicts" });
+      const verdict = verdicts.getByTestId("flag-verdict");
+      await expect(verdict).toHaveAttribute("data-verdict", "rejected");
+      await expect(verdict).toContainText(flag);
+      const reason = verdict.getByText("flag is wrong or expired.");
+      expect(await reason.evaluate((element) => {
+        const reasonBounds = element.getBoundingClientRect();
+        const scrollport = element.closest("ul")!.parentElement!;
+        const viewport = scrollport.getBoundingClientRect();
+        return reasonBounds.bottom <= viewport.bottom && scrollport.scrollWidth === scrollport.clientWidth;
+      })).toBe(true);
+
+      await expect(field).toBeFocused();
+      await page.keyboard.press("End");
+      await page.keyboard.type("x");
+      await expect(field).toHaveValue(`${flag}x`);
+
+      await field.fill(Array.from({ length: 12 }, (_, index) => `PLAYIT{audit-invalid-${index}}`).join("\n"));
+      await field.press("Control+Enter");
+      await expect(verdict).toHaveCount(12);
+      const results = page.getByRole("region", { name: "Flag results" });
+      await expect(results).toHaveAttribute("tabindex", "0");
+      await results.press("End");
+      await expect.poll(() => results.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test("a short reset dialog scrolls from the service identity to the warning", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 320 });
+    await page.goto("/services");
+    const reset = page.getByTestId("nb-service-svc-1").getByRole("button", { name: "Factory Reset" });
+    await reset.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "Factory Reset Service" });
+    const heading = dialog.getByRole("heading", { name: "Factory Reset Service" });
+    await expect(heading).toBeFocused();
+    await expect(dialog.getByText("college-http", { exact: true })).toBeInViewport();
+    await expect(dialog.getByText("10.80.50.11:30050", { exact: true })).toBeInViewport();
+
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const warning = dialog.getByText(/Factory reset deletes stored flags/);
+    await expect(warning).toBeInViewport({ ratio: 0.5 });
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(reset).toBeFocused();
+  });
+
   test("theme default mode applies until the participant picks one", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/scoreboard");
@@ -85,6 +161,78 @@ test.describe("as a participant", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
+
+  test("header popovers fit the viewport across mobile breakpoints", async ({ page }) => {
+    const appearance = page.locator(".mode-picker > summary");
+    const menu = page.getByTestId("nb-account-menu").locator("summary");
+
+    for (const width of [320, 390, 639, 640]) {
+      await page.setViewportSize({ width, height: 740 });
+      await page.goto("/services");
+
+      for (const [trigger, panel] of [
+        [appearance, page.locator(".mode-picker > div")],
+        [menu, page.locator(".nb-menu-panel")],
+      ] as const) {
+        await trigger.click();
+        await expect(panel).toBeVisible();
+        const bounds = await panel.boundingBox();
+        if (!bounds) throw new Error("Expected an open header popover");
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        for (const option of await panel.getByRole("radio").all()) {
+          expect(await option.evaluate((element) => {
+            const label = document.createRange();
+            label.selectNodeContents(element.querySelector("span")!);
+            const labelBounds = label.getBoundingClientRect();
+            const controlBounds = element.getBoundingClientRect();
+            return label.getClientRects().length === 1 &&
+              labelBounds.left >= controlBounds.left && labelBounds.right <= controlBounds.right;
+          })).toBe(true);
+        }
+        await trigger.click();
+      }
+    }
+  });
+
+  test("header disclosures keep keyboard focus predictable", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.goto("/services");
+
+    const appearance = page.locator(".mode-picker > summary");
+    await appearance.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("radio", { name: /^Light/ })).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("radio", { name: /^Dark/, checked: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(appearance).toBeFocused();
+    await expect(page.getByRole("radiogroup", { name: "Color mode" })).toBeHidden();
+
+    const menu = page.getByTestId("nb-account-menu").locator("summary");
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: "Account settings" }).focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Account settings" });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(menu).toBeFocused();
+  });
+
+  test("the manual fits and the attack table scrolls by keyboard on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 660 });
+    await page.goto("/docs/participant");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+    await page.goto("/attacks/table");
+    const region = page.getByRole("region", { name: "Accepted attacks" });
+    await expect(region).toHaveAttribute("tabindex", "0");
+    await region.press("ArrowRight");
+    await expect.poll(() => region.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   });
 });
 
@@ -103,6 +251,306 @@ test("organizer tabs keep stock content inside the theme's shell", async ({ page
   await expect(announcements.getByText("Theme test: warmup in 5 minutes.")).toBeVisible();
 });
 
+test("mobile navigation reveals each link as keyboard focus moves", async ({ baseURL, context }) => {
+  const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+  try {
+    const enlarged = await browser.newContext({
+      baseURL,
+      storageState: await context.storageState(),
+      viewport: { width: 320, height: 700 },
+    });
+    const page = await enlarged.newPage();
+    await page.goto("/admin");
+    await page.evaluate(() => document.fonts.ready);
+    const nav = page.getByRole("navigation", { name: "Primary", exact: true });
+    const links = await nav.getByRole("link").all();
+    expect(links.length).toBeGreaterThan(1);
+
+    await page.getByRole("link", { name: "Skip to content" }).focus();
+    await page.keyboard.press("Tab"); // Brand link.
+
+    const expectVisibleFocus = async (link: (typeof links)[number]) => {
+      await expect(link).toBeFocused();
+      await expect.poll(() => link.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const strip = element.closest("nav")!.getBoundingClientRect();
+        return bounds.left >= strip.left - 1 && bounds.right <= strip.right + 1;
+      })).toBe(true);
+    };
+
+    for (const link of links) {
+      await page.keyboard.press("Tab");
+      await expectVisibleFocus(link);
+    }
+    for (const link of links.slice(0, -1).reverse()) {
+      await page.keyboard.press("Shift+Tab");
+      await expectVisibleFocus(link);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("the desktop sidebar animates both ways and honors reduced motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/admin/scoreboard");
+  const toggle = page.getByRole("button", { name: /sidebar/ });
+  const surface = page.locator(".nb-rail-motion");
+
+  for (const expanded of ["false", "true"]) {
+    const transition = await toggle.evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      const motion = button.closest(".nb-rail-motion");
+      return motion?.getAnimations().some((animation) =>
+        animation instanceof CSSTransition && animation.transitionProperty === "clip-path");
+    });
+    expect(transition).toBe(true);
+    await expect(toggle).toHaveAttribute("aria-expanded", expanded);
+    await expect.poll(() => surface.evaluate((element) => element.getAnimations().length)).toBe(0);
+  }
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await toggle.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(surface).toHaveCSS("transition-property", "none");
+});
+
+test("organizer scoreboard fits long team names and large service scores", async ({ page }) => {
+  const teams = ["East", "West"].map(
+    (suffix) => `Northern Collegiate Infrastructure and Security Research Team ${suffix}`,
+  );
+  const services = [1, 2, 3].map((id) => ({
+    challenge_id: id,
+    service: `Scoring fixture ${id}`,
+    attack: 6530.25,
+    defense: id === 1 ? -1 : -3678.75,
+    sla: 2801.59,
+    total: 13010.59,
+  }));
+  const rows = teams.map((team, index) => ({
+    rank: index + 1,
+    team,
+    attack: 15530.75,
+    defense: 6500.12,
+    sla: 5120.09,
+    total: 27150.96,
+    delta: "+2",
+    services,
+  }));
+  await page.route("**/api/admin/realtime/game/scoreboard/stream", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify(rows)}\n\n`,
+    }),
+  );
+
+  await page.setViewportSize({ width: 320, height: 850 });
+  await page.goto("/admin/scoreboard");
+  const teamName = page.getByTestId("nb-score-row").first().getByText(teams[0], { exact: true });
+  await expect(teamName).toBeVisible();
+  await expect.poll(() => teamName.evaluate((name) => name.scrollWidth - name.clientWidth)).toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+  const cards = page.getByTestId("nb-service-score");
+  await expect(cards).toHaveCount(6);
+  const stacked = await cards.evaluateAll((cards) => cards.every((card) => {
+    const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
+      (chip) => chip.getBoundingClientRect(),
+    );
+    return Math.abs(attack.width - defense.width) <= 1 && attack.top === defense.top &&
+      sla.top > defense.top && sla.left === attack.left && sla.right === defense.right;
+  }));
+  expect(stacked).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 850 });
+  const singleRow = await cards.evaluateAll((cards) => cards.every((card) => {
+    const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
+      (chip) => chip.getBoundingClientRect(),
+    );
+    return Math.abs(attack.width - defense.width) <= 1 && sla.width > attack.width &&
+      attack.top === defense.top && defense.top === sla.top;
+  }));
+  expect(singleRow).toBe(true);
+
+  await page.setViewportSize({ width: 320, height: 850 });
+  const enlargedText = await page.addStyleTag({ content: "html { font-size: 32px; }" });
+  await expect(cards.first().getByText("Scoring fixture 1", { exact: true })).toBeVisible();
+  const fullRows = await cards.evaluateAll((cards) => cards.every((card) => {
+    const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
+      (chip) => chip.getBoundingClientRect(),
+    );
+    return attack.top < defense.top && defense.top < sla.top &&
+      attack.left === sla.left && defense.left === sla.left &&
+      attack.right === sla.right && defense.right === sla.right;
+  }));
+  expect(fullRows).toBe(true);
+  await enlargedText.evaluate((element) => element.parentNode?.removeChild(element));
+
+  await page.setViewportSize({ width: 1024, height: 850 });
+  const hasOverflow = await cards.evaluateAll((cards) =>
+    cards.some((card) => {
+      const bounds = card.getBoundingClientRect();
+      return Array.from(card.querySelectorAll(".nb-sticker")).some((chip) => {
+        const { left, right } = chip.getBoundingClientRect();
+        return left < bounds.left || right > bounds.right;
+      });
+    }),
+  );
+  expect(hasOverflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1024);
+});
+
+test("the player registry fits on mobile and returns focus after closing its form", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 450 });
+  await page.goto("/admin/players");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+  const create = page.getByRole("button", { name: "Create Player" });
+  await create.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Create player" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Team" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(create).toBeFocused();
+});
+
+test("appearance shows the checked mode in forced colors", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" });
+  await page.goto("/scoreboard");
+  const appearance = page.locator(".mode-picker summary");
+  await appearance.press("Enter");
+
+  const light = page.getByRole("radio", { name: /^Light/ });
+  await expect(light).toHaveAttribute("aria-checked", "true");
+  await expect(light.locator(".lucide-check")).toBeVisible();
+  const dark = page.getByRole("radio", { name: /^Dark/ });
+  await dark.click();
+  await appearance.focus();
+  await expect(dark).toHaveAttribute("aria-checked", "true");
+  await expect(dark.locator(".lucide-check")).toBeVisible();
+  await expect(light.locator(".lucide-check")).not.toBeVisible();
+});
+
+test("selects use native appearance when the forced palette differs from the app mode", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ad-platform-theme", "dark"));
+  await page.emulateMedia({ colorScheme: "light", forcedColors: "active" });
+  await page.goto("/admin/game?view=diagnostics");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const audit = page.getByTestId("scheduler-audit-disclosure");
+  await expect(audit).toBeVisible();
+  if (await audit.getAttribute("open") === null) await audit.locator("summary").click();
+  const size = audit.getByLabel("Page Size", { exact: true });
+  await expect(size).toHaveCSS("appearance", "auto");
+  await expect(size).toHaveCSS("background-image", "none");
+  await size.selectOption("24");
+  await expect(size).toHaveValue("24");
+});
+
+test("organizers can read the team deletion consequences in a short window", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 320 });
+  await page.addInitScript(() => localStorage.setItem("ad-platform-theme", "dark"));
+  await page.goto("/admin/teams");
+  const opener = page.getByTestId("delete-team-101");
+  await opener.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Delete team" });
+  await expect(dialog.getByRole("heading")).toBeFocused();
+  await page.keyboard.press("PageDown");
+  const consequence = dialog.getByText(/All associated player accounts/);
+  await expect(consequence).toBeInViewport({ ratio: 0.5 });
+  const warningColor = await dialog.getByTestId("delete-impact-panel").evaluate((panel) => getComputedStyle(panel).color);
+  await expect(consequence).toHaveCSS("color", warningColor);
+  await page.keyboard.press("Escape");
+  await expect(opener).toBeFocused();
+});
+
+test("participant and organizer pages reflow with a 32px browser default font on mobile", async ({ baseURL, context }) => {
+  const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+  try {
+    const cases = [
+      { storageState: participantStorageState, routes: ["/", "/services", "/scoreboard", "/attacks/map", "/docs/participant"] },
+      { storageState: await context.storageState(), routes: ["/admin/players", "/admin/scoreboard", "/admin/submissions"] },
+    ];
+    for (const { storageState, routes } of cases) {
+      const enlarged = await browser.newContext({ baseURL, storageState, viewport: { width: 320, height: 700 } });
+      const page = await enlarged.newPage();
+      for (const route of routes) {
+        await page.goto(route);
+        await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
+        await page.evaluate(() => document.fonts.ready);
+        const layout = await page.evaluate(() => ({
+          font: getComputedStyle(document.documentElement).fontSize,
+          width: document.documentElement.scrollWidth,
+        }));
+        expect(layout, route).toEqual({ font: "32px", width: 320 });
+      }
+      await enlarged.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("populated organizer views and scheduling values fit at narrow widths with enlarged text", async ({ baseURL, context, request }) => {
+  await resetMockApi(request, "submissions");
+  await useTheme(request, "neubrutalism");
+  const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+  try {
+    const enlarged = await browser.newContext({
+      baseURL,
+      storageState: await context.storageState(),
+      viewport: { width: 320, height: 700 },
+      locale: "en-US",
+      timezoneId: "UTC",
+    });
+    const page = await enlarged.newPage();
+    const cases = [
+      { route: "/admin", ready: page.getByTestId("announcements-panel") },
+      { route: "/admin/teams", ready: page.getByTestId("bulk-import-panel") },
+      { route: "/admin/attacks", ready: page.getByRole("heading", { name: "Accepted Attacks" }) },
+      { route: "/admin/game?view=settings", ready: page.getByRole("radio", { name: /Neubrutalism/ }) },
+      { route: "/admin/game?view=health", ready: page.getByTestId("operations-metrics-card") },
+      { route: "/admin/game?view=diagnostics", ready: page.getByTestId("scheduler-card") },
+      { route: "/admin/game", ready: page.getByLabel("Scheduled Start Date") },
+    ];
+    const expectReflow = async (route: string) => {
+      await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
+      const layout = await page.evaluate(async () => {
+        await document.fonts.ready;
+        return {
+          font: getComputedStyle(document.documentElement).fontSize,
+          width: document.documentElement.scrollWidth,
+        };
+      });
+      expect(layout, route).toEqual({ font: "32px", width: 320 });
+    };
+
+    for (const { route, ready } of cases) {
+      await page.goto(route);
+      await expect(ready).toBeVisible();
+      await expectReflow(route);
+    }
+
+    await page.getByLabel("Scheduled Start Date").fill("2029-06-07");
+    const time = page.getByLabel("Scheduled Start Time");
+    await time.fill("19:45");
+    await expect(time).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
+    await expect(page.locator("time[datetime='2029-06-07T19:45:00.000Z']")).toBeVisible();
+    await expectReflow("filled match schedule");
+
+    await page.goto("/admin/scoreboard");
+    const freeze = page.getByRole("group", { name: "Freeze at", exact: true });
+    const freezeTime = freeze.getByLabel("Time", { exact: true });
+    await freezeTime.fill("19:45");
+    await freeze.getByLabel("Date", { exact: true }).fill("2029-06-07");
+    await expect(freezeTime).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
+    await expect(page.locator("time[datetime='2029-06-07T19:45:00.000Z']")).toBeVisible();
+    await expectReflow("filled freeze schedule");
+  } finally {
+    await browser.close();
+  }
+});
+
 test("login works through the redesigned form", async ({ browser }) => {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   const page = await context.newPage();
@@ -114,4 +562,43 @@ test("login works through the redesigned form", async ({ browser }) => {
   await expect(page).toHaveURL(/\/services$/);
   await expect(page.getByTestId("nb-services")).toBeVisible();
   await context.close();
+});
+
+test("account mode labels fit at narrow widths with enlarged text", async ({ baseURL }) => {
+  const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+  try {
+    const page = await browser.newPage({
+      baseURL,
+      storageState: { cookies: [], origins: [] },
+      viewport: { width: 320, height: 700 },
+    });
+    await page.goto("/login");
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe("32px");
+    const modes = page.getByRole("group", { name: "Account mode" });
+    const register = modes.getByRole("button", { name: "New member" });
+    await register.press("Enter");
+    await expect(register).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Display name")).toBeVisible();
+
+    for (const button of await modes.getByRole("button").all()) {
+      expect(await button.evaluate((element) => {
+        const label = document.createRange();
+        label.selectNodeContents(element);
+        const buttonBounds = element.getBoundingClientRect();
+        const fits = Array.from(label.getClientRects()).every((line) =>
+          line.left >= buttonBounds.left && line.right <= buttonBounds.right,
+        );
+        const text = element.firstChild!;
+        const words = [...(text.textContent ?? "").matchAll(/\S+/g)];
+        return fits && words.every((word) => {
+          label.setStart(text, word.index);
+          label.setEnd(text, word.index + word[0].length);
+          return label.getClientRects().length === 1;
+        });
+      })).toBe(true);
+    }
+  } finally {
+    await browser.close();
+  }
 });

@@ -31,9 +31,11 @@ test("a theme can replace the page layout", async ({ page }) => {
   await page.goto("/admin/game?view=settings");
   await expect(page.getByTestId("nb-shell")).toHaveCount(0);
 
-  await page.getByTestId("theme-settings-card").locator('[data-theme-option="neubrutalism"]').click();
+  const options = page.getByRole("radiogroup", { name: "Platform theme" });
+  await options.getByRole("radio", { checked: true }).press("ArrowRight");
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
   await expect(page.getByTestId("nb-shell")).toBeVisible();
+  await expect(options.getByRole("radio", { name: /Neubrutalism/, checked: true })).toBeFocused();
 
   await page.goto("/scoreboard");
   await expect(page.getByTestId("nb-shell")).toBeVisible();

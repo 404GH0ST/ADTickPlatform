@@ -84,6 +84,36 @@ test('deleting a duplicate preserves the first-blood capture', async ({
   await expect(page.getByTestId('submission-30')).toContainText('First blood');
 });
 
+test('the first-blood warning and actions are reachable in a short dialog', async ({ page, request }) => {
+  const appearance = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+    data: { theme_id: 'neubrutalism' },
+  });
+  expect(appearance.ok()).toBeTruthy();
+  await page.setViewportSize({ width: 320, height: 320 });
+  await page.goto('/admin/submissions');
+  const opener = page.getByRole('button', { name: 'Delete submission #30', exact: true });
+  await opener.press('Enter');
+
+  const dialog = page.getByRole('dialog', { name: 'Delete submission #30?' });
+  await expect(dialog.getByRole('heading')).toBeFocused();
+  const warning = dialog.getByText(/existing captures will not be promoted/);
+  await page.keyboard.press('PageDown');
+  await expect(warning).toBeInViewport({ ratio: 0.5 });
+  await page.keyboard.press('Tab');
+  const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true });
+  await expect(cancel).toBeFocused();
+  await expect(cancel).toBeInViewport();
+  for (const label of ['Delete submission', 'Close', 'Cancel']) {
+    await page.keyboard.press('Tab');
+    const action = dialog.getByRole('button', { name: label, exact: true });
+    await expect(action).toBeFocused();
+    await expect(action).toBeInViewport();
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
 test('failed deletion keeps the row and shows a retryable error', async ({
   page,
   request,

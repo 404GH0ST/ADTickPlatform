@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { mockApiBaseUrl, realtimeTest as test } from "./test-utils";
 
 async function installMockAttackSfx(page: Page) {
@@ -95,6 +95,14 @@ async function scoreVoices(page: Page) {
   }).__attackSfxVoices ?? []);
 }
 
+async function revealGlobe(globe: Locator) {
+  // The streamed globe can be replaced while the lazy client module hydrates.
+  await expect(async () => {
+    await globe.scrollIntoViewIfNeeded({ timeout: 1000 });
+  }).toPass({ timeout: 7000 });
+  await expect(globe).toHaveAttribute('data-surface-active', 'true');
+}
+
 test("participant attacks applies realtime attack updates to the live slice", async ({
   page,
   request,
@@ -159,7 +167,7 @@ test("participant attack map respects muted attack SFX preference", async ({
   await installMockAttackSfx(page);
   await page.goto("/attacks");
   await expect(page.getByText("Showing 1-12 of 12")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Enable attack sound" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "SFX: Attack sound" })).toHaveAttribute("aria-pressed", "false");
   await page.mouse.click(24, 24);
 
   await request.post(`${mockApiBaseUrl}/__reset`, {
@@ -200,18 +208,23 @@ for (const muted of [false, true]) {
   test(`first blood has an exclusive route and ${muted ? 'respects mute' : 'plays a fanfare'}`, async ({ page, request }) => {
     await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'default' } });
     await installMockAttackSfx(page);
-    await page.emulateMedia({ colorScheme: muted ? 'dark' : 'light' });
+    await page.emulateMedia({ colorScheme: muted ? 'dark' : 'light', reducedMotion: 'reduce' });
     if (muted) await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript((off) => {
       localStorage.setItem('ad-platform-attack-sfx-enabled', off ? 'off' : 'on');
     }, muted);
     await page.goto('/attacks');
     await expect(page.getByText('Showing 1-12 of 12')).toBeVisible();
+    const globe = page.getByTestId('cyber-attack-map');
+    const autoCamera = globe.getByRole('button', { name: 'Auto camera' });
+    // Wait for the lazy globe to install its audio activation listeners.
+    await expect(autoCamera).toHaveAttribute('aria-pressed', 'false');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(autoCamera).toHaveAttribute('aria-pressed', 'true');
     await page.mouse.click(24, 24);
     await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood' } });
     await expect(page.getByText('Showing 1-13 of 13')).toBeVisible();
-    const globe = page.getByTestId('cyber-attack-map');
-    await globe.scrollIntoViewIfNeeded();
+    await revealGlobe(globe);
     await expect(globe).toHaveAttribute('data-surface-active', 'true');
     await expect(globe).toHaveAttribute('data-first-blood-phase', 'intro');
     await expect(globe.getByTestId('first-blood-intro')).toContainText('First blood');
@@ -248,7 +261,7 @@ for (const muted of [false, true]) {
     await expect(globe).toHaveAttribute('data-motion-enabled', 'false');
     await expect(globe.locator('[data-first-blood-effect] [class]')).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
-    await globe.scrollIntoViewIfNeeded();
+    await revealGlobe(globe);
     await expect(globe.getByTestId('first-blood-announcement')).toBeVisible();
     await globe.screenshot({ path: `test-results/first-blood-mobile-${muted ? 'dark' : 'light'}.png` });
     // The live moment ends even while the original capture stays featured.
@@ -296,7 +309,7 @@ test('muting during the first-blood intro silences the following attack', async 
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood' } });
   const globe = page.getByTestId('cyber-attack-map');
   await expect(globe).toHaveAttribute('data-first-blood-phase', 'intro');
-  await page.getByRole('button', { name: 'Mute attack sound' }).click();
+  await page.getByRole('button', { name: 'SFX: Attack sound', pressed: true }).click();
   await expect(globe).toHaveAttribute('data-first-blood-phase', 'attack');
   const muted = await scoreVoices(page);
   expect(muted.filter((voice) => voice.kind === 'sample').every((voice) => voice.stop < voice.start)).toBe(true);
@@ -315,7 +328,7 @@ for (const view of [
     await page.goto(view.route);
     const globe = page.getByTestId('cyber-attack-map');
     await expect(globe).toBeVisible();
-    await globe.scrollIntoViewIfNeeded();
+    await revealGlobe(globe);
     await expect(globe).toHaveAttribute('data-route-count', '0');
     await expect(globe.getByTestId('attack-map-waiting')).toBeVisible();
     // Prove the exact same globe survives the empty-to-first-arrival transition.
@@ -407,12 +420,14 @@ test('reduced motion keeps first blood legible without zoom, shake or fragments'
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge');
   await expect(globe).toHaveAttribute('data-zoom', '1.000');
   await expect(globe.locator('[data-first-blood-charge] [class]')).toHaveCount(0);
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact');
+  await expect(globe).toHaveAttribute('data-rotation-lon', '34.00');
+  await expect(globe).toHaveAttribute('data-rotation-lat', '-6.00');
   await expect(globe.locator('[data-first-blood-shard]')).toHaveCount(0);
   await expect(globe.locator('[data-first-blood-impact] [class]')).toHaveCount(0);
   await expect(globe.getByTestId('first-blood-announcement')).toContainText('First blood · college-http');
@@ -428,7 +443,7 @@ test('simultaneous first bloods share one sequence, one announcer and one banner
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-burst' } });
   await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-13');
@@ -453,7 +468,7 @@ test('a plain click on the globe during first blood keeps the sequence running',
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'focus');
@@ -470,7 +485,7 @@ test('manual camera control interrupts first blood and cancels the pending strik
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'focus');
@@ -492,7 +507,7 @@ test('first blood closing banner keeps long team and challenge names readable on
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-long-names' } });
   const banner = globe.getByTestId('first-blood-banner');
   await expect(banner).toBeVisible({ timeout: 12000 });
@@ -514,7 +529,7 @@ test('replacing first blood while its closing banner is showing celebrates the n
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
   await expect(globe.getByTestId('first-blood-banner')).toContainText('College Gamma', { timeout: 12000 });
@@ -547,7 +562,7 @@ for (const route of [
     await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
     await page.goto('/attacks');
     const globe = page.getByTestId('cyber-attack-map');
-    await globe.scrollIntoViewIfNeeded();
+    await revealGlobe(globe);
     const payload = {
       revision: 1,
       items: [{ id: 'atk-far', first_blood: true, attacker: 'Team Red', attackerLocation: route.attacker, victim: 'Team Blue', victimLocation: route.victim, service: 'svc', tick: 3, verdict: 'first valid submission accepted' }],
@@ -586,7 +601,7 @@ test('team locations stay put when a new team appears in the attack feed', async
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
   await page.goto('/attacks');
   const globe = page.getByTestId('cyber-attack-map');
-  await globe.scrollIntoViewIfNeeded();
+  await revealGlobe(globe);
   const frame = (items: object[]) => ({ revision: items.length, items, limit: 12, offset: 0, total_count: items.length, has_prev: false, has_next: false });
   const serve = async (payload: object) => {
     await page.unroute('**/api/platform/attacks**');

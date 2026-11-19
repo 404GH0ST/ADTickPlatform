@@ -102,7 +102,8 @@ test("participant attack map maximize dialog expands beyond the inline panel and
     throw new Error("inline attack map panel did not render");
   }
 
-  await page.getByRole("button", { name: "Maximize" }).click();
+  const maximize = page.getByRole("button", { name: "Maximize" });
+  await maximize.press("Enter");
 
   const maximizeDialog = page.getByTestId("attack-map-maximize-dialog");
   await expect(maximizeDialog).toBeVisible();
@@ -119,6 +120,9 @@ test("participant attack map maximize dialog expands beyond the inline panel and
       getComputedStyle(element).overflowY,
     ),
   ).toBe("auto");
+  await page.keyboard.press("Escape");
+  await expect(maximizeDialog).toBeHidden();
+  await expect(maximize).toBeFocused();
 });
 
 test("participant attack table route redirects to the unified attacks page", async ({

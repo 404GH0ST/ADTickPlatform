@@ -236,7 +236,8 @@ test("organizer scheduler controls can start, update, and stop with visible note
     schedulerCard.getByRole("button", { name: "Stop Scheduler" }),
   ).toBeEnabled();
 
-  const intervalInput = schedulerCard.locator('input[type="number"]:visible').first();
+  const intervalInput = schedulerCard.getByRole("spinbutton", { name: "Interval" });
+  await expect(intervalInput).toHaveAccessibleDescription("Seconds");
   await intervalInput.fill("90");
   await schedulerCard.getByRole("button", { name: "Update" }).click();
   await expectActionNote(page, /Scheduler interval updated to 90 seconds\./);
