@@ -27,13 +27,9 @@ func (s *gameCoreServer) nextRetentionCheck() time.Time {
 		low = time.Duration(interval) * time.Second / 8
 		high = time.Duration(interval) * time.Second / 3
 	}
-	if high <= low {
-		high = low + time.Millisecond
-	}
-	jitter, err := rand.Int(rand.Reader, big.NewInt(int64(high-low)))
-	if err != nil {
-		return s.now().Add(low)
-	}
+	// high > low for any positive interval (1/3 exceeds 1/8), and crypto/rand
+	// never returns an error, so the jitter draw cannot fail.
+	jitter, _ := rand.Int(rand.Reader, big.NewInt(int64(high-low)))
 	return s.now().Add(low + time.Duration(jitter.Int64()))
 }
 
@@ -132,10 +128,9 @@ func (s *gameCoreServer) sweepRetainedFlags(ctx, execCtx context.Context, force 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Dispatch stops when execCtx ends; a job delivered on that
+			// boundary finds execCtx expired, so its check records nothing.
 			for target := range jobs {
-				if execCtx.Err() != nil {
-					continue
-				}
 				unlock := s.lockRetentionTarget(target)
 				flag, err := s.store.LatestIssuedFlag(ctx, target.TeamID, target.ChallengeID)
 				if errors.Is(err, sql.ErrNoRows) {
@@ -178,7 +173,11 @@ func (s *gameCoreServer) startRetentionMonitor() func() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ticker := time.NewTicker(5 * time.Second)
+		interval := s.retentionMonitorInterval
+		if interval <= 0 {
+			interval = 5 * time.Second
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {

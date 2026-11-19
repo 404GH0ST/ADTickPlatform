@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"adplatform/internal/platform/config"
@@ -13,25 +16,36 @@ import (
 	"adplatform/internal/platform/httpapi"
 )
 
+// fatal reports a startup failure and exits; tests replace it.
+var fatal = log.Fatal
+
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
+		fatal(err)
+	}
+}
+
+// run wires the service and serves until ctx is cancelled.
+func run(ctx context.Context) error {
 	info := httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: config.String("GAME_CORE_ADDR", ":8081")}
 
 	store, err := buildStore(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer store.Close()
 	// Recover from a crash that left a tick stuck in the "running" state.
 	// StartNextTick refuses every future tick while the last one is "running",
 	// so without this the scheduler would deadlock after any mid-tick blackout.
 	if reaped, err := store.ReapRunningTicks(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	} else if reaped > 0 {
 		log.Printf("game-core: reaped %d incomplete tick(s) left running by a previous crash", reaped)
 	}
 	if err := recomputeScoreboardOnStartup(ctx, store); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	adminToken := config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN")
@@ -66,14 +80,14 @@ func main() {
 	httpapi.RegisterMetricsSource(info.Name, server)
 	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	matchEndAt, err := optionalRFC3339Env("GAME_CORE_MATCH_END_AT")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if matchStartAt != nil && matchEndAt != nil && matchEndAt.Before(*matchStartAt) {
-		log.Fatal("GAME_CORE_MATCH_END_AT must not be earlier than GAME_CORE_MATCH_START_AT")
+		return errors.New("GAME_CORE_MATCH_END_AT must not be earlier than GAME_CORE_MATCH_START_AT")
 	}
 	server.matchStartAt = matchStartAt
 	server.matchEndAt = matchEndAt
@@ -98,10 +112,8 @@ func main() {
 	mux := httpapi.NewBaseMux(info)
 	server.RegisterRoutes(mux)
 	log.Printf("starting %s on %s", info.Name, info.Addr)
-	if err := httpapi.RunServer(ctx, info, mux); err != nil {
-		_ = scheduler.Close()
-		log.Fatal(err)
-	}
+	// Returning runs the deferred scheduler, monitor, and store shutdowns.
+	return httpapi.RunServer(ctx, info, mux)
 }
 
 func recomputeScoreboardOnStartup(ctx context.Context, store gameStore) error {

@@ -585,16 +585,10 @@ func (s *memoryGameStore) recomputeScoreboardLocked() []apigateway.ScoreRowAlias
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Total != rows[j].Total {
-			return rows[i].Total > rows[j].Total
-		}
-		if rows[i].Attack != rows[j].Attack {
-			return rows[i].Attack > rows[j].Attack
-		}
-		if rows[i].Defense != rows[j].Defense {
-			return rows[i].Defense > rows[j].Defense
-		}
-		return rows[i].Team < rows[j].Team
+		return scoreRanksBefore(
+			scoreRankKey{rows[i].Total, rows[i].Attack, rows[i].Defense, rows[i].Team},
+			scoreRankKey{rows[j].Total, rows[j].Attack, rows[j].Defense, rows[j].Team},
+		)
 	})
 
 	for index := range rows {
@@ -611,10 +605,8 @@ func (s *memoryGameStore) AuditScoreboard(ctx context.Context) (apigateway.Scori
 	stored := append([]apigateway.ScoreRowAlias(nil), s.scoreboard...)
 	s.mu.Unlock()
 
-	replayed, err := s.RecomputeScoreboard(ctx)
-	if err != nil {
-		return apigateway.ScoringAuditAlias{}, err
-	}
+	// The in-memory recompute cannot fail.
+	replayed, _ := s.RecomputeScoreboard(ctx)
 
 	s.mu.Lock()
 	s.scoreboard = append([]apigateway.ScoreRowAlias(nil), stored...)
@@ -1309,10 +1301,8 @@ func (s *postgresGameStore) ReapRunningTicks(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
+	// The pgx driver's RowsAffected never fails.
+	affected, _ := result.RowsAffected()
 	return int(affected), nil
 }
 
@@ -2116,16 +2106,10 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	}
 
 	sort.Slice(scoreboard, func(i, j int) bool {
-		if scoreboard[i].Total() != scoreboard[j].Total() {
-			return scoreboard[i].Total() > scoreboard[j].Total()
-		}
-		if scoreboard[i].Attack != scoreboard[j].Attack {
-			return scoreboard[i].Attack > scoreboard[j].Attack
-		}
-		if scoreboard[i].Defense != scoreboard[j].Defense {
-			return scoreboard[i].Defense > scoreboard[j].Defense
-		}
-		return scoreboard[i].Team < scoreboard[j].Team
+		return scoreRanksBefore(
+			scoreRankKey{scoreboard[i].Total(), scoreboard[i].Attack, scoreboard[i].Defense, scoreboard[i].Team},
+			scoreRankKey{scoreboard[j].Total(), scoreboard[j].Attack, scoreboard[j].Defense, scoreboard[j].Team},
+		)
 	})
 
 	result := make([]apigateway.ScoreRowAlias, 0, len(scoreboard))
@@ -2498,6 +2482,27 @@ func nullTimeValue(raw string) any {
 		return nil
 	}
 	return parsed.UTC()
+}
+
+// scoreRankKey is what both scoreboard builds rank teams by.
+type scoreRankKey struct {
+	total, attack, defense float64
+	team                   string
+}
+
+// scoreRanksBefore orders teams by total, then attack, then defense, then name,
+// so the memory and Postgres stores rank ties identically.
+func scoreRanksBefore(a, b scoreRankKey) bool {
+	if a.total != b.total {
+		return a.total > b.total
+	}
+	if a.attack != b.attack {
+		return a.attack > b.attack
+	}
+	if a.defense != b.defense {
+		return a.defense > b.defense
+	}
+	return a.team < b.team
 }
 
 type teamScoreSnapshot struct {

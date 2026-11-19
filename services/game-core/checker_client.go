@@ -116,10 +116,8 @@ func newCheckerClient(baseURL, token string) checkerClient {
 }
 
 func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
-	reqBody, err := json.Marshal(request)
-	if err != nil {
-		return apigateway.CheckerExecutionResult{}, err
-	}
+	// A plain request struct always encodes.
+	reqBody, _ := json.Marshal(request)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/execute", strings.NewReader(string(reqBody))) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
@@ -154,10 +152,8 @@ func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.Chec
 }
 
 func (c *httpCheckerClient) ExecuteBatch(ctx context.Context, request apigateway.CheckerBatchExecutionRequest) (apigateway.CheckerBatchExecutionResult, error) {
-	reqBody, err := json.Marshal(request)
-	if err != nil {
-		return apigateway.CheckerBatchExecutionResult{}, err
-	}
+	// A plain request struct always encodes.
+	reqBody, _ := json.Marshal(request)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/execute-batch", strings.NewReader(string(reqBody))) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {

@@ -19,25 +19,32 @@ import (
 )
 
 type gameCoreServer struct {
-	adminToken         string
-	store              gameStore
-	checker            checkerClient
-	accessReconcile    accessReconcileClient
-	flags              flagCodec
-	flagsMu            sync.RWMutex
-	tickMu             sync.Mutex
-	retentionLocks     sync.Map
-	scheduler          gameScheduler
-	checkerPhases      []string
-	checkerTimeout     int
-	checkerParallelism int
-	tickTimeout        time.Duration
-	scoringDebounce    time.Duration
-	scoringRetryDelay  time.Duration
-	scoringTimeout     time.Duration
-	scoringMu          sync.Mutex
-	scoringTimer       *time.Timer
-	scoringStatus      scoringRecomputeStatus
+	adminToken      string
+	store           gameStore
+	checker         checkerClient
+	accessReconcile accessReconcileClient
+	flags           flagCodec
+	flagsMu         sync.RWMutex
+	tickMu          sync.Mutex
+	// unfinalizedTick is a tick this process started but could not persist as
+	// finished. Guarded by tickMu; the next advance finalizes it before starting
+	// a new tick, so a transient database error cannot leave the game wedged on
+	// a "running" tick until restart.
+	unfinalizedTick *apigateway.GameTickStatus
+	// retentionMonitorInterval spaces background retention sweeps; zero means 5s.
+	retentionMonitorInterval time.Duration
+	retentionLocks           sync.Map
+	scheduler                gameScheduler
+	checkerPhases            []string
+	checkerTimeout           int
+	checkerParallelism       int
+	tickTimeout              time.Duration
+	scoringDebounce          time.Duration
+	scoringRetryDelay        time.Duration
+	scoringTimeout           time.Duration
+	scoringMu                sync.Mutex
+	scoringTimer             *time.Timer
+	scoringStatus            scoringRecomputeStatus
 	// Concurrent live scoreboard reads share one build (scoreboard_reads.go).
 	liveScoreboardMu         sync.Mutex
 	liveScoreboardGeneration uint64
@@ -403,12 +410,9 @@ func (s *gameCoreServer) handleRunWarmup(w http.ResponseWriter, r *http.Request)
 	}
 	result, err := s.runWarmup(r.Context())
 	statusCode := http.StatusOK
-	switch {
-	case err != nil && result.Status == "failed":
-		statusCode = http.StatusUnprocessableEntity
-	case err != nil:
-		statusCode = http.StatusInternalServerError
-	case result.Status != "passed":
+	// runWarmup reports every error as a failed result, so any error or
+	// non-passing result is unprocessable.
+	if err != nil || result.Status != "passed" {
 		statusCode = http.StatusUnprocessableEntity
 	}
 	writeData(w, statusCode, result)
@@ -897,6 +901,12 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 		return apigateway.GameTickStatus{}, errTickInProgress
 	}
 	defer s.tickMu.Unlock()
+	if pending := s.unfinalizedTick; pending != nil {
+		if _, err := s.store.CompleteTick(context.WithoutCancel(ctx), *pending); err != nil {
+			return apigateway.GameTickStatus{}, fmt.Errorf("tick %d is still unfinalized: %w", pending.ID, err)
+		}
+		s.unfinalizedTick = nil
+	}
 	match, err := s.matchStatus(ctx)
 	if err != nil {
 		return apigateway.GameTickStatus{}, err
@@ -988,6 +998,7 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 	}
 	completed, err := s.store.CompleteTick(persistCtx, tick)
 	if err != nil {
+		s.rememberUnfinalizedTick(tick)
 		return apigateway.GameTickStatus{}, err
 	}
 	s.invalidateLiveScoreboard()
@@ -1010,7 +1021,15 @@ func (s *gameCoreServer) advanceTick(ctx context.Context) (apigateway.GameTickSt
 func (s *gameCoreServer) completeFailedTick(ctx context.Context, tick apigateway.GameTickStatus) {
 	if _, err := s.store.CompleteTick(ctx, tick); err != nil {
 		log.Printf("game-core: could not finalize failed tick %d: %v", tick.ID, err)
+		s.rememberUnfinalizedTick(tick)
 	}
+}
+
+// rememberUnfinalizedTick records a tick whose terminal state could not be
+// persisted, for the next advance to retry. Callers hold tickMu.
+func (s *gameCoreServer) rememberUnfinalizedTick(tick apigateway.GameTickStatus) {
+	pending := tick
+	s.unfinalizedTick = &pending
 }
 
 // runWarmup executes a pre-match warmup: it lists every checker target and runs
@@ -1084,18 +1103,26 @@ func (s *gameCoreServer) runWarmup(ctx context.Context) (apigateway.GameWarmupRe
 	jobs := make(chan warmupJob)
 	var failures []apigateway.GameWarmupFailure
 	var failuresMu sync.Mutex
+	// succeeded counts verified puts. Targets a timed-out warmup never reached
+	// are neither, so they must not be inferred as successes.
+	succeeded := 0
 	var wg sync.WaitGroup
 
 	for i := 0; i < parallelism; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// The producer stops dispatching at the deadline. A job that
+			// still lands on that boundary runs against the expired context
+			// and fails fast, so no separate skip is needed here.
 			for j := range jobs {
-				if runCtx.Err() != nil {
-					continue
-				}
 				target := targets[j.index]
-				if putErr := s.runWarmupForTarget(runCtx, target); putErr != nil {
+				putErr := s.runWarmupForTarget(runCtx, target)
+				if putErr == nil {
+					failuresMu.Lock()
+					succeeded++
+					failuresMu.Unlock()
+				} else {
 					failuresMu.Lock()
 					failures = append(failures, apigateway.GameWarmupFailure{
 						TeamID:        target.TeamID,
@@ -1122,25 +1149,23 @@ producer:
 
 	completedAt := s.now().UTC()
 	result.CompletedAt = completedAt.Format(time.RFC3339)
-	result.PutFailed = len(failures)
-	result.PutSuccess = result.TotalTargets - result.PutFailed
-	if result.TotalTargets > 0 {
-		result.SuccessRate = float64(result.PutSuccess) / float64(result.TotalTargets)
-	} else {
-		result.SuccessRate = 1.0
-	}
-	if runCtx.Err() != nil && len(failures) == 0 {
+	// Only verified puts count. A target the warmup never reached before it
+	// timed out is unverified, so it counts as failed rather than inferred as a
+	// success. TotalTargets > 0 here: an empty target list returned above.
+	result.PutSuccess = succeeded
+	result.PutFailed = result.TotalTargets - succeeded
+	result.SuccessRate = float64(result.PutSuccess) / float64(result.TotalTargets)
+	result.Failures = failures
+	aborted := runCtx.Err() != nil && succeeded < result.TotalTargets
+	if aborted && len(failures) == 0 {
 		result.Failures = []apigateway.GameWarmupFailure{{
 			Error: fmt.Sprintf("warmup aborted before completion: %v", runCtx.Err()),
 		}}
-		result.PutFailed = result.TotalTargets
-		result.PutSuccess = 0
-		result.SuccessRate = 0
-	} else {
-		result.Failures = failures
 	}
 
-	if result.SuccessRate >= s.warmupMinSuccess {
+	// An aborted warmup never passes: it did not verify every target it was
+	// asked to, whatever share it reached.
+	if !aborted && result.SuccessRate >= s.warmupMinSuccess {
 		result.Status = "passed"
 	} else {
 		result.Status = "failed"
@@ -1669,15 +1694,14 @@ func (s *gameCoreServer) runScheduledScoreboardRecompute() {
 	s.scoringMu.Lock()
 	defer s.scoringMu.Unlock()
 	s.scoringStatus.InFlight = false
+	// scoringTimer is nil here: it was cleared when this run started, and
+	// scheduleScoreboardRecompute does not arm a timer while a run is in flight.
 	if err != nil {
 		s.scoringStatus.Pending = true
 		s.scoringStatus.LastFailureAt = s.now().UTC()
 		s.scoringStatus.LastError = err.Error()
 		s.scoringStatus.FailureCount++
 		log.Printf("scoreboard recompute failed after submission: %v", err)
-		if s.scoringTimer != nil {
-			s.scoringTimer.Stop()
-		}
 		s.scoringTimer = time.AfterFunc(nonNegativeDuration(s.scoringRetryDelay), s.runScheduledScoreboardRecompute)
 		return
 	}
@@ -1685,9 +1709,6 @@ func (s *gameCoreServer) runScheduledScoreboardRecompute() {
 	s.scoringStatus.LastSuccessAt = s.now().UTC()
 	s.scoringStatus.LastError = ""
 	if s.scoringStatus.Pending {
-		if s.scoringTimer != nil {
-			s.scoringTimer.Stop()
-		}
 		s.scoringTimer = time.AfterFunc(nonNegativeDuration(s.scoringDebounce), s.runScheduledScoreboardRecompute)
 	}
 }

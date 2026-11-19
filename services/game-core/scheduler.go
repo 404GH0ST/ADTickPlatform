@@ -34,6 +34,10 @@ type intervalGameScheduler struct {
 	// restoring is true while a background retry of a failed start-up restore
 	// is pending. Any explicit Start, Stop, or Close cancels the retry.
 	restoring bool
+	// retryDelay and retryAttempts are copied from the package defaults when
+	// the scheduler is built, so a running retry loop never reads shared state.
+	retryDelay    time.Duration
+	retryAttempts int
 }
 
 // Restoring a running scheduler reads the match state; if that read fails
@@ -51,6 +55,9 @@ func newIntervalGameScheduler(store gameStore, interval time.Duration, autoStart
 		advance:  advance,
 		match:    match,
 		now:      time.Now,
+		// Copied so a background retry never reads the mutable package defaults.
+		retryDelay:    schedulerRestoreRetryDelay,
+		retryAttempts: schedulerRestoreAttempts,
 		status: apigateway.GameSchedulerStatus{
 			State:           "stopped",
 			IntervalSeconds: int(interval / time.Second),
@@ -131,8 +138,8 @@ func (s *intervalGameScheduler) recordRestoreStoppedLocked() {
 }
 
 func (s *intervalGameScheduler) retryRestore() {
-	for attempt := 0; attempt < schedulerRestoreAttempts; attempt++ {
-		time.Sleep(schedulerRestoreRetryDelay)
+	for attempt := 0; attempt < s.retryAttempts; attempt++ {
+		time.Sleep(s.retryDelay)
 		s.mu.Lock()
 		if !s.restoring {
 			s.mu.Unlock()
