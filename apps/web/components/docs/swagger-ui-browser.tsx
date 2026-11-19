@@ -7,6 +7,12 @@ import { swaggerAccessibility } from '@/components/docs/swagger-accessibility';
 
 // The accessibility plugin wraps components from this Swagger UI release.
 const SWAGGER_ASSETS = 'https://unpkg.com/swagger-ui-dist@5.35.0';
+// Subresource Integrity pins the exact third-party bytes. The docs page shares
+// an origin with the organizer dashboard, so a tampered CDN response must fail
+// to load rather than run with same-origin access. Recompute both hashes when
+// bumping the version above (sha384 of each file, base64).
+const SWAGGER_BUNDLE_INTEGRITY = 'sha384-gjRm0bEPMeTmMh5jT2cHccIwCUZSTd8YC+j0d0sXw0MdGEfScduGpSyF3ZSSLkX9';
+const SWAGGER_CSS_INTEGRITY = 'sha384-WlYgdmXYOOBWL5apwjDEZwN+U3HmXSSu5R6V5aGxEcf7z+KuRNwBhoxKVN1i3D5I';
 
 type SwaggerBundle = (config: Record<string, unknown>) => unknown;
 
@@ -55,9 +61,16 @@ export function SwaggerUIBrowser({ specURL }: Props) {
 
   return (
     <>
-      <link rel="stylesheet" href={`${SWAGGER_ASSETS}/swagger-ui.css`} />
+      <link
+        rel="stylesheet"
+        href={`${SWAGGER_ASSETS}/swagger-ui.css`}
+        integrity={SWAGGER_CSS_INTEGRITY}
+        crossOrigin="anonymous"
+      />
       <Script
         src={`${SWAGGER_ASSETS}/swagger-ui-bundle.js`}
+        integrity={SWAGGER_BUNDLE_INTEGRITY}
+        crossOrigin="anonymous"
         strategy="afterInteractive"
         onLoad={() => setReady(true)}
         onError={() => setError('Swagger UI assets could not be loaded from the CDN.')}
