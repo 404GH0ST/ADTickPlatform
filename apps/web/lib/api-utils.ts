@@ -64,10 +64,17 @@ export function firstForwardedAddress(value: string | null): string | undefined 
 }
 
 export async function parseTeamBody(request: Request) {
-  const body = (await request.json().catch(() => null)) as { name?: string; contact_email?: string } | null;
+  const body = (await request.json().catch(() => null)) as {
+    name?: string;
+    contact_email?: string;
+    institution?: unknown;
+  } | null;
   const name = body?.name?.trim();
   const contactEmail = body?.contact_email?.trim();
-  return { name, contactEmail };
+  // undefined = field absent (keep the stored value on update).
+  const institution =
+    typeof body?.institution === "string" ? body.institution.trim() : undefined;
+  return { name, contactEmail, institution };
 }
 
 export async function authenticatedFetch<T>(

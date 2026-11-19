@@ -27,6 +27,7 @@ export type ScoreboardRow = {
   rank: number;
   delta: string;
   team: string;
+  institution?: string;
   attack: number;
   defense: number;
   sla: number;
@@ -443,6 +444,15 @@ export function ScoreboardTable({
                     <div className="block truncate text-sm" title={score.team}>
                       {score.team}
                     </div>
+                    {score.institution ? (
+                      <div
+                        data-testid="scoreboard-team-institution"
+                        className="mt-0.5 block truncate text-xs font-normal text-muted-foreground"
+                        title={score.institution}
+                      >
+                        {score.institution}
+                      </div>
+                    ) : null}
                   </TableCell>
                   {serviceColumns.map((service) => (
                     <TableCell
@@ -570,7 +580,7 @@ function MobileScoreboardCards({
               "rounded-sm border border-border/65 bg-card p-3",
               isCurrentTeam && "border-primary/70 bg-primary/5",
             )}
-            aria-label={`Rank ${score.rank}, ${score.team}, total ${compactNumber(score.total)}`}
+            aria-label={`Rank ${score.rank}, ${score.team}${score.institution ? ` (${score.institution})` : ""}, total ${compactNumber(score.total)}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -580,6 +590,14 @@ function MobileScoreboardCards({
                 <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary")}>
                   {score.team}
                 </p>
+                {score.institution ? (
+                  <p
+                    data-testid="scoreboard-team-institution"
+                    className="mt-0.5 line-clamp-2 text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                  >
+                    {score.institution}
+                  </p>
+                ) : null}
               </div>
               <div className="text-right font-mono">
                 <p className="text-[10px] font-semibold uppercase text-muted-foreground">

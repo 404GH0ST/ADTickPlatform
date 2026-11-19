@@ -127,6 +127,11 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d: team name and contact_email are required", index+1))
 			continue
 		}
+		institution, institutionOK := normalizeTeamInstitution(teamInput.Institution)
+		if !institutionOK {
+			result.Errors = append(result.Errors, fmt.Sprintf("row %d: institution must be at most %d characters", index+1, maxTeamInstitutionLength))
+			continue
+		}
 
 		players, rosterErr := validateBulkImportRoster(index, teamInput.Players)
 		if rosterErr != "" {
@@ -134,7 +139,7 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 			continue
 		}
 
-		team, createdPlayers, err := s.importOneTeam(ctx, name, email, players, now)
+		team, createdPlayers, err := s.importOneTeam(ctx, name, email, institution, players, now)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d (%s): %v", index+1, name, err))
 			continue
@@ -189,7 +194,7 @@ func validateBulkImportRoster(teamIndex int, rows []adminBulkImportPlayer) ([]ad
 
 func (s *postgresStore) importOneTeam(
 	ctx context.Context,
-	name, contactEmail string,
+	name, contactEmail, institution string,
 	players []adminCreatePlayerRequest,
 	now time.Time,
 ) (adminTeam, []adminPlayer, error) {
@@ -197,6 +202,7 @@ func (s *postgresStore) importOneTeam(
 	team, err := s.CreateAdminTeam(ctx, adminCreateTeamRequest{
 		Name:         name,
 		ContactEmail: contactEmail,
+		Institution:  institution,
 	})
 	if err != nil {
 		return adminTeam{}, nil, err
@@ -288,6 +294,11 @@ func (s *memoryStore) ImportAdminTeams(ctx context.Context, teams []adminBulkImp
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d: team name and contact_email are required", index+1))
 			continue
 		}
+		institution, institutionOK := normalizeTeamInstitution(teamInput.Institution)
+		if !institutionOK {
+			result.Errors = append(result.Errors, fmt.Sprintf("row %d: institution must be at most %d characters", index+1, maxTeamInstitutionLength))
+			continue
+		}
 
 		players, rosterErr := validateBulkImportRoster(index, teamInput.Players)
 		if rosterErr != "" {
@@ -295,7 +306,7 @@ func (s *memoryStore) ImportAdminTeams(ctx context.Context, teams []adminBulkImp
 			continue
 		}
 
-		team, err := s.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: name, ContactEmail: email})
+		team, err := s.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: name, ContactEmail: email, Institution: institution})
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d (%s): %v", index+1, name, err))
 			continue

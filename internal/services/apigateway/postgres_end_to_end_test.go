@@ -187,11 +187,28 @@ func gatewayAdminLifecycle(t *testing.T, b e2eBackend) {
 		t.Fatalf("appearance not persisted: %v", appearance)
 	}
 
-	alpha := c.expect(http.StatusOK, http.MethodPost, "/api/v2/admin/teams", admin, adminCreateTeamRequest{Name: "Alpha", ContactEmail: "alpha@example.test"})
+	alpha := c.expect(http.StatusOK, http.MethodPost, "/api/v2/admin/teams", admin, adminCreateTeamRequest{Name: "Alpha", ContactEmail: "alpha@example.test", Institution: "Institut Teknologi Bandung"})
+	if alpha["institution"] != "Institut Teknologi Bandung" {
+		t.Fatalf("create must persist institution: %v", alpha)
+	}
 	bravo := c.expect(http.StatusOK, http.MethodPost, "/api/v2/admin/teams", admin, adminCreateTeamRequest{Name: "Bravo", ContactEmail: "bravo@example.test"})
 	alphaID, bravoID := idOf(t, alpha), idOf(t, bravo)
 	c.expect(http.StatusConflict, http.MethodPost, "/api/v2/admin/teams", admin, adminCreateTeamRequest{Name: "Alpha", ContactEmail: "other@example.test"})
-	c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/teams/%d", alphaID), admin, adminUpdateTeamRequest{Name: "Alpha Prime", ContactEmail: "alpha@example.test"})
+	// Omitting institution on update keeps the stored value.
+	if renamed := c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/teams/%d", alphaID), admin, adminUpdateTeamRequest{Name: "Alpha Prime", ContactEmail: "alpha@example.test"}); renamed["institution"] != "Institut Teknologi Bandung" {
+		t.Fatalf("update without institution must keep it: %v", renamed)
+	}
+	institution := "Universitas Indonesia"
+	if moved := c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/teams/%d", bravoID), admin, adminUpdateTeamRequest{Name: "Bravo", ContactEmail: "bravo@example.test", Institution: &institution}); moved["institution"] != institution {
+		t.Fatalf("update must set institution: %v", moved)
+	}
+	institutionByTeam := map[string]any{}
+	for _, row := range c.list(http.MethodGet, "/api/v2/admin/teams", admin) {
+		institutionByTeam[fmt.Sprint(row["name"])] = row["institution"]
+	}
+	if institutionByTeam["Alpha Prime"] != "Institut Teknologi Bandung" || institutionByTeam["Bravo"] != institution {
+		t.Fatalf("listed institutions = %v", institutionByTeam)
+	}
 	if teams := c.list(http.MethodGet, "/api/v2/admin/teams", admin); len(teams) != baseTeams+2 {
 		t.Fatalf("want 2 teams, got %v", teams)
 	}

@@ -132,6 +132,11 @@ export function NbStandings({
                   <span className="min-w-0 wrap-anywhere font-semibold">
                     {row.team}
                     {mine ? <span className="ml-2 text-xs font-bold">(you)</span> : null}
+                    {row.institution ? (
+                      <span data-testid="nb-score-institution" className="nb-institution mt-0.5 block">
+                        {row.institution}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="hidden text-right tabular-nums md:block" title="Attack"><span className="sr-only">Attack </span>{format(row.attack)}</span>
                   <span className="hidden text-right tabular-nums md:block" title="Defense"><span className="sr-only">Defense </span>{format(row.defense)}</span>

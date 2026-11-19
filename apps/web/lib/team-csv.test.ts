@@ -14,6 +14,7 @@ describe("parseTeamCsv", () => {
     expect(parseTeamCsv(csv)).toEqual([{
       name: "Blue, Inc.",
       contact_email: "team@example.test",
+      institution: "",
       players: [
         { display_name: 'Alex "Ace"', email: "one@example.test", password: "test-pass-one", role: "captain" },
         { display_name: "Bailey", email: "two@example.test", password: "test-pass-two", role: "member" },
@@ -24,8 +25,21 @@ describe("parseTeamCsv", () => {
   test("accepts headerless team-only data and skips blank rows", () => {
     expect(parseTeamCsv(" \n\n")).toEqual([]);
     expect(parseTeamCsv("Team A,a@example.test\n\nTeam B,b@example.test,,partial@example.test")).toEqual([
-      { name: "Team A", contact_email: "a@example.test", players: [] },
-      { name: "Team B", contact_email: "b@example.test", players: [] },
+      { name: "Team A", contact_email: "a@example.test", institution: "", players: [] },
+      { name: "Team B", contact_email: "b@example.test", institution: "", players: [] },
+    ]);
+  });
+
+  test("reads the optional institution column from any of the team's rows", () => {
+    const csv = [
+      "team_name,contact_email,team_institution,player_display_name,player_email,player_password",
+      "Red,red@example.test,,Ana,ana@example.test,test-pass-one",
+      'Red,red@example.test,"Institut Teknologi Bandung",Budi,budi@example.test,test-pass-two',
+      "Green,green@example.test,Universitas Indonesia,,,",
+    ].join("\n");
+    expect(parseTeamCsv(csv).map(({ name, institution }) => ({ name, institution }))).toEqual([
+      { name: "Red", institution: "Institut Teknologi Bandung" },
+      { name: "Green", institution: "Universitas Indonesia" },
     ]);
   });
 });

@@ -44,6 +44,7 @@ import {
 export type CreateTeamInput = {
   name: string;
   contact_email: string;
+  institution?: string;
 };
 
 export type CreatePlayerInput = {
@@ -67,6 +68,8 @@ export type CreateChallengeInput = {
 export type UpdateTeamInput = {
   name: string;
   contact_email: string;
+  /** Omit to keep the stored institution; "" clears it. */
+  institution?: string;
 };
 
 export type UpdatePlayerInput = {
@@ -876,6 +879,7 @@ export async function deleteAdminAnnouncement(announcementID: number) {
 export async function bulkImportAdminTeams(teams: Array<{
   name: string;
   contact_email: string;
+  institution?: string;
   players?: Array<{
     display_name: string;
     email: string;

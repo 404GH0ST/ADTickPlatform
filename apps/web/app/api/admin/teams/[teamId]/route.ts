@@ -21,13 +21,13 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ teamId: string }> },
 ) {
-  const { name, contactEmail } = await parseTeamBody(request);
+  const { name, contactEmail, institution } = await parseTeamBody(request);
   if (!name || !contactEmail) {
     return problemResponse(400, 'Invalid request', 'team update request is invalid.');
   }
   try {
     const { teamId } = await params;
-    const data = await updateAdminTeam(Number(teamId), { name, contact_email: contactEmail });
+    const data = await updateAdminTeam(Number(teamId), { name, contact_email: contactEmail, institution });
     return NextResponse.json(data);
   } catch (error) {
     return upstreamErrorResponse(error, 'team update failed', 'Upstream request failed');

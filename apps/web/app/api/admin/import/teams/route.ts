@@ -8,6 +8,7 @@ export async function POST(request: Request) {
     teams?: Array<{
       name: string;
       contact_email: string;
+      institution?: string;
       players?: Array<{
         display_name: string;
         email: string;

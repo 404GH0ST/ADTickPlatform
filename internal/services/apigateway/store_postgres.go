@@ -1109,11 +1109,11 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 
 func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at, t.play_from_tick
+		SELECT t.id, t.name, t.email, t.institution, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at, t.play_from_tick
 		FROM teams t
 		LEFT JOIN players p ON p.team_id = t.id
 		LEFT JOIN team_service_states tss ON tss.team_id = t.id
-		GROUP BY t.id, t.name, t.email, t.join_key, t.active, t.deactivated_at, t.play_from_tick
+		GROUP BY t.id, t.name, t.email, t.institution, t.join_key, t.active, t.deactivated_at, t.play_from_tick
 		ORDER BY t.id
 	`)
 	if err != nil {
@@ -1126,7 +1126,7 @@ func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 		var team adminTeam
 		var deactivatedAt sql.NullTime
 		var playFromTick sql.NullInt64
-		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt, &playFromTick); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.Institution, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt, &playFromTick); err != nil {
 			return nil, err
 		}
 		if deactivatedAt.Valid {
@@ -1144,6 +1144,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 	return retryBadConnection(func() (adminTeam, error) {
 		name := strings.TrimSpace(input.Name)
 		contactEmail := strings.TrimSpace(strings.ToLower(input.ContactEmail))
+		institution := storedTeamInstitution(input.Institution)
 		if name == "" || contactEmail == "" {
 			return adminTeam{}, ErrDuplicateResource
 		}
@@ -1167,7 +1168,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 			return adminTeam{}, fmt.Errorf("allocate team id: %w", err)
 		}
 		joinKey := NewTeamJoinKey()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO teams (id, name, email, join_key) VALUES ($1, $2, $3, $4)`, teamID, name, contactEmail, joinKey); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO teams (id, name, email, institution, join_key) VALUES ($1, $2, $3, $4, $5)`, teamID, name, contactEmail, institution, joinKey); err != nil {
 			return adminTeam{}, fmt.Errorf("insert team: %w", err)
 		}
 
@@ -1248,7 +1249,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 			return adminTeam{}, fmt.Errorf("commit create team tx: %w", err)
 		}
 
-		return adminTeam{ID: teamID, Name: name, ContactEmail: contactEmail, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: deployedChallenges}, nil
+		return adminTeam{ID: teamID, Name: name, ContactEmail: contactEmail, Institution: institution, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: deployedChallenges}, nil
 	})
 }
 
@@ -2062,6 +2063,11 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input adminUpdateTeamRequest) (adminTeam, error) {
 	name := strings.TrimSpace(input.Name)
 	contactEmail := strings.TrimSpace(strings.ToLower(input.ContactEmail))
+	var institution *string
+	if input.Institution != nil {
+		value := storedTeamInstitution(*input.Institution)
+		institution = &value
+	}
 	if name == "" || contactEmail == "" {
 		return adminTeam{}, fmt.Errorf("%w: name and contact_email are required", ErrDuplicateResource)
 	}
@@ -2072,7 +2078,7 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 	if duplicate {
 		return adminTeam{}, ErrDuplicateResource
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE teams SET name = $2, email = $3 WHERE id = $1`, teamID, name, contactEmail); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE teams SET name = $2, email = $3, institution = COALESCE($4, institution) WHERE id = $1`, teamID, name, contactEmail, institution); err != nil {
 		return adminTeam{}, fmt.Errorf("update team: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE scoreboard_entries SET team_name = $2 WHERE team_id = $1`, teamID, name); err != nil {
@@ -2080,11 +2086,11 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 	}
 	var team adminTeam
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT t.id, t.name, t.email, COALESCE(t.join_key, ''),
+		SELECT t.id, t.name, t.email, t.institution, COALESCE(t.join_key, ''),
 		       COALESCE((SELECT COUNT(*) FROM players p WHERE p.team_id = t.id), 0),
 		       COALESCE((SELECT COUNT(DISTINCT si.challenge_id) FROM service_instances si WHERE si.team_id = t.id AND si.runtime_status = 'ready'), 0)
 		FROM teams t WHERE t.id = $1
-	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); errors.Is(err, sql.ErrNoRows) {
+	`, teamID).Scan(&team.ID, &team.Name, &team.ContactEmail, &team.Institution, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges); errors.Is(err, sql.ErrNoRows) {
 		// The updates matched nothing: there is no such team.
 		return adminTeam{}, ErrTeamNotFound
 	} else if err != nil {

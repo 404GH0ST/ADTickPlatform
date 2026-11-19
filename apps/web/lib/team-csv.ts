@@ -8,6 +8,7 @@ export type TeamCsvPlayer = {
 export type TeamCsvRow = {
   name: string;
   contact_email: string;
+  institution: string;
   players: TeamCsvPlayer[];
 };
 
@@ -25,6 +26,10 @@ export function parseTeamCsv(text: string): TeamCsvRow[] {
     header.includes("team_name") || header.includes("contact_email");
   const rows = hasHeader ? lines.slice(1) : lines;
   const index = (name: string) => header.indexOf(name);
+  // Institution is optional and header-only, so positional CSVs keep their
+  // existing column layout. "team_institution" and "institution" both work.
+  const institutionIndex =
+    index("team_institution") >= 0 ? index("team_institution") : index("institution");
 
   const teams = new Map<string, TeamCsvRow>();
 
@@ -44,8 +49,17 @@ export function parseTeamCsv(text: string): TeamCsvRow[] {
       teams.set(key, {
         name: teamName.trim(),
         contact_email: contactEmail.trim(),
+        institution: "",
         players: [],
       });
+    }
+    // The first non-empty institution on any of the team's rows wins, so a
+    // roster may repeat it per player row or set it once.
+    const institution =
+      hasHeader && institutionIndex >= 0 ? (cells[institutionIndex] ?? "").trim() : "";
+    const team = teams.get(key);
+    if (team && !team.institution && institution) {
+      team.institution = institution;
     }
     const displayName = hasHeader
       ? (cells[index("player_display_name")] ?? "")

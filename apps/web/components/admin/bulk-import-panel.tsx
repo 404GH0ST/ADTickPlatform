@@ -20,7 +20,7 @@ export function BulkImportPanel(): ReactElement {
   const csvId = useId();
   const csvDescription = `${csvId}-description`;
   const [csvText, setCsvText] = useState(
-    "team_name,contact_email,player_display_name,player_email,player_password,player_role\n",
+    "team_name,contact_email,team_institution,player_display_name,player_email,player_password,player_role\n",
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,8 +81,9 @@ export function BulkImportPanel(): ReactElement {
           <CardTitle as="h2" className="text-base">Bulk team import</CardTitle>
         </div>
         <CardDescription id={csvDescription} className="wrap-anywhere">
-          CSV columns: team_name, contact_email, optional player_display_name,
-          player_email, player_password, player_role (member or captain, at
+          CSV columns: team_name, contact_email, optional team_institution,
+          player_display_name, player_email, player_password, player_role
+          (member or captain, at
           most one captain per team). Each team is created atomically with its
           players; a bad player row rolls that team back. Create organizer
           accounts from the player registry, not from a roster.

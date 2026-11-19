@@ -10,6 +10,7 @@ export type ScoreServiceRow = {
 export type ScoreRow = {
   rank: number;
   team: string;
+  institution?: string;
   attack: number;
   defense: number;
   sla: number;
@@ -46,6 +47,8 @@ export type AttackEvent = {
   id: string;
   attacker: string;
   victim: string;
+  attacker_institution?: string;
+  victim_institution?: string;
   service: string;
   tick: number;
   verdict: string;

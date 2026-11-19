@@ -41,6 +41,7 @@ Bulk import body:
     {
       "name": "Team Nova",
       "contact_email": "nova@example.com",
+      "institution": "Institut Teknologi Bandung",
       "players": [
         {
           "display_name": "Nova Cap",
@@ -69,9 +70,17 @@ Request body:
 ```json
 {
   "name": "Team Nova",
-  "contact_email": "team-nova@example.com"
+  "contact_email": "team-nova@example.com",
+  "institution": "Institut Teknologi Bandung"
 }
 ```
+
+`institution` is optional (at most 120 characters; whitespace is collapsed).
+It is display-only: api-gateway joins it into `GET /api/v2/scoreboard` rows
+(`institution`) and `GET /api/v2/attacks` events (`attacker_institution`,
+`victim_institution`), so it shows on the leaderboard, the attack globe and the
+first-blood banner. On `PUT /api/v2/admin/teams/{team_id}`, omitting
+`institution` keeps the stored value and `""` clears it.
 
 Behavior:
 

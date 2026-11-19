@@ -5,6 +5,7 @@ import "time"
 type adminCreateTeamRequest struct {
 	Name         string `json:"name"`
 	ContactEmail string `json:"contact_email"`
+	Institution  string `json:"institution"`
 }
 
 type adminCreatePlayerRequest struct {
@@ -28,6 +29,9 @@ type adminCreateChallengeRequest struct {
 type adminUpdateTeamRequest struct {
 	Name         string `json:"name"`
 	ContactEmail string `json:"contact_email"`
+	// Institution is optional: nil (field omitted) keeps the stored value and
+	// an empty string clears it.
+	Institution *string `json:"institution,omitempty"`
 }
 
 type adminUpdatePlayerRequest struct {
@@ -48,6 +52,7 @@ type adminTeam struct {
 	ID                 int    `json:"id"`
 	Name               string `json:"name"`
 	ContactEmail       string `json:"contact_email"`
+	Institution        string `json:"institution"`
 	JoinKey            string `json:"join_key"`
 	PlayerCount        int    `json:"player_count"`
 	DeployedChallenges int    `json:"deployed_challenges"`

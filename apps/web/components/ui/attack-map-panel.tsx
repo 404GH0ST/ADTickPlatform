@@ -41,6 +41,8 @@ export type AttackMapEvent = {
   first_blood?: boolean;
   id: string;
   attacker: string;
+  attacker_institution?: string;
+  victim_institution?: string;
   attackerLocation?: {
     lat: number;
     lon: number;
@@ -301,10 +303,17 @@ export function AttackMapPanel({
     const involvedRows = visibleRows.filter(
       (row) => row.attacker === selectedTeamId || row.victim === selectedTeamId,
     );
+    const institution =
+      involvedRows
+        .map((row) =>
+          row.attacker === selectedTeamId ? row.attacker_institution : row.victim_institution,
+        )
+        .find((value) => Boolean(value)) ?? '';
     if (involvedRows.length === 0) {
       return {
         attacks: 0,
         inbound: 0,
+        institution,
         outbound: 0,
         latestTick: null,
         opponents: [],
@@ -324,6 +333,7 @@ export function AttackMapPanel({
     return {
       attacks: involvedRows.length,
       inbound: inbound.length,
+      institution,
       outbound: outbound.length,
       latestTick: involvedRows.reduce(
         (current, row) => Math.max(current, row.tick),
@@ -452,6 +462,7 @@ export function AttackMapPanel({
         <InspectorCard
           eyebrow="Team"
           title={selectedTeamSummary.team}
+          subtitle={selectedTeamSummary.institution || undefined}
           lines={[
             { label: 'Outbound', value: String(selectedTeamSummary.outbound) },
             { label: 'Inbound', value: String(selectedTeamSummary.inbound) },
@@ -853,6 +864,7 @@ function InspectorCard({
   className,
   eyebrow,
   lines,
+  subtitle,
   title,
   ...props
 }: {
@@ -860,6 +872,7 @@ function InspectorCard({
   className?: string;
   eyebrow: string;
   lines: Array<{ label: string; value: string }>;
+  subtitle?: string;
   title: string;
 } & React.HTMLAttributes<HTMLDivElement>): ReactElement {
   return (
@@ -872,6 +885,14 @@ function InspectorCard({
           {eyebrow}
         </p>
         <p className="min-w-0 break-words text-base font-semibold text-foreground">{title}</p>
+        {subtitle ? (
+          <p
+            data-testid="attack-inspector-institution"
+            className="min-w-0 break-words text-sm text-muted-foreground"
+          >
+            {subtitle}
+          </p>
+        ) : null}
       </div>
       <div className="space-y-2 text-sm">
         {lines.map((line) => (

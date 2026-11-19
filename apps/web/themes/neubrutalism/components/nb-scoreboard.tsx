@@ -34,6 +34,11 @@ function PodiumBlock({ row, fill, height, mine }: { row: ScoreRow; fill: string;
           {row.team}
           {mine ? <span className="nb-sticker nb-status-chip ml-2 align-middle">You</span> : null}
         </p>
+        {row.institution ? (
+          <p data-testid="nb-podium-institution" className="nb-institution nb-institution-chip justify-self-start">
+            {row.institution}
+          </p>
+        ) : null}
         <p className="nb-display wrap-anywhere text-3xl font-extrabold tabular-nums leading-none">{format(row.total)}</p>
         <p className="text-xs font-semibold tabular-nums">
           A {format(row.attack)} · D {format(row.defense)} · SLA {format(row.sla)}

@@ -1015,6 +1015,10 @@ components:
           minimum: 1
         team:
           type: string
+        institution:
+          type: string
+          maxLength: 120
+          description: Institution the team represents. Omitted when not set.
         attack:
           type: integer
         defense:
@@ -1121,6 +1125,14 @@ components:
           type: string
         victim:
           type: string
+        attacker_institution:
+          type: string
+          maxLength: 120
+          description: Attacking team's institution. Omitted when not set.
+        victim_institution:
+          type: string
+          maxLength: 120
+          description: Victim team's institution. Omitted when not set.
         service:
           type: string
         tick:

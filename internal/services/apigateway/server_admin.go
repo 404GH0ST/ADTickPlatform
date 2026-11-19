@@ -35,6 +35,12 @@ func (s *Server) handleAdminCreateTeam(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "team request is invalid.")
 		return
 	}
+	institution, ok := normalizeTeamInstitution(req.Institution)
+	if !ok {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", fmt.Sprintf("institution must be at most %d characters.", maxTeamInstitutionLength))
+		return
+	}
+	req.Institution = institution
 	team, err := s.store.CreateAdminTeam(r.Context(), req)
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -43,6 +49,7 @@ func (s *Server) handleAdminCreateTeam(w http.ResponseWriter, r *http.Request) {
 	s.recordAdminAudit(r.Context(), "team.create", "team", fmt.Sprintf("team:%d %s", team.ID, team.Name), "created team", map[string]any{
 		"team_id":       team.ID,
 		"contact_email": team.ContactEmail,
+		"institution":   team.Institution,
 	})
 	writeData(w, http.StatusOK, team)
 }
@@ -93,6 +100,14 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "team update request is invalid.")
 		return
 	}
+	if req.Institution != nil {
+		institution, ok := normalizeTeamInstitution(*req.Institution)
+		if !ok {
+			writeProblem(w, http.StatusBadRequest, "Invalid request", fmt.Sprintf("institution must be at most %d characters.", maxTeamInstitutionLength))
+			return
+		}
+		req.Institution = &institution
+	}
 	team, err := s.store.UpdateAdminTeam(r.Context(), teamID, req)
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -102,6 +117,7 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		"team_id":       team.ID,
 		"name":          team.Name,
 		"contact_email": team.ContactEmail,
+		"institution":   team.Institution,
 	})
 	writeData(w, http.StatusOK, team)
 }
@@ -1139,7 +1155,7 @@ func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Reques
 	}
 	if s.scoring != nil {
 		if rows, err := s.scoring.Scoreboard(r.Context()); err == nil {
-			writeData(w, http.StatusOK, rows)
+			writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), rows))
 			return
 		} else if !errors.Is(err, errScoringWorkerDisabled) {
 			writeProblem(w, http.StatusBadGateway, "Scoreboard unavailable", "scoring-worker scoreboard could not be read.")
@@ -1151,7 +1167,7 @@ func (s *Server) handleAdminGameScoreboard(w http.ResponseWriter, r *http.Reques
 		writeGameCoreFailure(w, err, "game-core scoreboard could not be read.")
 		return
 	}
-	writeData(w, http.StatusOK, rows)
+	writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), rows))
 }
 
 func (s *Server) handleAdminScoreboardFreezeStatus(w http.ResponseWriter, r *http.Request) {

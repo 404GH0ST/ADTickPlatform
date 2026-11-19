@@ -1288,7 +1288,7 @@ function writeSSE(res, data) {
   });
   // A client disconnect mid-write must not crash the mock either.
   res.on("error", () => {});
-  writeSSEChunk(res, `data: ${JSON.stringify(data)}\n\n`);
+  writeSSEChunk(res, `data: ${JSON.stringify(withTeamInstitutions(data))}\n\n`);
   const heartbeat = setInterval(() => {
     writeSSEChunk(res, ": keep-alive\n\n");
   }, 15_000);
@@ -1368,7 +1368,7 @@ function writeScenarioSSE(res, pathname, initialData) {
   }
 
   const timer = setTimeout(() => {
-    writeSSEChunk(res, `data: ${JSON.stringify(followUpData)}\n\n`);
+    writeSSEChunk(res, `data: ${JSON.stringify(withTeamInstitutions(followUpData))}\n\n`);
   }, 250);
   onSSECleanup(res, () => clearTimeout(timer));
 }
@@ -1414,8 +1414,27 @@ function shouldFailRoute(method, pathname) {
   return state.failedRoutes.includes(`${method} ${pathname}`);
 }
 
+function withTeamInstitutions(value) {
+  const institutions = state?.teamInstitutions;
+  if (!institutions) return value;
+  const decorate = (row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+    const next = { ...row };
+    if (typeof row.team === "string" && institutions[row.team]) next.institution = institutions[row.team];
+    if (typeof row.attacker === "string" && institutions[row.attacker]) next.attacker_institution = institutions[row.attacker];
+    if (typeof row.victim === "string" && institutions[row.victim]) next.victim_institution = institutions[row.victim];
+    if (typeof row.name === "string" && typeof row.contact_email === "string" && institutions[row.name]) next.institution = institutions[row.name];
+    return next;
+  };
+  if (Array.isArray(value)) return value.map(decorate);
+  if (value && typeof value === "object" && Array.isArray(value.items)) {
+    return { ...value, items: value.items.map(decorate) };
+  }
+  return value;
+}
+
 function writeSuccess(res, data) {
-  writeJson(res, 200, success(data));
+  writeJson(res, 200, success(withTeamInstitutions(data)));
   return true;
 }
 
@@ -1509,6 +1528,11 @@ async function handleSystemRoutes({ req, res, url, method }) {
   if (method === "POST" && url.pathname === "/__reset") {
     const body = await readJsonBody(req);
     state = createStateForScenario(body?.scenario);
+    // Optional { teamName: institution } map. Like api-gateway, the mock joins
+    // institutions into scoreboard rows and attack events on the way out.
+    if (body?.institutions && typeof body.institutions === "object") {
+      state.teamInstitutions = { ...body.institutions };
+    }
     serviceActionCooldowns.clear();
     // Close all active SSE connections so Next.js re-fetches fresh data
     // Clear each stream's timers before ending it (see writeSSEChunk).

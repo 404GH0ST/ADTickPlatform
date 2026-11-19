@@ -26,6 +26,8 @@ export type CyberAttackEvent = {
   id: string;
   attacker: string;
   victim: string;
+  attacker_institution?: string;
+  victim_institution?: string;
   service: string;
   tick: number;
   attackerLocation?: GeoPoint;
@@ -86,6 +88,8 @@ const COUNTRY_TINT_COUNT = 5;
 type TeamNode = ProjectedPoint & {
   id: string;
   name: string;
+  /** Display-only; empty when the team has no institution set. */
+  institution: string;
   landmark: Landmark;
   labelX: number;
   labelY: number;
@@ -311,11 +315,12 @@ export function CyberAttackMap({
     const serviceColors = buildServiceColors(serviceNames);
     const tickRange = getAttackTickRange(attacks);
     const routeBundles = bundleAttackRoutes(attacks);
+    const institutionsByTeam = listTeamInstitutions(attacks);
 
-    return { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles };
+    return { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles, institutionsByTeam };
   }, [attacks, placementScopeTeams, teamLocations]);
   const { arcs, featuredAttack, nodes, services } = useMemo(() => {
-    const { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles } = scene;
+    const { attackTeamNames, teamStats, landmarksByTeam, serviceNames, serviceColors, tickRange, routeBundles, institutionsByTeam } = scene;
     const highlightedSet = new Set(highlightedAttackIDs);
 
     const nodesByName: Record<string, TeamNode> = {};
@@ -331,6 +336,7 @@ export function CyberAttackMap({
         ...point,
         id: name,
         name,
+        institution: institutionsByTeam.get(name) ?? '',
         landmark,
         labelX: label.x,
         labelY: label.y,
@@ -1216,7 +1222,9 @@ export function CyberAttackMap({
               >
                 <option value="">Select team</option>
                 {nodes.slice().sort((left, right) => left.name.localeCompare(right.name)).map((node) => (
-                  <option key={node.id} value={node.id}>{node.name}</option>
+                  <option key={node.id} value={node.id}>
+                    {node.institution ? `${node.name} (${node.institution})` : node.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -1970,11 +1978,17 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
         {attacks.map((attack) => (
           <div key={attack.id}>
             <h3 className="grid grid-cols-[minmax(0,1fr)_1.75rem_minmax(0,1fr)] items-center gap-2 text-[clamp(1.05rem,2vw,1.65rem)] leading-tight sm:gap-4">
-              <span className="min-w-0 break-words font-semibold">{attack.attacker}</span>
+              <span className="min-w-0 break-words font-semibold">
+                {attack.attacker}
+                <FirstBloodNoticeInstitution value={attack.attacker_institution} />
+              </span>
               <svg aria-hidden="true" viewBox="0 0 28 12" className="h-3 w-7" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M 0 6 H 26 M 20 1 L 26 6 L 20 11" />
               </svg>
-              <span className="min-w-0 break-words text-right font-normal">{attack.victim}</span>
+              <span className="min-w-0 break-words text-right font-normal">
+                {attack.victim}
+                <FirstBloodNoticeInstitution value={attack.victim_institution} />
+              </span>
             </h3>
             <div className="mt-2 flex items-start justify-between gap-3 text-xs">
               <p data-first-blood-notice-tag="true" className="min-w-0 break-words" style={{ color: 'var(--signal-negative)' }}>First blood · {attack.service}</p>
@@ -1984,6 +1998,19 @@ function FirstBloodNotice({ attacks, intro, stage, motionClass }: {
         ))}
       </div>
     </div>
+  );
+}
+
+function FirstBloodNoticeInstitution({ value }: { value?: string }): ReactElement | null {
+  if (!value) return null;
+  return (
+    <span
+      data-first-blood-notice-institution="true"
+      className="mt-0.5 block text-[11px] font-medium uppercase leading-snug tracking-[0.1em] sm:text-xs"
+      style={{ color: 'var(--attack-map-legend-foreground)' }}
+    >
+      {value}
+    </span>
   );
 }
 
@@ -2410,11 +2437,13 @@ function TeamNodeLabel({
   if (!node.visible || !showLabel) {
     return null;
   }
+  const meta = getTeamLabelMeta(node);
 
   return (
     <g
       data-attack-team-id={node.id}
       data-attack-team-label="true"
+      data-attack-team-institution={node.institution || undefined}
       pointerEvents="none"
     >
       <line
@@ -2454,7 +2483,13 @@ function TeamNodeLabel({
         fontWeight="500"
         className="select-none font-sans"
       >
-        {node.outgoing} out
+        {meta.institution ? (
+          <>
+            <tspan data-fx="team-institution" fontWeight="600">{meta.institution}</tspan>
+            <tspan data-fx="team-meta-separator" opacity="0.6">{' · '}</tspan>
+          </>
+        ) : null}
+        <tspan data-fx="team-meta-count">{meta.count}</tspan>
       </text>
       </g>
     </g>
@@ -2486,7 +2521,7 @@ function TeamNodeDot({
 
   return (
     <g
-      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
+      aria-label={`${node.selected ? 'Clear' : 'Inspect'} ${node.name}${node.institution ? ` (${node.institution})` : ''}, ${node.outgoing} outgoing and ${node.incoming} incoming attacks`}
       className="cursor-pointer"
       data-attack-team-id={node.id}
       data-attack-team-hit="true"
@@ -2555,10 +2590,39 @@ function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
   );
 }
 
+// Plates grow to fit an institution so a typical university name reads whole;
+// longer ones are cut with an ellipsis (the full name is in the aria-label,
+// the jump menu and the inspector).
+const LABEL_MAX_WIDTH = 178;
+const LABEL_MAX_WIDTH_WITH_INSTITUTION = 216;
+// Meta type is 9.5px; the Neubrutalism theme sets it in tracked capitals, so
+// size institution room for the wider of the two.
+const LABEL_META_CHAR_WIDTH = 5.2;
+const LABEL_INSTITUTION_CHAR_WIDTH = 6;
+
+function getTeamLabelMeta(node: TeamNode): { count: string; institution: string } {
+  const count = `${node.outgoing} out`;
+  if (!node.institution) {
+    return { count, institution: '' };
+  }
+  const room =
+    LABEL_MAX_WIDTH_WITH_INSTITUTION - 22 - (count.length + 3) * LABEL_META_CHAR_WIDTH;
+  const maxChars = Math.max(8, Math.floor(room / LABEL_INSTITUTION_CHAR_WIDTH));
+  const chars = Array.from(node.institution);
+  const institution =
+    chars.length > maxChars ? `${chars.slice(0, maxChars - 1).join('').trimEnd()}…` : node.institution;
+  return { count, institution };
+}
+
 function getTeamLabelWidth(node: TeamNode): number {
   const titleWidth = node.name.length * 6.5;
-  const metaWidth = `${node.outgoing} out`.length * 5.2;
-  return clamp(Math.max(titleWidth, metaWidth) + 22, 82, 178);
+  const meta = getTeamLabelMeta(node);
+  const metaWidth = meta.institution
+    ? Array.from(meta.institution).length * LABEL_INSTITUTION_CHAR_WIDTH +
+      (meta.count.length + 3) * LABEL_META_CHAR_WIDTH
+    : meta.count.length * LABEL_META_CHAR_WIDTH;
+  const maxWidth = meta.institution ? LABEL_MAX_WIDTH_WITH_INSTITUTION : LABEL_MAX_WIDTH;
+  return clamp(Math.max(titleWidth, metaWidth) + 22, 82, maxWidth);
 }
 
 function getRawLabelWidth(value: string): number {
@@ -3147,6 +3211,19 @@ function toRadians(value: number): number {
 
 function listAttackServices(attacks: CyberAttackEvent[]): string[] {
   return Array.from(new Set(attacks.map((attack) => attack.service))).sort();
+}
+
+function listTeamInstitutions(attacks: CyberAttackEvent[]): Map<string, string> {
+  const institutions = new Map<string, string>();
+  for (const attack of attacks) {
+    if (attack.attacker_institution && !institutions.has(attack.attacker)) {
+      institutions.set(attack.attacker, attack.attacker_institution);
+    }
+    if (attack.victim_institution && !institutions.has(attack.victim)) {
+      institutions.set(attack.victim, attack.victim_institution);
+    }
+  }
+  return institutions;
 }
 
 function listAttackTeams(attacks: CyberAttackEvent[]): string[] {

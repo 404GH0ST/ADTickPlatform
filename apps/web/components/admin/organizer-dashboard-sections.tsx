@@ -95,6 +95,7 @@ import { AttackFeedTable } from "@/components/ui/attack-feed-table";
 type TeamDraft = {
   name: string;
   contactEmail: string;
+  institution: string;
 };
 
 type PlayerDraft = {
@@ -488,7 +489,19 @@ export function TeamsTab({
               {teamRows.map((team) => (
                 <TableRow key={team.id} data-testid={`team-row-${team.id}`}>
                   <TableCell className="font-semibold">#{team.id}</TableCell>
-                  <TableCell>{team.name}</TableCell>
+                  <TableCell>
+                    <div className="min-w-0">
+                      <div className="font-medium">{team.name}</div>
+                      {team.institution ? (
+                        <div
+                          className="text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                          data-testid={`team-institution-${team.id}`}
+                        >
+                          {team.institution}
+                        </div>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell>{team.contact_email}</TableCell>
                   <TableCell className="whitespace-nowrap font-mono text-xs">{team.join_key}</TableCell>
                   <TableCell>{team.player_count}</TableCell>
@@ -5385,7 +5398,7 @@ type ChallengeDraftValidation = {
   fieldErrors: Partial<Record<ChallengeDraftField, string>>;
 };
 
-type TeamDraftField = "name" | "contactEmail";
+type TeamDraftField = "name" | "contactEmail" | "institution";
 
 type TeamDraftValidation = {
   errors: string[];
@@ -5405,6 +5418,8 @@ type PlayerDraftValidation = {
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Mirrors maxTeamInstitutionLength in api-gateway.
+const TEAM_INSTITUTION_MAX_LENGTH = 120;
 
 function validateTeamDraft(teamDraft: TeamDraft): TeamDraftValidation {
   const fieldErrors: Partial<Record<TeamDraftField, string>> = {};
@@ -5422,6 +5437,11 @@ function validateTeamDraft(teamDraft: TeamDraft): TeamDraftValidation {
   } else if (!emailPattern.test(email)) {
     fieldErrors.contactEmail = "Enter a valid email address.";
     errors.push("Contact email must be a valid email address.");
+  }
+
+  if (teamDraft.institution.trim().length > TEAM_INSTITUTION_MAX_LENGTH) {
+    fieldErrors.institution = `Keep it to ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`;
+    errors.push(`Institution must be ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`);
   }
 
   return { errors, fieldErrors };
@@ -5712,6 +5732,41 @@ export function EntityFormDialog({
                 {fieldErrors.contactEmail}
               </p>
             ) : null}
+          </div>
+        </Field>
+        <Field label="Institution (optional)" htmlFor="form-team-institution">
+          <div className="space-y-2">
+            <Input
+              id="form-team-institution"
+              aria-invalid={fieldErrors.institution ? true : undefined}
+              aria-describedby="form-team-institution-hint"
+              className={
+                fieldErrors.institution
+                  ? "border-destructive focus-visible:ring-destructive/20"
+                  : undefined
+              }
+              placeholder="University, school or company"
+              value={teamDraft.institution}
+              onChange={(event) =>
+                onTeamDraftChange({
+                  ...teamDraft,
+                  institution: event.target.value,
+                })
+              }
+            />
+            {fieldErrors.institution ? (
+              <p className="text-xs leading-5 text-destructive">
+                {fieldErrors.institution}
+              </p>
+            ) : (
+              <p
+                id="form-team-institution-hint"
+                className="text-xs leading-5 text-muted-foreground"
+              >
+                Shown under the team name on the scoreboard, attack globe and
+                first-blood banner.
+              </p>
+            )}
           </div>
         </Field>
       </div>

@@ -30,8 +30,10 @@ export function FirstBloodBanner({
   if (!attack) return null;
   const extras = others.slice(0, FIRST_BLOOD_BANNER_MAX_ROWS - 1);
   const hidden = others.length - extras.length;
+  const institution = attack.attacker_institution?.trim() ?? '';
   const dense =
-    others.length > 0 || attack.attacker.length + attack.service.length > 100;
+    others.length > 0 ||
+    attack.attacker.length + attack.service.length + institution.length / 2 > 100;
   return (
     <div
       role="status"
@@ -98,15 +100,29 @@ export function FirstBloodBanner({
           data-first-blood-banner-body="true"
           className={cn('min-w-0', dense ? 'space-y-2' : 'space-y-3')}
         >
-          <p
-            data-testid="first-blood-banner-team"
-            className={cn(
-              'text-balance font-semibold leading-tight [overflow-wrap:anywhere]',
-              dense ? 'text-lg sm:text-3xl' : 'text-2xl sm:text-4xl',
-            )}
-          >
-            {attack.attacker}
-          </p>
+          <div data-first-blood-banner-identity className="min-w-0">
+            <p
+              data-testid="first-blood-banner-team"
+              className={cn(
+                'text-balance font-semibold leading-tight [overflow-wrap:anywhere]',
+                dense ? 'text-lg sm:text-3xl' : 'text-2xl sm:text-4xl',
+              )}
+            >
+              {attack.attacker}
+            </p>
+            {institution ? (
+              <p
+                data-testid="first-blood-banner-institution"
+                className={cn(
+                  'mt-1 text-balance font-medium uppercase leading-snug tracking-[0.12em] [overflow-wrap:anywhere]',
+                  dense ? 'text-[0.6875rem] sm:text-xs' : 'text-xs sm:text-sm',
+                )}
+                style={{ color: 'var(--attack-map-legend-foreground)' }}
+              >
+                {institution}
+              </p>
+            ) : null}
+          </div>
           <p
             className={cn(
               'text-sm [overflow-wrap:anywhere] sm:text-base',
@@ -128,6 +144,11 @@ export function FirstBloodBanner({
             )}
           >
             Captured from {attack.victim}
+            {attack.victim_institution ? (
+              <span data-testid="first-blood-banner-victim-institution">
+                {' '}({attack.victim_institution})
+              </span>
+            ) : null}
             <span aria-hidden="true"> · </span>Tick #{attack.tick}
           </p>
           {extras.length > 0 ? (
@@ -142,6 +163,14 @@ export function FirstBloodBanner({
                   className="[overflow-wrap:anywhere]"
                 >
                   <span className="font-semibold">{entry.attacker}</span>
+                  {entry.attacker_institution ? (
+                    <span
+                      data-first-blood-banner-extra-institution
+                      style={{ color: 'var(--attack-map-legend-foreground)' }}
+                    >
+                      {' '}· {entry.attacker_institution}
+                    </span>
+                  ) : null}
                   {' '}first on{' '}
                   <strong className="font-semibold">{entry.service}</strong>
                 </li>

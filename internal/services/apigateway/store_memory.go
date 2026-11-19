@@ -796,6 +796,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 
 	name := strings.TrimSpace(input.Name)
 	contactEmail := strings.TrimSpace(strings.ToLower(input.ContactEmail))
+	institution := storedTeamInstitution(input.Institution)
 	if name == "" || contactEmail == "" {
 		return adminTeam{}, ErrDuplicateResource
 	}
@@ -810,7 +811,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 		return adminTeam{}, err
 	}
 	joinKey := NewTeamJoinKey()
-	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail, JoinKey: joinKey}
+	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail, Institution: institution, JoinKey: joinKey}
 	s.teams[id] = team
 	s.teamNames[id] = name
 	s.teamStates[id] = make(map[int]*serviceState)
@@ -846,7 +847,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 	}
 	s.scoreboard = append(s.scoreboard, scoreRow{Rank: len(s.scoreboard) + 1, Team: name, Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "new"})
 
-	return adminTeam{ID: id, Name: name, ContactEmail: contactEmail, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: len(s.teamStates[id]), Active: true}, nil
+	return adminTeam{ID: id, Name: name, ContactEmail: contactEmail, Institution: institution, JoinKey: joinKey, PlayerCount: 0, DeployedChallenges: len(s.teamStates[id]), Active: true}, nil
 }
 
 func (s *memoryStore) ListAdminPlayers(_ context.Context) ([]adminPlayer, error) {
@@ -1948,6 +1949,9 @@ func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input admin
 	}
 	team.Name = name
 	team.ContactEmail = email
+	if input.Institution != nil {
+		team.Institution = storedTeamInstitution(*input.Institution)
+	}
 	s.teamNames[teamID] = name
 	return *team, nil
 }

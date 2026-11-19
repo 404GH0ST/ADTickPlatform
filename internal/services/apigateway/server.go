@@ -495,7 +495,7 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 	}
 	frozen := freeze.activeAt(now)
 	if frozen && freeze.Snapshot != nil {
-		writeData(w, http.StatusOK, freeze.Snapshot)
+		writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), freeze.Snapshot))
 		return
 	}
 
@@ -518,7 +518,7 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = saved.Snapshot
 	}
-	writeData(w, http.StatusOK, rows)
+	writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), rows))
 }
 
 // fetchLiveScoreboard returns the current live board, preferring scoring-worker,
@@ -624,7 +624,7 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 	query := parseAttackFeedQuery(r)
 	if s.submission != nil {
 		if events, err := s.submission.AttackFeed(r.Context(), query); err == nil {
-			writeData(w, http.StatusOK, events)
+			writeData(w, http.StatusOK, s.enrichAttackFeedPage(r.Context(), events))
 			return
 		} else if !errors.Is(err, errSubmissionServiceDisabled) {
 			writeProblem(w, http.StatusBadGateway, "Attack feed unavailable", "submission-service attack feed failed.")
@@ -633,7 +633,7 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.gameCore != nil {
 		if events, err := s.gameCore.AttackFeed(r.Context(), query); err == nil {
-			writeData(w, http.StatusOK, events)
+			writeData(w, http.StatusOK, s.enrichAttackFeedPage(r.Context(), events))
 			return
 		} else if !errors.Is(err, errGameCoreDisabled) {
 			writeProblem(w, http.StatusBadGateway, "Attack feed unavailable", "game-core attack feed failed.")
@@ -645,7 +645,7 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 		writeStoreFailure(w, err)
 		return
 	}
-	writeData(w, http.StatusOK, paginateAttackFeed(events, query))
+	writeData(w, http.StatusOK, s.enrichAttackFeedPage(r.Context(), paginateAttackFeed(events, query)))
 }
 
 func parseAttackFeedQuery(r *http.Request) AttackFeedQuery {

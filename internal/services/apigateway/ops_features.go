@@ -36,6 +36,7 @@ type adminBulkImportPlayer struct {
 type adminBulkImportTeam struct {
 	Name         string                  `json:"name"`
 	ContactEmail string                  `json:"contact_email"`
+	Institution  string                  `json:"institution"`
 	Players      []adminBulkImportPlayer `json:"players"`
 }
 

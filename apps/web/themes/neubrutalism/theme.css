@@ -882,6 +882,38 @@
     color: var(--nb-score);
   }
 
+  /* Institution under a team name: small tracked capitals in the surrounding
+     type colour, so it sits on any fill (podium, your lilac row, night slate)
+     without claiming a status hue. */
+  :root[data-scheme="neubrutalism"] .nb-institution {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, currentColor 78%, transparent);
+    overflow-wrap: anywhere;
+  }
+
+  /* On a podium block it becomes a paper tag: ink outline, white wash. */
+  :root[data-scheme="neubrutalism"] .nb-institution-chip {
+    width: fit-content;
+    max-width: 100%;
+    border: 2px solid var(--nb-ink);
+    border-radius: 5px;
+    padding: 0.05rem 0.45rem;
+    background: oklch(1 0 0 / 0.55);
+    color: var(--nb-ink);
+  }
+
+  /* Night podium blocks are slate with cream type: the tag becomes a chalk
+     outline on the slate instead of a grey wash. */
+  :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-institution-chip {
+    border-color: color-mix(in oklab, var(--nb-chalk) 80%, transparent);
+    background: transparent;
+    color: var(--nb-chalk);
+  }
+
   :root[data-scheme="neubrutalism"] .nb-stat-a { --nb-score: var(--nb-score-a); }
   :root[data-scheme="neubrutalism"] .nb-stat-d { --nb-score: var(--nb-score-d); }
   :root[data-scheme="neubrutalism"] .nb-stat-sla { --nb-score: var(--nb-score-sla); }
@@ -1654,6 +1686,15 @@
   letter-spacing: 0.06em;
 }
 
+/* Institution reads as a caption under the name: sentence case (the count
+   keeps the tracked capitals) so long names fit the plate. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-institution"] {
+  fill: var(--nb-ink);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 /* Dark mode keeps the stickers paper-on-ink: chalk plate, ink type. */
 :root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] [data-fx="team-plate"]:not([data-selected]) {
   fill: var(--nb-chalk);
@@ -1779,9 +1820,34 @@
   font-weight: 700;
 }
 
+/* Live notice institutions: ink type on the cream speech bubble. */
+:root[data-scheme="neubrutalism"] [data-first-blood-notice-institution] {
+  color: color-mix(in oklab, var(--nb-ink) 75%, transparent) !important;
+  font-weight: 700;
+}
+
 /* Closing banner: a stamped sticker card. */
 :root[data-scheme="neubrutalism"] [data-first-blood-banner] {
   color: var(--nb-ink) !important;
+}
+
+/* The capturing team's institution: a white paper tag pinned under the name. */
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner-institution"] {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 0.5rem;
+  border: 2px solid var(--nb-ink);
+  border-radius: 6px;
+  padding: 0.1rem 0.55rem;
+  background: oklch(1 0 0);
+  color: var(--nb-ink) !important;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  box-shadow: 3px 3px 0 var(--nb-ink);
+}
+
+:root[data-scheme="neubrutalism"] [data-first-blood-banner-extra-institution] {
+  color: color-mix(in oklab, var(--nb-ink) 72%, transparent) !important;
 }
 
 :root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] {

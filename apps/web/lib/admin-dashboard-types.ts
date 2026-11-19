@@ -2,6 +2,7 @@ export type AdminTeam = {
   id: number;
   name: string;
   contact_email: string;
+  institution?: string;
   join_key: string;
   player_count: number;
   deployed_challenges: number;
@@ -277,6 +278,7 @@ export type AdminGameScoreServiceRow = {
 export type AdminGameScoreRow = {
   rank: number;
   team: string;
+  institution?: string;
   attack: number;
   defense: number;
   sla: number;
@@ -307,6 +309,8 @@ export type AdminAttackEvent = {
   id: string;
   attacker: string;
   victim: string;
+  attacker_institution?: string;
+  victim_institution?: string;
   service: string;
   tick: number;
   verdict: string;

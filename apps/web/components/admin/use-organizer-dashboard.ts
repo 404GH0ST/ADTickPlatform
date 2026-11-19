@@ -113,6 +113,7 @@ async function writeTextToClipboard(text: string): Promise<void> {
 
 type TeamDraft = {
   contactEmail: string;
+  institution: string;
   name: string;
 };
 
@@ -364,6 +365,7 @@ export function useOrganizerDashboard({
   const [teamDraft, setTeamDraft] = useState<TeamDraft>({
     name: "",
     contactEmail: "",
+    institution: "",
   });
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
   const playAttackSfx = useAttackSfx();
@@ -615,7 +617,11 @@ export function useOrganizerDashboard({
       const data = await persistEntity<AdminTeam>(
         "/api/admin/teams",
         "POST",
-        { name: teamDraft.name, contact_email: teamDraft.contactEmail },
+        {
+          name: teamDraft.name,
+          contact_email: teamDraft.contactEmail,
+          institution: teamDraft.institution,
+        },
         "team",
       );
 
@@ -633,7 +639,7 @@ export function useOrganizerDashboard({
         ),
       );
       await refreshGameScoreboard(true);
-      setTeamDraft({ name: "", contactEmail: "" });
+      setTeamDraft({ name: "", contactEmail: "", institution: "" });
       setPlayerDraft((current) => ({
         ...current,
         teamId: current.teamId || data.id,
@@ -2305,7 +2311,7 @@ export function useOrganizerDashboard({
     setActionError(null);
     setActionNote(null);
     if (entity === "team") {
-      setTeamDraft({ name: "", contactEmail: "" });
+      setTeamDraft({ name: "", contactEmail: "", institution: "" });
     } else if (entity === "player") {
       const defaultTeamID =
         teamRows.find((team) => team.id === playerDraft.teamId)?.id ??
@@ -2344,7 +2350,11 @@ export function useOrganizerDashboard({
     if (entity === "team") {
       const team = teamRows.find((t) => t.id === id);
       if (team) {
-        setTeamDraft({ name: team.name, contactEmail: team.contact_email });
+        setTeamDraft({
+          name: team.name,
+          contactEmail: team.contact_email,
+          institution: team.institution ?? "",
+        });
       }
     } else if (entity === "player") {
       const player = playerRows.find((p) => p.id === id);
@@ -2388,7 +2398,11 @@ export function useOrganizerDashboard({
       const data = await persistEntity<AdminTeam>(
         `/api/admin/teams/${editingId}`,
         "PUT",
-        { name: teamDraft.name, contact_email: teamDraft.contactEmail },
+        {
+          name: teamDraft.name,
+          contact_email: teamDraft.contactEmail,
+          institution: teamDraft.institution,
+        },
         "team",
       );
       setTeamRows((current) =>

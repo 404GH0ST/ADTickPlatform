@@ -98,6 +98,10 @@ type ScoreRowAlias struct {
 	Total    float64                      `json:"total"`
 	Delta    string                       `json:"delta"`
 	Services []ServiceScoreBreakdownAlias `json:"services,omitempty"`
+
+	// Institution is display-only metadata api-gateway joins in on read;
+	// upstream scorers never set it.
+	Institution string `json:"institution,omitempty"`
 }
 
 // scoreboardFreezeWindow is the stored freeze state: the optional window bounds
@@ -158,6 +162,11 @@ type AttackEventAlias struct {
 	Tick       int       `json:"tick"`
 	Verdict    string    `json:"verdict"`
 	CreatedAt  time.Time `json:"-"`
+
+	// AttackerInstitution and VictimInstitution are display-only metadata
+	// api-gateway joins in on read.
+	AttackerInstitution string `json:"attacker_institution,omitempty"`
+	VictimInstitution   string `json:"victim_institution,omitempty"`
 }
 
 type AttackFeedQuery struct {
