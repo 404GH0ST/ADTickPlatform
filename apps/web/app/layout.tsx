@@ -3,6 +3,14 @@ import { IBM_Plex_Sans, Lexend } from 'next/font/google';
 import { cookies } from 'next/headers';
 
 import { ActiveThemeProvider } from '@/components/theme/active-theme-provider';
+import { DocumentAppearance } from '@/components/theme/document-appearance';
+import {
+  DEFAULT_THEME_PREFERENCE,
+  isThemePreference,
+  SYSTEM_COLOR_SCHEME_QUERY,
+  THEME_COOKIE_PATTERN,
+  THEME_STORAGE_KEY,
+} from '@/lib/appearance';
 import { getActiveThemeId } from '@/lib/platform-appearance';
 import { getTheme } from '@/lib/themes';
 import { ActiveThemeStyles } from '@/themes/styles.generated';
@@ -32,44 +40,28 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // The theme (data-scheme) is the organizer's choice, read from the gateway.
-  // SSR also paints an explicit light/dark so router.refresh() does not flash;
-  // System mode and first visit still resolve in the inline FOUC script.
+  // The organizer sets the theme. The browser owns the visitor's color mode
+  // after the initial server render.
   const [cookieStore, themeId] = await Promise.all([cookies(), getActiveThemeId()]);
-  const storedTheme = cookieStore.get('ad-platform-theme')?.value;
-  // A theme may pick the mode used until the participant chooses one.
-  const themeDefaultMode = getTheme(themeId).defaultMode ?? 'system';
-
-  const preference =
-    storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
-      ? storedTheme
-      : themeDefaultMode;
-  // Only bake an explicit light/dark into SSR; system resolves in FOUC script.
-  const theme = preference === 'dark' || preference === 'light' ? preference : undefined;
+  const storedTheme = cookieStore.get(THEME_STORAGE_KEY)?.value;
+  const themeDefaultMode = getTheme(themeId).defaultMode ?? DEFAULT_THEME_PREFERENCE;
 
   return (
-    <html
-      lang="en"
+    <DocumentAppearance
       className={`${ibmPlexSans.variable} ${lexend.variable}`}
-      data-scheme={themeId}
-      data-theme={theme}
-      data-theme-preference={preference}
-      suppressHydrationWarning
+      themeId={themeId}
+      defaultMode={themeDefaultMode}
+      initialPreference={isThemePreference(storedTheme) ? storedTheme : null}
     >
       <head>
         <script
           dangerouslySetInnerHTML={{
             __html: `(() => {
-  const themeKey = "ad-platform-theme";
+  const themeKey = ${JSON.stringify(THEME_STORAGE_KEY)};
   const themeDefaultMode = ${JSON.stringify(themeDefaultMode)};
   const root = document.documentElement;
 
-  function readCookie(name) {
-    const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=(dark|light|system)"));
-    return match ? match[1] : null;
-  }
-
-  let themeStored = readCookie(themeKey);
+  let themeStored = document.cookie.match(${THEME_COOKIE_PATTERN})?.[1];
   if (!themeStored) {
     try { themeStored = window.localStorage.getItem(themeKey); } catch {}
   }
@@ -78,7 +70,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const preference = hasTheme ? themeStored : themeDefaultMode;
   const resolved =
     preference === "system"
-      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      ? (window.matchMedia(${JSON.stringify(SYSTEM_COLOR_SCHEME_QUERY)}).matches ? "dark" : "light")
       : preference;
 
   root.dataset.theme = resolved;
@@ -98,6 +90,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <ActiveThemeStyles themeId={themeId} />
         <ActiveThemeProvider themeId={themeId}>{children}</ActiveThemeProvider>
       </body>
-    </html>
+    </DocumentAppearance>
   );
 }

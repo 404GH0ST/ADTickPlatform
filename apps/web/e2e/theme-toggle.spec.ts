@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { resetMockApi } from "./test-utils";
+import { mockApiBaseUrl, resetMockApi } from "./test-utils";
 
 test.use({ viewport: { width: 1280, height: 900 } });
 // The organizer theme lives in the mock API; start every test on the default.
@@ -53,6 +53,60 @@ test("theme toggle persists dark mode across reload and organizer navigation", a
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "graphite");
   await expect(page.locator('[data-mode-option="dark"]')).toHaveAttribute("aria-checked", "true");
+});
+
+test("an older page refresh cannot overwrite Dark during navigation", async ({ page, request, baseURL }) => {
+  async function useNeubrutalism() {
+    const response = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+      data: { theme_id: "neubrutalism" },
+    });
+    expect(response.ok()).toBeTruthy();
+  }
+
+  await useNeubrutalism();
+  await page.context().addCookies([{ name: "ad-platform-theme", value: "dark", url: baseURL! }]);
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/admin/submissions");
+  const html = page.locator("html");
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  const refreshedRow = page.getByTestId("submission-30");
+  await expect(refreshedRow).toHaveCount(0);
+
+  await selectExpandedOption(page, ".mode-picker", '[data-mode-option="light"]');
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await resetMockApi(request, "submissions");
+  await useNeubrutalism();
+
+  let markResponseReady!: () => void;
+  let releaseRefresh!: () => void;
+  const responseReady = new Promise<void>((resolve) => { markResponseReady = resolve; });
+  const refreshCanFinish = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  await page.route((url) => url.pathname === "/admin/submissions" && url.searchParams.has("_rsc"), async (route) => {
+    const response = await route.fetch();
+    markResponseReady();
+    await refreshCanFinish;
+    await route.fulfill({ response });
+  }, { times: 1 });
+
+  try {
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await responseReady;
+    await selectExpandedOption(page, ".mode-picker", '[data-mode-option="dark"]');
+    await expect(html).toHaveAttribute("data-theme", "dark");
+  } finally {
+    releaseRefresh();
+  }
+
+  await expect(refreshedRow).toBeVisible();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  const primary = page.getByRole("navigation", { name: "Primary" });
+  await primary.getByRole("link", { name: "Teams", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/teams$/);
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator('[data-mode-option="dark"]')).toHaveAttribute("aria-checked", "true");
+  await page.goBack();
+  await expect(refreshedRow).toBeVisible();
+  await expect(html).toHaveAttribute("data-theme-preference", "dark");
 });
 
 test("system theme follows OS color scheme", async ({ page }) => {
