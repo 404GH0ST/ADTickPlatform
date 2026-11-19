@@ -70,18 +70,15 @@ type GlobeFeatureCollection = {
       coordinates: unknown;
       type: 'MultiPolygon' | 'Polygon';
     };
-    properties?: {
-      name?: string;
-    };
     type: 'Feature';
   }>;
   type: 'FeatureCollection';
 };
 
+type GlobeVector = [x: number, y: number, z: number];
+
 type CountryRing = {
-  id: string;
-  name: string;
-  points: GeoPoint[];
+  points: GlobeVector[];
   /** 0-4, chosen so countries that share a border never share a tint. */
   tint: number;
 };
@@ -219,6 +216,14 @@ const LANDMARKS: Landmark[] = [
 ];
 
 const COUNTRY_RINGS = parseCountryRings(globeJson as GlobeFeatureCollection);
+const LATITUDE_LINES = [-60, -30, 0, 30, 60].map((lat) => ({
+  lat,
+  points: Array.from({ length: 73 }, (_, index) => toGlobeVector({ lat, lon: -180 + index * 5 })),
+}));
+const LONGITUDE_LINES = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180].map((lon) => ({
+  lon,
+  points: Array.from({ length: 37 }, (_, index) => toGlobeVector({ lat: -90 + index * 5, lon })),
+}));
 
 export function CyberAttackMap({
   attacks,
@@ -2095,6 +2100,17 @@ const GlobeSurface = memo(function GlobeSurface({
   mapId: string;
   rotation: GlobeRotation;
 }): ReactElement {
+  const projection = createGlobeLineProjection(rotation);
+  const landByTint = Array.from({ length: COUNTRY_TINT_COUNT }, () => '');
+  let outline = '';
+  // A ring's projected line already outlines its fill when the whole ring is
+  // visible. Batch by paint so rotating the surface updates only a few paths.
+  for (const country of COUNTRY_RINGS) {
+    const { path, fullyVisible } = projectGlobeLine(country.points, projection);
+    outline += path;
+    if (fullyVisible) landByTint[country.tint] += `${path} Z`;
+  }
+
   return (
     <g pointerEvents="none">
       <circle
@@ -2124,36 +2140,26 @@ const GlobeSurface = memo(function GlobeSurface({
         fill={`url(#${mapId}-dots)`}
       />
       <g clipPath={`url(#${clipId})`}>
-        <ProjectedGraticule rotation={rotation} />
-        {COUNTRY_RINGS.map((country) => {
-          const fillPath = buildProjectedCountryFillPath(country.points, rotation);
-          const outlinePath = buildProjectedLinePath(country.points, rotation);
-          if (fillPath === '' && outlinePath === '') {
-            return null;
-          }
-          return (
-            <g key={country.id}>
-              {fillPath !== '' ? (
-                <path
-                  d={fillPath}
-                  data-fx="globe-land"
-                  data-tint={country.tint}
-                  fill="var(--attack-map-land)"
-                  fillOpacity="0.18"
-                  stroke="none"
-                />
-              ) : null}
-              <path
-                d={outlinePath}
-                data-fx="globe-borders"
-                fill="none"
-                stroke="var(--attack-map-outline)"
-                strokeOpacity="0.46"
-                strokeWidth="0.82"
-              />
-            </g>
-          );
-        })}
+        <ProjectedGraticule projection={projection} />
+        {landByTint.map((path, tint) => path && (
+          <path
+            key={tint}
+            d={path}
+            data-fx="globe-land"
+            data-tint={tint}
+            fill="var(--attack-map-land)"
+            fillOpacity="0.18"
+            stroke="none"
+          />
+        ))}
+        <path
+          d={outline}
+          data-fx="globe-borders"
+          fill="none"
+          stroke="var(--attack-map-outline)"
+          strokeOpacity="0.46"
+          strokeWidth="0.82"
+        />
         {LANDMARKS.map((landmark) => {
           const point = projectGlobePoint(landmark, rotation);
           if (!point.visible) {
@@ -2186,19 +2192,13 @@ const GlobeSurface = memo(function GlobeSurface({
   );
 });
 
-function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactElement {
+function ProjectedGraticule({ projection }: { projection: GlobeLineProjection }): ReactElement {
   return (
     <g>
-      {[-60, -30, 0, 30, 60].map((lat) => (
+      {LATITUDE_LINES.map(({ lat, points }) => (
         <path
           key={`lat-${lat}`}
-          d={buildProjectedLinePath(
-            Array.from({ length: 73 }, (_, index) => ({
-              lat,
-              lon: -180 + index * 5,
-            })),
-            rotation,
-          )}
+          d={projectGlobeLine(points, projection).path}
           fill="none"
           data-fx="globe-graticule"
           data-equator={lat === 0 ? 'true' : undefined}
@@ -2206,16 +2206,10 @@ function ProjectedGraticule({ rotation }: { rotation: GlobeRotation }): ReactEle
           strokeOpacity={lat === 0 ? '0.42' : '0.22'}
         />
       ))}
-      {[-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180].map((lon) => (
+      {LONGITUDE_LINES.map(({ lon, points }) => (
         <path
           key={`lon-${lon}`}
-          d={buildProjectedLinePath(
-            Array.from({ length: 37 }, (_, index) => ({
-              lat: -90 + index * 5,
-              lon,
-            })),
-            rotation,
-          )}
+          d={projectGlobeLine(points, projection).path}
           fill="none"
           data-fx="globe-graticule"
           stroke="var(--attack-map-grid)"
@@ -2828,48 +2822,58 @@ function getArcVisibility(start: TeamNode, end: TeamNode): number {
   return clamp((Math.min(start.z, end.z) + 0.04) / 1.04, 0, 1);
 }
 
-function buildProjectedCountryFillPath(points: GeoPoint[], rotation: GlobeRotation): string {
-  const projected = points.map((point) => projectGlobePoint(point, rotation));
-  if (projected.length < 3 || !projected.every((point) => point.visible)) {
-    return '';
-  }
-  return `${projected
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
-    .join(' ')} Z`;
+function toGlobeVector({ lat, lon }: GeoPoint): GlobeVector {
+  const latitude = toRadians(lat);
+  const longitude = toRadians(lon);
+  const cosLat = Math.cos(latitude);
+  return [cosLat * Math.cos(longitude), cosLat * Math.sin(longitude), Math.sin(latitude)];
 }
 
-function buildProjectedLinePath(points: GeoPoint[], rotation: GlobeRotation): string {
+type GlobeLineProjection = {
+  sinLon: number;
+  cosLon: number;
+  sinTilt: number;
+  cosTilt: number;
+};
+
+function createGlobeLineProjection(rotation: GlobeRotation): GlobeLineProjection {
+  const lon = toRadians(rotation.lon);
+  const tilt = toRadians(rotation.lat);
+  return { sinLon: Math.sin(lon), cosLon: Math.cos(lon), sinTilt: Math.sin(tilt), cosTilt: Math.cos(tilt) };
+}
+
+function projectGlobeLine(points: GlobeVector[], { sinLon, cosLon, sinTilt, cosTilt }: GlobeLineProjection) {
   let path = '';
   let drawing = false;
-  points.forEach((point) => {
-    const projected = projectGlobePoint(point, rotation);
-    if (!projected.visible) {
+  let fullyVisible = true;
+  for (const [x, y, z] of points) {
+    const depth = x * cosLon + y * sinLon;
+    if (z * sinTilt + depth * cosTilt <= -0.04) {
       drawing = false;
-      return;
+      fullyVisible = false;
+      continue;
     }
-    path += `${drawing ? ' L' : ' M'} ${projected.x} ${projected.y}`;
+    const screenX = roundCoord(CENTER_X + GLOBE_RADIUS * (y * cosLon - x * sinLon));
+    const screenY = roundCoord(CENTER_Y - GLOBE_RADIUS * (z * cosTilt - depth * sinTilt));
+    path += `${drawing ? ' L' : ' M'} ${screenX} ${screenY}`;
     drawing = true;
-  });
-  return path;
+  }
+  return { path, fullyVisible };
 }
 
 function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
   const featurePolygons = collection.features.map((feature) => getFeaturePolygons(feature.geometry));
   const tints = assignCountryTints(featurePolygons);
-  return collection.features.flatMap((feature, featureIndex) => {
-    const name = feature.properties?.name ?? `country-${featureIndex}`;
-    const polygons = featurePolygons[featureIndex] ?? [];
+  return featurePolygons.flatMap((polygons, featureIndex) => {
     const tint = tints[featureIndex] ?? 0;
-    return polygons.flatMap((polygon, polygonIndex) => {
+    return polygons.flatMap((polygon) => {
       const outerRing = polygon[0];
       if (!outerRing || outerRing.length < 3) {
         return [];
       }
       return [
         {
-          id: `${featureIndex}-${polygonIndex}`,
-          name,
-          points: outerRing.map(([lon, lat]) => ({ lat, lon })),
+          points: outerRing.map(([lon, lat]) => toGlobeVector({ lat, lon })),
           tint,
         },
       ];
@@ -3252,17 +3256,12 @@ function normalizeLongitude(value: number): number {
 
 /** The point a fraction `t` of the way along the great circle from `from` to `to`. */
 function interpolateGreatCircle(from: GeoPoint, to: GeoPoint, t: number): GeoPoint {
-  const vector = (point: GeoPoint) => {
-    const lat = toRadians(point.lat);
-    const lon = toRadians(point.lon);
-    return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
-  };
-  const a = vector(from);
+  const a = toGlobeVector(from);
   // Exactly antipodal teams have no unique great circle; nudge to pick one.
-  let b = vector(to);
+  let b = toGlobeVector(to);
   let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   if (dot < -0.9999) {
-    b = vector({ lat: to.lat, lon: to.lon + 1.5 });
+    b = toGlobeVector({ lat: to.lat, lon: to.lon + 1.5 });
     dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   }
   const omega = Math.acos(clamp(dot, -1, 1));
