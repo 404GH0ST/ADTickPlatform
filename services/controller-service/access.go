@@ -366,6 +366,9 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 			}
 		}
 	}
+	if err := e.applyOpenServiceSSHRules(ctx, iptablesBinary, chainName, policies); err != nil {
+		return err
+	}
 	if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
 		return err
 	}
@@ -383,7 +386,6 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 			continue
 		}
 		servicePort := fmt.Sprintf("%d", policy.ServicePort)
-		sshPort := fmt.Sprintf("%d", policy.SSHPort)
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
 			return err
 		}
@@ -402,30 +404,46 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, ip
 		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
 			return err
 		}
-		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
-			for _, peer := range policy.AllowedPeerAddresses {
-				if !isValidIP(peer) {
-					continue
-				}
-				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
-					return err
-				}
-				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
-					return err
-				}
-			}
-		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
-			return err
-		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
-			return err
-		}
 		// Residual default-deny on the WG path for non-service ports.
 		if strings.TrimSpace(e.interfaceName) != "" {
 			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// Check SSH ingress before conntrack accepts established sessions.
+func (e *hostServiceAccessExecutor) applyOpenServiceSSHRules(ctx context.Context, binary, chain string, policies []apigateway.ControllerServiceAccessPolicy) error {
+	for _, policy := range policies {
+		if policy.NetworkClosed || !isValidIP(policy.ServiceIP) || policy.SSHPort <= 0 {
+			continue
+		}
+		serviceCIDR := policy.ServiceIP + "/32"
+		sshPort := fmt.Sprintf("%d", policy.SSHPort)
+		if policy.SSHUnlocked {
+			for _, peer := range policy.AllowedPeerAddresses {
+				if !isValidIP(peer) {
+					continue
+				}
+				if e.interfaceName != "" {
+					if err := e.runner.Run(ctx, binary, "-A", chain, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
+						return err
+					}
+				}
+				if err := e.runner.Run(ctx, binary, "-A", chain, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
+					return err
+				}
+			}
+		}
+		if e.interfaceName != "" {
+			if err := e.runner.Run(ctx, binary, "-A", chain, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
+				return err
+			}
+		}
+		if err := e.runner.Run(ctx, binary, "-A", chain, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -523,17 +541,45 @@ func renderControllerAccessRules(tableName, interfaceName, internetInterface str
 	builder.WriteString("    type filter hook forward priority filter;\n")
 	builder.WriteString("    policy accept;\n")
 	appendClosedNetworkRules(&builder, interfaceName, policies)
+	appendOpenServiceSSHAccessRules(&builder, interfaceName, policies)
 	builder.WriteString("    ct state established,related accept\n")
 	appendControllerAccessPolicyRules(&builder, interfaceName, internetInterface, policies, "forward")
 	builder.WriteString("  }\n")
 	builder.WriteString("  chain output {\n")
 	builder.WriteString("    type filter hook output priority filter;\n")
 	builder.WriteString("    policy accept;\n")
+	appendOpenServiceSSHAccessRules(&builder, "", policies)
 	builder.WriteString("    ct state established,related accept\n")
 	appendControllerAccessPolicyRules(&builder, "", internetInterface, policies, "output")
 	builder.WriteString("  }\n")
 	builder.WriteString("}\n")
 	return builder.String()
+}
+
+func appendOpenServiceSSHAccessRules(builder *strings.Builder, interfaceName string, policies []apigateway.ControllerServiceAccessPolicy) {
+	for _, policy := range policies {
+		if policy.NetworkClosed || !isValidIP(policy.ServiceIP) || policy.SSHPort <= 0 {
+			continue
+		}
+		if policy.SSHUnlocked {
+			var validPeers []string
+			for _, peer := range policy.AllowedPeerAddresses {
+				if isValidIP(peer) {
+					validPeers = append(validPeers, peer)
+				}
+			}
+			if len(validPeers) > 0 {
+				if interfaceName != "" {
+					fmt.Fprintf(builder, "    iifname \"%s\" ip daddr %s tcp dport %d ip saddr { %s } accept\n", interfaceName, policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", "))
+				}
+				fmt.Fprintf(builder, "    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", "))
+			}
+		}
+		if interfaceName != "" {
+			fmt.Fprintf(builder, "    iifname \"%s\" ip daddr %s tcp dport %d drop\n", interfaceName, policy.ServiceIP, policy.SSHPort)
+		}
+		fmt.Fprintf(builder, "    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort)
+	}
 }
 
 // appendClosedNetworkRules emits organizer allowlist + participant WG drop for
@@ -609,28 +655,7 @@ func appendControllerAccessPolicyRules(
 				}
 			}
 		}
-		if policy.SSHUnlocked && len(policy.AllowedPeerAddresses) > 0 {
-			var validPeers []string
-			for _, peer := range policy.AllowedPeerAddresses {
-				if isValidIP(peer) {
-					validPeers = append(validPeers, peer)
-				}
-			}
-			if len(validPeers) > 0 {
-				if ingressPrefix != "" {
-					builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d ip saddr { %s } accept\n", ingressPrefix, policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
-				}
-				builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d ip saddr { %s } accept\n", policy.ServiceIP, policy.SSHPort, strings.Join(validPeers, ", ")))
-			}
-		}
-		if policy.SSHPort > 0 {
-			if ingressPrefix != "" {
-				builder.WriteString(fmt.Sprintf("    %sip daddr %s tcp dport %d drop\n", ingressPrefix, policy.ServiceIP, policy.SSHPort))
-			}
-			builder.WriteString(fmt.Sprintf("    ip daddr %s tcp dport %d drop\n", policy.ServiceIP, policy.SSHPort))
-		}
-		// Residual default-deny for open services: after service-port accept and
-		// SSH allowlist/drop, block other WireGuard destinations on this IP.
+		// Residual default-deny blocks other WireGuard destinations on this IP.
 		// Scope to the WG interface so host-local operator probes (OUTPUT / no
 		// iif) keep working.
 		if chainKind == "forward" && ingressPrefix != "" {

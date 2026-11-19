@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,14 @@ func TestRenderControllerAccessRulesEnforcesPublicServiceAndSSHAllowlist(t *test
 	}
 	if !strings.Contains(rules, `ip daddr 10.80.1.12 tcp dport 22 drop`) {
 		t.Fatalf("expected locked ssh fallback drop rule")
+	}
+	for _, chain := range strings.Split(rules, "  chain ")[1:] {
+		allow := strings.Index(chain, `ip daddr 10.80.1.11 tcp dport 22 ip saddr { 10.70.11.20, 10.70.11.21 } accept`)
+		deny := strings.Index(chain, `ip daddr 10.80.1.11 tcp dport 22 drop`)
+		established := strings.Index(chain, `ct state established,related accept`)
+		if allow < 0 || deny <= allow || established <= deny {
+			t.Fatalf("expected SSH allowlist and drop before accepting established traffic: %s", chain)
+		}
 	}
 	// Residual default-deny for other WG destinations on open service IPs.
 	if !strings.Contains(rules, `iifname "wg0" ip daddr 10.80.1.11 drop`) {
@@ -241,6 +250,12 @@ func TestHostServiceAccessExecutorRunsNft(t *testing.T) {
 	}
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP") {
 		t.Fatalf("expected ssh fallback drop command %#v", runner.commands)
+	}
+	allowSSH := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.70.11.20 -d 10.80.1.11/32 -p tcp --dport 22 -j ACCEPT")
+	denySSH := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP")
+	established := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT")
+	if allowSSH < 0 || denySSH <= allowSSH || established <= denySSH {
+		t.Fatalf("expected SSH allowlist and drop before accepting established traffic: %v", runner.commands)
 	}
 	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -j DROP") {
 		t.Fatalf("expected residual WG default-deny for open service %#v", runner.commands)
