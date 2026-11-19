@@ -8,6 +8,7 @@ import {
   Ban,
   Copy,
   Download,
+  Ellipsis,
   Flag,
   LoaderCircle,
   Network,
@@ -458,6 +459,66 @@ export function TeamsTab({
   onSelectDeleteTarget,
   onSetTeamActiveState,
 }: TeamsTabProps): ReactElement {
+  function renderTeamActions(team: AdminTeam, popoverId?: string) {
+    const activeAction = team.active ? "Deactivate" : "Reactivate";
+    const size = popoverId ? "touch" : "sm";
+    function run(action: () => void) {
+      if (popoverId) {
+        document.getElementById(popoverId)?.hidePopover();
+        document.getElementById(`${popoverId}-trigger`)?.focus();
+      }
+      action();
+    }
+
+    return (
+      <div className={popoverId ? "grid gap-2 [&_button]:justify-start" : "nb-team-actions-inline"}>
+        <Button
+          size={size}
+          variant="ghost"
+          className={team.active ? "button-danger-subtle" : undefined}
+          data-testid={popoverId ? undefined : `toggle-team-active-${team.id}`}
+          title={`${activeAction} team ${team.name}`}
+          aria-label={`${activeAction} team ${team.name}`}
+          disabled={pendingAction !== null}
+          onClick={() => run(() => onSetTeamActiveState(team, !team.active))}
+        >
+          {team.active ? <PowerOff className="size-4" aria-hidden /> : <Power className="size-4" aria-hidden />}
+          {popoverId ? activeAction : null}
+        </Button>
+        <Button
+          size={size}
+          variant="ghost"
+          data-testid={popoverId ? undefined : `edit-team-${team.id}`}
+          title={`Edit team ${team.name}`}
+          aria-label={`Edit team ${team.name}`}
+          disabled={pendingAction !== null}
+          onClick={() => run(() => onOpenEditDialog(team.id))}
+        >
+          <Pencil className="size-4" aria-hidden />
+          {popoverId ? "Edit team" : null}
+        </Button>
+        <Button
+          size={size}
+          variant="ghost"
+          className="button-danger-subtle"
+          data-testid={popoverId ? undefined : `delete-team-${team.id}`}
+          title={`Delete team ${team.name}`}
+          aria-label={`Delete team ${team.name}`}
+          disabled={pendingAction !== null}
+          onClick={() => run(() => onSelectDeleteTarget({
+            kind: "team",
+            id: team.id,
+            label: team.name,
+            warning: "This will also delete all associated players and service states.",
+          }))}
+        >
+          <Trash2 className="size-4" aria-hidden />
+          {popoverId ? "Delete team" : null}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <>
     <AdminRegistryCard
@@ -476,7 +537,7 @@ export function TeamsTab({
                 <TableHead>Players</TableHead>
                 <TableHead>Deployed</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="row-actions text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -486,7 +547,9 @@ export function TeamsTab({
                   message="No teams yet. Click Create Team to add one."
                 />
               )}
-              {teamRows.map((team) => (
+              {teamRows.map((team) => {
+                const popoverId = `team-actions-${team.id}`;
+                return (
                 <TableRow key={team.id} data-testid={`team-row-${team.id}`}>
                   <TableCell className="font-semibold">#{team.id}</TableCell>
                   <TableCell>
@@ -529,56 +592,32 @@ export function TeamsTab({
                     </div>
                   </TableCell>
                   <TableCell className="row-actions whitespace-nowrap text-right">
+                    {renderTeamActions(team)}
                     <Button
-                      size="sm"
-                      variant="ghost"
-                      className={team.active ? "button-danger-subtle" : undefined}
-                      data-testid={`toggle-team-active-${team.id}`}
-                      title={`${team.active ? "Deactivate" : "Reactivate"} team ${team.name}`}
-                      aria-label={`${team.active ? "Deactivate" : "Reactivate"} team ${team.name}`}
+                      id={`${popoverId}-trigger`}
+                      size="touch"
+                      variant="outline"
+                      className="nb-team-actions-trigger hidden"
+                      popoverTarget={popoverId}
+                      aria-label={`Actions for ${team.name}`}
                       disabled={pendingAction !== null}
-                      onClick={() => onSetTeamActiveState(team, !team.active)}
                     >
-                      {team.active ? (
-                        <PowerOff className="h-4 w-4" />
-                      ) : (
-                        <Power className="h-4 w-4" />
-                      )}
+                      <Ellipsis className="size-4" aria-hidden />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      data-testid={`edit-team-${team.id}`}
-                      title={`Edit team ${team.name}`}
-                      aria-label={`Edit team ${team.name}`}
-                      disabled={pendingAction !== null}
-                      onClick={() => onOpenEditDialog(team.id)}
+                    <div
+                      id={popoverId}
+                      popover="auto"
+                      role="group"
+                      aria-labelledby={`${popoverId}-heading`}
+                      className="nb-team-actions-popover hidden whitespace-normal text-left"
                     >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="button-danger-subtle"
-                      data-testid={`delete-team-${team.id}`}
-                      title={`Delete team ${team.name}`}
-                      aria-label={`Delete team ${team.name}`}
-                      disabled={pendingAction !== null}
-                      onClick={() =>
-                        onSelectDeleteTarget({
-                          kind: "team",
-                          id: team.id,
-                          label: team.name,
-                          warning:
-                            "This will also delete all associated players and service states.",
-                        })
-                      }
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      <p id={`${popoverId}-heading`} className="mb-2 wrap-anywhere font-semibold">{team.name}</p>
+                      {renderTeamActions(team, popoverId)}
+                    </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
     </AdminRegistryCard>

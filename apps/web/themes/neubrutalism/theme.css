@@ -2151,18 +2151,45 @@
   color: var(--nb-ink);
 }
 
-/* Teams table: the actions column stays pinned while the row scrolls on
-   narrow screens. */
-@media (max-width: 1023px) {
-  :root[data-scheme="neubrutalism"] td.row-actions {
-    position: sticky;
-    right: 0;
-    background: var(--card);
-    box-shadow: -3px 0 0 var(--border);
+/* Pin the matching heading and a single action trigger as the row scrolls. */
+@supports selector(:popover-open) {
+  @media (max-width: 1023px) {
+    :root[data-scheme="neubrutalism"] .row-actions {
+      position: sticky;
+      right: 0;
+      background: var(--card);
+      box-shadow: -3px 0 0 var(--border);
+      padding-inline: 0.5rem;
+    }
+
+    :root[data-scheme="neubrutalism"] [data-slot="table-body"] [data-slot="table-row"]:nth-child(odd) > td.row-actions {
+      background: var(--nb-zebra);
+    }
+
+    :root[data-scheme="neubrutalism"] .nb-team-actions-inline {
+      display: none;
+    }
+
+    :root[data-scheme="neubrutalism"] [data-slot="button"].nb-team-actions-trigger {
+      display: inline-flex;
+      min-inline-size: 2.75rem;
+      min-block-size: 2.75rem;
+      padding-inline: 0.4rem;
+    }
   }
 
-  :root[data-scheme="neubrutalism"] [data-slot="table-body"] [data-slot="table-row"]:nth-child(odd) > td.row-actions {
-    background: var(--nb-zebra);
+  :root[data-scheme="neubrutalism"] .nb-team-actions-popover:popover-open {
+    display: block;
+    inset: auto 0.75rem 0.75rem;
+    max-inline-size: min(22rem, calc(100vw - 1.5rem));
+    max-block-size: calc(100dvh - 1.5rem);
+    overflow: auto;
+    padding: 0.75rem;
+    border: var(--nb-line) solid var(--border);
+    border-radius: var(--nb-radius);
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 4px 4px 0 var(--nb-shadow);
   }
 }
 
