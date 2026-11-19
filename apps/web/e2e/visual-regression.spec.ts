@@ -62,9 +62,10 @@ async function loadDenseAttackMap(page: Page, request: APIRequestContext) {
   await forceDarkTheme(page);
 
   const panel = page.getByTestId("attack-map-panel");
-  const globe = page.getByTestId("cyber-attack-map");
+  const globe = panel.getByRole("region", { name: "Interactive attack globe" });
   await expect(panel).toBeVisible();
   await expect(globe).toBeVisible();
+  await expect(globe).toHaveAttribute("data-auto-camera", "paused");
   return { globe, panel };
 }
 
@@ -176,6 +177,7 @@ test.describe("presentation attack map visual baselines", () => {
     });
 
     await stabilize(page, panel);
+    await expect(panel.getByText("Featured transmission", { exact: true })).toBeVisible();
     await expectVisualBaseline(
       panel,
       "participant-dense-attack-globe-featured-dark.png",
@@ -193,6 +195,7 @@ test.describe("presentation attack map visual baselines", () => {
     await featureAttack(globe, attackId!);
 
     await stabilize(page, panel);
+    await expect(panel.getByText("Featured transmission", { exact: true })).toBeVisible();
     await expectVisualBaseline(
       panel,
       "participant-dense-attack-globe-partial-featured-dark.png",
