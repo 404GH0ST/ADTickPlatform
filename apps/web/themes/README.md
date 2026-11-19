@@ -11,13 +11,14 @@ up in the organizer picker.
 ```
 themes/
   my-theme/
-    theme.ts        required: metadata, default mode, view overrides
+    theme.ts        required: metadata and default mode
     theme.css       required: color tokens for light and dark, extra CSS
+    views.ts        optional: lazy view overrides
     components/     optional: your own views
     assets/         optional: images, fonts, referenced from theme.css
 ```
 
-`registry.generated.ts` and `themes.generated.css` are written by
+`registry.generated.ts`, `styles.generated.tsx`, and `views.generated.ts` are written by
 `scripts/generate-themes.mjs`. It runs automatically before `dev`, `build` and
 `typecheck`, or by hand with `bun run themes`. Don't edit those files yourself.
 Folders whose names start with `_` are ignored, so `_draft/` is a safe place to
@@ -35,7 +36,7 @@ clock reuses the stock countdown logic through `useMatchClock`.
 ## 1. `theme.ts`
 
 ```ts
-import { defineTheme } from "@/components/theme/kit";
+import { defineTheme } from "@/lib/theme-contract";
 
 export default defineTheme({
   id: "my-theme",                 // must equal the folder name: a-z, 0-9, -
@@ -43,7 +44,6 @@ export default defineTheme({
   description: "One line shown in the organizer picker",
   swatch: { light: "oklch(...)", dark: "oklch(...)", accent: "oklch(...)" },
   defaultMode: "dark",            // optional: "light" | "dark" | "system" (default)
-  components: {},                 // optional: view overrides, see section 3
 });
 ```
 
@@ -80,6 +80,10 @@ allowed. Put it under `@layer components { :root[data-scheme="my-theme"] ... }`
 so utilities can still override it. `lib/themes.test.ts` fails if a theme's
 CSS mentions another theme's `data-scheme`.
 
+Graphite's fallback tokens are loaded globally. The root layout loads the
+selected theme stylesheet separately. Use lazy imports for view overrides to
+load each view only where its slot renders.
+
 **Assets and fonts:** reference files next to `theme.css` with relative URLs.
 The build fingerprints and bundles them:
 
@@ -101,14 +105,19 @@ callbacks the stock view gets, so a theme can redesign the page while live
 updates, flag submission, SSH sessions, restart, factory reset, cooldowns and
 filters keep working unchanged.
 
-```ts
-import { NbScoreboard } from "./components/nb-scoreboard";
+Define overrides in `views.ts` so the organizer picker and server layout can read
+`theme.ts` independently. A lazy import limits each route to the views it uses.
 
-export default defineTheme({
-  // ...
-  components: { Scoreboard: NbScoreboard },
-});
+```ts
+import dynamic from "next/dynamic";
+import type { ThemeComponents } from "@/lib/theme-contract";
+
+export default {
+  Scoreboard: dynamic(() => import("./components/nb-scoreboard").then((module) => module.NbScoreboard)),
+} satisfies ThemeComponents;
 ```
+
+Existing theme definitions with inline `components` continue to work.
 
 | Slot | Where | Props (from `@/components/theme/kit`) |
 |------|-------|----------------------------------------|

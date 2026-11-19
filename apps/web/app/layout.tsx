@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { ActiveThemeProvider } from '@/components/theme/active-theme-provider';
 import { getActiveThemeId } from '@/lib/platform-appearance';
 import { getTheme } from '@/lib/themes';
+import { ActiveThemeStyles } from '@/themes/styles.generated';
 import './globals.css';
 
 const ibmPlexSans = IBM_Plex_Sans({
@@ -94,6 +95,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         />
       </head>
       <body className={ibmPlexSans.className}>
+        <ActiveThemeStyles themeId={themeId} />
         <ActiveThemeProvider themeId={themeId}>{children}</ActiveThemeProvider>
       </body>
     </html>

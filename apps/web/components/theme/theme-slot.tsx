@@ -4,6 +4,7 @@ import { Component, Suspense, type ComponentType, type ReactNode } from "react";
 
 import { useActiveTheme } from "@/components/theme/active-theme-provider";
 import type { ThemeSlotName, ThemeSlotProps } from "@/lib/theme-contract";
+import { GENERATED_THEME_VIEWS } from "@/themes/views.generated";
 
 type BoundaryProps = { slot: string; themeId: string; fallback: ReactNode; children: ReactNode };
 
@@ -45,7 +46,7 @@ export function ThemeSlot<K extends ThemeSlotName>({
   props: ThemeSlotProps[K];
 }) {
   const theme = useActiveTheme();
-  const Override = theme.components?.[name] as ComponentType<ThemeSlotProps[K]> | undefined;
+  const Override = (GENERATED_THEME_VIEWS[theme.id]?.[name] ?? theme.components?.[name]) as ComponentType<ThemeSlotProps[K]> | undefined;
   // Generic props spread: TS cannot prove ThemeSlotProps[K] is an object, so widen once here.
   const p = props as ThemeSlotProps[K] & object;
   if (!Override) {

@@ -1,11 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 /*
-  Theme colors live in themes/<id>/theme.css, one folder per theme, and are
-  collected by scripts/generate-themes.mjs. The organizer picks the active
-  theme (html[data-scheme]); participants only choose light/dark (data-theme).
+  Graphite provides fallback tokens. The root layout loads the selected
+  scheme's overrides separately.
 */
-@import "../themes/themes.generated.css";
+@import "../themes/graphite/theme.css";
 
 @theme inline {
   --font-sans: var(--font-plex), "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;

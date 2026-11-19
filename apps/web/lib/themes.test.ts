@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // @ts-expect-error: plain .mjs build script without type declarations
-import { discoverThemes, renderCss, renderRegistry } from "../scripts/generate-themes.mjs";
+import { discoverThemes, renderStyles, renderRegistry, renderViews } from "../scripts/generate-themes.mjs";
 import { THEME_ID_PATTERN } from "./theme-contract";
 import { GENERATED_THEMES } from "../themes/registry.generated";
 import { DEFAULT_THEME_ID, getTheme, resolveThemeId } from "./themes";
@@ -20,7 +20,8 @@ describe("theme registry", () => {
   test("generated files are in sync with theme folders", () => {
     const ids: string[] = discoverThemes(themesDir);
     expect(readFileSync(join(themesDir, "registry.generated.ts"), "utf8")).toBe(renderRegistry(ids));
-    expect(readFileSync(join(themesDir, "themes.generated.css"), "utf8")).toBe(renderCss(ids, themesDir));
+    expect(readFileSync(join(themesDir, "styles.generated.tsx"), "utf8")).toBe(renderStyles(ids, themesDir));
+    expect(readFileSync(join(themesDir, "views.generated.ts"), "utf8")).toBe(renderViews(ids, themesDir));
   });
 
   test("default theme is registered first", () => {

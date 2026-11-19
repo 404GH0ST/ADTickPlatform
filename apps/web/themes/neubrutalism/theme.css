@@ -1155,7 +1155,7 @@
   }
 
   /* Use Tailwind's lg breakpoint for the shell grid and the rail together. */
-  @variant lg {
+  @media (width >= 64rem) {
     :root[data-scheme="neubrutalism"] .nb-frame {
       --nb-rail-inset: 1rem;
       --nb-rail-expanded-width: 14rem;

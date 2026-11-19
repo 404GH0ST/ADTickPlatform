@@ -2,7 +2,12 @@
 
 import { LoaderCircle } from "lucide-react";
 
-import { Button, Input, Label, StatusBanner, cn, type ParticipantLoginState } from "@/components/theme/kit";
+import type { ParticipantLoginState } from "@/components/dashboard/use-participant-login";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { StatusBanner } from "@/components/ui/status-banner";
+import { cn } from "@/lib/utils";
 
 /** Sign in / register with a pill switch. Same auth flow as the stock form. */
 export function NbLogin({

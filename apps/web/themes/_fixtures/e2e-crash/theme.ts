@@ -1,4 +1,4 @@
-import { defineTheme } from "@/components/theme/kit";
+import { defineTheme } from "@/lib/theme-contract";
 
 /**
  * Test-only theme (registered only when AD_PLATFORM_THEME_FIXTURES=1).

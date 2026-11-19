@@ -1,12 +1,4 @@
-import { defineTheme } from "@/components/theme/kit";
-
-import { NbFlagSubmit } from "./components/nb-flag-submit";
-import { NbLogin } from "./components/nb-login";
-import { NbOrganizerScoreboard } from "./components/nb-organizer-scoreboard";
-import { NbOverview } from "./components/nb-overview";
-import { NbScoreboard } from "./components/nb-scoreboard";
-import { NbServices } from "./components/nb-services";
-import { NbShell } from "./components/nb-shell";
+import { defineTheme } from "@/lib/theme-contract";
 
 /**
  * Neubrutalism: white grid paper, black outlines, hard offset shadows, and
@@ -26,13 +18,4 @@ export default defineTheme({
     accent: "oklch(0.565 0.225 263)",
   },
   defaultMode: "light",
-  components: {
-    AppShell: NbShell,
-    Overview: NbOverview,
-    Scoreboard: NbScoreboard,
-    Services: NbServices,
-    FlagSubmit: NbFlagSubmit,
-    Login: NbLogin,
-    OrganizerScoreboard: NbOrganizerScoreboard,
-  },
 });

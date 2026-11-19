@@ -27,7 +27,7 @@ test("organizer theme applies platform-wide and keeps participant mode", async (
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
-test("a theme can replace the page layout", async ({ page }) => {
+test("a theme can replace the page layout", async ({ page, browser, baseURL }) => {
   await page.goto("/admin/game?view=settings");
   await expect(page.getByTestId("nb-shell")).toHaveCount(0);
 
@@ -40,6 +40,18 @@ test("a theme can replace the page layout", async ({ page }) => {
   await page.goto("/scoreboard");
   await expect(page.getByTestId("nb-shell")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+
+  const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
+  try {
+    const login = await context.newPage();
+    await login.goto("/login");
+    await expect(login.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
+    await expect.poll(() => login.locator("html").evaluate((element) =>
+      getComputedStyle(element).getPropertyValue("--nb-blue").trim(),
+    )).not.toBe("");
+  } finally {
+    await context.close();
+  }
 });
 
 test("theme API rejects ids without a theme folder", async ({ page }) => {
