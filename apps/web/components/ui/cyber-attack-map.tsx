@@ -4,10 +4,11 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactElement,
+  ReactNode,
   CSSProperties,
 } from 'react';
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plus } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Minus, Plus } from 'lucide-react';
 
 import {
   FIRST_BLOOD_FOCUS_MS, FIRST_BLOOD_CHARGE_MS, FIRST_BLOOD_INTRO_MS,
@@ -17,6 +18,8 @@ import {
   type FirstBloodStage,
 } from '@/lib/first-blood';
 import { useAttackSfx } from '@/components/hooks/use-attack-sfx';
+import { useActiveTheme } from '@/components/theme/active-theme-provider';
+import { ScrollableRegion } from '@/components/ui/scrollable-region';
 import globeJson from '@/data/globe.json';
 import { FirstBloodBanner } from './first-blood-banner';
 import { cn } from '@/lib/utils';
@@ -228,6 +231,7 @@ export function CyberAttackMap({
   selectedTeamId = null,
   className,
   expanded = false,
+  compactActions,
   onSelectAttack,
   onSelectTeam,
   onFeaturedAttackChange,
@@ -245,6 +249,7 @@ export function CyberAttackMap({
   selectedTeamId?: string | null;
   className?: string;
   expanded?: boolean;
+  compactActions?: ReactNode;
   onSelectAttack?: (attackId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
   onFeaturedAttackChange?: (attackId: string | null) => void;
@@ -252,6 +257,7 @@ export function CyberAttackMap({
   presentation?: boolean;
   teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
+  const { id: themeId } = useActiveTheme();
   const [compactSurface, setCompactSurface] = useState(false);
   const [canvasAspectRatio, setCanvasAspectRatio] = useState(MAP_WIDTH / MAP_HEIGHT);
   // Match the expanded canvas aspect ratio while keeping space at the globe's rim.
@@ -1118,6 +1124,150 @@ export function CyberAttackMap({
     return result.filter(({ id }) => firstBloodIds.has(id));
   }, [attacks, closingFirstBlood, lastFirstBlood]);
 
+  const globeControls = (
+    <div className="grid gap-3">
+      <div className={cn('flex flex-wrap items-center gap-y-2', expanded ? 'gap-x-2' : 'gap-x-4')}>
+        {presentation ? null : (
+          <div role="group" aria-label="Globe regions" className="flex flex-wrap gap-1.5 sm:gap-2">
+            {REGION_PRESETS.map(({ label, lon }) => (
+              <button
+                key={label}
+                type="button"
+                data-fx="map-control"
+                className={cn(MAP_CONTROL_CLASS, 'px-1.5 text-[0.6875rem] font-semibold sm:px-2 sm:text-xs')}
+                onClick={() => {
+                  interruptFirstBlood();
+                  markUserActivity();
+                  animateRotationTo({ lat: -6, lon });
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div role="group" aria-label="Rotate globe" className="flex flex-wrap gap-2">
+          {ROTATION_CONTROLS.map(({ label, Icon, lat, lon }) => (
+            <button
+              key={label}
+              type="button"
+              aria-label={label}
+              title={label}
+              data-fx="map-control"
+              className={MAP_CONTROL_CLASS}
+              onClick={() => rotateBy(lat, lon)}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+        <div role="group" aria-label="Globe zoom" className="flex flex-wrap gap-2">
+          {[
+            { Icon: Plus, delta: ZOOM_STEP, label: 'Zoom in', disabled: zoom >= ZOOM_MAX },
+            { Icon: Minus, delta: -ZOOM_STEP, label: 'Zoom out', disabled: zoom <= ZOOM_MIN },
+          ].map(({ Icon, delta, label, disabled }) => (
+            <button
+              key={label}
+              type="button"
+              aria-label={label}
+              title={label}
+              disabled={disabled}
+              data-fx="map-control"
+              className={MAP_CONTROL_CLASS}
+              onClick={() => zoomBy(delta)}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+        {onAutoCameraChange ? (
+          <button
+            type="button"
+            aria-pressed={autoCameraEnabled}
+            className={cn(MAP_CONTROL_CLASS, 'max-w-full flex-wrap gap-x-2 px-2 py-1 text-xs')}
+            data-fx="map-control"
+            onClick={() => onAutoCameraChange(!autoCameraEnabled)}
+          >
+            <span>Auto camera</span>
+            <span aria-hidden="true">{autoCameraEnabled ? 'On' : 'Paused'}</span>
+          </button>
+        ) : null}
+      </div>
+      {presentation || !denseKeyboardMode ? null : (
+        <div className={cn(
+          'grid w-full max-w-xl gap-2',
+          expanded
+            ? 'grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]'
+            : 'grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]',
+        )}>
+          <label className="grid min-w-0 gap-1 text-xs font-semibold">
+            Jump to team
+            <select
+              className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
+              value={selectedTeamId ?? ''}
+              onChange={(event) => {
+                const value = event.target.value;
+                onSelectTeam?.(value === '' ? null : value);
+                if (value !== '') onSelectAttack?.(null);
+              }}
+            >
+              <option value="">Select team</option>
+              {nodes.slice().sort((left, right) => left.name.localeCompare(right.name)).map((node) => (
+                <option key={node.id} value={node.id}>
+                  {node.institution ? `${node.name} (${node.institution})` : node.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid min-w-0 gap-1 text-xs font-semibold">
+            Jump to route
+            <select
+              className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
+              value={selectedAttackId ?? ''}
+              onChange={(event) => {
+                const value = event.target.value;
+                onSelectAttack?.(value === '' ? null : value);
+                if (value !== '') onSelectTeam?.(null);
+              }}
+            >
+              <option value="">Select route</option>
+              {arcs.map((arc) => (
+                <option key={arc.id} value={arc.attackIds[0]}>
+                  {arc.attacker} to {arc.victim}, {arc.service}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+
+  const legend = services.length ? (
+    <div className="flex min-w-0 flex-wrap gap-1.5">
+      {services.map((service) => (
+        <div
+          key={service.name}
+          data-fx="map-legend"
+          className="flex min-w-0 max-w-full items-center gap-1.5 rounded-sm border px-2 py-1"
+          style={{
+            backgroundColor: 'var(--attack-map-legend-background)',
+            borderColor: 'var(--attack-map-legend-border)',
+          }}
+        >
+          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: service.color }} />
+          <span
+            className="min-w-0 wrap-anywhere text-[10px] font-semibold"
+            style={{ color: 'var(--attack-map-legend-foreground)' }}
+          >
+            {service.name}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : null;
+  const legendBelowMap = legend !== null && !compactActions && (expanded || themeId === 'neubrutalism');
+
   return (
     <div
       ref={mapRootRef}
@@ -1141,7 +1291,8 @@ export function CyberAttackMap({
       role="region"
       className={cn(
         'flex min-w-0 flex-col rounded-sm border',
-        expanded && 'min-h-[calc(100%-2.75rem)] shrink-0 lg:min-h-0',
+        expanded && 'shrink-0 @[60rem]/expanded-map:min-h-0',
+        expanded && (compactActions ? 'relative h-[calc(100%-32px)] min-h-0 @[60rem]/expanded-map:h-auto' : 'min-h-[calc(100%-2.75rem)]'),
       )}
       style={{
         background:
@@ -1157,123 +1308,26 @@ export function CyberAttackMap({
           ? ' Use the jump menus to inspect a team or route.'
           : ' Press Enter or Space on a focused team or route to inspect it.'}
       </p>
-      <div className="grid gap-3 rounded-t-[inherit] border-b border-border bg-card p-3">
-        <div className={cn('flex flex-wrap items-center gap-y-2', expanded ? 'gap-x-2' : 'gap-x-4')}>
-          {presentation ? null : (
-            <div role="group" aria-label="Globe regions" className="flex flex-wrap gap-1.5 sm:gap-2">
-              {REGION_PRESETS.map(({ label, lon }) => (
-                <button
-                  key={label}
-                  type="button"
-                  data-fx="map-control"
-                  className={cn(MAP_CONTROL_CLASS, 'px-1.5 text-[0.6875rem] font-semibold sm:px-2 sm:text-xs')}
-                  onClick={() => {
-                    interruptFirstBlood();
-                    markUserActivity();
-                    animateRotationTo({ lat: -6, lon });
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          <div role="group" aria-label="Rotate globe" className="flex flex-wrap gap-2">
-            {ROTATION_CONTROLS.map(({ label, Icon, lat, lon }) => (
-              <button
-                key={label}
-                type="button"
-                aria-label={label}
-                title={label}
-                data-fx="map-control"
-                className={MAP_CONTROL_CLASS}
-                onClick={() => rotateBy(lat, lon)}
-              >
-                <Icon className="size-4" aria-hidden="true" />
-              </button>
-            ))}
+      {compactActions ? (
+        <details data-globe-controls className="group pointer-events-none absolute inset-x-2 top-2 z-30 portrait:relative portrait:inset-auto portrait:mx-2 portrait:mt-2 [@media(height>=640px)]:relative [@media(height>=640px)]:inset-auto [@media(height>=640px)]:mx-2 [@media(height>=640px)]:mt-2">
+          <summary className={cn(MAP_CONTROL_CLASS, 'pointer-events-auto min-h-[44px] cursor-pointer list-none gap-2 px-2 py-1 text-sm font-semibold [@media(orientation:landscape)_and_(height<640px)]:max-w-1/3 [&::-webkit-details-marker]:hidden')}>
+            <span className="min-w-0 wrap-anywhere">Globe controls</span>
+            <ChevronDown className="size-4 shrink-0 group-open:rotate-180" aria-hidden />
+          </summary>
+          <div className="pointer-events-auto absolute inset-x-0 top-full mt-1 grid max-h-[min(50dvh,24rem)] gap-3 overflow-y-auto overscroll-contain rounded-sm border border-border bg-popover p-3 text-popover-foreground shadow-lg">
+            {compactActions}
+            {globeControls}
+            {legend}
           </div>
-          <div role="group" aria-label="Globe zoom" className="flex flex-wrap gap-2">
-            {[
-              { Icon: Plus, delta: ZOOM_STEP, label: 'Zoom in', disabled: zoom >= ZOOM_MAX },
-              { Icon: Minus, delta: -ZOOM_STEP, label: 'Zoom out', disabled: zoom <= ZOOM_MIN },
-            ].map(({ Icon, delta, label, disabled }) => (
-              <button
-                key={label}
-                type="button"
-                aria-label={label}
-                title={label}
-                disabled={disabled}
-                data-fx="map-control"
-                className={MAP_CONTROL_CLASS}
-                onClick={() => zoomBy(delta)}
-              >
-                <Icon className="size-4" aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-          {onAutoCameraChange ? (
-            <button
-              type="button"
-              aria-pressed={autoCameraEnabled}
-              className={cn(MAP_CONTROL_CLASS, 'max-w-full flex-wrap gap-x-2 px-2 py-1 text-xs')}
-              data-fx="map-control"
-              onClick={() => onAutoCameraChange(!autoCameraEnabled)}
-            >
-              <span>Auto camera</span>
-              <span aria-hidden="true">{autoCameraEnabled ? 'On' : 'Paused'}</span>
-            </button>
-          ) : null}
-        </div>
-        {presentation || !denseKeyboardMode ? null : (
-          <div className={cn(
-            'grid w-full max-w-xl gap-2',
-            expanded
-              ? 'grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]'
-              : 'grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]',
-          )}>
-            <label className="grid min-w-0 gap-1 text-xs font-semibold">
-              Jump to team
-              <select
-                className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
-                value={selectedTeamId ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onSelectTeam?.(value === '' ? null : value);
-                  if (value !== '') onSelectAttack?.(null);
-                }}
-              >
-                <option value="">Select team</option>
-                {nodes.slice().sort((left, right) => left.name.localeCompare(right.name)).map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {node.institution ? `${node.name} (${node.institution})` : node.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid min-w-0 gap-1 text-xs font-semibold">
-              Jump to route
-              <select
-                className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
-                value={selectedAttackId ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onSelectAttack?.(value === '' ? null : value);
-                  if (value !== '') onSelectTeam?.(null);
-                }}
-              >
-                <option value="">Select route</option>
-                {arcs.map((arc) => (
-                  <option key={arc.id} value={arc.attackIds[0]}>
-                    {arc.attacker} to {arc.victim}, {arc.service}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-      </div>
-      <div data-fx="map-stage" className="@container relative isolate flex min-w-0 flex-1 flex-col rounded-b-[inherit]">
+        </details>
+      ) : (
+        <div className="rounded-t-[inherit] border-b border-border bg-card p-3">{globeControls}</div>
+      )}
+      <div data-fx="map-stage" className={cn(
+        '@container relative isolate flex min-w-0 flex-1 flex-col',
+        !legendBelowMap && 'rounded-b-[inherit]',
+        compactActions && 'min-h-0',
+      )}>
         {firstBloodResult.length > 0 ? (
           <div
             data-first-blood-layer
@@ -1462,30 +1516,25 @@ export function CyberAttackMap({
               Waiting for the first capture
             </p>
           ) : null}
-          <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
-            {services.map((service) => (
-              <div
-                key={service.name}
-                data-fx="map-legend"
-                className="flex items-center gap-1.5 rounded-sm border px-2 py-1"
-                style={{
-                  backgroundColor: 'var(--attack-map-legend-background)',
-                  borderColor: 'var(--attack-map-legend-border)',
-                }}
-              >
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: service.color }} />
-                <span
-                  className="text-[10px] font-semibold"
-                  style={{ color: 'var(--attack-map-legend-foreground)' }}
-                >
-                  {service.name}
-                </span>
-              </div>
-            ))}
-          </div>
+          {!expanded && !legendBelowMap && legend ? (
+            <div className="pointer-events-none absolute inset-x-3 bottom-3">{legend}</div>
+          ) : null}
 
         </div>
       </div>
+
+      {legendBelowMap ? (
+        <ScrollableRegion
+          axis="vertical"
+          label="Map legend"
+          className={cn(
+            'shrink-0 overflow-y-auto rounded-b-[inherit] border-t border-border bg-card p-2',
+            expanded ? 'max-h-[min(5rem,12dvh)]' : 'max-h-[min(9rem,40dvh)]',
+          )}
+        >
+          {legend}
+        </ScrollableRegion>
+      ) : null}
 
       <style
         dangerouslySetInnerHTML={{

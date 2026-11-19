@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { mockApiBaseUrl } from "./test-utils";
+import { mockApiBaseUrl, participantStorageState } from "./test-utils";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -182,6 +182,7 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
   const globe = page.getByTestId("cyber-attack-map");
   await expect(globe).toHaveAttribute("data-keyboard-mode", "jump");
+  await expect(globe.locator('[data-fx="map-legend"] > span:last-child').first()).toHaveCSS("font-size", "12px");
   for (const [region, longitude] of [["Americas", "-82.00"], ["APAC", "118.00"], ["EMEA", "34.00"]]) {
     await globe.getByRole("button", { name: region, exact: true }).click();
     await expect(globe).toHaveAttribute("data-rotation-lon", longitude);
@@ -206,12 +207,147 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
   await dialog.getByRole("region", { name: "Maximized attack map" }).press("End");
   await expect(dialog.getByRole("button", { name: "Clear team focus" })).toBeInViewport();
 
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await sphere.scrollIntoViewIfNeeded();
+  await expect(sphere).toBeInViewport({ ratio: 0.99 });
+  await expect.poll(async () => (await sphere.boundingBox())?.width ?? 0).toBeGreaterThan(443);
+
   await page.setViewportSize({ width: 844, height: 390 });
   await sphere.scrollIntoViewIfNeeded();
   await expect(sphere).toBeInViewport({ ratio: 0.99 });
   await expect.poll(async () => (await sphere.boundingBox())?.width ?? 0).toBeGreaterThan(220);
+
+  await page.addStyleTag({ content: "html { font-size: 32px; }" });
+  const controls = dialog.locator("[data-globe-controls] summary");
+  await expect(controls).toBeVisible();
+  await sphere.scrollIntoViewIfNeeded();
+  await expect(sphere).toBeInViewport({ ratio: 0.99 });
+  await controls.press("Enter");
+  await expect(dialog.getByRole("combobox", { name: "Jump to route" })).toBeVisible();
+  await expect(dialog.locator('[data-fx="map-legend"] > span:last-child').first()).toHaveCSS("font-size", "24px");
+  await page.keyboard.press("Escape");
+  await expect(controls).toBeFocused();
+  await expect(dialog.getByRole("combobox", { name: "Jump to route" })).toBeHidden();
+
+  for (const viewport of [{ width: 320, height: 660 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    await sphere.scrollIntoViewIfNeeded();
+    await expect(sphere).toBeInViewport({ ratio: 0.99 });
+    const controlsBox = await controls.boundingBox();
+    const sphereBox = await sphere.boundingBox();
+    expect(sphereBox?.y).toBeGreaterThanOrEqual((controlsBox?.y ?? 0) + (controlsBox?.height ?? 0));
+  }
   await page.keyboard.press("Escape");
   await expect(maximize).toBeFocused();
+});
+
+test.describe("opening a dense maximized globe from a scrolled page", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  for (const { width, height, fontSize, input } of [
+    { width: 390, height: 844, fontSize: 16, input: "touch" },
+    { width: 844, height: 390, fontSize: 32, input: "keyboard" },
+  ]) {
+    test(`paints and accepts input at ${width}×${height} with ${input}`, async ({ page, request }) => {
+      const appearance = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+        data: { theme_id: "neubrutalism" },
+      });
+      expect(appearance.ok()).toBeTruthy();
+      await page.context().addCookies(participantStorageState.cookies);
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/attacks");
+      await page.locator("html").evaluate((element, size) => {
+        element.style.fontSize = `${size}px`;
+      }, fontSize);
+      await page.evaluate(() => document.fonts.ready);
+
+      const globe = page.getByTestId("cyber-attack-map");
+      await expect(globe.locator('[data-fx="globe-sphere"]')).toBeVisible();
+      const maximize = page.getByRole("button", { name: "Maximize", exact: true });
+      await maximize.evaluate((element) => element.scrollIntoView({ block: "center", behavior: "instant" }));
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(height);
+      if (input === "touch") {
+        await maximize.tap();
+      } else {
+        await maximize.press("Enter");
+      }
+
+      const dialog = page.getByTestId("attack-map-maximize-dialog");
+      const sphere = dialog.locator('[data-fx="globe-sphere"]');
+      const back = dialog.getByRole("button", { name: "Back to page" });
+      await expect(sphere).toBeInViewport({ ratio: 0.99 });
+      // A blank dialog can still report viewport-sized bounds. Probe the page
+      // before any modal interaction that could trigger a fresh paint.
+      await expect.poll(() => sphere.evaluate((element) => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(x + width / 2, y + height / 2);
+        return hit?.closest('[data-fx="map-canvas"]') === element.closest('[data-fx="map-canvas"]');
+      })).toBe(true);
+
+      if (input === "touch") {
+        await back.tap();
+      } else {
+        const controls = dialog.locator("[data-globe-controls] summary");
+        await controls.press("Enter");
+        await expect(dialog.getByRole("combobox", { name: "Jump to route" })).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(controls).toBeFocused();
+        await page.keyboard.press("Escape");
+      }
+      await expect(dialog).toBeHidden();
+      await expect(maximize).toBeFocused();
+    });
+  }
+});
+
+test("neubrutalism keeps the busy inline legend outside the globe and keyboard scrollable", async ({ page, request }) => {
+  const appearance = await request.put(`${mockApiBaseUrl}/api/v2/admin/platform/appearance`, {
+    data: { theme_id: "neubrutalism" },
+  });
+  expect(appearance.ok()).toBeTruthy();
+  await page.context().addCookies(participantStorageState.cookies);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  const items = Array.from({ length: 12 }, (_, index) => ({
+    id: `legend-attack-${index}`,
+    attacker: index % 2 ? "College Beta" : "College Gamma",
+    victim: "College Alpha",
+    service: `RegionalIdentityAndAccessManagementService${index + 1}`,
+    tick: 29,
+    verdict: "accepted",
+  }));
+  await page.route("**/api/platform/realtime/attacks/stream", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `data: ${JSON.stringify({ items, limit: 24, offset: 0, total_count: 36, has_next: true, has_prev: false })}\n\n`,
+  }));
+
+  await page.goto("/attacks");
+  const globe = page.getByTestId("cyber-attack-map");
+  const canvas = globe.locator('[data-fx="map-canvas"]');
+  const legend = globe.getByRole("region", { name: "Map legend", exact: true });
+  const keys = legend.locator('[data-fx="map-legend"]');
+  await expect(keys).toHaveCount(15);
+  await expect(legend).toHaveAttribute("tabindex", "0");
+
+  for (const fontSize of [16, 32]) {
+    await page.locator("html").evaluate((element, size) => { element.style.fontSize = `${size}px`; }, fontSize);
+    const canvasBounds = await canvas.boundingBox();
+    const legendBounds = await legend.boundingBox();
+    expect(legendBounds!.y).toBeGreaterThanOrEqual(canvasBounds!.y + canvasBounds!.height - 1);
+    await expect(canvas.locator('[data-fx="map-legend"]')).toHaveCount(0);
+    await expect(keys.first().locator("span").last()).toHaveCSS("font-size", `${fontSize * 0.75}px`);
+    expect(await legend.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(legendBounds!.width + 1);
+
+    await legend.press("End");
+    await expect(legend).toBeFocused();
+    await expect.poll(() => legend.evaluate((element) =>
+      element.scrollHeight - element.clientHeight - element.scrollTop,
+    )).toBeLessThanOrEqual(1);
+    await legend.press("Home");
+    await expect.poll(() => legend.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
+  }
 });
 
 test("pausing the automatic camera holds its view through manual input, maximize, and reload", async ({ page }) => {
@@ -219,7 +355,12 @@ test("pausing the automatic camera holds its view through manual input, maximize
   await page.goto("/attacks");
   const globe = page.getByRole("region", { name: "Interactive attack globe" });
   const autoCamera = globe.getByRole("button", { name: "Auto camera", pressed: true });
-  await globe.locator('[data-fx="map-canvas"]').scrollIntoViewIfNeeded();
+  const canvas = globe.locator('[data-fx="map-canvas"]');
+  // The streamed globe can be replaced while the client hydrates.
+  await expect(async () => {
+    await canvas.scrollIntoViewIfNeeded();
+    await expect(canvas).toBeInViewport();
+  }).toPass({ timeout: 5000 });
   await expect(globe).toHaveAttribute("data-surface-active", "true");
   await page.clock.fastForward(11_000);
   await expect(globe).toHaveAttribute("data-featured-attack-id", /.+/);

@@ -91,6 +91,19 @@ export function AttackMapPanel({
   onVisibleRowsChange?: (rows: AttackMapEvent[]) => void;
 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
+  const [expandedLayout, setExpandedLayout] = useState<HTMLDivElement | null>(null);
+  const [compactViewer, setCompactViewer] = useState(false);
+  useEffect(() => {
+    if (!expandedLayout) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const { width, height } = entry.contentRect;
+      const comfortableHeight = width < 66 * rem ? 50 * rem : 34 * rem;
+      setCompactViewer(width < 25 * rem || height < comfortableHeight);
+    });
+    observer.observe(expandedLayout);
+    return () => observer.disconnect();
+  }, [expandedLayout]);
   const maximizeTrigger = useRef<HTMLButtonElement>(null);
   const viewLabelId = useId();
   const [autoCameraPreference, setAutoCameraPreference] = useState<boolean | null>(null);
@@ -535,15 +548,37 @@ export function AttackMapPanel({
     );
   }
 
+  const expandedActions = (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Badge data-testid="attack-map-visible-attacks" variant="secondary">{visibleRows.length} attacks</Badge>
+      <Badge data-testid="attack-map-visible-teams" variant="secondary">{visibleTeamCount} teams</Badge>
+      <Badge data-testid="attack-map-visible-services" variant="secondary">{visibleServiceCount} services</Badge>
+      <Button
+        data-testid="attack-map-highlight-current-tick"
+        size="sm"
+        variant="outline"
+        className="any-pointer-coarse:min-h-11"
+        disabled={currentTickAttackIDs.length === 0}
+        onClick={replayCurrentTick}
+      >
+        <Zap className="size-4" aria-hidden />
+        Highlight tick #{selectedTickValue}
+      </Button>
+    </div>
+  );
+
   function renderMapSurface(expandedView: boolean): ReactElement {
-    const mapSize = expandedView ? 'aspect-auto min-h-[min(16rem,65dvh)] flex-1' : 'min-h-[27rem]';
+    const compact = expandedView && compactViewer;
+    const mapSize = expandedView
+      ? cn('aspect-auto flex-1', compact ? 'min-h-0' : 'min-h-[min(16rem,65dvh)]')
+      : 'min-h-[27rem]';
 
     return (
       <div
         className={cn(
           'gap-3',
           expandedView
-            ? 'flex h-full flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:grid-rows-[minmax(0,1fr)]'
+            ? 'flex h-full flex-col @[60rem]/expanded-map:grid @[60rem]/expanded-map:grid-cols-[minmax(0,1fr)_16rem] @[60rem]/expanded-map:grid-rows-[minmax(0,1fr)]'
             : 'grid grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
@@ -562,6 +597,7 @@ export function AttackMapPanel({
             autoCameraPreference={autoCameraPreference}
             className={mapSize}
             expanded={expandedView}
+            compactActions={compact ? expandedActions : undefined}
             focusedTeams={focusedTeams}
             highlightedAttackIDs={activeHighlightIDs}
             liveAttackIDs={highlightedAttackIDs}
@@ -588,7 +624,7 @@ export function AttackMapPanel({
         <div
           className={cn(
             'min-w-0',
-            expandedView && 'shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1',
+            expandedView && 'shrink-0 @[60rem]/expanded-map:min-h-0 @[60rem]/expanded-map:overflow-y-auto @[60rem]/expanded-map:pr-1',
           )}
         >
           {renderInspector()}
@@ -814,52 +850,44 @@ export function AttackMapPanel({
         <DialogContent
           data-testid="attack-map-maximize-dialog"
           showCloseButton={false}
-          className="h-[98dvh] w-[99vw] max-w-[99vw] grid-rows-[auto_minmax(min(10rem,35dvh),1fr)] gap-2 overflow-y-auto p-2 sm:p-3"
+          className="h-[98dvh] w-[99vw] max-w-[99vw] grid-rows-[minmax(0,1fr)] p-0"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             maximizeTrigger.current?.focus();
           }}
+          onEscapeKeyDown={(event) => {
+            const controls = expandedLayout?.querySelector<HTMLDetailsElement>('[data-globe-controls][open]');
+            if (!controls) return;
+            event.preventDefault();
+            controls.open = false;
+            controls.querySelector('summary')?.focus();
+          }}
         >
-          <DialogHeader className="min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="min-w-0 flex-1 basis-40">
-              <DialogTitle className="wrap-anywhere">{title}</DialogTitle>
-              <DialogDescription className="sr-only">{description}</DialogDescription>
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge data-testid="attack-map-visible-attacks" variant="secondary">
-                {visibleRows.length} attacks
-              </Badge>
-              <Badge data-testid="attack-map-visible-teams" variant="secondary">
-                {visibleTeamCount} teams
-              </Badge>
-              <Badge data-testid="attack-map-visible-services" variant="secondary">
-                {visibleServiceCount} services
-              </Badge>
-              <Button
-                data-testid="attack-map-highlight-current-tick"
-                size="sm"
-                variant="outline"
-                className="any-pointer-coarse:min-h-11"
-                disabled={currentTickAttackIDs.length === 0}
-                onClick={replayCurrentTick}
-              >
-                <Zap className="h-4 w-4" />
-                Highlight tick #{selectedTickValue}
-              </Button>
+          {/* Chromium can leave a fixed scroll container blank when the dense globe opens from a scrolled page. */}
+          <div
+            ref={setExpandedLayout}
+            className="grid min-w-0 grid-rows-[auto_minmax(min(10rem,35dvh),1fr)] gap-2 overflow-y-auto p-2 sm:p-3"
+          >
+            <DialogHeader className="min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="min-w-0 flex-1 basis-40">
+                <DialogTitle className="wrap-anywhere">{title}</DialogTitle>
+                <DialogDescription className="sr-only">{description}</DialogDescription>
+              </div>
+              {compactViewer ? null : expandedActions}
               <Button
                 size="sm"
                 variant="outline"
                 className="any-pointer-coarse:min-h-11"
                 onClick={() => setExpanded(false)}
               >
-                <Minimize2 className="h-4 w-4" />
+                <Minimize2 className="size-4" aria-hidden />
                 Back to page
               </Button>
-            </div>
-          </DialogHeader>
-          <ScrollableRegion axis="vertical" label="Maximized attack map" className="min-h-0 overflow-y-auto">
-            {renderMapSurface(true)}
-          </ScrollableRegion>
+            </DialogHeader>
+            <ScrollableRegion axis="vertical" label="Maximized attack map" className="@container/expanded-map min-h-0 overflow-y-auto">
+              {renderMapSurface(true)}
+            </ScrollableRegion>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

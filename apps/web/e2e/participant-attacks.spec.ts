@@ -94,6 +94,7 @@ test("participant services page falls back to endpoint-only rows when service-st
 test("participant attack map maximize dialog expands beyond the inline panel and stays scrollable", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/attacks");
 
   const inlinePanel = page.getByTestId("attack-map-panel");
@@ -115,11 +116,10 @@ test("participant attack map maximize dialog expands beyond the inline panel and
   }
 
   expect(dialogBox.width).toBeGreaterThan(inlineBox.width);
-  expect(
-    await maximizeDialog.evaluate((element) =>
-      getComputedStyle(element).overflowY,
-    ),
-  ).toBe("auto");
+  const mapRegion = maximizeDialog.getByRole("region", { name: "Maximized attack map" });
+  await mapRegion.press("End");
+  await expect.poll(() => mapRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(maximizeDialog.getByRole("button", { name: "Back to page" })).toBeInViewport();
   await page.keyboard.press("Escape");
   await expect(maximizeDialog).toBeHidden();
   await expect(maximize).toBeFocused();
