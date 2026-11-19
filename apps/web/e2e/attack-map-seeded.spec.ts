@@ -194,6 +194,24 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
   await globe.getByRole("combobox", { name: "Jump to team" }).selectOption({ index: 1 });
   await expect(page.getByText("Clear team focus")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const maximize = page.getByRole("button", { name: "Maximize" });
+  await maximize.press("Enter");
+  const dialog = page.getByTestId("attack-map-maximize-dialog");
+  const sphere = dialog.locator('[data-fx="globe-sphere"]');
+  await expect(sphere).toBeInViewport({ ratio: 0.99 });
+  await expect.poll(async () => (await sphere.boundingBox())?.width ?? 0).toBeGreaterThan(300);
+
+  await dialog.getByRole("region", { name: "Maximized attack map" }).press("End");
+  await expect(dialog.getByRole("button", { name: "Clear team focus" })).toBeInViewport();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await sphere.scrollIntoViewIfNeeded();
+  await expect(sphere).toBeInViewport({ ratio: 0.99 });
+  await expect.poll(async () => (await sphere.boundingBox())?.width ?? 0).toBeGreaterThan(220);
+  await page.keyboard.press("Escape");
+  await expect(maximize).toBeFocused();
 });
 
 test("pausing the automatic camera holds its view through manual input, maximize, and reload", async ({ page }) => {
@@ -437,4 +455,9 @@ test("seeded dense attack globe uses maximize without presentation mode", async 
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
   }
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const sphere = globe.locator('[data-fx="globe-sphere"]');
+  await expect(sphere).toBeInViewport({ ratio: 0.99 });
+  await expect.poll(async () => (await sphere.boundingBox())?.width ?? 0).toBeGreaterThan(420);
 });

@@ -1393,16 +1393,6 @@
   font-weight: 700;
 }
 
-@container (width < 16rem) {
-  :root[data-scheme="neubrutalism"] .nb-score-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  :root[data-scheme="neubrutalism"] .nb-score-total {
-    text-align: start;
-  }
-}
-
 /* Stock login page: one bold frame, not a card inside a frame. */
 :root[data-scheme="neubrutalism"] .workspace-frame [data-slot="card"] {
   border: 0;

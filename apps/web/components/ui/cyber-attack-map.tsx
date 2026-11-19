@@ -154,6 +154,7 @@ type DragState = {
 
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 560;
+const COMPACT_MAP_WIDTH = 600;
 const CENTER_X = MAP_WIDTH / 2 - 22;
 const CENTER_Y = MAP_HEIGHT / 2 + 2;
 const GLOBE_RADIUS = 256;
@@ -226,6 +227,7 @@ export function CyberAttackMap({
   selectedAttackId = null,
   selectedTeamId = null,
   className,
+  expanded = false,
   onSelectAttack,
   onSelectTeam,
   onFeaturedAttackChange,
@@ -242,6 +244,7 @@ export function CyberAttackMap({
   selectedAttackId?: string | null;
   selectedTeamId?: string | null;
   className?: string;
+  expanded?: boolean;
   onSelectAttack?: (attackId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
   onFeaturedAttackChange?: (attackId: string | null) => void;
@@ -250,6 +253,12 @@ export function CyberAttackMap({
   teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
   const [compactSurface, setCompactSurface] = useState(false);
+  const [canvasAspectRatio, setCanvasAspectRatio] = useState(MAP_WIDTH / MAP_HEIGHT);
+  // Match the expanded canvas aspect ratio while keeping space at the globe's rim.
+  const frameWidth = expanded
+    ? Math.max(COMPACT_MAP_WIDTH, MAP_HEIGHT * canvasAspectRatio)
+    : compactSurface ? COMPACT_MAP_WIDTH : MAP_WIDTH;
+  const frameHeight = expanded ? Math.max(MAP_HEIGHT, COMPACT_MAP_WIDTH / canvasAspectRatio) : MAP_HEIGHT;
   const [surfaceActive, setSurfaceActive] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
   const autoCameraEnabled = autoCameraPreference ?? !reducedMotion;
@@ -434,6 +443,8 @@ export function CyberAttackMap({
   sceneRef.current = scene;
   const compactSurfaceRef = useRef(compactSurface);
   compactSurfaceRef.current = compactSurface;
+  const frameRef = useRef({ width: frameWidth, height: frameHeight });
+  frameRef.current = { width: frameWidth, height: frameHeight };
   const introAttacks = attacks.filter((attack) => introAttackIds.has(attack.id));
   const firstBloodAnnouncement = attacks.find((attack) => celebratingAttackIds.has(attack.id));
 
@@ -460,7 +471,11 @@ export function CyberAttackMap({
       sync();
     });
     const resizeObserver = new ResizeObserver(([entry]) => {
-      setCompactSurface(entry.contentRect.width < 520);
+      const { width, height } = entry.contentRect;
+      setCompactSurface(width < 520);
+      if (expanded && width > 0 && height > 0) {
+        setCanvasAspectRatio(width / height);
+      }
     });
     if (canvas) {
       observer.observe(canvas);
@@ -477,7 +492,7 @@ export function CyberAttackMap({
       media.removeEventListener('change', sync);
       window.removeEventListener('blur', endDrag);
     };
-  }, [endDrag]);
+  }, [endDrag, expanded]);
 
   useEffect(() => {
     rotationRef.current = rotation;
@@ -787,13 +802,13 @@ export function CyberAttackMap({
         ...camera, zoom: clamp(camera.zoom * scale, ZOOM_MIN, ZOOM_MAX),
       });
       if (start.visible && end.visible && Math.min(start.z, end.z) >= FIRST_BLOOD_SPLIT_DEPTH) {
-        const width = compactSurfaceRef.current ? 600 : MAP_WIDTH;
+        const { width, height } = frameRef.current;
         // Frame both endpoints and their burst/labels. Never zoom one team out
         // of shot, including wide routes and the narrow mobile surface.
         const fitZoom = clamp(Math.min(
           compactSurfaceRef.current ? 1.5 : 1.85,
           width / (Math.abs(start.x - end.x) + 210),
-          MAP_HEIGHT / (Math.abs(start.y - end.y) + 340),
+          height / (Math.abs(start.y - end.y) + 340),
         ), ZOOM_MIN, ZOOM_MAX);
         const shot = { rotation: target, zoom: fitZoom, x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 + 38 };
         // A slow push-in while charging, a lean toward the target as the
@@ -1093,8 +1108,8 @@ export function CyberAttackMap({
 
   // Zoom by shrinking the SVG viewBox around the globe centre. Purely visual,
   // so projection/rotation math is untouched; HTML chrome stays unscaled.
-  const viewWidth = (compactSurface ? 600 : MAP_WIDTH) / zoom;
-  const viewHeight = MAP_HEIGHT / zoom;
+  const viewWidth = frameWidth / zoom;
+  const viewHeight = frameHeight / zoom;
   const viewBox = `${cameraCenter.x - viewWidth / 2} ${cameraCenter.y - viewHeight / 2} ${viewWidth} ${viewHeight}`;
   const firstBloodResult = useMemo(() => {
     const result = closingFirstBlood?.attacks ?? lastFirstBlood;
@@ -1124,7 +1139,10 @@ export function CyberAttackMap({
       aria-describedby={`${mapId}-instructions`}
       aria-label="Interactive attack globe"
       role="region"
-      className="flex min-w-0 flex-col rounded-sm border"
+      className={cn(
+        'flex min-w-0 flex-col rounded-sm border',
+        expanded && 'min-h-[calc(100%-2.75rem)] shrink-0 lg:min-h-0',
+      )}
       style={{
         background:
           presentation
@@ -1140,7 +1158,7 @@ export function CyberAttackMap({
           : ' Press Enter or Space on a focused team or route to inspect it.'}
       </p>
       <div className="grid gap-3 rounded-t-[inherit] border-b border-border bg-card p-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className={cn('flex flex-wrap items-center gap-y-2', expanded ? 'gap-x-2' : 'gap-x-4')}>
           {presentation ? null : (
             <div role="group" aria-label="Globe regions" className="flex flex-wrap gap-1.5 sm:gap-2">
               {REGION_PRESETS.map(({ label, lon }) => (
@@ -1208,7 +1226,12 @@ export function CyberAttackMap({
           ) : null}
         </div>
         {presentation || !denseKeyboardMode ? null : (
-          <div className="grid w-full max-w-xl grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2">
+          <div className={cn(
+            'grid w-full max-w-xl gap-2',
+            expanded
+              ? 'grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]'
+              : 'grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]',
+          )}>
             <label className="grid min-w-0 gap-1 text-xs font-semibold">
               Jump to team
               <select
@@ -1352,8 +1375,8 @@ export function CyberAttackMap({
               const labelNode: TeamNode = insetLabel ? {
                 ...node,
                 labelX: labelOnLeft
-                  ? clamp(node.x - 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + labelWidth + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - 10)
-                  : clamp(node.x + 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - labelWidth - 10),
+                  ? clamp(node.x - 34, cameraCenter.x - viewWidth / 2 + labelWidth + 10, cameraCenter.x + viewWidth / 2 - 10)
+                  : clamp(node.x + 34, cameraCenter.x - viewWidth / 2 + 10, cameraCenter.x + viewWidth / 2 - labelWidth - 10),
                 labelY: node.y + 48,
                 labelAnchor: labelOnLeft ? 'end' : 'start',
               } : node;

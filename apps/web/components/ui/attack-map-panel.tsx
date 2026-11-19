@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ScrollableRegion } from '@/components/ui/scrollable-region';
 import { cn } from '@/lib/utils';
 
 const CyberAttackMap = lazy(async () => {
@@ -535,15 +536,15 @@ export function AttackMapPanel({
   }
 
   function renderMapSurface(expandedView: boolean): ReactElement {
-    const mapSize = expandedView ? 'aspect-auto min-h-[24rem] flex-1' : 'min-h-[27rem]';
+    const mapSize = expandedView ? 'aspect-auto min-h-[min(16rem,65dvh)] flex-1' : 'min-h-[27rem]';
 
     return (
       <div
         className={cn(
-          'grid gap-3',
+          'gap-3',
           expandedView
-            ? 'min-h-full grid-rows-[auto_minmax(0,18vh)] xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_18rem] xl:grid-rows-none'
-            : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
+            ? 'flex h-full flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:grid-rows-[minmax(0,1fr)]'
+            : 'grid grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
         <Suspense
@@ -560,6 +561,7 @@ export function AttackMapPanel({
             attacks={visibleRows}
             autoCameraPreference={autoCameraPreference}
             className={mapSize}
+            expanded={expandedView}
             focusedTeams={focusedTeams}
             highlightedAttackIDs={activeHighlightIDs}
             liveAttackIDs={highlightedAttackIDs}
@@ -586,7 +588,7 @@ export function AttackMapPanel({
         <div
           className={cn(
             'min-w-0',
-            expandedView ? 'min-h-0 overflow-y-auto pr-1' : '',
+            expandedView && 'shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1',
           )}
         >
           {renderInspector()}
@@ -811,18 +813,19 @@ export function AttackMapPanel({
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <DialogContent
           data-testid="attack-map-maximize-dialog"
-          className="grid h-[98vh] w-[99vw] max-w-[99vw] grid-rows-[auto_minmax(0,1fr)] overflow-y-auto p-4 sm:p-6"
+          showCloseButton={false}
+          className="h-[98dvh] w-[99vw] max-w-[99vw] grid-rows-[auto_minmax(min(10rem,35dvh),1fr)] gap-2 overflow-y-auto p-2 sm:p-3"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             maximizeTrigger.current?.focus();
           }}
         >
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-            <div className="flex flex-wrap gap-2">
+          <DialogHeader className="min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="min-w-0 flex-1 basis-40">
+              <DialogTitle className="wrap-anywhere">{title}</DialogTitle>
+              <DialogDescription className="sr-only">{description}</DialogDescription>
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Badge data-testid="attack-map-visible-attacks" variant="secondary">
                 {visibleRows.length} attacks
               </Badge>
@@ -836,6 +839,7 @@ export function AttackMapPanel({
                 data-testid="attack-map-highlight-current-tick"
                 size="sm"
                 variant="outline"
+                className="any-pointer-coarse:min-h-11"
                 disabled={currentTickAttackIDs.length === 0}
                 onClick={replayCurrentTick}
               >
@@ -845,14 +849,17 @@ export function AttackMapPanel({
               <Button
                 size="sm"
                 variant="outline"
+                className="any-pointer-coarse:min-h-11"
                 onClick={() => setExpanded(false)}
               >
                 <Minimize2 className="h-4 w-4" />
                 Back to page
               </Button>
             </div>
-            <div className="min-h-0 flex-1">{renderMapSurface(true)}</div>
-          </div>
+          </DialogHeader>
+          <ScrollableRegion axis="vertical" label="Maximized attack map" className="min-h-0 overflow-y-auto">
+            {renderMapSurface(true)}
+          </ScrollableRegion>
         </DialogContent>
       </Dialog>
     </div>

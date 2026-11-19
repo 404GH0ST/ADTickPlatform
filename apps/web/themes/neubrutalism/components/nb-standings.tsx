@@ -24,11 +24,11 @@ function RankDelta({ delta }: { delta: string }) {
   const up = value > 0;
   return (
     <span
-      className={cn("inline-flex items-center text-xs font-extrabold tabular-nums", up ? "text-positive" : "text-negative")}
+      className={cn("inline-flex min-w-0 items-center text-xs font-extrabold tabular-nums", up ? "text-positive" : "text-negative")}
     >
       <span className="sr-only">{up ? "Up" : "Down"} </span>
-      {up ? <ArrowUp className="size-3.5" strokeWidth={3} aria-hidden /> : <ArrowDown className="size-3.5" strokeWidth={3} aria-hidden />}
-      {Math.abs(value)}
+      {up ? <ArrowUp className="size-3.5 shrink-0" strokeWidth={3} aria-hidden /> : <ArrowDown className="size-3.5 shrink-0" strokeWidth={3} aria-hidden />}
+      <span className="min-w-0 wrap-anywhere">{Math.abs(value)}</span>
     </span>
   );
 }
@@ -99,10 +99,10 @@ export function NbStandings({
       {rows.length === 0 ? (
         <p className="px-5 py-8 text-sm text-muted-foreground">{emptyMessage}</p>
       ) : (
-        <>
+        <div className="grid grid-cols-1 p-2 sm:p-3 @max-[16rem]:px-1 @[42rem]:grid-cols-[minmax(4.5rem,max-content)_minmax(0,1fr)_repeat(3,minmax(4.5rem,max-content))_minmax(5.5rem,max-content)] @[42rem]:gap-x-4">
           <div
             aria-hidden
-            className="hidden grid-cols-[3.5rem_minmax(0,1fr)_repeat(3,4.5rem)_5.5rem] gap-x-4 px-5 pt-3 nb-eyebrow text-[0.6875rem] text-muted-foreground md:grid"
+            className="nb-eyebrow col-span-full hidden grid-cols-subgrid border-x-2 border-transparent px-3 pb-1 text-[0.6875rem] text-muted-foreground @[42rem]:grid"
           >
             <span>Rank</span>
             <span>Team</span>
@@ -111,7 +111,7 @@ export function NbStandings({
             <span className="text-right">SLA</span>
             <span className="text-right">Total</span>
           </div>
-          <ol className="grid grid-cols-1 gap-1 p-2 sm:p-3">
+          <ol className="col-span-full grid grid-cols-subgrid gap-y-1">
             {rows.map((row) => {
               const mine = currentTeamName !== undefined && row.team === currentTeamName;
               return (
@@ -120,13 +120,13 @@ export function NbStandings({
                   data-testid="nb-score-row"
                   data-current-team={mine ? "true" : undefined}
                   className={cn(
-                    "nb-score-row grid items-center gap-x-4 gap-y-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent px-3 py-2.5 text-sm",
-                    "grid-cols-[3.5rem_minmax(0,1fr)_auto] md:grid-cols-[3.5rem_minmax(0,1fr)_repeat(3,4.5rem)_5.5rem]",
+                    "col-span-full grid items-center gap-x-4 gap-y-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent px-3 py-2.5 text-sm",
+                    "grid-cols-[4rem_minmax(0,1fr)] @max-[16rem]:grid-cols-1 @max-[16rem]:px-1 @[22rem]:grid-cols-[4rem_minmax(0,1fr)_fit-content(45%)] @[42rem]:grid-cols-subgrid",
                     mine && "nb-fill-lilac border-border",
                   )}
                 >
-                  <span className="flex items-center gap-1.5">
-                    <span className="nb-display text-lg font-extrabold tabular-nums"><span className="sr-only">Rank </span>#{row.rank}</span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0">
+                    <span className="nb-display min-w-0 wrap-anywhere text-lg font-extrabold tabular-nums"><span className="sr-only">Rank </span>#{row.rank}</span>
                     {showDelta ? <RankDelta delta={row.delta} /> : null}
                   </span>
                   <span className="min-w-0 wrap-anywhere font-semibold">
@@ -138,14 +138,14 @@ export function NbStandings({
                       </span>
                     ) : null}
                   </span>
-                  <span className="hidden text-right tabular-nums md:block" title="Attack"><span className="sr-only">Attack </span>{format(row.attack)}</span>
-                  <span className="hidden text-right tabular-nums md:block" title="Defense"><span className="sr-only">Defense </span>{format(row.defense)}</span>
-                  <span className="hidden text-right tabular-nums md:block" title="SLA"><span className="sr-only">SLA </span>{format(row.sla)}</span>
-                  <span className="nb-score-total nb-display wrap-anywhere text-right text-lg font-extrabold tabular-nums">
-                    <span className="sr-only @max-[16rem]:not-sr-only @max-[16rem]:mr-1 @max-[16rem]:text-xs">Total</span>
-                    {format(row.total)}
+                  <span className="hidden min-w-0 wrap-anywhere text-right tabular-nums @[42rem]:block" title="Attack"><span className="sr-only">Attack </span>{format(row.attack)}</span>
+                  <span className="hidden min-w-0 wrap-anywhere text-right tabular-nums @[42rem]:block" title="Defense"><span className="sr-only">Defense </span>{format(row.defense)}</span>
+                  <span className="hidden min-w-0 wrap-anywhere text-right tabular-nums @[42rem]:block" title="SLA"><span className="sr-only">SLA </span>{format(row.sla)}</span>
+                  <span className="col-span-full min-w-0 @[22rem]:col-span-1 @[22rem]:text-right">
+                    <span className="block text-xs font-semibold @[42rem]:sr-only">Total </span>
+                    <span className="nb-display block wrap-anywhere text-lg font-extrabold tabular-nums">{format(row.total)}</span>
                   </span>
-                  <p className="col-span-full flex flex-wrap gap-x-4 gap-y-0.5 text-xs font-semibold tabular-nums md:hidden">
+                  <p className="col-span-full flex flex-wrap gap-x-4 gap-y-0.5 text-xs font-semibold tabular-nums wrap-anywhere @[42rem]:hidden">
                     <span>Atk {format(row.attack)}</span>
                     <span>Def {format(row.defense)}</span>
                     <span>SLA {format(row.sla)}</span>
@@ -153,7 +153,7 @@ export function NbStandings({
                   {showDetail && row.services && row.services.length > 0 ? (
                     <ul
                       aria-label={`${row.team} per-service scores`}
-                      className="col-span-full mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),1fr))] gap-2 md:ml-[4.5rem]"
+                      className="col-span-full mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),1fr))] gap-2 @[42rem]:col-[2/-1]"
                     >
                       {row.services.map((service) => (
                         <li
@@ -189,7 +189,7 @@ export function NbStandings({
               );
             })}
           </ol>
-        </>
+        </div>
       )}
     </div>
   );

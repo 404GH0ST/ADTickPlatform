@@ -455,13 +455,13 @@ test("organizer scoreboard fits long team names and large service scores", async
     total: 13010.59,
   }));
   const rows = teams.map((team, index) => ({
-    rank: index + 1,
+    rank: index + 100,
     team,
-    attack: 15530.75,
-    defense: 6500.12,
+    attack: 155309.75,
+    defense: -367891.75,
     sla: 5120.09,
-    total: 27150.96,
-    delta: "+2",
+    total: index === 0 ? 9999999.96 : -27150.96,
+    delta: index === 0 ? "+12" : "-10",
     services,
   }));
   await page.route("**/api/admin/realtime/game/scoreboard/stream", (route) =>
@@ -473,10 +473,48 @@ test("organizer scoreboard fits long team names and large service scores", async
 
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto("/admin/scoreboard");
-  const teamName = page.getByTestId("nb-score-row").first().getByText(teams[0], { exact: true });
+  const standings = page.getByTestId("nb-score-row");
+  const teamName = standings.first().getByText(teams[0], { exact: true });
   await expect(teamName).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   await expect.poll(() => teamName.evaluate((name) => name.scrollWidth - name.clientWidth)).toBeLessThanOrEqual(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+  const total = standings.first().getByText("9999999.96", { exact: true });
+  function fitsOnOneLine(element: Element) {
+    const text = element.lastChild;
+    if (!(text instanceof Text)) return false;
+    const range = document.createRange();
+    range.selectNode(text);
+    const lines = range.getClientRects();
+    return lines.length === 1 && lines[0].width <= element.clientWidth + 1;
+  }
+
+  for (const width of [320, 390, 640, 768, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 850 });
+    for (const standing of await standings.all()) {
+      const rank = standing.locator(":scope > span").first();
+      await expectNoHorizontalOverflow(rank);
+      expect(await rank.locator(":scope > span").first().evaluate(fitsOnOneLine),
+        `rank fits on one line at ${width}px`).toBe(true);
+    }
+    expect(await total.evaluate(fitsOnOneLine), `total fits on one line at ${width}px`).toBe(true);
+
+    const label = standings.first().getByText("Total", { exact: true });
+    expect(await label.evaluate((element) => getComputedStyle(element).position === "absolute"),
+      `Total is labeled at ${width}px`).toBe(width >= 768);
+
+    if (width >= 768) {
+      expect(await standings.evaluateAll((rows) => {
+        const headings = rows[0].parentElement!.previousElementSibling!;
+        return rows.every((row) => [...headings.children].every((heading, index) => {
+          const column = heading.getBoundingClientRect();
+          const cell = row.children[index].getBoundingClientRect();
+          return Math.abs(column.left - cell.left) <= 1 && Math.abs(column.right - cell.right) <= 1;
+        }));
+      }), `headings and rows share columns at ${width}px`).toBe(true);
+    }
+  }
 
   const cards = page.getByTestId("nb-service-score");
   await expect(cards).toHaveCount(6);
@@ -501,6 +539,7 @@ test("organizer scoreboard fits long team names and large service scores", async
 
   await page.setViewportSize({ width: 320, height: 850 });
   const enlargedText = await page.addStyleTag({ content: "html { font-size: 32px; }" });
+  expect(await total.evaluate(fitsOnOneLine), "total fits at 200% text size").toBe(true);
   await expect(cards.first().getByText("Scoring fixture 1", { exact: true })).toBeVisible();
   const fullRows = await cards.evaluateAll((cards) => cards.every((card) => {
     const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
