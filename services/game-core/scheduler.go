@@ -202,7 +202,7 @@ func (s *intervalGameScheduler) startLocked(source, message string) (apigateway.
 		State:     s.status.State,
 		Message:   message,
 	})
-	go s.run(ctx)
+	go s.run(ctx, s.interval)
 	return s.status, nil
 }
 
@@ -260,7 +260,7 @@ func (s *intervalGameScheduler) Update(interval time.Duration) (apigateway.GameS
 		s.status.NextRunAt = now.Add(s.interval).Format(time.RFC3339)
 		ctx, cancel := context.WithCancel(context.Background())
 		s.cancel = cancel
-		go s.run(ctx)
+		go s.run(ctx, s.interval)
 	}
 
 	s.persistLocked(now)
@@ -292,8 +292,11 @@ func (s *intervalGameScheduler) Close() error {
 	return nil
 }
 
-func (s *intervalGameScheduler) run(ctx context.Context) {
-	timer := time.NewTimer(s.interval)
+// run ticks every interval until ctx ends. The interval is captured under the
+// lock when the loop starts: Update replaces the loop rather than changing
+// s.interval underneath it, which would race with this goroutine.
+func (s *intervalGameScheduler) run(ctx context.Context, interval time.Duration) {
+	timer := time.NewTimer(interval)
 	defer timer.Stop()
 
 	for {
@@ -310,7 +313,7 @@ func (s *intervalGameScheduler) run(ctx context.Context) {
 		now := s.now().UTC()
 
 		elapsed := now.Sub(tickStart)
-		nextWait := s.interval - elapsed
+		nextWait := interval - elapsed
 		if nextWait < 0 {
 			nextWait = 0
 		}
