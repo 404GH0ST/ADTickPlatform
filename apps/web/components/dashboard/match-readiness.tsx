@@ -129,12 +129,12 @@ export function MatchReadinessNavButton({
       aria-expanded={open}
       aria-controls="match-readiness-panel"
       onClick={onToggle}
-      className="gap-1.5"
+      className="h-auto min-h-8 max-w-full flex-wrap gap-1.5 py-1 whitespace-normal"
     >
       <ListChecks className="h-4 w-4" />
-      <span>Match readiness</span>
+      <span className="min-w-0 wrap-anywhere">Setup checklist</span>
       <span className="rounded-sm bg-background/60 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-highlight">
-        {remaining}
+        {remaining} left
       </span>
       <ChevronDown
         className={cn(

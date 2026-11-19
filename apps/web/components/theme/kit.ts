@@ -127,6 +127,7 @@ export { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export { EmptyStateText } from "@/components/ui/empty-state";
 export { Input } from "@/components/ui/input";
 export { Label } from "@/components/ui/label";
+export { ScrollableRegion } from "@/components/ui/scrollable-region";
 export { StatusBanner } from "@/components/ui/status-banner";
 export { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 export { WorkspaceFrame } from "@/components/ui/workspace-frame";

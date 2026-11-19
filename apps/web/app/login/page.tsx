@@ -36,7 +36,8 @@ export default async function ParticipantLoginPage() {
           <CardHeader>
             <CardTitle>Sign In</CardTitle>
             <CardDescription>
-              Sign in with your team member account.
+              AD Platform team console. Use your team member account, or
+              register with your team's join key.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">

@@ -19,7 +19,7 @@ export function AttackSliceSummaryGrid<T extends AttackSliceRow>({
   const leaders = buildAttackSliceLeaders(rows);
 
   return (
-    <div className="grid gap-3 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
       <AttackLeaderboardPanel
         emptyMessage="No accepted attackers in the current slice."
         items={leaders.attackers}
@@ -51,7 +51,7 @@ function AttackLeaderboardPanel({
   return (
     <div className="rounded-sm border border-border/70 bg-muted/20 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="wrap-anywhere text-sm font-medium text-foreground">{title}</p>
         <Badge variant="outline">{items.length}</Badge>
       </div>
       {items.length === 0 ? (
@@ -60,7 +60,7 @@ function AttackLeaderboardPanel({
         <ol className="space-y-2 text-sm">
           {items.map((item, index) => (
             <li key={`${title}:${item.label}`} className="flex items-center justify-between gap-3">
-              <span className="truncate text-muted-foreground">
+              <span className="min-w-0 wrap-anywhere text-muted-foreground">
                 {index + 1}. {item.label}
               </span>
               <span className="font-mono text-foreground">{item.count}</span>

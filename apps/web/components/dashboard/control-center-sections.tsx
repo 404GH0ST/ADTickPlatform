@@ -1,6 +1,8 @@
 "use client";
 import type { ReactElement, ReactNode } from "react";
 import { useRouter } from "next/navigation";
+
+import { formatMatchStateLabel } from "@/lib/match-state";
 import { useEffect, useState } from "react";
 import { Download, LoaderCircle, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
@@ -172,21 +174,6 @@ function formatFreezeTimestamp(value: string): string {
     return value;
   }
   return parsed.toLocaleString();
-}
-
-function formatMatchStateLabel(state?: string): string {
-  if (!state) {
-    return "Inactive";
-  }
-  const labels: Record<string, string> = {
-    not_started: "Not started",
-    running: "Running",
-    paused: "Paused",
-    stopped: "Stopped",
-    finished: "Finished",
-  };
-  const key = state.toLowerCase();
-  return labels[key] ?? state.replaceAll("_", " ");
 }
 
 function formatCountdown(seconds: number): string {
@@ -749,7 +736,17 @@ export function FactoryResetDialog({
           <ResetWarningBlock />
         </div>
       }
-      description="Recreate the service from the organizer baseline image and discard the current patch state."
+      description={
+        <>
+          {target ? (
+            <span className="mb-2 block wrap-anywhere">
+              <strong className="block text-foreground">{target.name}</strong>
+              <span className="block font-mono text-sm">{target.endpoint}</span>
+            </span>
+          ) : null}
+          Recreate the service from the organizer baseline image and discard the current patch state.
+        </>
+      }
       footer={
         <>
           <Button variant="outline" onClick={onClose}>

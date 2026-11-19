@@ -21,8 +21,8 @@ export function ApiDocs(props: ApiDocsViewProps): ReactElement {
 
 export function DefaultApiDocsView({ specURL, explorer }: ApiDocsViewProps): ReactElement {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="min-w-0 space-y-4">
         <Card>
           <CardHeader>
             <CardTitle>Swagger Explorer</CardTitle>
@@ -43,7 +43,7 @@ export function DefaultApiDocsView({ specURL, explorer }: ApiDocsViewProps): Rea
         {explorer}
       </div>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4 wrap-anywhere">
         <Card>
           <CardHeader>
             <CardTitle>Bearer Auth</CardTitle>

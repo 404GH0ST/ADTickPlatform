@@ -6,7 +6,8 @@ import type {
   ReactElement,
   CSSProperties,
 } from 'react';
-import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plus } from 'lucide-react';
 
 import {
   FIRST_BLOOD_FOCUS_MS, FIRST_BLOOD_CHARGE_MS, FIRST_BLOOD_INTRO_MS,
@@ -156,6 +157,19 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 2.6;
 const ZOOM_STEP = 0.35;
 const MAX_ROTATION_LAT = 62;
+const ROTATION_STEP = 12;
+const ROTATION_CONTROLS = [
+  { label: 'Rotate left', Icon: ArrowLeft, lat: 0, lon: ROTATION_STEP },
+  { label: 'Rotate right', Icon: ArrowRight, lat: 0, lon: -ROTATION_STEP },
+  { label: 'Rotate up', Icon: ArrowUp, lat: ROTATION_STEP, lon: 0 },
+  { label: 'Rotate down', Icon: ArrowDown, lat: -ROTATION_STEP, lon: 0 },
+];
+const REGION_PRESETS = [
+  { label: 'Americas', lon: -82 },
+  { label: 'EMEA', lon: 34 },
+  { label: 'APAC', lon: 118 },
+];
+const MAP_CONTROL_CLASS = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-[var(--attack-map-legend-border)] bg-[var(--attack-map-legend-background)] text-[color:var(--attack-map-legend-foreground)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40';
 const AUTO_ROTATE_IDLE_MS = 10_000;
 const FEATURED_ATTACK_STEP_MS = 6_400;
 const FRESH_ATTACK_FLY_MS = 1_500;
@@ -200,6 +214,7 @@ const COUNTRY_RINGS = parseCountryRings(globeJson as GlobeFeatureCollection);
 
 export function CyberAttackMap({
   attacks,
+  autoCameraPreference = null,
   highlightedAttackIDs = [],
   liveAttackIDs = [],
   focusedTeams = [],
@@ -210,10 +225,12 @@ export function CyberAttackMap({
   onSelectAttack,
   onSelectTeam,
   onFeaturedAttackChange,
+  onAutoCameraChange,
   presentation = false,
   teamLocations,
 }: {
   attacks: CyberAttackEvent[];
+  autoCameraPreference?: boolean | null;
   highlightedAttackIDs?: string[];
   liveAttackIDs?: string[];
   focusedTeams?: string[];
@@ -224,12 +241,16 @@ export function CyberAttackMap({
   onSelectAttack?: (attackId: string | null) => void;
   onSelectTeam?: (teamId: string | null) => void;
   onFeaturedAttackChange?: (attackId: string | null) => void;
+  onAutoCameraChange?: (enabled: boolean) => void;
   presentation?: boolean;
   teamLocations?: Record<string, GeoPoint>;
 }): ReactElement {
   const [compactSurface, setCompactSurface] = useState(false);
   const [surfaceActive, setSurfaceActive] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const autoCameraEnabled = autoCameraPreference ?? !reducedMotion;
+  const autoCameraEnabledRef = useRef(autoCameraEnabled);
+  autoCameraEnabledRef.current = autoCameraEnabled;
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -250,6 +271,7 @@ export function CyberAttackMap({
   const sequenceAudioRef = useRef<AbortController | null>(null);
   const playFirstBloodSfx = useAttackSfx({ firstBloodOnly: true });
   const mapRootRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const featuredAttackIndexRef = useRef(0);
@@ -399,7 +421,8 @@ export function CyberAttackMap({
   ]);
   const showDefaultLabels = !hasFocus && nodes.length > 0 && nodes.length <= DEFAULT_LABEL_LIMIT;
   const denseKeyboardMode = arcs.length + nodes.length > DENSE_KEYBOARD_ITEM_LIMIT;
-  const motionEnabled = surfaceActive && !reducedMotion && attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
+  const cinematicMotionEnabled = surfaceActive && autoCameraEnabled && !reducedMotion;
+  const motionEnabled = cinematicMotionEnabled && attacks.length <= 160 && arcs.length <= PACKET_ANIMATION_ROUTE_LIMIT;
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
   const compactSurfaceRef = useRef(compactSurface);
@@ -407,8 +430,18 @@ export function CyberAttackMap({
   const introAttacks = attacks.filter((attack) => introAttackIds.has(attack.id));
   const firstBloodAnnouncement = attacks.find((attack) => celebratingAttackIds.has(attack.id));
 
+  const endDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    dragRef.current = null;
+    const canvas = canvasRef.current;
+    if (canvas?.hasPointerCapture(drag.pointerId)) canvas.releasePointerCapture(drag.pointerId);
+    setDragging(false);
+  }, []);
+
   useEffect(() => {
-    const root = mapRootRef.current;
+    const canvas = canvasRef.current;
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     let intersecting = true;
     const sync = () => {
@@ -422,20 +455,22 @@ export function CyberAttackMap({
     const resizeObserver = new ResizeObserver(([entry]) => {
       setCompactSurface(entry.contentRect.width < 520);
     });
-    if (root) {
-      observer.observe(root);
-      resizeObserver.observe(root);
+    if (canvas) {
+      observer.observe(canvas);
+      resizeObserver.observe(canvas);
     }
     document.addEventListener('visibilitychange', sync);
     media.addEventListener('change', sync);
+    window.addEventListener('blur', endDrag);
     sync();
     return () => {
       observer.disconnect();
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', sync);
       media.removeEventListener('change', sync);
+      window.removeEventListener('blur', endDrag);
     };
-  }, []);
+  }, [endDrag]);
 
   useEffect(() => {
     rotationRef.current = rotation;
@@ -448,9 +483,14 @@ export function CyberAttackMap({
   }, [featuredAttackId, onFeaturedAttackChange]);
 
   useEffect(() => {
-    startAutoRotationFromIdle();
-    return clearAutoRotationTimers;
-  }, [attacks, featuredQueue, placementScopeTeams, surfaceActive, firstBloodPresentationActive]);
+    if (autoCameraEnabled) {
+      clearAutoRotationTimers();
+      startAutoRotationFromIdle();
+    } else if (featuredAttackIdRef.current && !attacks.some((attack) => attack.id === featuredAttackIdRef.current)) {
+      setFeaturedAttackId(null);
+    }
+    return () => clearAutoRotationTimers(false);
+  }, [attacks, featuredQueue, placementScopeTeams, surfaceActive, firstBloodPresentationActive, autoCameraEnabled]);
 
   useEffect(() => {
     const nextAttackIds = new Set(attacks.map((attack) => attack.id));
@@ -504,7 +544,7 @@ export function CyberAttackMap({
     }
     freshFrameTimeoutRef.current = window.setTimeout(() => {
       freshFrameTimeoutRef.current = null;
-      if (sequenceRef.current !== null || milestone || !surfaceActive || document.hidden || featuredAttackIntervalRef.current === null || dragRef.current !== null || featuredAttackPausedRef.current) {
+      if (sequenceRef.current !== null || milestone || !autoCameraEnabledRef.current || !surfaceActive || document.hidden || featuredAttackIntervalRef.current === null || dragRef.current !== null || featuredAttackPausedRef.current) {
         return;
       }
       const target = attacks.find((attack) => attack.id === latestFreshId);
@@ -568,11 +608,15 @@ export function CyberAttackMap({
   }, [attacks]);
 
   useEffect(() => {
-    if (!surfaceActive && cinematicFrameRef.current !== null) {
+    if (!autoCameraEnabled || reducedMotion) {
+      // Resuming the camera should not restart a first-blood sequence in progress.
+      savedCameraRef.current = null;
+    }
+    if (!cinematicMotionEnabled && cinematicFrameRef.current !== null) {
       window.cancelAnimationFrame(cinematicFrameRef.current);
       cinematicFrameRef.current = null;
     }
-  }, [surfaceActive]);
+  }, [autoCameraEnabled, reducedMotion, cinematicMotionEnabled]);
 
   useEffect(() => {
     const root = mapRootRef.current;
@@ -623,6 +667,7 @@ export function CyberAttackMap({
     }
 
     function handleFeatureNextAttack(): void {
+      if (!autoCameraEnabledRef.current) return;
       featuredAttackPausedRef.current = false;
       clearAutoRotationTimers(false);
       featureNextAttack();
@@ -643,24 +688,23 @@ export function CyberAttackMap({
   }, [attacks, featuredQueue, placementScopeTeams, surfaceActive]);
 
   function animateCinematicCamera(target: GlobeCamera, duration: number): void {
+    if (!autoCameraEnabledRef.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     if (cinematicFrameRef.current !== null) window.cancelAnimationFrame(cinematicFrameRef.current);
     const start = cameraRef.current;
     const started = performance.now();
     const deltaLon = normalizeLongitude(target.rotation.lon - start.rotation.lon);
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     function frame(now: number): void {
-      const still = media.matches;
       const hidden = document.hidden || mapRootRef.current?.dataset.surfaceActive === 'false';
-      const progress = still || hidden ? 1 : clamp((now - started) / duration, 0, 1);
+      const progress = hidden ? 1 : clamp((now - started) / duration, 0, 1);
       const ease = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
       const next = {
         rotation: {
           lat: start.rotation.lat + (target.rotation.lat - start.rotation.lat) * ease,
           lon: normalizeLongitude(start.rotation.lon + deltaLon * ease),
         },
-        zoom: still && sequenceRef.current?.stage !== 'recover' ? start.zoom : start.zoom + (target.zoom - start.zoom) * ease,
-        x: still ? CENTER_X : start.x + (target.x - start.x) * ease,
-        y: still ? CENTER_Y : start.y + (target.y - start.y) * ease,
+        zoom: start.zoom + (target.zoom - start.zoom) * ease,
+        x: start.x + (target.x - start.x) * ease,
+        y: start.y + (target.y - start.y) * ease,
       };
       cameraRef.current = next;
       rotationRef.current = next.rotation;
@@ -700,13 +744,17 @@ export function CyberAttackMap({
     if (!attack) return;
     sequenceBusyRef.current = true;
     clearAutoRotationTimers(false);
-    savedCameraRef.current = { ...cameraRef.current };
+    savedCameraRef.current = autoCameraEnabledRef.current && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? { ...cameraRef.current }
+      : null;
     sequenceRef.current = { attack, attacks: group, stage: 'focus' };
     setFirstBloodSequence(sequenceRef.current);
     setIntroAttackIds(new Set([attack.id]));
     setCelebratingAttackIds(new Set());
-    setFeaturedAttackId(attack.id);
-    featuredAttackIdRef.current = attack.id;
+    if (autoCameraEnabledRef.current) {
+      setFeaturedAttackId(attack.id);
+      featuredAttackIdRef.current = attack.id;
+    }
     const { landmarksByTeam } = sceneRef.current;
     const attacker = landmarksByTeam[attack.attacker];
     const victim = landmarksByTeam[attack.victim];
@@ -758,10 +806,10 @@ export function CyberAttackMap({
         attackerPan = clamp((projectGlobePoint(attacker, launch.rotation).x - CENTER_X) / GLOBE_RADIUS, -0.6, -0.15);
         victimPan = clamp((projectGlobePoint(victim, arrival.rotation).x - CENTER_X) / GLOBE_RADIUS, 0.15, 0.6);
       }
-      animateCinematicCamera(plan.focus, FIRST_BLOOD_FOCUS_MS);
+      if (savedCameraRef.current) animateCinematicCamera(plan.focus, FIRST_BLOOD_FOCUS_MS);
     }
     const moveTo = (camera: GlobeCamera | undefined, duration: number) => {
-      if (camera) animateCinematicCamera(camera, duration);
+      if (camera && savedCameraRef.current) animateCinematicCamera(camera, duration);
     };
     sequenceAudioRef.current = new AbortController();
     const sequenceAudio = sequenceAudioRef.current;
@@ -871,7 +919,7 @@ export function CyberAttackMap({
 
   function markUserActivity(): void {
     // Passing the cursor over the globe must not cancel its live focal moment.
-    if (sequenceBusyRef.current) return;
+    if (sequenceBusyRef.current || !autoCameraEnabledRef.current) return;
     const now = window.performance.now();
     if (featuredAttackIdRef.current === null && now - lastActivityRef.current < 250) {
       return;
@@ -883,7 +931,7 @@ export function CyberAttackMap({
   }
 
   function featureNextAttack(): void {
-    if (sequenceBusyRef.current || !surfaceActive || document.hidden || attacks.length === 0) {
+    if (!autoCameraEnabledRef.current || sequenceBusyRef.current || !surfaceActive || document.hidden || attacks.length === 0) {
       return;
     }
     const queue = featuredQueue.length > 0 ? featuredQueue : attacks;
@@ -950,7 +998,7 @@ export function CyberAttackMap({
 
   function startAutoRotationFromIdle(): void {
     clearAutoRotationTimers(false);
-    if (sequenceBusyRef.current || attacks.length === 0 || featuredAttackPausedRef.current || !surfaceActive) {
+    if (!autoCameraEnabledRef.current || sequenceBusyRef.current || attacks.length === 0 || featuredAttackPausedRef.current || !surfaceActive) {
       return;
     }
     idleTimeoutRef.current = window.setTimeout(() => {
@@ -967,7 +1015,7 @@ export function CyberAttackMap({
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (event.button !== 0 || isInteractivePointerTarget(event.target)) {
+    if (dragRef.current || !event.isPrimary || event.button !== 0 || isInteractivePointerTarget(event.target)) {
       return;
     }
     // A plain click (e.g. the gesture that unlocks audio on a venue screen)
@@ -1003,21 +1051,23 @@ export function CyberAttackMap({
   }
 
   function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
-    markUserActivity();
     if (dragRef.current?.pointerId === event.pointerId) {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-      dragRef.current = null;
-      setDragging(false);
+      endDrag();
+      markUserActivity();
     }
   }
 
-  function handlePointerLostCapture(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
-      setDragging(false);
-    }
+  function rotateBy(lat: number, lon: number): void {
+    interruptFirstBlood();
+    markUserActivity();
+    cancelRotationAnimation();
+    const current = rotationRef.current;
+    const next = {
+      lat: clamp(current.lat + lat, -MAX_ROTATION_LAT, MAX_ROTATION_LAT),
+      lon: normalizeLongitude(current.lon + lon),
+    };
+    rotationRef.current = next;
+    setRotation(next);
   }
 
   function zoomBy(delta: number): void {
@@ -1046,344 +1096,339 @@ export function CyberAttackMap({
       data-keyboard-mode={denseKeyboardMode ? 'jump' : 'direct'}
       data-surface-active={surfaceActive ? 'true' : 'false'}
       data-motion-enabled={motionEnabled ? 'true' : 'false'}
+      data-auto-camera={autoCameraEnabled ? 'on' : 'paused'}
       data-rotation-lat={rotation.lat.toFixed(2)}
       data-rotation-lon={rotation.lon.toFixed(2)}
       data-route-count={arcs.length}
       data-team-count={nodes.length}
       aria-describedby={`${mapId}-instructions`}
-      aria-label="Interactive attack globe. Drag to rotate the globe, tab to teams and routes, then press Enter or Space to inspect."
+      aria-label="Interactive attack globe"
       role="region"
-      className={cn(
-        'relative aspect-[2/1] w-full touch-none overflow-hidden rounded-sm border',
-        className,
-      )}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onLostPointerCapture={handlePointerLostCapture}
-      onMouseMove={markUserActivity}
+      className="flex min-w-0 flex-col rounded-sm border"
       style={{
         background:
           presentation
             ? 'radial-gradient(circle at 50% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 18%, transparent) 0%, transparent 38%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 20%, transparent) 0%, transparent 64%), var(--attack-map-background)'
             : 'radial-gradient(circle at 48% 48%, color-mix(in oklab, var(--attack-map-node-highlight) 14%, transparent) 0%, transparent 34%), radial-gradient(circle at 48% 52%, color-mix(in oklab, var(--attack-map-land) 18%, transparent) 0%, transparent 62%), var(--attack-map-background)',
         borderColor: 'var(--attack-map-border)',
-        cursor: dragging ? 'grabbing' : 'grab',
       }}
     >
       <p id={`${mapId}-instructions`} className="sr-only">
-        Attack map routes and team nodes are keyboard focusable. Press Enter or
-        Space on a focused team or route to inspect it.
+        Use the rotation buttons or drag the globe to change the view.
+        {denseKeyboardMode && !presentation
+          ? ' Use the jump menus to inspect a team or route.'
+          : ' Press Enter or Space on a focused team or route to inspect it.'}
       </p>
-      <svg
-        viewBox={viewBox}
-        preserveAspectRatio="xMidYMid meet"
-        className={cn('absolute inset-0 h-full w-full', firstBloodSequence?.stage === 'impact' && surfaceActive && !reducedMotion ? `${flyClassName}-recoil` : '')}
-        xmlns="http://www.w3.org/2000/svg"
+      <div className="grid gap-3 rounded-t-[inherit] border-b border-border bg-card p-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {presentation ? null : (
+            <div role="group" aria-label="Globe regions" className="flex flex-wrap gap-1.5 sm:gap-2">
+              {REGION_PRESETS.map(({ label, lon }) => (
+                <button
+                  key={label}
+                  type="button"
+                  data-fx="map-control"
+                  className={cn(MAP_CONTROL_CLASS, 'px-1.5 text-[0.6875rem] font-semibold sm:px-2 sm:text-xs')}
+                  onClick={() => {
+                    interruptFirstBlood();
+                    markUserActivity();
+                    animateRotationTo({ lat: -6, lon });
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div role="group" aria-label="Rotate globe" className="flex flex-wrap gap-2">
+            {ROTATION_CONTROLS.map(({ label, Icon, lat, lon }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                title={label}
+                data-fx="map-control"
+                className={MAP_CONTROL_CLASS}
+                onClick={() => rotateBy(lat, lon)}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="Globe zoom" className="flex flex-wrap gap-2">
+            {[
+              { Icon: Plus, delta: ZOOM_STEP, label: 'Zoom in', disabled: zoom >= ZOOM_MAX },
+              { Icon: Minus, delta: -ZOOM_STEP, label: 'Zoom out', disabled: zoom <= ZOOM_MIN },
+            ].map(({ Icon, delta, label, disabled }) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                title={label}
+                disabled={disabled}
+                data-fx="map-control"
+                className={MAP_CONTROL_CLASS}
+                onClick={() => zoomBy(delta)}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          {onAutoCameraChange ? (
+            <button
+              type="button"
+              aria-pressed={autoCameraEnabled}
+              className={cn(MAP_CONTROL_CLASS, 'max-w-full flex-wrap gap-x-2 px-2 py-1 text-xs')}
+              data-fx="map-control"
+              onClick={() => onAutoCameraChange(!autoCameraEnabled)}
+            >
+              <span>Auto camera</span>
+              <span aria-hidden="true">{autoCameraEnabled ? 'On' : 'Paused'}</span>
+            </button>
+          ) : null}
+        </div>
+        {presentation || !denseKeyboardMode ? null : (
+          <div className="grid w-full max-w-xl grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2">
+            <label className="grid min-w-0 gap-1 text-xs font-semibold">
+              Jump to team
+              <select
+                className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
+                value={selectedTeamId ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onSelectTeam?.(value === '' ? null : value);
+                  if (value !== '') onSelectAttack?.(null);
+                }}
+              >
+                <option value="">Select team</option>
+                {nodes.slice().sort((left, right) => left.name.localeCompare(right.name)).map((node) => (
+                  <option key={node.id} value={node.id}>{node.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid min-w-0 gap-1 text-xs font-semibold">
+              Jump to route
+              <select
+                className="min-h-11 w-full min-w-0 rounded-sm border bg-card px-2 text-sm font-normal text-foreground"
+                value={selectedAttackId ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onSelectAttack?.(value === '' ? null : value);
+                  if (value !== '') onSelectTeam?.(null);
+                }}
+              >
+                <option value="">Select route</option>
+                {arcs.map((arc) => (
+                  <option key={arc.id} value={arc.attackIds[0]}>
+                    {arc.attacker} to {arc.victim}, {arc.service}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </div>
+      <div
+        ref={canvasRef}
+        data-fx="map-canvas"
+        className={cn('relative aspect-[2/1] w-full touch-none overflow-hidden rounded-b-[inherit]', className)}
+        style={{ cursor: dragging ? 'grabbing' : 'grab' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
+        onMouseMove={markUserActivity}
       >
-        <defs>
-          <filter id={`${mapId}-first-blood-glow`} filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="4000" height="4000">
-            <feGaussianBlur stdDeviation="5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <clipPath id={clipId}>
-            <circle cx={CENTER_X} cy={CENTER_Y} r={GLOBE_RADIUS} />
-          </clipPath>
-          <radialGradient id={`${mapId}-sphere`} cx="34%" cy="24%" r="76%">
-            <stop offset="0%" stopColor="var(--attack-map-land)" stopOpacity="0.28" />
-            <stop offset="58%" stopColor="var(--attack-map-background)" stopOpacity="0.1" />
-            <stop offset="100%" stopColor="var(--foreground)" stopOpacity="0.2" />
-          </radialGradient>
-          {/* Halftone ocean: unused unless a theme shows [data-fx="globe-texture"]. */}
-          <pattern id={`${mapId}-dots`} width="7" height="7" patternUnits="userSpaceOnUse">
-            <circle cx="3.5" cy="3.5" r="1.05" data-fx="globe-dot" fill="var(--attack-map-grid)" />
-          </pattern>
-          <marker
-            id={markerId}
-            markerHeight="8"
-            markerWidth="8"
-            orient="auto"
-            refX="7"
-            refY="4"
-          >
-            <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--attack-map-node-highlight)" opacity="0.8" />
-          </marker>
-        </defs>
+        <svg
+          viewBox={viewBox}
+          preserveAspectRatio="xMidYMid meet"
+          className={cn('absolute inset-0 h-full w-full', firstBloodSequence?.stage === 'impact' && cinematicMotionEnabled ? `${flyClassName}-recoil` : '')}
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <filter id={`${mapId}-first-blood-glow`} filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="4000" height="4000">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <clipPath id={clipId}>
+              <circle cx={CENTER_X} cy={CENTER_Y} r={GLOBE_RADIUS} />
+            </clipPath>
+            <radialGradient id={`${mapId}-sphere`} cx="34%" cy="24%" r="76%">
+              <stop offset="0%" stopColor="var(--attack-map-land)" stopOpacity="0.28" />
+              <stop offset="58%" stopColor="var(--attack-map-background)" stopOpacity="0.1" />
+              <stop offset="100%" stopColor="var(--foreground)" stopOpacity="0.2" />
+            </radialGradient>
+            {/* Halftone ocean: unused unless a theme shows [data-fx="globe-texture"]. */}
+            <pattern id={`${mapId}-dots`} width="7" height="7" patternUnits="userSpaceOnUse">
+              <circle cx="3.5" cy="3.5" r="1.05" data-fx="globe-dot" fill="var(--attack-map-grid)" />
+            </pattern>
+            <marker
+              id={markerId}
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+            >
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--attack-map-node-highlight)" opacity="0.8" />
+            </marker>
+          </defs>
 
-        <g opacity={firstBloodSequence && firstBloodSequence.stage !== 'recover' ? 0.48 : closingFirstBlood ? 0.65 : 1} style={{ transition: `opacity ${FIRST_BLOOD_RECOVER_MS}ms ease` }}>
-          <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
-        </g>
+          <g opacity={firstBloodSequence && firstBloodSequence.stage !== 'recover' ? 0.48 : closingFirstBlood ? 0.65 : 1} style={{ transition: `opacity ${FIRST_BLOOD_RECOVER_MS}ms ease` }}>
+            <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
+          </g>
 
-        <g clipPath={`url(#${clipId})`}>
-          {arcs.map((arc) => (
-            <AttackArcPath
-              key={arc.id}
-              arc={arc}
-              beamClassName={beamClassName}
-              dimmed={closingFirstBlood ? true : firstBloodSequence ? arc.id !== firstBloodSequence.attack.id : hasFocus && !arc.active}
-              flyClassName={flyClassName}
-              haloClassName={haloClassName}
-              markerId={markerId}
-              motionEnabled={motionEnabled}
-              onSelectAttack={onSelectAttack}
-              tabReachable={!denseKeyboardMode}
-            />
-          ))}
-        </g>
-
-        {nodes.map((node) => {
-          const featured = isFeaturedTeam(node, featuredAttack);
-          const focal = firstBloodSequence && (node.id === firstBloodSequence.attack.attacker || node.id === firstBloodSequence.attack.victim);
-          const showLabel = closingFirstBlood ? false : firstBloodSequence ? Boolean(focal) : (
-            showDefaultLabels || shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) || featured
-          );
-          const insetLabel = compactSurface && focal;
-          const labelOnLeft = node.x > cameraCenter.x;
-          const labelScale = insetLabel ? 1.5 : 1;
-          const labelWidth = getTeamLabelWidth(node) * labelScale;
-          const labelNode: TeamNode = insetLabel ? {
-            ...node,
-            labelX: labelOnLeft
-              ? clamp(node.x - 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + labelWidth + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - 10)
-              : clamp(node.x + 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - labelWidth - 10),
-            labelY: node.y + 48,
-            labelAnchor: labelOnLeft ? 'end' : 'start',
-          } : node;
-          return (
-            <TeamNodeLabel
-              key={`${node.id}-label`}
-              node={labelNode}
-              scale={labelScale}
-              showLabel={showLabel}
-            />
-          );
-        })}
-
-        {nodes.map((node) => {
-          const featured = isFeaturedTeam(node, featuredAttack);
-          const showLabel =
-            showDefaultLabels ||
-            shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
-            featured;
-          const unrelated = firstBloodSequence && firstBloodSequence.stage !== 'recover' && node.id !== firstBloodSequence.attack.attacker && node.id !== firstBloodSequence.attack.victim;
-          const struck = firstBloodSequence?.attack.victim === node.id && firstBloodSequence.stage === 'impact' && !reducedMotion;
-          return (
-            <g key={node.id} opacity={closingFirstBlood ? 0.4 : unrelated ? 0.2 : struck ? 0.12 : 1} style={{ transition: 'opacity 400ms ease' }}>
-              <TeamNodeDot
-                node={node}
+          <g clipPath={`url(#${clipId})`}>
+            {arcs.map((arc) => (
+              <AttackArcPath
+                key={arc.id}
+                arc={arc}
+                beamClassName={beamClassName}
+                dimmed={closingFirstBlood ? true : firstBloodSequence ? arc.id !== firstBloodSequence.attack.id : hasFocus && !arc.active}
+                flyClassName={flyClassName}
                 haloClassName={haloClassName}
-                showLabel={showLabel}
-                onHoverChange={setHoveredTeamId}
-                onSelectTeam={onSelectTeam}
+                markerId={markerId}
+                motionEnabled={motionEnabled}
+                onSelectAttack={onSelectAttack}
                 tabReachable={!denseKeyboardMode}
               />
-            </g>
-          );
-        })}
+            ))}
+          </g>
 
-        {firstBloodSequence ? (
-          <FirstBloodChoreography
-            sequence={firstBloodSequence}
-            arc={arcs.find((arc) => arc.id === firstBloodSequence.attack.id)}
-            nodes={nodes}
-            className={flyClassName}
-            motion={surfaceActive && !reducedMotion}
-            glowId={`${mapId}-first-blood-glow`}
-            clipId={clipId}
+          {nodes.map((node) => {
+            const featured = isFeaturedTeam(node, featuredAttack);
+            const focal = firstBloodSequence && (node.id === firstBloodSequence.attack.attacker || node.id === firstBloodSequence.attack.victim);
+            const showLabel = closingFirstBlood ? false : firstBloodSequence ? Boolean(focal) : (
+              showDefaultLabels || shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) || featured
+            );
+            const insetLabel = compactSurface && focal;
+            const labelOnLeft = node.x > cameraCenter.x;
+            const labelScale = insetLabel ? 1.5 : 1;
+            const labelWidth = getTeamLabelWidth(node) * labelScale;
+            const labelNode: TeamNode = insetLabel ? {
+              ...node,
+              labelX: labelOnLeft
+                ? clamp(node.x - 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + labelWidth + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - 10)
+                : clamp(node.x + 34, cameraCenter.x - (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 + 10, cameraCenter.x + (compactSurface ? 600 : MAP_WIDTH) / zoom / 2 - labelWidth - 10),
+              labelY: node.y + 48,
+              labelAnchor: labelOnLeft ? 'end' : 'start',
+            } : node;
+            return (
+              <TeamNodeLabel
+                key={`${node.id}-label`}
+                node={labelNode}
+                scale={labelScale}
+                showLabel={showLabel}
+              />
+            );
+          })}
+
+          {nodes.map((node) => {
+            const featured = isFeaturedTeam(node, featuredAttack);
+            const showLabel =
+              showDefaultLabels ||
+              shouldShowTeamLabel(node, hoveredTeamId, focusedTeamSet) ||
+              featured;
+            const unrelated = firstBloodSequence && firstBloodSequence.stage !== 'recover' && node.id !== firstBloodSequence.attack.attacker && node.id !== firstBloodSequence.attack.victim;
+            const struck = firstBloodSequence?.attack.victim === node.id && firstBloodSequence.stage === 'impact' && cinematicMotionEnabled;
+            return (
+              <g key={node.id} opacity={closingFirstBlood ? 0.4 : unrelated ? 0.2 : struck ? 0.12 : 1} style={{ transition: 'opacity 400ms ease' }}>
+                <TeamNodeDot
+                  node={node}
+                  haloClassName={haloClassName}
+                  showLabel={showLabel}
+                  onHoverChange={setHoveredTeamId}
+                  onSelectTeam={onSelectTeam}
+                  tabReachable={!denseKeyboardMode}
+                />
+              </g>
+            );
+          })}
+
+          {firstBloodSequence ? (
+            <FirstBloodChoreography
+              sequence={firstBloodSequence}
+              arc={arcs.find((arc) => arc.id === firstBloodSequence.attack.id)}
+              nodes={nodes}
+              className={flyClassName}
+              motion={cinematicMotionEnabled}
+              glowId={`${mapId}-first-blood-glow`}
+              clipId={clipId}
+            />
+          ) : null}
+        </svg>
+
+        {firstBloodSequence && cinematicMotionEnabled ? (() => {
+          const arc = arcs.find((entry) => entry.id === firstBloodSequence.attack.id);
+          const fx = arc ? clamp(((arc.endX - (cameraCenter.x - viewWidth / 2)) / viewWidth) * 100, 0, 100) : 50;
+          const fy = arc ? clamp(((arc.endY - (cameraCenter.y - viewHeight / 2)) / viewHeight) * 100, 0, 100) : 50;
+          return (
+            <div aria-hidden="true" data-first-blood-overlay={firstBloodSequence.stage}
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+              style={{ '--fx': `${fx}%`, '--fy': `${fy}%` } as CSSProperties}>
+              <div data-fx="vignette" className={`${flyClassName}-vignette absolute inset-0`} />
+              {firstBloodSequence.stage === 'flight' || firstBloodSequence.stage === 'impact' ? <>
+                <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} />
+                <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} data-alt="true" />
+              </> : null}
+              <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 top-0`} data-edge="top" />
+              <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 bottom-0`} data-edge="bottom" />
+              {firstBloodSequence.stage === 'impact' ? <>
+                <div data-fx="impact-frame" className={`${flyClassName}-impact-frame absolute inset-0`} />
+                <div data-fx="tint" className={`${flyClassName}-tint absolute inset-0`} />
+                <div data-fx="flash" className={`${flyClassName}-flash absolute inset-0`} />
+              </> : null}
+            </div>
+          );
+        })() : null}
+
+        {introAttacks.length > 0 || (firstBloodAnnouncement && firstBloodSequence?.stage !== 'recover') ? (
+          <FirstBloodNotice
+            attacks={introAttacks.length > 0 ? introAttacks : firstBloodAnnouncement ? [firstBloodAnnouncement] : []}
+            intro={introAttacks.length > 0}
+            stage={firstBloodSequence?.stage ?? 'focus'}
+            motionClass={cinematicMotionEnabled ? `${flyClassName}-notice` : undefined}
           />
         ) : null}
-      </svg>
-
-      {firstBloodSequence && surfaceActive && !reducedMotion ? (() => {
-        const arc = arcs.find((entry) => entry.id === firstBloodSequence.attack.id);
-        const fx = arc ? clamp(((arc.endX - (cameraCenter.x - viewWidth / 2)) / viewWidth) * 100, 0, 100) : 50;
-        const fy = arc ? clamp(((arc.endY - (cameraCenter.y - viewHeight / 2)) / viewHeight) * 100, 0, 100) : 50;
-        return (
-          <div aria-hidden="true" data-first-blood-overlay={firstBloodSequence.stage}
-            className="pointer-events-none absolute inset-0 overflow-hidden"
-            style={{ '--fx': `${fx}%`, '--fy': `${fy}%` } as CSSProperties}>
-            <div data-fx="vignette" className={`${flyClassName}-vignette absolute inset-0`} />
-            {firstBloodSequence.stage === 'flight' || firstBloodSequence.stage === 'impact' ? <>
-              <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} />
-              <div data-fx="speed" className={`${flyClassName}-speed absolute inset-0`} data-alt="true" />
-            </> : null}
-            <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 top-0`} data-edge="top" />
-            <div data-fx="bar" className={`${flyClassName}-bar absolute inset-x-0 bottom-0`} data-edge="bottom" />
-            {firstBloodSequence.stage === 'impact' ? <>
-              <div data-fx="impact-frame" className={`${flyClassName}-impact-frame absolute inset-0`} />
-              <div data-fx="tint" className={`${flyClassName}-tint absolute inset-0`} />
-              <div data-fx="flash" className={`${flyClassName}-flash absolute inset-0`} />
-            </> : null}
-          </div>
-        );
-      })() : null}
-
-      {introAttacks.length > 0 || (firstBloodAnnouncement && firstBloodSequence?.stage !== 'recover') ? (
-        <FirstBloodNotice
-          attacks={introAttacks.length > 0 ? introAttacks : firstBloodAnnouncement ? [firstBloodAnnouncement] : []}
-          intro={introAttacks.length > 0}
-          stage={firstBloodSequence?.stage ?? 'focus'}
-          motionClass={surfaceActive && !reducedMotion ? `${flyClassName}-notice` : undefined}
-        />
-      ) : null}
-      {closingFirstBlood ? (
-        <FirstBloodBanner
-          attacks={closingFirstBlood.attacks}
-          leaving={closingFirstBlood.leaving}
-          reducedMotion={reducedMotion || !surfaceActive}
-        />
-      ) : null}
-      {attacks.length === 0 ? (
-        <p data-testid="attack-map-waiting" className="pointer-events-none absolute inset-x-6 bottom-12 text-center text-sm" style={{ color: 'var(--attack-map-node-label)' }}>
-          Waiting for the first capture
-        </p>
-      ) : null}
-      <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
-        {services.map((service) => (
-          <div
-            key={service.name}
-            data-fx="map-legend"
-            className="flex items-center gap-1.5 rounded-sm border px-2 py-1"
-            style={{
-              backgroundColor: 'var(--attack-map-legend-background)',
-              borderColor: 'var(--attack-map-legend-border)',
-            }}
-          >
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: service.color }} />
-            <span
-              className="text-[10px] font-semibold"
-              style={{ color: 'var(--attack-map-legend-foreground)' }}
-            >
-              {service.name}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {presentation ? null : (
-        <div className="absolute right-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-1.5">
-          {[
-            { label: 'Americas', value: { lat: -6, lon: -82 } },
-            { label: 'EMEA', value: { lat: -6, lon: 34 } },
-            { label: 'APAC', value: { lat: -6, lon: 118 } },
-          ].map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              data-fx="map-control"
-              className="min-h-9 rounded-sm border px-3 py-1.5 text-[11px] font-semibold sm:min-h-0 sm:px-2 sm:py-1 sm:text-[10px]"
-              onClick={(event) => {
-                event.stopPropagation();
-                interruptFirstBlood();
-                markUserActivity();
-                animateRotationTo(preset.value);
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
+        {closingFirstBlood ? (
+          <FirstBloodBanner
+            attacks={closingFirstBlood.attacks}
+            leaving={closingFirstBlood.leaving}
+            reducedMotion={!cinematicMotionEnabled}
+          />
+        ) : null}
+        {attacks.length === 0 ? (
+          <p data-testid="attack-map-waiting" className="pointer-events-none absolute inset-x-6 bottom-12 text-center text-sm" style={{ color: 'var(--attack-map-node-label)' }}>
+            Waiting for the first capture
+          </p>
+        ) : null}
+        <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
+          {services.map((service) => (
+            <div
+              key={service.name}
+              data-fx="map-legend"
+              className="flex items-center gap-1.5 rounded-sm border px-2 py-1"
               style={{
                 backgroundColor: 'var(--attack-map-legend-background)',
                 borderColor: 'var(--attack-map-legend-border)',
-                color: 'var(--attack-map-node-label)',
               }}
             >
-              {preset.label}
-            </button>
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: service.color }} />
+              <span
+                className="text-[10px] font-semibold"
+                style={{ color: 'var(--attack-map-legend-foreground)' }}
+              >
+                {service.name}
+              </span>
+            </div>
           ))}
         </div>
-      )}
 
-      <div className={cn('absolute bottom-3 right-3 flex gap-1.5', firstBloodPresentationActive ? 'flex-row' : 'flex-col')}>
-        {[
-          { label: '+', delta: ZOOM_STEP, aria: 'Zoom in', disabled: zoom >= ZOOM_MAX },
-          { label: '−', delta: -ZOOM_STEP, aria: 'Zoom out', disabled: zoom <= ZOOM_MIN },
-        ].map((control) => (
-          <button
-            key={control.aria}
-            type="button"
-            aria-label={control.aria}
-            title={control.aria}
-            disabled={control.disabled}
-            data-fx="map-control"
-            className="flex h-9 w-9 items-center justify-center rounded-sm border text-base font-semibold leading-none disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={(event) => {
-              event.stopPropagation();
-              zoomBy(control.delta);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{
-              backgroundColor: 'var(--attack-map-legend-background)',
-              borderColor: 'var(--attack-map-legend-border)',
-              color: 'var(--attack-map-node-label)',
-            }}
-          >
-            {control.label}
-          </button>
-        ))}
       </div>
-
-      {presentation || !denseKeyboardMode ? null : (
-        <div
-          className="absolute left-3 top-3 grid max-w-[min(26rem,calc(100%-1.5rem))] gap-1.5 rounded-sm border p-2 sm:grid-cols-2"
-          style={{
-            backgroundColor: 'var(--attack-map-legend-background)',
-            borderColor: 'var(--attack-map-legend-border)',
-            color: 'var(--attack-map-legend-foreground)',
-          }}
-        >
-          <label className="grid gap-1">
-            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to team</span>
-            <select
-              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
-              value={selectedTeamId ?? ''}
-              onChange={(event) => {
-                event.stopPropagation();
-                const value = event.target.value;
-                onSelectTeam?.(value === '' ? null : value);
-                if (value !== '') {
-                  onSelectAttack?.(null);
-                }
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <option value="">Select team</option>
-              {nodes
-                .slice()
-                .sort((left, right) => left.name.localeCompare(right.name))
-                .map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {node.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="grid gap-1">
-            <span className="text-[11px] font-semibold uppercase opacity-80">Jump to route</span>
-            <select
-              className="h-11 min-w-0 rounded-sm border bg-card px-2 text-sm normal-case text-foreground sm:text-xs"
-              value={selectedAttackId ?? ''}
-              onChange={(event) => {
-                event.stopPropagation();
-                const value = event.target.value;
-                onSelectAttack?.(value === '' ? null : value);
-                if (value !== '') {
-                  onSelectTeam?.(null);
-                }
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <option value="">Select route</option>
-              {arcs.map((arc) => (
-                <option key={arc.id} value={arc.attackIds[0]}>
-                  {arc.attacker} to {arc.victim}, {arc.service}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
 
       <style
         dangerouslySetInnerHTML={{

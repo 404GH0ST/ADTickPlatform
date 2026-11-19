@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import Script from 'next/script';
 
+import { swaggerAccessibility } from '@/components/docs/swagger-accessibility';
+
+// The accessibility plugin wraps components from this Swagger UI release.
+const SWAGGER_ASSETS = 'https://unpkg.com/swagger-ui-dist@5.35.0';
+
 type SwaggerBundle = (config: Record<string, unknown>) => unknown;
 
 type WindowWithSwagger = Window & {
@@ -40,6 +45,7 @@ export function SwaggerUIBrowser({ specURL }: Props) {
         defaultModelExpandDepth: 1,
         displayRequestDuration: true,
         filter: true,
+        plugins: [swaggerAccessibility],
         layout: 'BaseLayout',
       });
     } catch (cause) {
@@ -49,9 +55,9 @@ export function SwaggerUIBrowser({ specURL }: Props) {
 
   return (
     <>
-      <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+      <link rel="stylesheet" href={`${SWAGGER_ASSETS}/swagger-ui.css`} />
       <Script
-        src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"
+        src={`${SWAGGER_ASSETS}/swagger-ui-bundle.js`}
         strategy="afterInteractive"
         onLoad={() => setReady(true)}
         onError={() => setError('Swagger UI assets could not be loaded from the CDN.')}

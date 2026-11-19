@@ -178,7 +178,7 @@ export function PlatformSettingsCard(): ReactElement {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1.5">
+          <div className="min-w-0 flex-1 space-y-1.5">
             <label
               htmlFor="platform-flag-format-prefix"
               className="text-xs font-medium text-muted-foreground"
@@ -197,7 +197,7 @@ export function PlatformSettingsCard(): ReactElement {
               disabled={saveState.kind === "saving" || saveState.kind === "reloading"}
             />
             <p className="text-xs text-muted-foreground">
-              Example flag: <code className="font-mono">{trimmed || "PLAYIT"}{'{payload.signature}'}</code>
+              Example flag: <code className="wrap-anywhere font-mono">{trimmed || "PLAYIT"}{'{payload.signature}'}</code>
             </p>
           </div>
           <div className="w-full space-y-1.5 sm:w-48">

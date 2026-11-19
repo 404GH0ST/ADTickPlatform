@@ -15,7 +15,6 @@ export default async function AdminTeamsPage() {
       title="Teams"
     >
       <div className="grid gap-4">
-        <BulkImportPanel />
         <OrganizerDashboard
           attackPage={dashboard.attackPage}
           challenges={dashboard.challenges}
@@ -29,6 +28,8 @@ export default async function AdminTeamsPage() {
           teams={dashboard.teams}
           initialTab="teams"
         />
+        {/* Rare, one-shot setup task: below the registry organizers use all match. */}
+        <BulkImportPanel />
       </div>
     </OrganizerShell>
   );

@@ -16,8 +16,12 @@ export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDiv
   return <div data-slot="card-header" className={cn('flex flex-col gap-1.5 border-b border-border px-4 py-3 sm:px-5', className)} {...props} />;
 }
 
-export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 data-slot="card-title" className={cn('text-base font-semibold leading-6 tracking-tight', className)} {...props} />;
+export function CardTitle({
+  as: Heading = 'h3',
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h2' | 'h3' | 'h4' }) {
+  return <Heading data-slot="card-title" className={cn('text-base font-semibold leading-6 tracking-tight', className)} {...props} />;
 }
 
 export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {

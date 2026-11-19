@@ -51,8 +51,8 @@ export function ParticipantManual(props: ParticipantManualViewProps): ReactEleme
 
 export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHref }: ParticipantManualViewProps): ReactElement {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="space-y-4">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="min-w-0 space-y-4 [&_code]:wrap-anywhere">
         <Card>
           <CardHeader>
             <CardTitle>Participant Flow</CardTitle>
@@ -60,7 +60,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
               Start here for the normal participant workflow. Use Swagger for the full request and response contract.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-0 md:grid-cols-2">
+          <CardContent className="grid grid-cols-1 gap-0 md:grid-cols-2">
             {steps.map((item) => (
               <StepRow key={item.step} step={item.step} title={item.title} detail={item.detail} />
             ))}
@@ -82,7 +82,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
         </Card>
       </div>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4 [&_code]:wrap-anywhere">
         <Card>
           <CardHeader>
             <CardTitle>API Reference</CardTitle>
@@ -130,7 +130,7 @@ function StepRow({ step, title, detail }: { step: string; title: string; detail:
     <div className="border-b px-4 py-4 last:border-b-0 md:[&:nth-child(odd)]:border-r md:[&:nth-last-child(2):nth-child(odd)]:border-b-0 md:[&:last-child:nth-child(odd)]:col-span-2 md:[&:last-child:nth-child(odd)]:border-r-0">
       <div className="text-xs font-medium text-muted-foreground">Step {step}</div>
       <div className="mt-1 text-sm font-medium">{title}</div>
-      <p className="mt-1 text-sm text-muted-foreground">{detail}</p>
+      <p className="mt-1 wrap-anywhere text-sm text-muted-foreground">{detail}</p>
     </div>
   );
 }

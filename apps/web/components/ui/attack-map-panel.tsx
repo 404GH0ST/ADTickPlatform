@@ -1,8 +1,9 @@
 'use client';
 
 import type { ReactElement, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Expand,
@@ -31,7 +32,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-import { CyberAttackMap } from './cyber-attack-map';
+const CyberAttackMap = lazy(async () => {
+  const { CyberAttackMap } = await import('./cyber-attack-map');
+  return { default: CyberAttackMap };
+});
 
 export type AttackMapEvent = {
   first_blood?: boolean;
@@ -54,6 +58,7 @@ export type AttackMapEvent = {
 type ViewMode = 'all' | 'recent' | 'current';
 
 const RECENT_TICK_WINDOW = 5;
+const PAUSED_CAMERA_KEY = 'ad-platform-attack-camera-paused';
 const PLAYBACK_SPEEDS = [
   { label: 'Fast', value: 900 },
   { label: 'Normal', value: 1500 },
@@ -83,6 +88,9 @@ export function AttackMapPanel({
   onVisibleRowsChange?: (rows: AttackMapEvent[]) => void;
 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
+  const maximizeTrigger = useRef<HTMLButtonElement>(null);
+  const viewLabelId = useId();
+  const [autoCameraPreference, setAutoCameraPreference] = useState<boolean | null>(null);
   const [teamQuery, setTeamQuery] = useState('');
   const [replayAttackIDs, setReplayAttackIDs] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('all');
@@ -97,6 +105,30 @@ export function AttackMapPanel({
   const previewAttackSfx = useAttackSfxPreview();
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(PAUSED_CAMERA_KEY) === 'true') {
+        setAutoCameraPreference(false);
+      }
+    } catch {
+      // The control still works when this browser blocks local storage.
+    }
+  }, []);
+
+  const changeAutoCamera = useCallback((enabled: boolean) => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setAutoCameraPreference(enabled ? (reducedMotion ? true : null) : false);
+    try {
+      if (enabled) {
+        window.localStorage.removeItem(PAUSED_CAMERA_KEY);
+      } else {
+        window.localStorage.setItem(PAUSED_CAMERA_KEY, 'true');
+      }
+    } catch {
+      // Keep the in-memory choice when it cannot be saved.
+    }
+  }, []);
 
   const tickValues = useMemo(
     () => Array.from(new Set(attackRows.map((row) => row.tick))).sort((left, right) => left - right),
@@ -400,8 +432,7 @@ export function AttackMapPanel({
         >
           {inspectingAutoFeature ? (
             <p className="text-sm text-muted-foreground">
-              Idle showcase is following this route. Move the pointer or click a
-              path to take manual control.
+              Select a path to inspect it.
             </p>
           ) : (
             <Button
@@ -493,39 +524,54 @@ export function AttackMapPanel({
   }
 
   function renderMapSurface(expandedView: boolean): ReactElement {
+    const mapSize = expandedView ? 'aspect-auto min-h-[24rem] flex-1' : 'min-h-[27rem]';
+
     return (
       <div
         className={cn(
           'grid gap-3',
           expandedView
-            ? 'h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,18vh)] xl:grid-cols-[minmax(0,1fr)_18rem] xl:grid-rows-none'
+            ? 'min-h-full grid-rows-[auto_minmax(0,18vh)] xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_18rem] xl:grid-rows-none'
             : 'grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
-        <CyberAttackMap
-          attacks={visibleRows}
-          className={expandedView ? 'aspect-auto h-full min-h-[36rem]' : 'min-h-[27rem]'}
-          focusedTeams={focusedTeams}
-          highlightedAttackIDs={activeHighlightIDs}
-          liveAttackIDs={highlightedAttackIDs}
-          placementScopeTeams={placementTeams}
-          selectedAttackId={selectedAttackId}
-          selectedTeamId={selectedTeamId}
-          teamLocations={teamLocations}
-          onFeaturedAttackChange={handleFeaturedAttackChange}
-          onSelectAttack={(attackId) => {
-            setSelectedAttackId(attackId);
-            if (attackId) {
-              setSelectedTeamId(null);
-            }
-          }}
-          onSelectTeam={(teamId) => {
-            setSelectedTeamId(teamId);
-            if (teamId) {
-              setSelectedAttackId(null);
-            }
-          }}
-        />
+        <Suspense
+          fallback={
+            <div
+              role="status"
+              className={cn('grid place-items-center rounded-sm border bg-card p-4 text-sm text-muted-foreground', mapSize)}
+            >
+              Loading attack globe…
+            </div>
+          }
+        >
+          <CyberAttackMap
+            attacks={visibleRows}
+            autoCameraPreference={autoCameraPreference}
+            className={mapSize}
+            focusedTeams={focusedTeams}
+            highlightedAttackIDs={activeHighlightIDs}
+            liveAttackIDs={highlightedAttackIDs}
+            placementScopeTeams={placementTeams}
+            selectedAttackId={selectedAttackId}
+            selectedTeamId={selectedTeamId}
+            teamLocations={teamLocations}
+            onAutoCameraChange={changeAutoCamera}
+            onFeaturedAttackChange={handleFeaturedAttackChange}
+            onSelectAttack={(attackId) => {
+              setSelectedAttackId(attackId);
+              if (attackId) {
+                setSelectedTeamId(null);
+              }
+            }}
+            onSelectTeam={(teamId) => {
+              setSelectedTeamId(teamId);
+              if (teamId) {
+                setSelectedAttackId(null);
+              }
+            }}
+          />
+        </Suspense>
         <div
           className={cn(
             'min-w-0',
@@ -542,7 +588,7 @@ export function AttackMapPanel({
     <div
       data-testid="attack-map-panel"
       className={cn(
-        'space-y-3 rounded-sm border border-border/70 bg-card p-3',
+        'space-y-3 rounded-sm border border-border/70 bg-card px-1 py-3 sm:px-3',
         className,
       )}
     >
@@ -566,7 +612,7 @@ export function AttackMapPanel({
             data-testid="attack-sfx-control"
           >
             <Button
-              aria-label={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
+              aria-label="SFX: Attack sound"
               aria-pressed={attackSfx.enabled}
               className="h-7 px-2 text-xs"
               size="sm"
@@ -604,7 +650,14 @@ export function AttackMapPanel({
               Test
             </Button>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setExpanded(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(event) => {
+              maximizeTrigger.current = event.currentTarget;
+              setExpanded(true);
+            }}
+          >
             <Expand className="h-4 w-4" />
             Maximize
           </Button>
@@ -612,9 +665,9 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="grid gap-3 rounded-sm border border-border/70 bg-muted/20 p-3">
-          <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="grid grid-cols-1 gap-3 rounded-sm border border-border/70 bg-muted/20 px-1 py-3 sm:px-3">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
               <div className="space-y-2">
                 <label
                   htmlFor={`${title}-team-search`}
@@ -634,16 +687,23 @@ export function AttackMapPanel({
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-foreground">View</p>
-                <div className="flex flex-wrap gap-2">
+                <p id={viewLabelId} className="text-sm font-medium text-foreground">View</p>
+                <div role="group" aria-labelledby={viewLabelId} className="flex flex-wrap gap-2">
                   {(['all', 'recent', 'current'] as ViewMode[]).map((mode) => (
                     <Button
                       key={mode}
+                      type="button"
                       size="touch"
+                      aria-pressed={viewMode === mode}
+                      className="gap-1 px-1 sm:gap-2 sm:px-3"
                       variant={viewMode === mode ? 'default' : 'outline'}
                       onClick={() => setViewMode(mode)}
                     >
-                      {describeViewMode(mode)}
+                      <Check
+                        aria-hidden="true"
+                        className={cn('size-3 shrink-0 sm:size-4', viewMode !== mode && 'invisible')}
+                      />
+                      <span className="min-w-0 wrap-anywhere">{describeViewMode(mode)}</span>
                     </Button>
                   ))}
                 </div>
@@ -741,6 +801,10 @@ export function AttackMapPanel({
         <DialogContent
           data-testid="attack-map-maximize-dialog"
           className="grid h-[98vh] w-[99vw] max-w-[99vw] grid-rows-[auto_minmax(0,1fr)] overflow-y-auto p-4 sm:p-6"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            maximizeTrigger.current?.focus();
+          }}
         >
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>

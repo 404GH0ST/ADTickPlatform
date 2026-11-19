@@ -37,7 +37,7 @@ function TruthRow({
         {state?.trim() || "unknown"}
       </dd>
       {detail ? (
-        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+        <dd className="mt-1 text-xs text-muted-foreground">{detail}</dd>
       ) : null}
     </div>
   );
@@ -59,7 +59,7 @@ export function DefaultTrustedStateView({
       <CardHeader>
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Trusted runtime state</CardTitle>
+          <CardTitle as="h2" className="text-base">Trusted runtime state</CardTitle>
         </div>
         <CardDescription>
           Host truth after deploy: queued instances, SSH access policy, and
@@ -76,7 +76,7 @@ export function DefaultTrustedStateView({
               : "warning"
           }
         />
-        <div className="grid gap-2 sm:grid-cols-3">
+        <dl className="grid gap-2 sm:grid-cols-3">
           <TruthRow
             label="Pending deployments"
             state={
@@ -106,7 +106,7 @@ export function DefaultTrustedStateView({
                 : undefined
             }
           />
-        </div>
+        </dl>
         {access?.last_error ? (
           <StatusBanner message={`Access: ${access.last_error}`} variant="error" />
         ) : null}

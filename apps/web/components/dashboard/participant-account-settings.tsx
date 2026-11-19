@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Settings } from "lucide-react";
 
@@ -13,6 +13,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -45,6 +46,7 @@ export function ParticipantAccountSettings({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -244,17 +246,29 @@ export function ParticipantAccountSettings({
   }
 
   return (
-    <>
-      <Button
-        aria-label="Account settings"
-        variant="outline"
-        onClick={() => setOpen(true)}
-      >
-        <Settings className="h-4 w-4" />
-        Account
-      </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogTrigger asChild>
+          <Button
+            aria-label="Account settings"
+            variant="outline"
+            onClick={(event) => {
+              trigger.current = event.currentTarget;
+            }}
+          >
+            <Settings className="h-4 w-4" aria-hidden />
+            Account
+          </Button>
+        </DialogTrigger>
+        <DialogContent
+          className="max-h-[90vh] overflow-y-auto"
+          onCloseAutoFocus={(event) => {
+            const summary = trigger.current?.closest("details:not([open])")?.querySelector("summary");
+            if (summary) {
+              event.preventDefault();
+              summary.focus();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Account settings</DialogTitle>
             <DialogDescription>
@@ -481,7 +495,6 @@ export function ParticipantAccountSettings({
           </form>
         </DialogContent>
       </Dialog>
-    </>
   );
 }
 

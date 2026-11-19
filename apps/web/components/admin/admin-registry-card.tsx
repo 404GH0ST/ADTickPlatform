@@ -18,8 +18,8 @@ export function AdminRegistryCard({
 }) {
   return (
     <Card className="flex h-full flex-col">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-        <div className="space-y-1.5">
+      <CardHeader className="flex flex-col items-start gap-3 space-y-0 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 max-w-full space-y-1.5 wrap-anywhere">
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </div>

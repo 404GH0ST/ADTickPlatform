@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 import type {
@@ -11,13 +11,7 @@ import type {
 import { processApiResponse } from '@/lib/api-utils';
 import { formatIndonesianDate } from '@/lib/date-format';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { AppDialog } from '@/components/ui/app-dialog';
 import { StatusBanner } from '@/components/ui/status-banner';
 import {
   Table,
@@ -46,6 +40,7 @@ export function SubmissionsTable({
   error?: string;
 }) {
   const router = useRouter();
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<AdminSubmission | null>(null);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -102,7 +97,7 @@ export function SubmissionsTable({
           <StatusBanner variant="success" message={note} />
         </div>
       ) : null}
-      <Table data-testid="submissions-table" className="min-w-[68rem]">
+      <Table scrollLabel="Submissions" data-testid="submissions-table" className="min-w-[68rem]">
         <TableHeader>
           <TableRow>
             <TableHead>Submitted</TableHead>
@@ -180,7 +175,8 @@ export function SubmissionsTable({
                     variant="ghost"
                     size="touch"
                     aria-label={`Delete submission #${row.id}`}
-                    onClick={() => {
+                    onClick={(event) => {
+                      deleteTrigger.current = event.currentTarget;
                       setActionError(null);
                       setSelected(row);
                     }}
@@ -193,41 +189,40 @@ export function SubmissionsTable({
           )}
         </TableBody>
       </Table>
-      <Dialog
+      <AppDialog
         open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open && !pending) setSelected(null);
+        onClose={() => {
+          if (!pending) setSelected(null);
         }}
-      >
-        <DialogContent showCloseButton={!pending}>
-          <DialogHeader>
-            <DialogTitle>Delete submission #{selected?.id}?</DialogTitle>
-            <DialogDescription>
-              {selected?.status === 'accepted'
-                ? 'This removes the accepted capture from the attack feed and scoring. The flag can be submitted again if it is still valid.'
-                : 'This removes only this attempt from submission history. It does not change scores or an existing capture.'}
-            </DialogDescription>
-          </DialogHeader>
-          {selected ? (
-            <dl className="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-2 border-y py-3 text-sm">
-              <dt className="text-muted-foreground">Team</dt>
-              <dd className="break-words">{selected.attacker}</dd>
-              <dt className="text-muted-foreground">Challenge</dt>
-              <dd className="break-words">{selected.service || 'Unknown'}</dd>
-              <dt className="text-muted-foreground">Tick</dt>
-              <dd>#{selected.tick}</dd>
-            </dl>
-          ) : null}
-          {selected?.first_blood ? (
-            <StatusBanner
-              variant="warning"
-              message={`First blood on ${selected.service} will be cleared. The next accepted capture earns it; existing captures will not be promoted.`}
-            />
-          ) : null}
-          {actionError ? (
-            <StatusBanner variant="error" message={actionError} />
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
+        returnFocusRef={deleteTrigger}
+        showCloseButton={!pending}
+        title={`Delete submission #${selected?.id}?`}
+        description={selected?.status === 'accepted'
+          ? 'This removes the accepted capture from the attack feed and scoring. The flag can be submitted again if it is still valid.'
+          : 'This removes only this attempt from submission history. It does not change scores or an existing capture.'}
+        body={
+          <div className="grid gap-4">
+            {selected ? (
+              <dl className="grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)] gap-x-4 gap-y-2 border-y py-3 text-sm">
+                <dt className="wrap-anywhere text-muted-foreground">Team</dt>
+                <dd className="wrap-anywhere">{selected.attacker}</dd>
+                <dt className="wrap-anywhere text-muted-foreground">Challenge</dt>
+                <dd className="wrap-anywhere">{selected.service || 'Unknown'}</dd>
+                <dt className="wrap-anywhere text-muted-foreground">Tick</dt>
+                <dd className="wrap-anywhere">#{selected.tick}</dd>
+              </dl>
+            ) : null}
+            {selected?.first_blood ? (
+              <StatusBanner
+                variant="warning"
+                message={`First blood on ${selected.service} will be cleared. The next accepted capture earns it; existing captures will not be promoted.`}
+              />
+            ) : null}
+            {actionError ? <StatusBanner variant="error" message={actionError} /> : null}
+          </div>
+        }
+        footer={
+          <>
             <Button
               variant="outline"
               disabled={pending}
@@ -236,8 +231,7 @@ export function SubmissionsTable({
               Cancel
             </Button>
             <Button
-              variant="outline"
-              className="border-negative/40 bg-negative/5 text-negative hover:bg-negative/10"
+              className="button-danger-solid"
               disabled={pending}
               onClick={() => {
                 void removeSubmission();
@@ -245,9 +239,9 @@ export function SubmissionsTable({
             >
               {pending ? 'Deleting…' : 'Delete submission'}
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      />
     </>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useId, useState, type FormEvent, type ReactElement } from "react";
 import { LoaderCircle, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import type { AdminBulkImportResult } from "@/lib/admin-dashboard-types";
 import { parseTeamCsv } from "@/lib/team-csv";
 
 export function BulkImportPanel(): ReactElement {
+  const csvId = useId();
+  const csvDescription = `${csvId}-description`;
   const [csvText, setCsvText] = useState(
     "team_name,contact_email,player_display_name,player_email,player_password,player_role\n",
   );
@@ -78,7 +80,7 @@ export function BulkImportPanel(): ReactElement {
           <Upload className="h-4 w-4 text-primary" />
           <CardTitle className="text-base">Bulk team import</CardTitle>
         </div>
-        <CardDescription>
+        <CardDescription id={csvDescription} className="wrap-anywhere">
           CSV columns: team_name, contact_email, optional player_display_name,
           player_email, player_password, player_role. Each team is created
           atomically with its players; a bad player row rolls that team back.
@@ -86,7 +88,10 @@ export function BulkImportPanel(): ReactElement {
       </CardHeader>
       <CardContent>
         <form className="grid gap-3" onSubmit={onSubmit}>
+          <label htmlFor={csvId} className="text-sm font-medium">Team CSV</label>
           <textarea
+            id={csvId}
+            aria-describedby={csvDescription}
             className="min-h-36 w-full rounded-sm border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             value={csvText}
             onChange={(event) => setCsvText(event.target.value)}

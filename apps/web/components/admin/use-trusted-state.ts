@@ -167,7 +167,7 @@ export function useTrustedState(): TrustedState {
     pendingDeployments,
     healthy,
     summary: healthy
-      ? "Trusted host truth looks healthy."
+      ? "Host state looks healthy: deployments, SSH access, and WireGuard all match."
       : "Host truth is incomplete or degraded — do not assume SSH/access is correct until reconcile succeeds.",
     pending,
     error,

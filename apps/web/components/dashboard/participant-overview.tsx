@@ -19,14 +19,14 @@ export function ParticipantOverview({
       href: "/scoreboard",
       title: "Scoreboard",
       description: "See the live standings without the rest of the participant controls.",
-      meta: `${scoreCount} teams live`,
+      meta: `${scoreCount} ${scoreCount === 1 ? "team" : "teams"} live`,
     },
     {
       id: "services",
       href: "/services",
       title: "Services",
       description: "Submit flags and manage unlocks, SSH access, restarts, and resets.",
-      meta: `${serviceCount} services under your team`,
+      meta: `${serviceCount} ${serviceCount === 1 ? "service" : "services"} assigned to your team`,
     },
     {
       id: "attacks",

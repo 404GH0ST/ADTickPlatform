@@ -30,7 +30,7 @@ const toneClassName: Record<InfoPanelTone, string> = {
 
 const layoutClassName: Record<InfoPanelLayout, string> = {
   stack: 'space-y-3',
-  grid: 'grid gap-3',
+  grid: 'grid grid-cols-1 gap-3',
 };
 
 export function InfoPanel({

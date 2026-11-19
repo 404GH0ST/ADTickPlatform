@@ -1,14 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useLayoutEffect, useRef, useState, useTransition } from "react";
 
 import { useActiveTheme } from "@/components/theme/active-theme-provider";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { moveCompositeFocus } from "@/lib/composite-focus";
 import { getThemes } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 type SaveState = { kind: "idle" } | { kind: "saving"; id: string } | { kind: "error"; message: string };
+
+// Changing to a theme with a different shell remounts the settings card.
+let themeFocusAfterRefresh: { id: string; url: string } | undefined;
 
 async function saveTheme(themeID: string) {
   const response = await fetch("/api/admin/platform/appearance", {
@@ -33,15 +37,30 @@ export function ThemeSettingsCard() {
   const active = useActiveTheme();
   const [state, setState] = useState<SaveState>({ kind: "idle" });
   const [refreshing, startRefresh] = useTransition();
+  const busy = state.kind === "saving" || refreshing;
+  const checkedOption = useRef<HTMLButtonElement>(null);
 
-  async function select(themeID: string) {
-    if (themeID === active.id || state.kind === "saving") {
+  useLayoutEffect(() => {
+    if (themeFocusAfterRefresh?.id !== active.id) return;
+
+    const { url } = themeFocusAfterRefresh;
+    themeFocusAfterRefresh = undefined;
+    if (url === window.location.href && document.activeElement === document.body) {
+      checkedOption.current?.focus();
+    }
+  }, [active.id]);
+
+  async function select(themeID: string, option: HTMLButtonElement) {
+    if (themeID === active.id || busy) {
       return;
     }
     setState({ kind: "saving", id: themeID });
     try {
       await saveTheme(themeID);
       setState({ kind: "idle" });
+      themeFocusAfterRefresh = document.activeElement === option
+        ? { id: themeID, url: window.location.href }
+        : undefined;
       // Re-render the root layout so html[data-scheme] and layout overrides switch.
       startRefresh(() => router.refresh());
     } catch (error) {
@@ -58,23 +77,34 @@ export function ThemeSettingsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
-        <div role="radiogroup" aria-label="Platform theme" className="grid gap-2 sm:grid-cols-2">
+        <div
+          role="radiogroup"
+          aria-label="Platform theme"
+          aria-busy={busy || undefined}
+          className="@container grid grid-cols-1 gap-2 sm:grid-cols-2"
+          onKeyDown={(event) => {
+            if (!busy) moveCompositeFocus(event, "[data-theme-option]", true)?.click();
+          }}
+        >
           {getThemes().map((theme) => {
             const checked = theme.id === active.id;
             const saving = state.kind === "saving" && state.id === theme.id;
             return (
               <button
                 key={theme.id}
+                ref={checked ? checkedOption : undefined}
                 type="button"
                 role="radio"
                 aria-checked={checked}
+                tabIndex={checked ? 0 : -1}
                 data-theme-option={theme.id}
-                disabled={state.kind === "saving" || refreshing}
-                onClick={() => void select(theme.id)}
+                aria-disabled={busy || undefined}
+                onClick={(event) => void select(theme.id, event.currentTarget)}
                 className={cn(
                   "flex items-center gap-3 rounded-sm border border-border bg-background p-3 text-left",
+                  "@max-[12rem]:flex-col @max-[12rem]:items-start @max-[12rem]:gap-2",
                   "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "disabled:cursor-wait",
+                  "aria-disabled:cursor-wait",
                   checked && "border-foreground/60 bg-muted",
                 )}
               >
@@ -83,15 +113,15 @@ export function ThemeSettingsCard() {
                   <span className="h-full w-1/2" style={{ background: theme.swatch.dark }} />
                   <span className="absolute bottom-0 right-0 size-3" style={{ background: theme.swatch.accent }} />
                 </span>
-                <span className="grid min-w-0 gap-0.5">
-                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    {theme.label}
+                <span className="min-w-0 space-y-0.5">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-foreground">
+                    <span className="min-w-0 wrap-anywhere">{theme.label}</span>
                     {checked ? (
                       <span className="rounded-sm border border-border px-1.5 text-[11px] font-medium leading-5">Active</span>
                     ) : null}
                     {saving ? <span className="text-xs text-muted-foreground">Applying…</span> : null}
                   </span>
-                  <span className="truncate text-xs text-muted-foreground">{theme.description}</span>
+                  <span className="block wrap-anywhere text-xs text-muted-foreground">{theme.description}</span>
                 </span>
               </button>
             );

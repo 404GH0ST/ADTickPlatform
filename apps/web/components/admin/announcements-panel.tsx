@@ -34,9 +34,9 @@ export function DefaultAnnouncementsView({
   return (
     <Card data-testid="announcements-panel">
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Megaphone className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Match announcements</CardTitle>
+        <div className="flex items-start gap-2">
+          <Megaphone className="mt-1 h-4 w-4 shrink-0 text-primary" />
+          <CardTitle className="min-w-0 wrap-anywhere text-base">Match announcements</CardTitle>
         </div>
         <CardDescription>
           Broadcast short messages to the participant shell during the match.
@@ -67,9 +67,9 @@ export function DefaultAnnouncementsView({
           {items.map((item) => (
             <li
               key={item.id}
-              className="flex items-start justify-between gap-3 rounded-sm border px-3 py-2 text-sm"
+              className="flex flex-wrap items-start justify-between gap-3 rounded-sm border px-3 py-2 text-sm"
             >
-              <div>
+              <div className="min-w-0 wrap-anywhere">
                 <p>{item.body}</p>
                 <p className="text-xs text-muted-foreground">{item.created_at}</p>
               </div>

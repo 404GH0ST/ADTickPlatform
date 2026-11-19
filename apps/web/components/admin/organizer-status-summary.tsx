@@ -29,11 +29,11 @@ function SummaryItem({
 }) {
   return (
     <div
-      className="border-b border-r border-border px-3 py-2.5 xl:border-b-0 xl:last:border-r-0"
+      className="min-w-0 wrap-anywhere border-b border-r border-border px-3 py-2.5 xl:border-b-0 xl:last:border-r-0"
       data-testid={testId}
     >
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'mt-1 break-all font-mono text-sm' : 'mt-1 text-sm font-semibold'}>
+      <dd className={mono ? 'mt-1 truncate font-mono text-sm' : 'mt-1 text-sm font-semibold'}>
         {value}
       </dd>
     </div>
@@ -125,7 +125,7 @@ export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
             <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
           </dl>
           <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
-            API base <span className="font-mono text-foreground">{overview.apiBaseUrl}</span>
+            API base <span className="wrap-anywhere font-mono text-foreground">{overview.apiBaseUrl}</span>
           </p>
         </section>
       ) : null}

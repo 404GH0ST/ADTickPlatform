@@ -31,7 +31,7 @@ export function AttackFeedTable({
   emptyMessage?: string;
 }): ReactElement {
   return (
-    <Table>
+    <Table scrollLabel="Accepted attacks">
       <TableHeader>
         <TableRow>
           <TableHead>Tick</TableHead>
