@@ -43,6 +43,8 @@ ADTickPlatform runs the whole game loop of an Attack-Defense CTF. Every tick it 
 
 ## Screenshots
 
+The participant console and organizer desk below are shown with demo data.
+
 ### Participant console
 
 <p align="center">
@@ -63,7 +65,7 @@ ADTickPlatform runs the whole game loop of an Attack-Defense CTF. Every tick it 
 
 ### Themes
 
-The organizer sets the theme for the whole platform. Players switch between light and dark.
+The organizer sets the theme for the whole platform. Players can choose Light, Dark, or System.
 
 <p align="center">
   <img src="docs/images/theme-graphite.png" alt="Scoreboard in the Graphite theme" width="32%" />
