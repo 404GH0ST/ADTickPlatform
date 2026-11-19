@@ -9,10 +9,9 @@ import (
 )
 
 func OpenPostgres(ctx context.Context, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		return nil, err
-	}
+	// sql.Open cannot fail for the registered pgx driver: its OpenConnector
+	// defers DSN parsing to the first connection, which PingContext surfaces.
+	db, _ := sql.Open("pgx", dsn)
 
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)

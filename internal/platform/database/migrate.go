@@ -12,6 +12,9 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// migrationSource is the filesystem migrations are read from; tests swap it.
+var migrationSource fs.FS = migrationsFS
+
 const migrationLockKey int64 = 91743021
 
 type queryRower interface {
@@ -47,7 +50,7 @@ func RunEmbeddedMigrationsWithOptions(ctx context.Context, db *sql.DB, options M
 		return fmt.Errorf("ensure schema_migrations: %w", err)
 	}
 
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	entries, err := fs.ReadDir(migrationSource, "migrations")
 	if err != nil {
 		return fmt.Errorf("read migrations: %w", err)
 	}
@@ -71,7 +74,7 @@ func RunEmbeddedMigrationsWithOptions(ctx context.Context, db *sql.DB, options M
 			continue
 		}
 
-		script, err := migrationsFS.ReadFile("migrations/" + version)
+		script, err := fs.ReadFile(migrationSource, "migrations/"+version)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", version, err)
 		}

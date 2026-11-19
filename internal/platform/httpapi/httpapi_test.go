@@ -247,3 +247,55 @@ func TestNormalizeInternalBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestBearerTokenRejectsBlankToken(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer    ")
+	if token, ok := BearerToken(request); ok || token != "" {
+		t.Fatalf("a blank bearer token must be rejected, got %q", token)
+	}
+}
+
+func TestRegisterMetricsSourceIgnoresBlankNameAndNilSource(t *testing.T) {
+	registered := func(name string) bool {
+		metricsRegistry.mu.Lock()
+		defer metricsRegistry.mu.Unlock()
+		_, ok := metricsRegistry.services[name]
+		return ok
+	}
+	noop := stubMetricsSource{}
+	RegisterMetricsSource("  ", noop)
+	if registered("") {
+		t.Error("a blank service name must not create a registry entry")
+	}
+	RegisterMetricsSource("svc-nil-source", nil)
+	if registered("svc-nil-source") {
+		t.Error("a nil source must not create a registry entry")
+	}
+}
+
+func TestMetricsSortByPatternThenStatus(t *testing.T) {
+	info := ServiceInfo{Name: "sort-probe", Version: "test", Addr: ":0"}
+	mux := NewBaseMux(info)
+	mux.HandleFunc("GET /zeta", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /alpha/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") == "missing" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := newHTTPServer(info, mux).Handler
+	for _, path := range []string{"/zeta", "/alpha/missing", "/alpha/1"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	alphaOK := strings.Index(body, `pattern="GET /alpha/{id}",status_code="200"`)
+	alphaMissing := strings.Index(body, `pattern="GET /alpha/{id}",status_code="404"`)
+	zeta := strings.Index(body, `pattern="GET /zeta"`)
+	if alphaOK < 0 || alphaMissing < 0 || zeta < 0 || !(alphaOK < alphaMissing && alphaMissing < zeta) {
+		t.Fatalf("metrics must sort by pattern, then status:\n%s", body)
+	}
+}

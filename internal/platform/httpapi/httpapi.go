@@ -108,12 +108,10 @@ func BearerToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 
-	token := strings.TrimSpace(parts[1])
-	if token == "" {
-		return "", false
-	}
-
-	return token, true
+	// header was trimmed before splitting, so parts[1] ends in a non-space
+	// character and the token cannot be empty here; a bare "Bearer" header
+	// already failed the two-part check above.
+	return strings.TrimSpace(parts[1]), true
 }
 
 func RunServer(ctx context.Context, info ServiceInfo, handler http.Handler) error {
