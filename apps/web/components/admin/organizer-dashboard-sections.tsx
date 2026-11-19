@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import type { ReactElement, ReactNode } from "react";
-import { Fragment, useCallback, useMemo, useState, useEffect } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   Ban,
   Copy,
@@ -52,6 +52,7 @@ import { AdminRegistryCard } from "@/components/admin/admin-registry-card";
 import { AdminRuntimeCard } from "@/components/admin/admin-runtime-card";
 import { PlatformSettingsCard } from "@/components/admin/platform-settings-card";
 import { ThemeSettingsCard } from "@/components/admin/theme-settings-card";
+import { moveCompositeFocus } from "@/lib/composite-focus";
 import { Badge } from "@/components/ui/badge";
 import { AdminTable, AdminTableHeader } from "@/components/ui/admin-table";
 import { Button } from "@/components/ui/button";
@@ -336,6 +337,31 @@ function fromDateTimeLocalValue(value: string): string | undefined {
   return parsed.toISOString();
 }
 
+function LocalDateTimePreview({
+  id,
+  value,
+}: {
+  id: string;
+  value: string;
+}): ReactElement | null {
+  const iso = fromDateTimeLocalValue(value);
+  if (!iso) return null;
+
+  return (
+    <p id={id} className="wrap-anywhere text-sm text-foreground">
+      <time dateTime={iso}>
+        {new Date(iso).toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })}
+      </time>
+    </p>
+  );
+}
+
 function datePartFromDateTimeLocalValue(value: string): string {
   if (!value) {
     return "";
@@ -464,7 +490,7 @@ export function TeamsTab({
                   <TableCell className="font-semibold">#{team.id}</TableCell>
                   <TableCell>{team.name}</TableCell>
                   <TableCell>{team.contact_email}</TableCell>
-                  <TableCell className="font-mono text-xs">{team.join_key}</TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">{team.join_key}</TableCell>
                   <TableCell>{team.player_count}</TableCell>
                   <TableCell>{team.deployed_challenges}</TableCell>
                   <TableCell>
@@ -488,14 +514,14 @@ export function TeamsTab({
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="row-actions whitespace-nowrap text-right">
                     <Button
                       size="sm"
                       variant="ghost"
                       className={team.active ? "button-danger-subtle" : undefined}
                       data-testid={`toggle-team-active-${team.id}`}
-                      title={team.active ? "Deactivate team" : "Reactivate team"}
-                      aria-label={team.active ? "Deactivate team" : "Reactivate team"}
+                      title={`${team.active ? "Deactivate" : "Reactivate"} team ${team.name}`}
+                      aria-label={`${team.active ? "Deactivate" : "Reactivate"} team ${team.name}`}
                       disabled={pendingAction !== null}
                       onClick={() => onSetTeamActiveState(team, !team.active)}
                     >
@@ -509,6 +535,8 @@ export function TeamsTab({
                       size="sm"
                       variant="ghost"
                       data-testid={`edit-team-${team.id}`}
+                      title={`Edit team ${team.name}`}
+                      aria-label={`Edit team ${team.name}`}
                       disabled={pendingAction !== null}
                       onClick={() => onOpenEditDialog(team.id)}
                     >
@@ -519,6 +547,8 @@ export function TeamsTab({
                       variant="ghost"
                       className="button-danger-subtle"
                       data-testid={`delete-team-${team.id}`}
+                      title={`Delete team ${team.name}`}
+                      aria-label={`Delete team ${team.name}`}
                       disabled={pendingAction !== null}
                       onClick={() =>
                         onSelectDeleteTarget({
@@ -574,17 +604,24 @@ export function PlayersTab({
   onTeardownWireGuardGateway,
   onSetPlayerActiveState,
 }: PlayersTabProps): ReactElement {
+  const wireGuardTrigger = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <div className="grid gap-4">
+      <div className="grid grid-cols-1 gap-4">
         <PlayerRegistryCard
           pendingAction={pendingAction}
           playerRows={playerRows}
           onOpenCreateDialog={onOpenCreateDialog}
           onOpenEditDialog={onOpenEditDialog}
-          onInspectWireGuard={onInspectWireGuard}
+          onInspectWireGuard={(player, trigger) => {
+            wireGuardTrigger.current = trigger;
+            onInspectWireGuard(player);
+          }}
           onRevokeWireGuard={onRevokeWireGuard}
-          onRotateWireGuard={onRotateWireGuard}
+          onRotateWireGuard={(player, trigger) => {
+            wireGuardTrigger.current = trigger;
+            onRotateWireGuard(player);
+          }}
           onSelectDeleteTarget={onSelectDeleteTarget}
           onSetPlayerActiveState={onSetPlayerActiveState}
         />
@@ -593,7 +630,7 @@ export function PlayersTab({
           <h2 id="players-network-heading" data-slot="section-heading" className="text-sm font-semibold text-foreground">
             Network runtime
           </h2>
-        <div className="grid items-start gap-4 xl:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
           <WireGuardGatewayCard
             pendingAction={pendingAction}
             wireGuardGatewayStatus={wireGuardGatewayStatus}
@@ -618,6 +655,7 @@ export function PlayersTab({
         peer={selectedWireGuardPeer}
         onClose={onCloseWireGuardDialog}
         onDownload={onDownloadWireGuardConfig}
+        returnFocusRef={wireGuardTrigger}
       />
       <DeleteConfirmDialog
         deleteTarget={deleteTarget}
@@ -972,9 +1010,9 @@ function PlayerRegistryCard({
   playerRows: AdminPlayer[];
   onOpenCreateDialog: () => void;
   onOpenEditDialog: (id: number) => void;
-  onInspectWireGuard: (player: AdminPlayer) => void;
+  onInspectWireGuard: (player: AdminPlayer, trigger: HTMLButtonElement) => void;
   onRevokeWireGuard: (player: AdminPlayer) => void;
-  onRotateWireGuard: (player: AdminPlayer) => void;
+  onRotateWireGuard: (player: AdminPlayer, trigger: HTMLButtonElement) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
   onSetPlayerActiveState: (player: AdminPlayer, active: boolean) => void;
 }): ReactElement {
@@ -1057,7 +1095,7 @@ function PlayerRegistryCard({
                           size="sm"
                           variant="outline"
                           data-testid={`inspect-wireguard-${player.id}`}
-                          onClick={() => onInspectWireGuard(player)}
+                          onClick={(event) => onInspectWireGuard(player, event.currentTarget)}
                         >
                           {pendingAction === `wireguard:get:${player.id}` ? (
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -1072,9 +1110,9 @@ function PlayerRegistryCard({
                             size="icon"
                             variant="ghost"
                             data-testid={`rotate-wireguard-${player.id}`}
-                            title="Rotate WireGuard key"
-                            aria-label="Rotate WireGuard key"
-                            onClick={() => onRotateWireGuard(player)}
+                            title={`Rotate WireGuard key for ${player.display_name}`}
+                            aria-label={`Rotate WireGuard key for ${player.display_name}`}
+                            onClick={(event) => onRotateWireGuard(player, event.currentTarget)}
                           >
                             {pendingAction === `wireguard:rotate:${player.id}` ? (
                               <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -1092,8 +1130,8 @@ function PlayerRegistryCard({
                             variant="ghost"
                             className="button-danger-subtle"
                             data-testid={`revoke-wireguard-${player.id}`}
-                            title="Revoke WireGuard peer"
-                            aria-label="Revoke WireGuard peer"
+                            title={`Revoke WireGuard peer for ${player.display_name}`}
+                            aria-label={`Revoke WireGuard peer for ${player.display_name}`}
                             onClick={() => onRevokeWireGuard(player)}
                           >
                             {pendingAction === `wireguard:revoke:${player.id}` ? (
@@ -1109,8 +1147,8 @@ function PlayerRegistryCard({
                             size="icon"
                             variant="ghost"
                             data-testid={`edit-player-${player.id}`}
-                            title="Edit player"
-                            aria-label="Edit player"
+                            title={`Edit player ${player.display_name}`}
+                            aria-label={`Edit player ${player.display_name}`}
                             onClick={() => onOpenEditDialog(player.id)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -1121,8 +1159,8 @@ function PlayerRegistryCard({
                             variant="ghost"
                             className={player.active ? "button-danger-subtle" : undefined}
                             data-testid={`toggle-player-active-${player.id}`}
-                            title={player.active ? "Deactivate player" : "Reactivate player"}
-                            aria-label={player.active ? "Deactivate player" : "Reactivate player"}
+                            title={`${player.active ? "Deactivate" : "Reactivate"} player ${player.display_name}`}
+                            aria-label={`${player.active ? "Deactivate" : "Reactivate"} player ${player.display_name}`}
                             onClick={() => onSetPlayerActiveState(player, !player.active)}
                           >
                             {player.active ? (
@@ -1137,8 +1175,8 @@ function PlayerRegistryCard({
                             variant="ghost"
                             className="button-danger-subtle"
                             data-testid={`delete-player-${player.id}`}
-                            title="Delete player"
-                            aria-label="Delete player"
+                            title={`Delete player ${player.display_name}`}
+                            aria-label={`Delete player ${player.display_name}`}
                             onClick={() =>
                               onSelectDeleteTarget({
                                 kind: "player",
@@ -1379,7 +1417,7 @@ function ChallengeCatalogRow({
                 aria-label={
                   challenge.maintenance
                     ? "Resume challenge after maintenance"
-                    : "Put challenge under maintenance"
+                    : "Maintain challenge"
                 }
                 onClick={() =>
                   onSetChallengeMaintenanceState(challenge, !challenge.maintenance)
@@ -1652,7 +1690,7 @@ export function GameTab({
       {(view) => {
         if (view === "health") {
           return (
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <RuntimeHealthCard
                 accessStatus={accessStatus}
                 deploymentRows={deploymentRows}
@@ -1679,7 +1717,7 @@ export function GameTab({
 
         if (view === "diagnostics") {
           return (
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <SchedulerCard
                 filters={filters.schedulerEvent}
                 pendingAction={pendingAction}
@@ -1727,7 +1765,7 @@ export function GameTab({
 
         if (view === "settings") {
           return (
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <PlatformSettingsCard />
               <ThemeSettingsCard />
             </div>
@@ -1735,7 +1773,7 @@ export function GameTab({
         }
 
         return (
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <GameControlCard
               gameState={gameState}
               pendingAction={pendingAction}
@@ -1751,7 +1789,7 @@ export function GameTab({
               onStopMatch={onStopMatch}
               onUpdateMatchSchedule={onUpdateMatchSchedule}
             />
-            <div className="grid items-start gap-4 xl:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
               <CurrentTickCard currentTick={gameState.current_tick} />
               <ScoreboardSnapshotCard
                 pendingAction={pendingAction}
@@ -1813,12 +1851,13 @@ function GameViewTabs({
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <div
         role="tablist"
         aria-label="Game views"
-        className="section-tabs flex max-w-full gap-1 overflow-x-auto border-b border-border"
+        className="section-tabs flex max-w-full flex-wrap gap-1 border-b border-border"
         data-testid="game-view-tabs"
+        onKeyDown={(event) => moveCompositeFocus(event, '[role="tab"]')?.click()}
       >
         {GAME_VIEWS.map((item) => (
           <button
@@ -1827,23 +1866,38 @@ function GameViewTabs({
             role="tab"
             id={`game-tab-${item.id}`}
             aria-selected={view === item.id}
-            aria-controls="game-view-panel"
+            aria-controls={`game-panel-${item.id}`}
+            tabIndex={view === item.id ? 0 : -1}
             data-active={view === item.id ? "true" : "false"}
-            className="section-tab"
+            className="section-tab wrap-anywhere"
             onClick={() => select(item.id)}
           >
-            {item.label}
+            <span className="min-w-0">{item.label}</span>
             {item.id === "health" && alertCount > 0 ? (
-              <span className="section-tab-count" aria-label={`${alertCount} alerts`}>
-                {alertCount}
+              <span className="section-tab-count">
+                {alertCount}<span className="sr-only"> alerts</span>
               </span>
             ) : null}
           </button>
         ))}
       </div>
-      <div role="tabpanel" id="game-view-panel" aria-labelledby={`game-tab-${view}`}>
-        {children(view)}
-      </div>
+      {GAME_VIEWS.map((item) => (
+        <div
+          key={item.id}
+          role="tabpanel"
+          id={`game-panel-${item.id}`}
+          aria-labelledby={`game-tab-${item.id}`}
+          hidden={view !== item.id}
+          tabIndex={0}
+        >
+          {view === item.id ? (
+            <>
+              <h2 className="sr-only">{item.label}</h2>
+              {children(view)}
+            </>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1857,11 +1911,11 @@ function CategoryLeaderRow({
 }): ReactElement {
   return (
     <li className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="w-6 font-mono text-xs tabular-nums text-muted-foreground">
+      <div className="flex min-w-0 items-baseline gap-3">
+        <span className="w-6 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
           #{leader.rank}
         </span>
-        <span className="truncate font-medium text-foreground">{leader.team}</span>
+        <span className="min-w-0 wrap-anywhere font-medium text-foreground">{leader.team}</span>
       </div>
       <span className="shrink-0 font-mono text-sm tabular-nums text-foreground">
         {scoreFormatter(leader.score)}
@@ -1882,7 +1936,7 @@ function CategoryLeaderCard({
   scoreFormatter: (n: number) => string;
 }): ReactElement {
   return (
-    <section className="grid content-start gap-3 p-4 sm:p-5">
+    <section className="grid min-w-0 grid-cols-1 content-start gap-3 p-4 sm:p-5">
       <div>
         <h4 className="text-sm font-semibold text-foreground">{title}</h4>
         <p className="text-xs text-muted-foreground">{caption}</p>
@@ -1890,7 +1944,7 @@ function CategoryLeaderCard({
       {leaders.length === 0 ? (
         <EmptyStateText message="No team has a score yet. Rankings will appear after the first scored tick; verify the match and scheduler are running if this remains empty." />
       ) : (
-        <ol className="grid gap-2" aria-label={title}>
+        <ol className="grid grid-cols-1 gap-2" aria-label={title}>
           {leaders.map((leader) => (
             <CategoryLeaderRow
               key={leader.team}
@@ -1926,7 +1980,7 @@ export function ScoreboardCategoryLeadersPanel({
           Top {topN} teams per cumulative category. Awards go to teams, not players.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid p-0 sm:p-0 md:grid-cols-3 md:divide-x divide-y md:divide-y-0 divide-border">
+      <CardContent className="grid grid-cols-1 p-0 sm:p-0 md:grid-cols-3 md:divide-x divide-y md:divide-y-0 divide-border">
         <CategoryLeaderCard
           title="Best Attacker"
           caption="Attack points from captured flags."
@@ -1963,14 +2017,61 @@ function freezeStateLabel(status: AdminScoreboardFreeze | null): {
   return { label: "Scheduled", tone: "tone-info" };
 }
 
+type FreezeDateTime = { date: string; time: string };
+const emptyFreezeDateTime: FreezeDateTime = { date: "", time: "" };
+
+function FreezeDateTimeFields({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: FreezeDateTime;
+  onChange: (value: FreezeDateTime) => void;
+}): ReactElement {
+  const previewId = `${id}-preview`;
+  const complete = value.date !== "" && value.time !== "";
+
+  return (
+    <fieldset className="min-w-0 space-y-2">
+      <legend className="text-sm font-semibold">{label}</legend>
+      <Field label="Date" htmlFor={`${id}-date`}>
+        <Input
+          id={`${id}-date`}
+          type="date"
+          aria-describedby={complete ? previewId : undefined}
+          className="px-1 sm:px-3"
+          value={value.date}
+          onChange={(event) => onChange({ ...value, date: event.target.value })}
+        />
+      </Field>
+      <Field label="Time" htmlFor={`${id}-time`}>
+        <Input
+          id={`${id}-time`}
+          type="time"
+          aria-describedby={complete ? previewId : undefined}
+          className="px-1 sm:px-3"
+          value={value.time}
+          onChange={(event) => onChange({ ...value, time: event.target.value })}
+        />
+      </Field>
+      {complete && (
+        <LocalDateTimePreview id={previewId} value={`${value.date}T${value.time}`} />
+      )}
+    </fieldset>
+  );
+}
+
 // ScoreboardFreezeControl is self-contained: it reads and writes the freeze
 // window directly through the admin proxy routes rather than threading state
 // through the organizer dashboard hook. The participant board freezes; this
 // organizer view (and the admin SSE stream) stay live.
 export function ScoreboardFreezeControl(): ReactElement {
   const [status, setStatus] = useState<AdminScoreboardFreeze | null>(null);
-  const [freezeAt, setFreezeAt] = useState("");
-  const [unfreezeAt, setUnfreezeAt] = useState("");
+  const [freezeAt, setFreezeAt] = useState(emptyFreezeDateTime);
+  const [unfreezeAt, setUnfreezeAt] = useState(emptyFreezeDateTime);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -1993,8 +2094,14 @@ export function ScoreboardFreezeControl(): ReactElement {
   }, [load]);
 
   async function applyFreeze(): Promise<void> {
-    if (!freezeAt) {
-      setError("Pick a freeze start time.");
+    const freezeTimestamp = fromDateTimeLocalValue(`${freezeAt.date}T${freezeAt.time}`);
+    const unfreezeTimestamp = fromDateTimeLocalValue(`${unfreezeAt.date}T${unfreezeAt.time}`);
+    if (!freezeTimestamp) {
+      setError("Pick a freeze date and time.");
+      return;
+    }
+    if ((unfreezeAt.date || unfreezeAt.time) && !unfreezeTimestamp) {
+      setError("Pick both an unfreeze date and time, or leave both blank.");
       return;
     }
     setBusy(true);
@@ -2002,10 +2109,10 @@ export function ScoreboardFreezeControl(): ReactElement {
     setNote(null);
     try {
       const body: { freeze_at: string; unfreeze_at?: string } = {
-        freeze_at: new Date(freezeAt).toISOString(),
+        freeze_at: freezeTimestamp,
       };
-      if (unfreezeAt) {
-        body.unfreeze_at = new Date(unfreezeAt).toISOString();
+      if (unfreezeTimestamp) {
+        body.unfreeze_at = unfreezeTimestamp;
       }
       const res = await fetch("/api/admin/game/scoreboard/freeze", {
         method: "POST",
@@ -2042,8 +2149,8 @@ export function ScoreboardFreezeControl(): ReactElement {
         throw new Error(problem?.detail ?? "freeze clear failed");
       }
       setStatus((await res.json()) as AdminScoreboardFreeze);
-      setFreezeAt("");
-      setUnfreezeAt("");
+      setFreezeAt(emptyFreezeDateTime);
+      setUnfreezeAt(emptyFreezeDateTime);
       setNote("Freeze cleared. Participant board is live.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "freeze clear failed");
@@ -2063,9 +2170,9 @@ export function ScoreboardFreezeControl(): ReactElement {
           the live board.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Participant board:</span>
+      <CardContent className="grid grid-cols-1 gap-3 px-2 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="wrap-anywhere text-sm text-muted-foreground">Participant board:</span>
           <Badge className={state.tone} data-testid="scoreboard-freeze-state">
             {state.label}
           </Badge>
@@ -2078,26 +2185,20 @@ export function ScoreboardFreezeControl(): ReactElement {
             </span>
           )}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
-          <Field label="Freeze at" htmlFor="scoreboard-freeze-at">
-            <Input
-              id="scoreboard-freeze-at"
-              data-testid="scoreboard-freeze-at"
-              type="datetime-local"
-              value={freezeAt}
-              onChange={(event) => setFreezeAt(event.target.value)}
-            />
-          </Field>
-          <Field label="Unfreeze at (optional)" htmlFor="scoreboard-unfreeze-at">
-            <Input
-              id="scoreboard-unfreeze-at"
-              data-testid="scoreboard-unfreeze-at"
-              type="datetime-local"
-              value={unfreezeAt}
-              onChange={(event) => setUnfreezeAt(event.target.value)}
-            />
-          </Field>
-          <div className="flex gap-2 sm:col-span-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <FreezeDateTimeFields
+            id="scoreboard-freeze-at"
+            label="Freeze at"
+            value={freezeAt}
+            onChange={setFreezeAt}
+          />
+          <FreezeDateTimeFields
+            id="scoreboard-unfreeze-at"
+            label="Unfreeze at (optional)"
+            value={unfreezeAt}
+            onChange={setUnfreezeAt}
+          />
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Button
               type="button"
               disabled={busy}
@@ -2317,7 +2418,12 @@ function MatchLifecycleCard({
               </Button>
             ) : null}
             {canPause ? (
-              <Button disabled={pendingAction !== null} data-testid="pause-match" onClick={onPauseMatch}>
+              <Button
+                disabled={pendingAction !== null}
+                data-testid="pause-match"
+                className="button-attention"
+                onClick={onPauseMatch}
+              >
                 {pendingAction === "game:match:pause" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
                 Pause game
               </Button>
@@ -2396,7 +2502,7 @@ function MatchScheduleCard({
           Configure the planned start and end timestamps used by game-core.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 px-2 sm:px-5">
         <InfoPanel layout="grid">
           <InfoLine
             label="Scheduled start"
@@ -2409,9 +2515,9 @@ function MatchScheduleCard({
             valueClassName="font-mono"
           />
         </InfoPanel>
-        <div className="grid gap-3 rounded-sm border border-border/70 bg-background p-3">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className="grid gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:rounded-sm sm:border sm:border-border/70 sm:bg-background sm:p-3">
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3">
               <Field
                 label="Scheduled Start Date"
                 htmlFor="match-scheduled-start-date"
@@ -2419,6 +2525,8 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-start-date"
                   type="date"
+                  aria-describedby={draftScheduledStart ? "match-start-preview" : undefined}
+                  className="px-1 sm:px-3"
                   value={datePartFromDateTimeLocalValue(draftScheduledStart)}
                   onChange={(event) =>
                     setDraftScheduledStart(
@@ -2437,6 +2545,8 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-start-time"
                   type="time"
+                  aria-describedby={draftScheduledStart ? "match-start-preview" : undefined}
+                  className="px-1 sm:px-3"
                   step={60}
                   value={timePartFromDateTimeLocalValue(draftScheduledStart)}
                   onChange={(event) =>
@@ -2449,8 +2559,9 @@ function MatchScheduleCard({
                   }
                 />
               </Field>
+              <LocalDateTimePreview id="match-start-preview" value={draftScheduledStart} />
             </div>
-            <div className="grid gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <Field
                 label="Scheduled End Date"
                 htmlFor="match-scheduled-end-date"
@@ -2458,6 +2569,8 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-end-date"
                   type="date"
+                  aria-describedby={draftScheduledEnd ? "match-end-preview" : undefined}
+                  className="px-1 sm:px-3"
                   value={datePartFromDateTimeLocalValue(draftScheduledEnd)}
                   onChange={(event) =>
                     setDraftScheduledEnd(
@@ -2473,6 +2586,8 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-end-time"
                   type="time"
+                  aria-describedby={draftScheduledEnd ? "match-end-preview" : undefined}
+                  className="px-1 sm:px-3"
                   step={60}
                   value={timePartFromDateTimeLocalValue(draftScheduledEnd)}
                   onChange={(event) =>
@@ -2482,6 +2597,7 @@ function MatchScheduleCard({
                   }
                 />
               </Field>
+              <LocalDateTimePreview id="match-end-preview" value={draftScheduledEnd} />
             </div>
           </div>
           <CardActionRow>
@@ -3112,7 +3228,7 @@ function OperationsSupportPanel({
   onRefreshMetrics: () => void;
 }): ReactElement {
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <div className="flex flex-col gap-1">
         <h3 data-slot="section-heading" className="text-sm font-semibold text-foreground">
           Operational Signals
@@ -3121,7 +3237,7 @@ function OperationsSupportPanel({
           Alert pressure and live service health in one operator band.
         </p>
       </div>
-      <div className="grid items-start gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <OperationsAlertsCard
           operationsStatus={operationsStatus}
           pendingAction={pendingAction}
@@ -3150,8 +3266,8 @@ function OperationsAlertsCard({
 
   return (
     <Card data-testid="operations-alerts-card">
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div className="grid gap-1.5">
+      <CardHeader className="flex-wrap items-start justify-between gap-3 sm:flex-row">
+        <div className="grid min-w-0 gap-1.5">
           <CardTitle>Runtime Alerts</CardTitle>
           <CardDescription>Scheduler, checker, deployment, gateway, and access warnings.</CardDescription>
         </div>
@@ -3240,8 +3356,8 @@ function OperationsMetricsCard({
 
   return (
     <Card data-testid="operations-metrics-card">
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div className="grid gap-1.5">
+      <CardHeader className="flex-wrap items-start justify-between gap-3 sm:flex-row">
+        <div className="grid min-w-0 gap-1.5">
           <CardTitle>Service Metrics</CardTitle>
           <CardDescription>
             Live counters from game-core, submission, controller, realtime, and WireGuard.
@@ -3269,7 +3385,7 @@ function OperationsMetricsCard({
           />
         ) : (
           <>
-            <div className="grid gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <StatusBanner
                 message={
                   unhealthyCount === 0
@@ -3284,7 +3400,7 @@ function OperationsMetricsCard({
                     <Badge
                       key={entry.title}
                       variant="outline"
-                      className={entry.statusClassName}
+                      className={cn("min-w-0 wrap-anywhere", entry.statusClassName)}
                     >
                       {entry.title}: {entry.statusLabel}
                     </Badge>
@@ -3301,7 +3417,7 @@ function OperationsMetricsCard({
                 .
               </p>
             </InfoPanel>
-            <div className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <InfoPanel layout="grid" tone="surface">
                 <InfoLine
                   label="Checker runs"
@@ -3352,7 +3468,7 @@ function OperationsMetricsCard({
               <summary className="cursor-pointer text-sm font-medium text-foreground">
                 Inspect per-service metrics
               </summary>
-              <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr] 2xl:grid-cols-[1fr_1fr_1fr]">
+              <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 <MetricsServicePanel
                   title="Game Core"
                   health={serviceHealth[0]}
@@ -3544,8 +3660,8 @@ function MetricsServicePanel({
   lines: { label: string; value: string }[];
 }): ReactElement {
   return (
-    <div className="rounded-sm border border-border/70 bg-muted/20 p-4">
-      <div className="flex items-start justify-between gap-3">
+    <div className="min-w-0 wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 sm:p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {health ? (
           <Badge variant="outline" className={health.statusClassName}>
@@ -3562,7 +3678,7 @@ function MetricsServicePanel({
         {lines.map((line) => (
           <div
             key={`${title}-${line.label}`}
-            className="flex items-center justify-between gap-3 text-sm"
+            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm"
           >
             <span className="text-muted-foreground">{line.label}</span>
             <span className="font-mono text-foreground">{line.value}</span>
@@ -3736,8 +3852,8 @@ function SchedulerCard({
   return (
     <Card data-testid="scheduler-card" id="scheduler-card">
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+          <div className="min-w-0 wrap-anywhere">
             <CardTitle>Scheduler</CardTitle>
             <CardDescription>
               Core cadence controls stay visible. Audit history expands only when
@@ -3760,7 +3876,7 @@ function SchedulerCard({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4">
+        <div className="grid grid-cols-1 gap-4">
           <SchedulerStatusPanel
             draftInterval={draftInterval}
             intervalChanged={intervalChanged}
@@ -3895,12 +4011,16 @@ function SchedulerIntervalControl({
 
   return (
     <div data-slot="info-line" className="flex items-center justify-between gap-3">
-      <span data-slot="info-label" className="text-sm text-muted-foreground">Interval</span>
-      <div className="flex items-center gap-2">
+      <label htmlFor="scheduler-interval" data-slot="info-label" className="text-sm text-muted-foreground">
+        Interval
+      </label>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <div className="flex h-8 items-center rounded-sm border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
           <input
+            id="scheduler-interval"
             type="number"
             min="1"
+            aria-describedby="scheduler-interval-unit"
             className="w-12 bg-transparent outline-none font-mono"
             value={draftInterval}
             onChange={(event) => onDraftIntervalChange(event.target.value)}
@@ -3910,8 +4030,9 @@ function SchedulerIntervalControl({
               }
             }}
           />
-          <span className="ml-1 text-[10px] text-muted-foreground uppercase font-bold">
-            Sec
+          <span id="scheduler-interval-unit" className="ml-1 text-[10px] text-muted-foreground uppercase font-bold">
+            <span aria-hidden="true">Sec</span>
+            <span className="sr-only">Seconds</span>
           </span>
         </div>
         <Button
@@ -4107,7 +4228,7 @@ function SchedulerAuditInput({
   onChange: (value: string) => void;
 }): ReactElement {
   return (
-    <Field label={label} htmlFor={id} className="min-w-[11rem] flex-1">
+    <Field label={label} htmlFor={id} className="flex-[1_1_min(100%,11rem)]">
       <Input
         id={id}
         placeholder={placeholder}
@@ -4181,10 +4302,10 @@ function SchedulerEventRow({
   event: AdminSchedulerEventPage["items"][number];
 }): ReactElement {
   return (
-    <div className="rounded-sm border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+    <div className="wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{event.event_type}</Badge>
+          <Badge variant="outline" className="min-w-0">{event.event_type}</Badge>
           <Badge variant="secondary">{event.source}</Badge>
           <span className="font-mono text-xs text-foreground">
             {formatIndonesianDate(event.created_at)}
@@ -4216,7 +4337,7 @@ function CurrentTickCard({
       <CardContent>
         {currentTick ? (
           <InfoPanel layout="grid" tone="surface">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <span>Tick #{currentTick.id}</span>
               <Badge
                 className={getTickStatusTone(currentTick.status)}
@@ -4364,8 +4485,8 @@ export function GameAttacksCard({
   return (
     <Card id="attack-feed">
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+          <div className="min-w-0 wrap-anywhere">
             <CardTitle>Accepted Attacks</CardTitle>
             <CardDescription>
               Organizer feed with direct filters, pagination, and live accepted
@@ -4530,8 +4651,8 @@ export function ScoringAuditCard({
   return (
     <Card data-testid="scoring-audit-card">
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-3 sm:flex-nowrap">
+          <div className="min-w-0 wrap-anywhere">
             <CardTitle>Scoring Replay Audit</CardTitle>
             <CardDescription>
               Dry-run replay of submissions and checker state against the stored scoreboard.
@@ -4722,8 +4843,8 @@ function CheckerRunsCard({
   return (
     <Card data-testid="checker-runs-card" id="checker-runs-card">
       <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+          <div className="min-w-0 wrap-anywhere">
             <CardTitle>Checker Investigation</CardTitle>
             <CardDescription>
               Summary-first checker diagnostics. Expand the history only
@@ -5015,14 +5136,17 @@ function WireGuardDialog({
   peer,
   onClose,
   onDownload,
+  returnFocusRef,
 }: {
   open: boolean;
   peer: AdminWireGuardPeer | null;
   onClose: () => void;
   onDownload: (peer: AdminWireGuardPeer) => void;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
 }): ReactElement {
   return (
     <AppDialog
+      returnFocusRef={returnFocusRef}
       body={
         peer ? (
           <div className="grid gap-4">
@@ -5090,8 +5214,8 @@ function RuntimeStatusBlock({
   error?: string;
 }): ReactElement {
   return (
-    <div className="surface-inset grid gap-2 rounded-sm border p-3 text-sm">
-      <div className="flex items-center justify-between gap-3">
+    <div className="surface-inset grid grid-cols-1 gap-2 rounded-sm border p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="font-medium text-foreground">Runtime status</span>
         <Badge className={tone} variant="outline">
           {state}
@@ -5106,7 +5230,7 @@ function RuntimeStatusBlock({
               className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-4"
             >
               <dt data-slot="info-label" className="text-muted-foreground">{row.label}</dt>
-              <dd data-slot="info-value" className="min-w-0 break-words font-mono text-[0.8125rem]">
+              <dd data-slot="info-value" className="min-w-0 wrap-anywhere font-mono text-[0.8125rem]">
                 {row.value}
               </dd>
             </div>
@@ -6000,6 +6124,7 @@ export function EntityFormDialog({
   return (
     <AppDialog
       open={isOpen}
+      pinFormFooter
       onClose={onClose}
       title={title}
       description={
@@ -6086,12 +6211,12 @@ function DeleteConfirmDialog({
             <InfoLine label="Target" value={deleteTarget.label} />
             <InfoLine label="Effect" value={`Delete this ${kindLabel} immediately`} />
             {deleteTarget.warning ? (
-              <p className="text-sm leading-6 text-muted-foreground">
+              <p className="text-sm leading-6">
                 {deleteTarget.warning}
               </p>
             ) : null}
             {impactLines.length > 0 ? (
-              <ul className="space-y-1 text-xs leading-5 text-foreground">
+              <ul className="space-y-1 text-xs leading-5">
                 {impactLines.map((line) => (
                   <li key={line}>{line}</li>
                 ))}

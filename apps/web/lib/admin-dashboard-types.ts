@@ -379,6 +379,12 @@ export type AdminOverview = {
   totalTicks: number;
   scoreboardRows: number;
   apiBaseUrl: string;
+  /** Match lifecycle state from game-core (running, paused, …), when known. */
+  matchState?: string;
+  /** Latest tick id, when one exists. */
+  currentTick?: number;
+  /** Whether the participant scoreboard is frozen right now. */
+  scoreboardFrozen?: boolean;
 };
 
 export type AdminOperationsAlert = {

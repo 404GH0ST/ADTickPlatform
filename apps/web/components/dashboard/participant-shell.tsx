@@ -38,7 +38,7 @@ export function ParticipantShell({
   children,
   title = 'Participant',
 }: Props) {
-  const gameAlertMessage = getParticipantGameAlertMessage(overview);
+  const gameAlertMessage = getParticipantGameAlertMessage(overview, activePath);
   const readiness = useMatchReadiness(overview);
   const hasParticipantTeam =
     overview.authenticated &&
@@ -90,16 +90,19 @@ export function ParticipantShell({
               ) : null}
               <ParticipantLogoutButton />
             </>
-          ) : (
-            <Button asChild>
-              <Link href="/login">Sign In</Link>
-            </Button>
-          )}
+          ) : null}
         </>
+      }
+      primaryHeaderAction={
+        overview.authenticated ? null : (
+          <Button asChild>
+            <Link href="/login">Sign In</Link>
+          </Button>
+        )
       }
       summarySection={
         <section className="surface-inset overflow-hidden rounded-sm border" data-slot="summary-strip" data-testid="participant-summary">
-          <dl className="grid gap-0 sm:grid-cols-2 xl:grid-cols-6">
+          <dl className="grid grid-cols-1 gap-0 sm:grid-cols-2 xl:grid-cols-6">
             <SummaryItem label="Challenge Catalog" value={String(overview.challengeCount)} />
             <SummaryItem label="Owned Services" value={String(overview.ownServiceCount)} />
             <SummaryItem label="Enemy Targets" value={String(overview.enemyTargetCount)} />
@@ -121,7 +124,7 @@ export function ParticipantShell({
                 )
               }
             />
-            <SummaryItem label="API Base" value={overview.apiBaseUrl} mono />
+            <SummaryItem label="API Base" value={<span title={overview.apiBaseUrl}>{overview.apiBaseUrl}</span>} mono />
           </dl>
         </section>
       }
@@ -141,7 +144,7 @@ export function ParticipantShell({
   );
 }
 
-function getParticipantGameAlertMessage(overview: PlatformOverview): string | null {
+function getParticipantGameAlertMessage(overview: PlatformOverview, activePath: string): string | null {
   if (overview.matchState === 'finished') {
     const currentTickText =
       typeof overview.currentTick === 'number' ? ` at tick #${overview.currentTick}` : '';
@@ -156,7 +159,8 @@ function getParticipantGameAlertMessage(overview: PlatformOverview): string | nu
     return 'The match is currently paused. Tick progression and checker runs are temporarily suspended. Submissions, service access, and SSH are blocked until organizers resume.';
   }
 
-  if (overview.scoreboardFrozen) {
+  // The scoreboard page shows its own frozen banner; don't announce it twice.
+  if (overview.scoreboardFrozen && activePath !== '/scoreboard') {
     return 'The public scoreboard is frozen. Attack submissions and service controls still follow match state.';
   }
 
@@ -174,14 +178,14 @@ function SummaryItem({
 }) {
   return (
     <div className="border-b border-border px-3 py-2.5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <dt className="wrap-anywhere text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
       <dd
         className={
           mono
-            ? "mt-1 break-all font-mono text-xs leading-5 text-foreground"
-            : "mt-1 text-sm font-semibold tabular-nums tracking-tight text-foreground"
+            ? "mt-1 wrap-anywhere font-mono text-xs leading-5 text-foreground xl:truncate"
+            : "mt-1 wrap-anywhere text-sm font-semibold tabular-nums tracking-tight text-foreground"
         }
       >
         {value}

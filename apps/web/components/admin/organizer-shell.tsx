@@ -1,6 +1,7 @@
 import type { AdminOverview } from '@/lib/admin-dashboard-types';
 import type { ReactNode } from 'react';
 
+import { OrganizerMatchStatus } from '@/components/admin/organizer-match-status';
 import { OrganizerStatusSummary } from '@/components/admin/organizer-status-summary';
 import { AppShell } from '@/components/ui/app-shell';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,7 @@ export function OrganizerShell({
           <a href="/">Participant</a>
         </Button>
       }
+      navActions={<OrganizerMatchStatus overview={overview} />}
       summarySection={<OrganizerStatusSummary overview={overview} showStats={activePath === '/admin'} />}
     >
       {children}

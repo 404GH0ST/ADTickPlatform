@@ -21,6 +21,11 @@ export type AppShellProps = {
   title: string;
   children: ReactNode;
   headerActions?: ReactNode;
+  /**
+   * One key that must stay visible on its own (e.g. Sign In while signed
+   * out), even when a theme folds headerActions into a menu.
+   */
+  primaryHeaderAction?: ReactNode;
   /** Right side of the primary nav row (e.g. match readiness). */
   navActions?: ReactNode;
   /** Directly under the nav, above summary/alerts (e.g. expanded readiness). */
@@ -40,6 +45,7 @@ export function DefaultAppShell({
   title,
   children,
   headerActions,
+  primaryHeaderAction,
   navActions,
   belowNav,
   summarySection,
@@ -55,6 +61,7 @@ export function DefaultAppShell({
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <AppearanceControls />
             {headerActions}
+            {primaryHeaderAction}
           </div>
         </header>
 

@@ -26,6 +26,7 @@ import {
   listAdminTeams,
   organizerApiBaseUrl,
 } from '@/lib/admin-api';
+import { getScoreboardFreezeStatus } from '@/lib/platform-api';
 
 export type AdminDashboardData = {
   teams: AdminTeam[];
@@ -147,7 +148,12 @@ function emptyServiceMetrics(): AdminServiceMetricSnapshot | null {
 export async function loadAdminDashboardData(
   options: AdminDashboardDataOptions = {},
 ): Promise<AdminDashboardData> {
-  const results = await fetchAdminDashboardResults(options);
+  // Freeze state only feeds the shell's status chip, so a failed read must not
+  // mark the whole dashboard degraded.
+  const [results, freeze] = await Promise.all([
+    fetchAdminDashboardResults(options),
+    getScoreboardFreezeStatus().catch(() => null),
+  ]);
   const data = readAdminDashboardResults(results, options);
   const source = adminDashboardSource(results);
 
@@ -162,7 +168,7 @@ export async function loadAdminDashboardData(
     attackPage: data.attackPage,
     scoreboard: data.scoreboard,
     serviceMetrics: data.serviceMetrics,
-    overview: buildAdminOverview(data, source),
+    overview: buildAdminOverview(data, source, freeze?.frozen),
   };
 }
 
@@ -255,6 +261,7 @@ function adminDashboardSource(
 function buildAdminOverview(
   data: AdminLiveData,
   source: AdminOverview['source'],
+  scoreboardFrozen?: boolean,
 ): AdminOverview {
   return {
     source,
@@ -277,5 +284,8 @@ function buildAdminOverview(
     totalTicks: data.gameStatus.total_ticks,
     scoreboardRows: data.scoreboard.length,
     apiBaseUrl: organizerApiBaseUrl(),
+    matchState: data.gameStatus.match?.state,
+    currentTick: data.gameStatus.current_tick?.id,
+    scoreboardFrozen,
   };
 }
