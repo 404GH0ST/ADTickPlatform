@@ -28,6 +28,9 @@ type serviceAccessExecutor interface {
 	Teardown(ctx context.Context) error
 }
 
+// marshalAccessStatus is a seam so tests can exercise encoding failures.
+var marshalAccessStatus = json.MarshalIndent
+
 type controllerAccessArtifactPaths struct {
 	rulesPath  string
 	statusPath string
@@ -488,9 +491,6 @@ func (e *hostServiceAccessExecutor) selectIptablesBinary(ctx context.Context) (s
 		if candidate == "" {
 			continue
 		}
-		if _, ok := seen[candidate]; !ok {
-			continue
-		}
 		if err := e.runner.Run(ctx, candidate, "-S", "FORWARD"); err == nil {
 			return candidate, nil
 		}
@@ -704,7 +704,7 @@ func writeControllerAccessStatus(path string, status apigateway.ControllerAccess
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	payload, err := json.MarshalIndent(status, "", "  ")
+	payload, err := marshalAccessStatus(status, "", "  ")
 	if err != nil {
 		return err
 	}

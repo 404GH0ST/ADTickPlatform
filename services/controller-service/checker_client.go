@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -39,10 +38,8 @@ func newCheckerValidationClient() checkerValidationClient {
 }
 
 func (c *httpCheckerValidationClient) Validate(ctx context.Context, request apigateway.CheckerValidationRequest) (apigateway.CheckerValidationResult, error) {
-	body, err := json.Marshal(request)
-	if err != nil {
-		return apigateway.CheckerValidationResult{}, err
-	}
+	// A plain request struct always encodes.
+	body, _ := json.Marshal(request)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/v1/checkers/validate", strings.NewReader(string(body))) // #nosec G704 -- base URL is validated service configuration.
 	if err != nil {
 		return apigateway.CheckerValidationResult{}, err
@@ -85,12 +82,4 @@ func cloneCheckerValidationClient(baseURL, token string, client *http.Client) *h
 		token:   strings.TrimSpace(token),
 		client:  client,
 	}
-}
-
-func decodeCheckerValidationRequest(body io.Reader) (apigateway.CheckerValidationRequest, error) {
-	var request apigateway.CheckerValidationRequest
-	if err := json.NewDecoder(body).Decode(&request); err != nil {
-		return apigateway.CheckerValidationRequest{}, err
-	}
-	return request, nil
 }

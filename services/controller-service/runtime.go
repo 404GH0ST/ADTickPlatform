@@ -140,6 +140,8 @@ type dockerCLIExecutor struct {
 	captureNetnsRoot     string
 	captureNetnsHostRoot string
 	captureMu            sync.Mutex
+	// captureSweepInterval spaces guard re-verification sweeps; zero means 2s.
+	captureSweepInterval time.Duration
 	captureSeen          map[string]captureStamp
 }
 

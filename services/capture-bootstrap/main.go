@@ -19,6 +19,16 @@ import (
 
 const address = "@adplatform-capture-start-v1"
 
+// Seams over the host interfaces this gate depends on; tests replace them.
+var (
+	procRoot    = "/proc"
+	readLink    = os.Readlink
+	listen      = net.Listen
+	dial        = net.DialTimeout
+	execProgram = syscall.Exec
+	exit        = os.Exit
+)
+
 type message struct {
 	Op    string `json:"op"`
 	Nonce string `json:"nonce,omitempty"`
@@ -26,7 +36,7 @@ type message struct {
 }
 
 func exchange(op, nonce string) (message, error) {
-	c, err := net.DialTimeout("unix", address, time.Second)
+	c, err := dial("unix", address, time.Second)
 	if err != nil {
 		return message{}, err
 	}
@@ -47,7 +57,7 @@ func exchange(op, nonce string) (message, error) {
 // gate execs the application. Docker init is PID 1; its single direct child
 // is the entrypoint. Only that child may report readiness or release the gate.
 func verifyGateLeader() error {
-	children, err := os.ReadFile("/proc/1/task/1/children")
+	children, err := os.ReadFile(filepath.Join(procRoot, "1", "task", "1", "children"))
 	if err != nil {
 		return err
 	}
@@ -55,11 +65,11 @@ func verifyGateLeader() error {
 	if len(pids) != 1 {
 		return fmt.Errorf("capture startup gate is not the sole Docker init child")
 	}
-	leader, err := os.Stat(filepath.Join("/proc", pids[0], "exe"))
+	leader, err := os.Stat(filepath.Join(procRoot, pids[0], "exe"))
 	if err != nil {
 		return err
 	}
-	self, err := os.Stat("/proc/self/exe")
+	self, err := os.Stat(filepath.Join(procRoot, "self", "exe"))
 	if err != nil {
 		return err
 	}
@@ -69,7 +79,7 @@ func verifyGateLeader() error {
 	// The one-shot bootstrap initializer atomically replaces this read-only
 	// volume file during upgrades. A gate already waiting on its old inode is
 	// still trusted; only the immutable volume path can produce this link.
-	path, err := os.Readlink(filepath.Join("/proc", pids[0], "exe"))
+	path, err := readLink(filepath.Join(procRoot, pids[0], "exe"))
 	if err != nil || path != "/opt/adplatform-capture/start (deleted)" {
 		return fmt.Errorf("container entrypoint is not the capture startup gate")
 	}
@@ -80,11 +90,10 @@ func gate(args []string) error {
 		return fmt.Errorf("original image command is required")
 	}
 	nonceBytes := make([]byte, 32)
-	if _, err := rand.Read(nonceBytes); err != nil {
-		return err
-	}
+	// crypto/rand.Read never returns an error; it aborts the process instead.
+	_, _ = rand.Read(nonceBytes)
 	nonce := hex.EncodeToString(nonceBytes)
-	listener, err := net.Listen("unix", address)
+	listener, err := listen("unix", address)
 	if err != nil {
 		return err
 	}
@@ -113,7 +122,7 @@ func gate(args []string) error {
 	if err != nil {
 		return err
 	}
-	return syscall.Exec(executable, args, os.Environ())
+	return execProgram(executable, args, os.Environ())
 }
 func lookPath(name string) (string, error) {
 	if filepath.IsAbs(name) || filepath.Base(name) != name {
@@ -128,47 +137,53 @@ func lookPath(name string) (string, error) {
 	return "", fmt.Errorf("original executable %q not found", name)
 }
 func main() {
+	exit(cli(os.Args, os.Stdout, os.Stderr))
+}
+
+// cli runs one gate command and returns the process exit status.
+func cli(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch {
-	case len(os.Args) == 3 && os.Args[1] == "install":
+	case len(args) == 3 && args[1] == "install":
 		var binary []byte
-		binary, err = os.ReadFile("/proc/self/exe")
+		binary, err = os.ReadFile(filepath.Join(procRoot, "self", "exe"))
 		if err == nil {
-			err = os.MkdirAll(os.Args[2], 0755)
+			err = os.MkdirAll(args[2], 0755)
 		}
 		if err == nil {
-			temporary := filepath.Join(os.Args[2], ".start-new")
+			temporary := filepath.Join(args[2], ".start-new")
 			err = os.WriteFile(temporary, binary, 0555)
 			if err == nil {
 				err = os.Chmod(temporary, 0555)
 			}
 			if err == nil {
-				err = os.Rename(temporary, filepath.Join(os.Args[2], "start"))
+				err = os.Rename(temporary, filepath.Join(args[2], "start"))
 			}
 		}
-	case len(os.Args) == 2 && os.Args[1] == "probe":
+	case len(args) == 2 && args[1] == "probe":
 		var reply message
 		err = verifyGateLeader()
 		if err == nil {
 			reply, err = exchange("probe", "")
 		}
 		if err == nil {
-			fmt.Println(reply.Nonce)
+			fmt.Fprintln(stdout, reply.Nonce)
 		}
-	case len(os.Args) == 3 && os.Args[1] == "release":
+	case len(args) == 3 && args[1] == "release":
 		err = verifyGateLeader()
 		if err == nil {
-			_, err = exchange("release", os.Args[2])
+			_, err = exchange("release", args[2])
 		}
-	case len(os.Args) == 2 && os.Args[1] == "status":
+	case len(args) == 2 && args[1] == "status":
 		err = verifyGateLeader()
-	case len(os.Args) >= 3 && os.Args[1] == "run":
-		err = gate(os.Args[2:])
+	case len(args) >= 3 && args[1] == "run":
+		err = gate(args[2:])
 	default:
 		err = fmt.Errorf("expected install, status, probe, release, or run COMMAND")
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "capture startup gate:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "capture startup gate:", err)
+		return 1
 	}
+	return 0
 }

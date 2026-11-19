@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"adplatform/internal/platform/config"
@@ -25,13 +28,24 @@ type controllerServer struct {
 	now        func() time.Time
 }
 
+// fatal reports a startup failure and exits; tests replace it.
+var fatal = log.Fatal
+
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
+		fatal(err)
+	}
+}
+
+// run wires the service and serves until ctx is cancelled.
+func run(ctx context.Context) error {
 	info := httpapi.ServiceInfo{Name: "controller-service", Version: "dev", Addr: config.String("CONTROLLER_SERVICE_ADDR", ":8084")}
 
 	store, err := buildStore(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer store.Close()
 
@@ -46,12 +60,12 @@ func main() {
 	}
 	if docker, ok := server.executor.(*dockerCLIExecutor); ok {
 		if err := docker.validateCaptureConfig(); err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 	httpapi.RegisterMetricsSource(info.Name, server)
 	if err := restoreControllerState(ctx, controllerReconcileStoreAdapter{store: store}, server.executor, server.access, server.wireGuard, server.now); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	if docker, ok := server.executor.(*dockerCLIExecutor); ok {
@@ -63,9 +77,7 @@ func main() {
 	server.RegisterRoutes(mux)
 
 	log.Printf("starting %s on %s", info.Name, info.Addr)
-	if err := httpapi.RunServer(ctx, info, mux); err != nil {
-		log.Fatal(err)
-	}
+	return httpapi.RunServer(ctx, info, mux)
 }
 
 func buildStore(ctx context.Context) (apigateway.Store, error) {

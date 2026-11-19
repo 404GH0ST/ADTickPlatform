@@ -3,13 +3,27 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/httpapi"
 )
 
+// fatal reports a startup failure and exits; tests replace it.
+var fatal = log.Fatal
+
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
+		fatal(err)
+	}
+}
+
+// run wires the service and serves until ctx is cancelled.
+func run(ctx context.Context) error {
 	info := httpapi.ServiceInfo{Name: "submission-service", Version: "dev", Addr: config.String("SUBMISSION_SERVICE_ADDR", ":8082")}
 
 	server := newSubmissionServiceServer(
@@ -25,7 +39,5 @@ func main() {
 	server.RegisterRoutes(mux)
 
 	log.Printf("starting %s on %s", info.Name, info.Addr)
-	if err := httpapi.RunServer(ctx, info, mux); err != nil {
-		log.Fatal(err)
-	}
+	return httpapi.RunServer(ctx, info, mux)
 }

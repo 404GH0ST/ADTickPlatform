@@ -92,6 +92,9 @@ type hostWireGuardApplier struct {
 	runner          commandRunner
 }
 
+// marshalIndent is a seam so tests can exercise artifact encoding failures.
+var marshalIndent = json.MarshalIndent
+
 type commandRunner interface {
 	Run(ctx context.Context, binary string, args ...string) error
 }
@@ -358,7 +361,7 @@ func (a *hostWireGuardApplier) Apply(ctx context.Context, snapshot wireGuardGate
 		if snapshot.MatchPaused {
 			var organizers []apigateway.WireGuardGatewayPeer
 			for _, p := range peers {
-				if p.TeamName == "Organizer" {
+				if p.Organizer {
 					organizers = append(organizers, p)
 				}
 			}
@@ -438,7 +441,7 @@ func writeWireGuardArtifacts(paths artifactPaths, snapshot wireGuardGatewaySnaps
 		return err
 	}
 
-	manifest, err := json.MarshalIndent(wireGuardPeerManifest{Revision: snapshot.Revision, GeneratedAt: snapshot.GeneratedAt, Peers: snapshot.Peers}, "", "  ")
+	manifest, err := marshalIndent(wireGuardPeerManifest{Revision: snapshot.Revision, GeneratedAt: snapshot.GeneratedAt, Peers: snapshot.Peers}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -457,7 +460,7 @@ func writeStatusArtifact(path string, status apigateway.WireGuardGatewayStatus) 
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	payload, err := json.MarshalIndent(status, "", "  ")
+	payload, err := marshalIndent(status, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -718,22 +721,17 @@ func validateWireGuardGatewayPrivateKey(privateKey string) error {
 	if err != nil {
 		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
 	}
+	// X25519 accepts any 32-byte scalar (it clamps on use), so length is the
+	// only property left to check once the value decodes.
 	if len(decoded) != 32 {
 		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY must decode to 32 bytes")
-	}
-	if _, err := ecdh.X25519().NewPrivateKey(decoded); err != nil {
-		return fmt.Errorf("WIREGUARD_SERVER_PRIVATE_KEY is invalid: %w", err)
 	}
 	return nil
 }
 
 func defaultWireGuardGatewayKeypair() (string, string) {
-	curve := ecdh.X25519()
 	seed := sha256.Sum256([]byte("adplatform-dev-wireguard-server"))
-	privateKey, err := curve.NewPrivateKey(seed[:])
-	if err != nil {
-		encodedSeed := base64.StdEncoding.EncodeToString(seed[:])
-		return encodedSeed, encodedSeed
-	}
+	// A 32-byte seed is always a valid X25519 private key.
+	privateKey, _ := ecdh.X25519().NewPrivateKey(seed[:])
 	return base64.StdEncoding.EncodeToString(privateKey.Bytes()), base64.StdEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 }

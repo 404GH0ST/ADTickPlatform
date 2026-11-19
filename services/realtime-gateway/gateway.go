@@ -16,6 +16,9 @@ import (
 	"adplatform/internal/platform/httpapi"
 )
 
+// marshalJSON is a seam so tests can exercise snapshot encoding failures.
+var marshalJSON = json.Marshal
+
 type streamKind string
 
 const (
@@ -31,6 +34,8 @@ type realtimeGateway struct {
 	client       publicSnapshotClient
 	pollInterval time.Duration
 	adminToken   string
+	// keepaliveInterval spaces SSE comment frames that keep idle proxies open.
+	keepaliveInterval time.Duration
 
 	mu                  sync.RWMutex
 	scoreboard          []byte
@@ -55,6 +60,10 @@ type realtimeGateway struct {
 	lastSyncAt          time.Time
 	lastSyncSuccessful  bool
 	syncErrorsTotal     uint64
+	// shutdown ends every open stream when the server starts shutting down,
+	// so graceful shutdown is not held open by long-lived SSE requests. A nil
+	// channel never fires.
+	shutdown <-chan struct{}
 }
 
 type realtimeSubscriber struct {
@@ -66,6 +75,7 @@ func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration,
 	return &realtimeGateway{
 		client:              client,
 		pollInterval:        pollInterval,
+		keepaliveInterval:   15 * time.Second,
 		adminToken:          strings.TrimSpace(adminToken),
 		maxSubscribers:      2000,
 		maxPerClient:        12,
@@ -79,6 +89,12 @@ func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration,
 			streamCheckerRuns:     make(map[int]realtimeSubscriber),
 		},
 	}
+}
+
+// withShutdown ends open streams once done is closed.
+func (g *realtimeGateway) withShutdown(done <-chan struct{}) *realtimeGateway {
+	g.shutdown = done
+	return g
 }
 
 func (g *realtimeGateway) withSubscriberLimits(total, perClient int, trustProxyHeaders bool) *realtimeGateway {
@@ -244,12 +260,14 @@ func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, k
 		flusher.Flush()
 	}
 
-	keepalive := time.NewTicker(15 * time.Second)
+	keepalive := time.NewTicker(g.keepaliveInterval)
 	defer keepalive.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-g.shutdown:
 			return
 		case payload, ok := <-updates:
 			if !ok {
@@ -418,7 +436,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(rows)
+		payload, err := marshalJSON(rows)
 		if err != nil {
 			return err
 		}
@@ -428,7 +446,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(rows)
+		payload, err := marshalJSON(rows)
 		if err != nil {
 			return err
 		}
@@ -438,7 +456,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(rows)
+		payload, err := marshalJSON(rows)
 		if err != nil {
 			return err
 		}
@@ -448,7 +466,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(status)
+		payload, err := marshalJSON(status)
 		if err != nil {
 			return err
 		}
@@ -458,7 +476,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(events)
+		payload, err := marshalJSON(events)
 		if err != nil {
 			return err
 		}
@@ -468,7 +486,7 @@ func (g *realtimeGateway) syncKind(ctx context.Context, kind streamKind) error {
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(runs)
+		payload, err := marshalJSON(runs)
 		if err != nil {
 			return err
 		}
