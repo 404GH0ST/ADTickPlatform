@@ -13,9 +13,6 @@ type ControllerRuntimeTask struct {
 	Endpoint        string `json:"endpoint"`
 	SSHHost         string `json:"ssh_host"`
 	ServicePort     int    `json:"service_port"`
-	// UnlockProofEpoch is mixed into AD_PLATFORM_UNLOCK_PROOF. Bumping it
-	// invalidates previously stolen proofs after a security-fix redeploy.
-	UnlockProofEpoch int `json:"unlock_proof_epoch"`
 }
 
 type ControllerServiceAccessPolicy struct {

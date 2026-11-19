@@ -390,9 +390,7 @@ This avoids forcing teams to reuse a human member credential for headless automa
 
 ## 6.1 Unlock Requirement
 
-An accepted flag captured from another team automatically unlocks SSH on the submitting team's own container for the same challenge. Game-core persists this grant in the acceptance transaction, including flags arriving through the TCP submission service, then reconciles controller access policies. The participant opens **SSH Access** to retrieve and apply the stable credential. Factory resets preserve access during the same match; organizer maintenance clears it.
-
-The legacy unlock endpoint only retries an existing grant. Injected unlock proofs no longer authorize access.
+An accepted flag captured from another team automatically unlocks SSH on the submitting team's own container for the same challenge. Game-core persists this grant in the acceptance transaction, including flags arriving through the TCP submission service, then reconciles controller access policies. The participant opens **SSH Access** to retrieve and apply the stable credential. Factory resets preserve access during the same match, and organizer maintenance clears it.
 
 ## 6.2 Direct Service Container Access
 
@@ -643,7 +641,7 @@ Attack map event payload should contain:
 ## 14. Security And Fairness Controls
 
 - strong service-to-service authentication inside the control plane
-- signed unlock tokens and tightly scoped SSH credentials
+- SSH grants tied to accepted flag captures and scoped to the submitting team’s service
 - auditable admin actions with persistent audit log
 - team-less organizer accounts to isolate administrative access from game infrastructure
 - immutable score event history

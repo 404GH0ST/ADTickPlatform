@@ -27,7 +27,6 @@ type Server struct {
 	gameCore            gameCoreClient
 	rateLimiter         rateLimiter
 	rateLimitMetrics    *rateLimitMetrics
-	unlockProofSecret   string
 	now                 func() time.Time
 }
 
@@ -56,7 +55,6 @@ func NewWithDeps(teamToken, adminToken string, teamID int, store Store, controll
 		gameCore:            game,
 		rateLimiter:         noopRateLimiter{},
 		rateLimitMetrics:    newRateLimitMetrics(),
-		unlockProofSecret:   teamToken,
 		now:                 time.Now,
 	}
 }
@@ -71,14 +69,6 @@ func (s *Server) WithSubmissionClient(client submissionClient) *Server {
 func (s *Server) WithScoringClient(client scoringClient) *Server {
 	if client != nil {
 		s.scoring = client
-	}
-	return s
-}
-
-func (s *Server) WithUnlockProofSecret(secret string) *Server {
-	trimmed := strings.TrimSpace(secret)
-	if trimmed != "" {
-		s.unlockProofSecret = trimmed
 	}
 	return s
 }
@@ -149,7 +139,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/validate", s.handleAdminValidateChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/deploy", s.handleAdminDeployChallenge)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/maintenance", s.handleAdminChallengeMaintenance)
-	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/rotate-unlock-proof", s.handleAdminRotateChallengeUnlockProof)
 	mux.HandleFunc("POST /api/v2/admin/challenges/{challenge_id}/resume", s.handleAdminChallengeResume)
 	mux.HandleFunc("GET /api/v2/admin/deployments", s.handleAdminListDeployments)
 	mux.HandleFunc("DELETE /api/v2/admin/deployments/{deployment_id}", s.handleAdminDeleteDeployment)

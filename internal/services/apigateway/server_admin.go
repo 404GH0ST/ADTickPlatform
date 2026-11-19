@@ -612,32 +612,9 @@ func (s *Server) requireSafeResourceDeletion(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// handleAdminRotateChallengeUnlockProof bumps unlock_proof_epoch and clears
-// unlocks so previously extracted proofs stop verifying after instances are
-// redeployed with the new AD_PLATFORM_UNLOCK_PROOF.
-func (s *Server) handleAdminRotateChallengeUnlockProof(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	challengeID, ok := parseChallengeID(w, r)
-	if !ok {
-		return
-	}
-	challenge, err := s.store.RotateChallengeUnlockProof(r.Context(), challengeID, s.now())
-	if err != nil {
-		writeDomainFailure(w, err)
-		return
-	}
-	s.recordAdminAudit(r.Context(), "challenge.unlock_proof.rotate", "challenge", fmt.Sprintf("challenge:%d %s", challenge.ID, challenge.Name), "rotated challenge unlock proof epoch", map[string]any{
-		"challenge_id":       challengeID,
-		"unlock_proof_epoch": challenge.UnlockProofEpoch,
-	})
-	writeData(w, http.StatusOK, challenge)
-}
-
 // handleAdminChallengeMaintenance puts a challenge under mid-match maintenance:
 // participant actions and scoring stop, and all team containers for that challenge
-// are torn down. Unlock proofs are rotated (epoch bump). Historical points remain.
+// are torn down and SSH grants are cleared. Historical points remain.
 func (s *Server) handleAdminChallengeMaintenance(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return

@@ -251,58 +251,31 @@ func TestTeamReactivateDeferredClosesNetworkAndHidesPublicServices(t *testing.T)
 	}
 }
 
-func TestMaintenanceRotatesUnlockProofEpoch(t *testing.T) {
+func TestMaintenanceClearsSSHGrants(t *testing.T) {
 	store := NewMemoryStore(101).(*memoryStore)
 	ctx := context.Background()
 
-	before, err := store.GetChallengeUnlockProofEpoch(ctx, 1)
-	if err != nil || before != 1 {
-		t.Fatalf("expected initial epoch 1, got %d err=%v", before, err)
-	}
-	oldTask, err := store.GetControllerRuntimeTask(ctx, 101, 1)
-	if err != nil {
-		t.Fatalf("runtime task: %v", err)
-	}
-	if oldTask.UnlockProofEpoch != 1 {
-		t.Fatalf("expected runtime task epoch 1, got %d", oldTask.UnlockProofEpoch)
-	}
-
-	// Simulate unlock before maintain.
 	if _, err := store.UnlockService(ctx, 101, 1); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
 
-	challenge, err := store.SetChallengeMaintenance(ctx, 1, true, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("maintain: %v", err)
-	}
-	if challenge.UnlockProofEpoch != 2 {
-		t.Fatalf("expected epoch 2 after maintain, got %d", challenge.UnlockProofEpoch)
+	if challenge, err := store.SetChallengeMaintenance(ctx, 1, true, time.Now().UTC()); err != nil || !challenge.Maintenance {
+		t.Fatalf("enter maintenance: %+v, %v", challenge, err)
 	}
 	services, err := store.ListTeamServices(ctx, 101)
 	if err != nil {
 		t.Fatalf("list team services: %v", err)
 	}
 	for _, svc := range services {
-		if svc.ChallengeID == 1 && svc.Unlocked {
-			t.Fatalf("expected unlock cleared after maintain, got %+v", svc)
+		if svc.ChallengeID != 1 {
+			continue
 		}
+		if svc.Unlocked || svc.LockReason != "maintenance" {
+			t.Fatalf("expected maintenance to clear the SSH grant, got %+v", svc)
+		}
+		return
 	}
-	afterTask, err := store.GetControllerRuntimeTask(ctx, 101, 1)
-	if err != nil {
-		t.Fatalf("runtime task after: %v", err)
-	}
-	if afterTask.UnlockProofEpoch != 2 {
-		t.Fatalf("expected runtime task epoch 2, got %d", afterTask.UnlockProofEpoch)
-	}
-
-	rotated, err := store.RotateChallengeUnlockProof(ctx, 1, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("rotate: %v", err)
-	}
-	if rotated.UnlockProofEpoch != 3 {
-		t.Fatalf("expected epoch 3 after explicit rotate, got %d", rotated.UnlockProofEpoch)
-	}
+	t.Fatal("expected a service state for the challenge under maintenance")
 }
 
 func TestMatchPausedBlocksInteractionsAndClosesNetwork(t *testing.T) {

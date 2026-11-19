@@ -160,7 +160,7 @@ func (e *dockerCLIExecutor) capturedRunArgs(ctx context.Context, network string,
 	}
 	security := e.serviceSecurity
 	security.capAdd = append(slices.Clone(security.capAdd), "NET_RAW")
-	args := buildDockerRunArgs(network, e.stateMountPath, e.unlockProofSecret, security, task)
+	args := buildDockerRunArgs(network, e.stateMountPath, security, task)
 	args = args[:len(args)-1]
 	args = append(args, "--no-healthcheck", "--entrypoint", captureGate, "--label", "adplatform.capture=guarded", "--label", "adplatform.capture_owner="+e.captureVolume, "--mount", "type=volume,src="+e.captureVolume+",dst="+captureMount+",readonly,volume-nocopy", task.BaselineImage)
 	return append(append(args, "run"), command...), nil

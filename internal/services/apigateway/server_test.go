@@ -2829,16 +2829,16 @@ func TestAttacksSupportsTickRangeFilters(t *testing.T) {
 
 // SSH unlocks only through an accepted enemy flag; the legacy proof-based
 // unlock endpoint is removed and SSH Access (/ssh-session) is the retry path.
-func TestLegacyUnlockEndpointIsRemoved(t *testing.T) {
+func TestLegacyUnlockEndpointsAreRemoved(t *testing.T) {
 	mux := newTestMuxWithCaptureGrant(t)
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v2/services/1/unlock", bytes.NewBufferString(`{"proof":"anything"}`))
-	setTestTeamAuthHeader(t, request)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, request)
-
-	if response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected legacy unlock route to be gone, got %d: %s", response.Code, response.Body.String())
+	for _, path := range []string{"/api/v2/services/1/unlock", "/api/v2/admin/challenges/1/rotate-unlock-proof"} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Errorf("retired route %s returned %d: %s", path, response.Code, response.Body.String())
+		}
 	}
 }
 

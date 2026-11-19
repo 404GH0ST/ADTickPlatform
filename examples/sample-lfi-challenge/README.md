@@ -112,7 +112,7 @@ Attack **another team's** service for this challenge and submit its current flag
 One accepted enemy flag automatically unlocks SSH on **your own** service for the same
 challenge. Open **SSH Access** in the dashboard to retrieve the stable team credential.
 Own-team, expired, invalid, and duplicate flags do not create an access grant. Factory
-reset preserves access; organizer maintenance clears it. No unlock proof is required.
+reset preserves access; organizer maintenance clears it.
 
 Run the bundled exploit against an enemy endpoint after the checker has stored a flag:
 

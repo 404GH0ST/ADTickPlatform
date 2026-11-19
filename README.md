@@ -36,7 +36,7 @@ ADTickPlatform runs the whole game loop of an Attack-Defense CTF. Every tick it 
 - **Scoring.** FaustCTF-style attack points that decay as more teams exploit the same service, plus defense and SLA uptime scoring. Scores come from a replayable pipeline, so they can be audited and recalculated.
 - **Live views.** The scoreboard, the attack feed and a 3D attack globe update over Server-Sent Events. A scoreboard freeze hides standings while the attack feed stays live.
 - **Network access.** One WireGuard peer per player, with config download, key rotation and revoke. `nftables` host rules keep team runtimes isolated from each other.
-- **Exploit-gated SSH.** Teams unlock SSH to their own service containers by proving an exploit, then patch and harden them in place.
+- **Flag-gated SSH.** An accepted enemy flag unlocks SSH to the submitting team’s own container for that challenge so the team can patch it in place.
 - **Organizer themes.** Organizers pick the platform theme (Graphite, Paper or Neubrutalism); each player chooses light, dark or system mode.
 
 ---
@@ -194,10 +194,9 @@ make bootstrap-clean-match
 
 Challenges must follow the [Challenge Runtime Contract](docs/challenge-runtime.md). In short, the service image needs:
 
-- a working `/bin/sh`;
-- an SSH daemon (`sshd` or `dropbear`);
-- a password command (`chpasswd` or `passwd`);
-- a way to expose or protect the generated `AD_PLATFORM_UNLOCK_PROOF` environment variable.
+- a working `/bin/sh`
+- an SSH daemon (`sshd` or `dropbear`)
+- a password command (`chpasswd` or `passwd`)
 
 Start from one of the examples:
 

@@ -90,9 +90,9 @@ func NewMemoryStore(teamID int) Store {
 			4: mustNewAdminPlayerRecord(4, 104, "Team Orchid", "Orchid Captain", "orchid.captain@example.com", "captain", "orchid-secret", now.Add(-69*time.Hour)),
 		},
 		challenges: map[int]*adminChallenge{
-			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
-			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
-			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, UnlockProofEpoch: 1, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
+			1: {ID: 1, Name: "banking", BaselineImage: "registry.local/banking:baseline", CheckerImage: "registry.local/banking-checker:latest", SourceBundlePath: "examples/sample-lfi-challenge", ServicePort: DefaultServicePort(1), ServiceSubnetOctet: DefaultServiceSubnetOctet(1), EgressEnabled: true, Published: true, CreatedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
+			2: {ID: 2, Name: "chat", BaselineImage: "registry.local/chat:baseline", CheckerImage: "registry.local/chat-checker:latest", SourceBundlePath: "examples/sample-rce-challenge", ServicePort: DefaultServicePort(2), ServiceSubnetOctet: DefaultServiceSubnetOctet(2), EgressEnabled: true, Published: true, CreatedAt: now.Add(-47 * time.Hour).Format(time.RFC3339)},
+			3: {ID: 3, Name: "storage", BaselineImage: "registry.local/storage:baseline", CheckerImage: "registry.local/storage-checker:latest", ServicePort: DefaultServicePort(3), ServiceSubnetOctet: DefaultServiceSubnetOctet(3), EgressEnabled: true, Published: true, CreatedAt: now.Add(-46 * time.Hour).Format(time.RFC3339)},
 		},
 		teamStates:  make(map[int]map[int]*serviceState),
 		instances:   make(map[int]map[int]*serviceInstanceRecord),
@@ -1471,7 +1471,6 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
 		Published:          false,
-		UnlockProofEpoch:   1,
 		TotalTeams:         len(s.teams),
 		RuntimeStatus:      "draft",
 		CreatedAt:          now.UTC().Format(time.RFC3339),
@@ -1799,24 +1798,19 @@ func (s *memoryStore) GetControllerRuntimeTask(_ context.Context, teamID, challe
 }
 
 func (s *memoryStore) controllerRuntimeTaskLocked(teamID, challengeID int, instance *serviceInstanceRecord) ControllerRuntimeTask {
-	epoch := 1
-	if challenge, ok := s.challenges[challengeID]; ok && challenge != nil && challenge.UnlockProofEpoch > 0 {
-		epoch = challenge.UnlockProofEpoch
-	}
 	return ControllerRuntimeTask{
-		DeploymentJobID:  instance.DeploymentJobID,
-		TeamID:           teamID,
-		ChallengeID:      challengeID,
-		ChallengeName:    instance.ChallengeName,
-		RuntimeKind:      instance.RuntimeKind,
-		ContainerName:    instance.ContainerName,
-		StateVolume:      instance.StateVolume,
-		BaselineImage:    instance.BaselineImage,
-		CheckerToken:     instance.CheckerToken,
-		Endpoint:         instance.Endpoint,
-		SSHHost:          instance.SSHHost,
-		ServicePort:      instance.ServicePort,
-		UnlockProofEpoch: epoch,
+		DeploymentJobID: instance.DeploymentJobID,
+		TeamID:          teamID,
+		ChallengeID:     challengeID,
+		ChallengeName:   instance.ChallengeName,
+		RuntimeKind:     instance.RuntimeKind,
+		ContainerName:   instance.ContainerName,
+		StateVolume:     instance.StateVolume,
+		BaselineImage:   instance.BaselineImage,
+		CheckerToken:    instance.CheckerToken,
+		Endpoint:        instance.Endpoint,
+		SSHHost:         instance.SSHHost,
+		ServicePort:     instance.ServicePort,
 	}
 }
 
@@ -2172,16 +2166,12 @@ func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int
 	if maintenance {
 		clone.MaintenanceAt = now.UTC().Format(time.RFC3339)
 		clone.PlayFromTick = 0
-		if clone.UnlockProofEpoch < 1 {
-			clone.UnlockProofEpoch = 1
-		}
-		clone.UnlockProofEpoch++
 		for teamID, challengeStates := range s.teamStates {
 			if state, ok := challengeStates[challengeID]; ok && state != nil {
 				state.Status = "degraded"
 				state.Checker = "pending"
 				state.Unlocked = false
-				state.LastEvent = "challenge under organizer maintenance; unlock proofs rotated"
+				state.LastEvent = "challenge under organizer maintenance; SSH access cleared"
 				state.ResetCooldown = "maintenance"
 			}
 			if instances, ok := s.instances[teamID]; ok {
@@ -2198,47 +2188,6 @@ func (s *memoryStore) SetChallengeMaintenance(_ context.Context, challengeID int
 		clone.PlayFromTick = 0
 	}
 	s.challenges[challengeID] = &clone
-	clone.TotalTeams = len(s.teams)
-	clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challengeID)
-	clone.ReadyTeams = s.readyTeamsForChallengeLocked(challengeID)
-	clone.QueuedTeams = s.queuedTeamsForChallengeLocked(challengeID)
-	clone.RuntimeStatus = challengeRuntimeStatus(clone.Published, clone.TotalTeams, clone.ReadyTeams, clone.QueuedTeams)
-	return clone, nil
-}
-
-func (s *memoryStore) GetChallengeUnlockProofEpoch(_ context.Context, challengeID int) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	challenge, ok := s.challenges[challengeID]
-	if !ok || challenge == nil {
-		return 0, ErrChallengeNotFound
-	}
-	if challenge.UnlockProofEpoch < 1 {
-		return 1, nil
-	}
-	return challenge.UnlockProofEpoch, nil
-}
-
-func (s *memoryStore) RotateChallengeUnlockProof(_ context.Context, challengeID int, now time.Time) (adminChallenge, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	challenge, ok := s.challenges[challengeID]
-	if !ok || challenge == nil {
-		return adminChallenge{}, ErrChallengeNotFound
-	}
-	clone := *challenge
-	if clone.UnlockProofEpoch < 1 {
-		clone.UnlockProofEpoch = 1
-	}
-	clone.UnlockProofEpoch++
-	s.challenges[challengeID] = &clone
-	for _, challengeStates := range s.teamStates {
-		if state, ok := challengeStates[challengeID]; ok && state != nil {
-			state.Unlocked = false
-			state.LastEvent = "unlock proofs rotated by organizer"
-		}
-	}
-	_ = now
 	clone.TotalTeams = len(s.teams)
 	clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challengeID)
 	clone.ReadyTeams = s.readyTeamsForChallengeLocked(challengeID)

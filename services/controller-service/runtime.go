@@ -13,7 +13,6 @@ import (
 
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/gamenet"
-	"adplatform/internal/platform/unlockproof"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -48,11 +47,10 @@ func newRuntimeExecutor() runtimeExecutor {
 	switch strings.ToLower(config.String("CONTROLLER_RUNTIME_MODE", "dry-run")) {
 	case "docker":
 		return &dockerCLIExecutor{
-			binary:            config.String("CONTROLLER_DOCKER_BIN", "docker"),
-			network:           strings.TrimSpace(config.String("CONTROLLER_DOCKER_NETWORK", "adplatform_game")),
-			networkLayout:     gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
-			stateMountPath:    strings.TrimSpace(config.String("CONTROLLER_STATE_MOUNT_PATH", "/opt/ad/state")),
-			unlockProofSecret: strings.TrimSpace(config.Secret("UNLOCK_PROOF_SECRET", "TEAM_JWT_SECRET")),
+			binary:         config.String("CONTROLLER_DOCKER_BIN", "docker"),
+			network:        strings.TrimSpace(config.String("CONTROLLER_DOCKER_NETWORK", "adplatform_game")),
+			networkLayout:  gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
+			stateMountPath: strings.TrimSpace(config.String("CONTROLLER_STATE_MOUNT_PATH", "/opt/ad/state")),
 			serviceSecurity: dockerRunSecurity{
 				capDrop:     csvConfig("CONTROLLER_SERVICE_CAP_DROP", "ALL"),
 				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE,SYS_CHROOT,AUDIT_WRITE"),
@@ -124,16 +122,15 @@ func (dryRunExecutor) RemoveChallengeServices(_ context.Context, _ int) error {
 }
 
 type dockerCLIExecutor struct {
-	binary            string
-	network           string
-	networkLayout     string
-	stateMountPath    string
-	unlockProofSecret string
-	serviceSecurity   dockerRunSecurity
-	sshApplyMode      string
-	sshContractMode   string
-	checkerValidator  checkerValidationClient
-	timeout           time.Duration
+	binary           string
+	network          string
+	networkLayout    string
+	stateMountPath   string
+	serviceSecurity  dockerRunSecurity
+	sshApplyMode     string
+	sshContractMode  string
+	checkerValidator checkerValidationClient
+	timeout          time.Duration
 
 	captureMode          string
 	captureVolume        string
@@ -602,7 +599,7 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 	for attempts := 0; attempts < 3; attempts++ {
 		args := guardedArgs
 		if !e.captureEnabled() {
-			args = buildDockerRunArgs(plan.Name, e.stateMountPath, e.unlockProofSecret, e.serviceSecurity, task)
+			args = buildDockerRunArgs(plan.Name, e.stateMountPath, e.serviceSecurity, task)
 		}
 		_, runErr = e.execDocker(ctx, args...)
 		if runErr == nil {
@@ -713,7 +710,6 @@ func (o *boundedDockerOutput) result() ([]byte, bool) {
 func redactControllerDockerSecrets(message string, args []string) string {
 	for _, arg := range args {
 		for _, prefix := range []string{
-			"AD_PLATFORM_UNLOCK_PROOF=",
 			"AD_CHECKER_TOKEN=",
 			"AD_PLATFORM_ROOT_PASSWORD=",
 		} {
@@ -767,7 +763,7 @@ func (e *dockerCLIExecutor) ensureNetwork(ctx context.Context, plan gamenet.Dock
 	return err
 }
 
-func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, security dockerRunSecurity, task apigateway.ControllerRuntimeTask) []string {
+func buildDockerRunArgs(network, stateMountPath string, security dockerRunSecurity, task apigateway.ControllerRuntimeTask) []string {
 	serviceIP := strings.TrimSpace(task.SSHHost)
 	servicePort := task.ServicePort
 	if endpointHost, endpointPort := apigateway.ParseEndpoint(task.Endpoint); serviceIP == "" || servicePort == 0 {
@@ -799,7 +795,6 @@ func buildDockerRunArgs(network, stateMountPath, unlockProofSecret string, secur
 		"-e", fmt.Sprintf("AD_PLATFORM_SERVICE_IP=%s", serviceIP),
 		"-e", fmt.Sprintf("AD_PLATFORM_SERVICE_PORT=%d", servicePort),
 		"-e", fmt.Sprintf("AD_PLATFORM_ENDPOINT=%s", task.Endpoint),
-		"-e", fmt.Sprintf("AD_PLATFORM_UNLOCK_PROOF=%s", unlockproof.Issue(unlockProofSecret, task.TeamID, task.ChallengeID, task.UnlockProofEpoch)),
 		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", task.CheckerToken),
 		"-e", fmt.Sprintf("PORT=%d", servicePort),
 	)

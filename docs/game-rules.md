@@ -249,7 +249,7 @@ Teams earn patch access by submitting at least one correct flag from another tea
 1. A team captures another team's flag and submits it through the flag submission API or TCP submission service.
 2. Game-core validates the flag and accepts the capture. Own-team, invalid, expired, and duplicate submissions do not create a grant.
 3. Acceptance automatically unlocks SSH on the submitting team's own container for that challenge and reconciles network access.
-4. The team opens **SSH Access** to retrieve its stable root credential. No separate unlock proof is required.
+4. The team opens **SSH Access** to retrieve its stable root credential.
 5. Factory reset preserves the grant during the same match. Organizer maintenance or access reset clears it; a new accepted capture grants access again.
 
 ## 7.3 Patch Session

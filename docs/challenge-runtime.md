@@ -42,10 +42,9 @@ The platform injects:
 - `AD_PLATFORM_SERVICE_IP`
 - `AD_PLATFORM_SERVICE_PORT`
 - `AD_PLATFORM_ENDPOINT`
-- `AD_PLATFORM_UNLOCK_PROOF`
 - `PORT`
 
-`AD_PLATFORM_UNLOCK_PROOF` remains a legacy environment variable for image compatibility. It no longer authorizes SSH. An accepted enemy flag automatically grants the submitting team SSH access on the same challenge. Maintenance clears access grants; teams must obtain another accepted capture after the challenge resumes.
+An accepted enemy flag automatically grants the submitting team SSH access on the same challenge. Maintenance clears access grants. Teams must obtain another accepted capture after the challenge resumes.
 
 Recommended service-image behavior:
 
@@ -252,7 +251,7 @@ docker network create --subnet 10.80.0.0/16 adplatform_game
 For challenge authors:
 
 1. build the service image so it can listen on an injected port
-2. keep the exploitable secret path tied to `AD_PLATFORM_UNLOCK_PROOF`
+2. make checker-stored flags available through the challenge’s intended vulnerability
 3. include `sshd` plus a password setter
 4. keep mutable state under the mounted state directory if persistence matters
 5. build the checker to consume `AD_TARGET_HOST`, `AD_TARGET_PORT`, `AD_FLAG`, and `AD_METADATA`
@@ -327,7 +326,6 @@ exec python3 /app/service.py
 Service expectations:
 
 - listen on `PORT` or `AD_PLATFORM_SERVICE_PORT`
-- expose the exploit path that reveals `AD_PLATFORM_UNLOCK_PROOF`
 - keep mutable state under `/opt/ad/state` if restart persistence matters
 
 ### Checker Image

@@ -155,7 +155,6 @@ ensure_runtime_wireguard_private_key() {
 ensure_local_runtime_secrets() {
   ensure_runtime_secret ADMIN_API_TOKEN
   ensure_runtime_secret TEAM_JWT_SECRET
-  ensure_runtime_secret UNLOCK_PROOF_SECRET
   ensure_runtime_secret SSH_CREDENTIAL_SECRET
   ensure_runtime_secret GAME_CORE_FLAG_SECRET
   ensure_runtime_secret CONTROLLER_INTERNAL_TOKEN
@@ -178,7 +177,6 @@ write_local_runtime_env_file() {
   cat > "${runtime_env}" <<EOF
 ADMIN_API_TOKEN=${ADMIN_API_TOKEN}
 TEAM_JWT_SECRET=${TEAM_JWT_SECRET}
-UNLOCK_PROOF_SECRET=${UNLOCK_PROOF_SECRET}
 SSH_CREDENTIAL_SECRET=${SSH_CREDENTIAL_SECRET}
 GAME_CORE_FLAG_SECRET=${GAME_CORE_FLAG_SECRET}
 CONTROLLER_INTERNAL_TOKEN=${CONTROLLER_INTERNAL_TOKEN}

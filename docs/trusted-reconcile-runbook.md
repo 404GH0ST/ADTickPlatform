@@ -20,7 +20,6 @@ Set these in `deploy/compose/prod.env` or export them before running the checks:
 - `ADMIN_API_TOKEN`
 - `AD_PLATFORM_EMAIL`
 - `AD_PLATFORM_PASSWORD`
-- `UNLOCK_PROOF_SECRET`
 
 If you run host-mode networking, use:
 

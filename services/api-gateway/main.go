@@ -27,7 +27,6 @@ func main() {
 
 	teamJWTSecret := config.RequiredSecret("TEAM_JWT_SECRET")
 	adminAPIToken := config.RequiredSecret("ADMIN_API_TOKEN")
-	unlockProofSecret := config.RequiredSecret("UNLOCK_PROOF_SECRET")
 	sshCredentialSecret := config.RequiredSecret("SSH_CREDENTIAL_SECRET")
 
 	server := apigateway.NewWithDeps(
@@ -61,7 +60,6 @@ func main() {
 			config.Secret("SCORING_WORKER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
 	)
-	server.WithUnlockProofSecret(unlockProofSecret)
 	server.WithSSHCredentialSecret(sshCredentialSecret)
 	server.WithRateLimiter(
 		apigateway.NewRateLimiter(

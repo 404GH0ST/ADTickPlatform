@@ -470,13 +470,6 @@ export async function putAdminChallengeMaintenance(challengeID: number) {
   );
 }
 
-export async function rotateAdminChallengeUnlockProof(challengeID: number) {
-  return adminFetch<AdminChallenge>(
-    `/api/v2/admin/challenges/${challengeID}/rotate-unlock-proof`,
-    { method: "POST" },
-  );
-}
-
 export async function resumeAdminChallenge(challengeID: number) {
   return adminFetch<AdminChallenge>(
     `/api/v2/admin/challenges/${challengeID}/resume`,

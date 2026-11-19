@@ -100,11 +100,6 @@ type Store interface {
 	// ChallengePlayBlocked is true while maintenance is set or play_from_tick is
 	// still in the future (warm redeploy window before the challenge re-enters play).
 	ChallengePlayBlocked(ctx context.Context, challengeID int) (bool, error)
-	// GetChallengeUnlockProofEpoch returns the current unlock proof epoch (>= 1).
-	GetChallengeUnlockProofEpoch(ctx context.Context, challengeID int) (int, error)
-	// RotateChallengeUnlockProof bumps unlock_proof_epoch and clears unlocks so
-	// previously extracted proofs no longer verify after instances are redeployed.
-	RotateChallengeUnlockProof(ctx context.Context, challengeID int, now time.Time) (adminChallenge, error)
 	RequeueChallengeServices(ctx context.Context, challengeID int) error
 	ListAdminPlayers(ctx context.Context) ([]adminPlayer, error)
 	CreateAdminPlayer(ctx context.Context, input adminCreatePlayerRequest, now time.Time) (adminPlayer, error)

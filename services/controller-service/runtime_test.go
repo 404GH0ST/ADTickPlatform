@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"adplatform/internal/platform/unlockproof"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -70,7 +69,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 		SSHHost:         "10.80.3.11",
 	}
 
-	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", "dev-unlock-secret", testServiceSecurity(), task)
+	args := buildDockerRunArgs("adplatform_game_svc_003", "/opt/ad/state", testServiceSecurity(), task)
 
 	if len(args) == 0 || args[0] != "run" {
 		t.Fatalf("expected docker run args, got %v", args)
@@ -86,9 +85,6 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	}
 	if !slices.Contains(args, "--mount") || !slices.Contains(args, "type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state") {
 		t.Fatalf("expected state volume mount args, got %v", args)
-	}
-	if !slices.Contains(args, "-e") || !slices.Contains(args, "AD_PLATFORM_UNLOCK_PROOF="+unlockproof.Issue("dev-unlock-secret", 101, 3, 1)) {
-		t.Fatalf("expected unlock proof env args, got %v", args)
 	}
 	if !slices.Contains(args, "AD_PLATFORM_SERVICE_IP=10.80.3.11") || !slices.Contains(args, "AD_PLATFORM_SERVICE_PORT=10003") || !slices.Contains(args, "AD_CHECKER_TOKEN=checker-secret-101-3") || !slices.Contains(args, "PORT=10003") {
 		t.Fatalf("expected service ip/port env args, got %v", args)
@@ -126,7 +122,7 @@ func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
 		SSHHost:         "10.80.2.12",
 	}
 
-	args := buildDockerRunArgs("", "", "dev-unlock-secret", testServiceSecurity(), task)
+	args := buildDockerRunArgs("", "", testServiceSecurity(), task)
 
 	if slices.Contains(args, "--network") || slices.Contains(args, "--ip") || slices.Contains(args, "--mount") {
 		t.Fatalf("did not expect network, ip, or mount args, got %v", args)
@@ -146,7 +142,6 @@ func TestDockerCommandErrorRedactsSensitiveArgumentsAndOutput(t *testing.T) {
 	_, err := executor.execDocker(
 		context.Background(),
 		"run",
-		"-e", "AD_PLATFORM_UNLOCK_PROOF=unlock-proof-secret",
 		"-e", "AD_CHECKER_TOKEN=checker-token-secret",
 		"-e", "AD_PLATFORM_ROOT_PASSWORD=root-password-secret",
 	)
@@ -156,7 +151,6 @@ func TestDockerCommandErrorRedactsSensitiveArgumentsAndOutput(t *testing.T) {
 
 	message := err.Error()
 	for _, secret := range []string{
-		"unlock-proof-secret",
 		"checker-token-secret",
 		"root-password-secret",
 	} {
@@ -204,13 +198,12 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		SSHHost:       "10.80.3.11",
 	}
 	executor := &dockerCLIExecutor{
-		binary:            binPath,
-		network:           "adplatform_game",
-		networkLayout:     "per-service",
-		stateMountPath:    "/opt/ad/state",
-		unlockProofSecret: "dev-unlock-secret",
-		serviceSecurity:   testServiceSecurity(),
-		timeout:           5 * time.Second,
+		binary:          binPath,
+		network:         "adplatform_game",
+		networkLayout:   "per-service",
+		stateMountPath:  "/opt/ad/state",
+		serviceSecurity: testServiceSecurity(),
+		timeout:         5 * time.Second,
 	}
 	t.Setenv("DOCKER_LOG", logPath)
 	t.Setenv("DOCKER_CONTAINER_NAME", task.ContainerName)
@@ -233,7 +226,6 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
 		"run -d --init --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --security-opt no-new-privileges:true --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
-		"-e AD_PLATFORM_UNLOCK_PROOF=" + unlockproof.Issue("dev-unlock-secret", 101, 3, 1),
 		"-e AD_CHECKER_TOKEN=checker-secret-101-3",
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",

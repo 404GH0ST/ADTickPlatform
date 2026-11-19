@@ -103,8 +103,6 @@ export type AdminChallenge = {
   maintenance_at?: string;
   /** When set, challenge re-enters play at this tick after maintenance resume. */
   play_from_tick?: number;
-  /** Bumped on maintenance / rotate so old unlock proofs stop verifying. */
-  unlock_proof_epoch?: number;
   deployed_teams: number;
   total_teams: number;
   runtime_status: string;

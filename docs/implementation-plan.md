@@ -170,7 +170,7 @@ Exit criteria:
 
 Deliverables:
 
-- unlock proof validation
+- automatic SSH access for the submitting team after an accepted enemy flag
 - stable per-team/per-service SSH credential issuance and owner-only SSH policy on the service IP
 - factory reset preserving unlock state
 - optional soft restart

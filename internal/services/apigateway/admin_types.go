@@ -166,17 +166,14 @@ type adminChallenge struct {
 	MaintenanceAt      string `json:"maintenance_at,omitempty"`
 	// PlayFromTick, when set, defers checker/scoring/participant access until
 	// that tick id exists (set on maintenance resume to "next tick").
-	PlayFromTick int `json:"play_from_tick,omitempty"`
-	// UnlockProofEpoch is mixed into unlock proofs. Bumped on maintenance (and
-	// via explicit rotate) so stolen proofs stop working after a security fix.
-	UnlockProofEpoch int                        `json:"unlock_proof_epoch"`
-	DeployedTeams    int                        `json:"deployed_teams"`
-	TotalTeams       int                        `json:"total_teams"`
-	RuntimeStatus    string                     `json:"runtime_status"`
-	QueuedTeams      int                        `json:"queued_teams"`
-	ReadyTeams       int                        `json:"ready_teams"`
-	CreatedAt        string                     `json:"created_at"`
-	LastValidation   *ChallengeValidationResult `json:"last_validation,omitempty"`
+	PlayFromTick   int                        `json:"play_from_tick,omitempty"`
+	DeployedTeams  int                        `json:"deployed_teams"`
+	TotalTeams     int                        `json:"total_teams"`
+	RuntimeStatus  string                     `json:"runtime_status"`
+	QueuedTeams    int                        `json:"queued_teams"`
+	ReadyTeams     int                        `json:"ready_teams"`
+	CreatedAt      string                     `json:"created_at"`
+	LastValidation *ChallengeValidationResult `json:"last_validation,omitempty"`
 }
 
 type adminDeployment struct {

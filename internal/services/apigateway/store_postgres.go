@@ -1927,7 +1927,6 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       c.maintenance,
 		       c.maintenance_at,
 		       c.play_from_tick,
-		       COALESCE(c.unlock_proof_epoch, 1),
 		       c.created_at,
 		       c.last_validation_status,
 		       c.last_validation_baseline_ssh_contract_ok,
@@ -1941,7 +1940,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.unlock_proof_epoch, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1974,7 +1973,6 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.Maintenance,
 			&maintenanceAt,
 			&playFromTick,
-			&challenge.UnlockProofEpoch,
 			&createdAt,
 			&validationStatus,
 			&validationBaselineOK,
@@ -1988,9 +1986,6 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.TotalTeams,
 		); err != nil {
 			return nil, err
-		}
-		if challenge.UnlockProofEpoch < 1 {
-			challenge.UnlockProofEpoch = 1
 		}
 		challenge.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		if maintenanceAt.Valid {
@@ -2254,14 +2249,11 @@ func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID
 	var result sql.Result
 	var err error
 	if maintenance {
-		// Entering maintenance: block immediately, clear deferred resume, and bump
-		// unlock_proof_epoch so stolen proofs stop verifying after redeploy.
 		result, err = s.db.ExecContext(ctx, `
 			UPDATE challenges
 			SET maintenance = TRUE,
 			    maintenance_at = $2,
-			    play_from_tick = NULL,
-			    unlock_proof_epoch = COALESCE(unlock_proof_epoch, 1) + 1
+			    play_from_tick = NULL
 			WHERE id = $1
 		`, challengeID, now.UTC())
 	} else {
@@ -2299,7 +2291,7 @@ func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID
 			SET status = 'degraded',
 			    checker = 'pending',
 			    unlocked = FALSE,
-			    last_event = 'challenge under organizer maintenance; unlock proofs rotated',
+			    last_event = 'challenge under organizer maintenance; SSH access cleared',
 			    reset_cooldown = 'maintenance'
 			WHERE challenge_id = $1
 		`, challengeID); err != nil {
@@ -2319,58 +2311,6 @@ func (s *postgresStore) SetChallengeMaintenance(ctx context.Context, challengeID
 		}
 	}
 
-	challenges, err := s.ListAdminChallenges(ctx)
-	if err != nil {
-		return adminChallenge{}, err
-	}
-	for _, challenge := range challenges {
-		if challenge.ID == challengeID {
-			return challenge, nil
-		}
-	}
-	return adminChallenge{}, ErrChallengeNotFound
-}
-
-func (s *postgresStore) GetChallengeUnlockProofEpoch(ctx context.Context, challengeID int) (int, error) {
-	var epoch int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(unlock_proof_epoch, 1)
-		FROM challenges
-		WHERE id = $1
-	`, challengeID).Scan(&epoch); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrChallengeNotFound
-		}
-		return 0, err
-	}
-	if epoch < 1 {
-		return 1, nil
-	}
-	return epoch, nil
-}
-
-func (s *postgresStore) RotateChallengeUnlockProof(ctx context.Context, challengeID int, now time.Time) (adminChallenge, error) {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE challenges
-		SET unlock_proof_epoch = COALESCE(unlock_proof_epoch, 1) + 1
-		WHERE id = $1
-	`, challengeID)
-	if err != nil {
-		return adminChallenge{}, fmt.Errorf("rotate unlock proof epoch: %w", err)
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return adminChallenge{}, ErrChallengeNotFound
-	}
-	if _, err := s.db.ExecContext(ctx, `
-		UPDATE team_service_states
-		SET unlocked = FALSE,
-		    last_event = 'unlock proofs rotated by organizer',
-		    reset_cooldown = CASE WHEN reset_cooldown = 'maintenance' THEN reset_cooldown ELSE 'ready' END
-		WHERE challenge_id = $1
-	`, challengeID); err != nil {
-		return adminChallenge{}, fmt.Errorf("clear unlocks after proof rotate: %w", err)
-	}
-	_ = now
 	challenges, err := s.ListAdminChallenges(ctx)
 	if err != nil {
 		return adminChallenge{}, err
@@ -3070,7 +3010,7 @@ func (s *postgresStore) SetPlatformTheme(ctx context.Context, themeID string, ac
 
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, COALESCE(c.unlock_proof_epoch, 1)
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		LEFT JOIN deployment_jobs dj ON dj.id = si.deployment_job_id
@@ -3098,12 +3038,8 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 			&task.Endpoint,
 			&task.SSHHost,
 			&task.ServicePort,
-			&task.UnlockProofEpoch,
 		); err != nil {
 			return nil, err
-		}
-		if task.UnlockProofEpoch < 1 {
-			task.UnlockProofEpoch = 1
 		}
 		result = append(result, task)
 	}
@@ -3113,7 +3049,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (ControllerRuntimeTask, error) {
 	var task ControllerRuntimeTask
 	if err := s.db.QueryRowContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, COALESCE(c.unlock_proof_epoch, 1)
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		WHERE si.team_id = $1 AND si.challenge_id = $2
@@ -3130,15 +3066,11 @@ func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, ch
 		&task.Endpoint,
 		&task.SSHHost,
 		&task.ServicePort,
-		&task.UnlockProofEpoch,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ControllerRuntimeTask{}, ErrChallengeNotFound
 		}
 		return ControllerRuntimeTask{}, err
-	}
-	if task.UnlockProofEpoch < 1 {
-		task.UnlockProofEpoch = 1
 	}
 	return task, nil
 }
