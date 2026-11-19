@@ -24,7 +24,7 @@ function statusFill(service: ServiceRow, locked: boolean) {
 
 function Fact({ label, value, tone }: { label: string; value: ReactNode; tone?: "good" | "bad" }) {
   return (
-    <div className="grid gap-0.5">
+    <div className="grid min-w-0 gap-0.5 wrap-anywhere">
       <dt className="nb-eyebrow text-[0.6875rem] text-muted-foreground">{label}</dt>
       <dd className={cn("text-sm font-semibold", tone === "good" && "text-positive", tone === "bad" && "text-negative")}>
         {value}
@@ -76,7 +76,7 @@ export function NbServices({
                 <li
                   key={service.id}
                   data-testid={`nb-service-${service.id}`}
-                  className="nb-panel flex flex-col overflow-hidden xl:only:col-span-2"
+                  className="nb-panel @container flex flex-col overflow-hidden xl:only:col-span-2"
                 >
                   <div
                     className={cn(
@@ -94,8 +94,8 @@ export function NbServices({
                     </span>
                   </div>
 
-                  <div className="grid flex-1 gap-4 px-5 py-4">
-                    <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
+                  <div className="grid min-w-0 flex-1 gap-4 px-5 py-4 @max-[12rem]:px-2">
+                    <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-x-6 gap-y-3 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]">
                       <Fact
                         label="Checker"
                         value={service.checker}
@@ -111,7 +111,7 @@ export function NbServices({
                       <Fact label="Last event" value={service.lastEvent} />
                     </dl>
                     {service.slaMessage ? (
-                      <p className="text-xs leading-5 text-muted-foreground">{service.slaMessage}</p>
+                      <p className="text-xs leading-5 wrap-anywhere text-muted-foreground">{service.slaMessage}</p>
                     ) : null}
 
                     {view.notice ? (
@@ -121,14 +121,18 @@ export function NbServices({
                     ) : null}
 
                     {view.lock || view.unlockHint ? (
-                      <p className="flex gap-2 text-sm text-muted-foreground">
-                        <TriangleAlert className="mt-0.5 size-4 shrink-0" strokeWidth={2.4} aria-hidden />
-                        <span>{view.lock ? view.lock.help : view.unlockHint}</span>
+                      <p className="flex gap-2 text-sm text-muted-foreground @max-[10rem]:block">
+                        <TriangleAlert
+                          className="mt-0.5 size-4 shrink-0 @max-[10rem]:me-2 @max-[10rem]:inline @max-[10rem]:align-text-bottom"
+                          strokeWidth={2.4}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 wrap-anywhere">{view.lock ? view.lock.help : view.unlockHint}</span>
                       </p>
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap gap-2.5 border-t-2 border-dashed border-border px-5 py-4">
+                  <div className="flex flex-wrap gap-2.5 border-t-2 border-dashed border-border px-5 py-4 @max-[12rem]:px-2 @max-[12rem]:[&>[data-slot=button]]:px-2">
                     <Button
                       disabled={view.ssh.disabled}
                       className={cn(!service.unlocked && view.ssh.disabled && "nb-key-locked")}

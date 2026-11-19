@@ -71,7 +71,7 @@ export function OrganizerAuditView({
     <div className="grid gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Filters</CardTitle>
+          <CardTitle as="h2">Filters</CardTitle>
           <CardDescription>
             Filter by actor, action, target type, or status. Paging is
             server-side.
@@ -143,7 +143,7 @@ export function OrganizerAuditView({
 
       <Card>
         <CardHeader>
-          <CardTitle>Audit Log</CardTitle>
+          <CardTitle as="h2">Audit Log</CardTitle>
           <CardDescription>
             Showing {auditPage.items.length > 0 ? offset + 1 : 0}-
             {offset + auditPage.items.length} of {auditPage.total_count} audit

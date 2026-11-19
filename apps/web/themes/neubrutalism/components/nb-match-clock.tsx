@@ -10,9 +10,11 @@ const STATE_FILL = {
   idle: "nb-fill-lilac",
 } as const;
 
+const CELL_PADDING = "px-5 py-4 @max-[10.5rem]:px-2 @max-[9rem]:px-1";
+
 function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid content-start gap-1.5 px-5 py-4">
+    <div className={cn("grid min-w-0 content-start gap-1.5", CELL_PADDING)}>
       <dt className="nb-eyebrow text-[0.6875rem] text-muted-foreground">{label}</dt>
       <dd>{children}</dd>
     </div>
@@ -29,16 +31,16 @@ export function NbMatchClock({ overview }: { overview: PlatformOverview }) {
     <section
       data-testid="match-progress"
       aria-label="Match progress"
-      className="nb-panel grid overflow-hidden sm:grid-cols-[minmax(10rem,auto)_minmax(0,1fr)]"
+      className="nb-panel @container grid grid-cols-1 overflow-hidden wrap-anywhere md:grid-cols-[minmax(10rem,auto)_minmax(0,1fr)]"
     >
-      <div className="grid content-center gap-1 border-b-[3px] border-border px-5 py-4 sm:border-b-0 sm:border-r-[3px]">
+      <div className={cn("grid content-center gap-1 border-b-[3px] border-border md:border-b-0 md:border-r-[3px]", CELL_PADDING)}>
         <p className="nb-eyebrow text-[0.6875rem] text-muted-foreground">Current tick</p>
         <p className="nb-display text-5xl font-extrabold leading-none tabular-nums">{clock.currentTickLabel}</p>
       </div>
       <dl className="grid grid-cols-1 divide-y-2 divide-border sm:grid-cols-3 sm:divide-x-2 sm:divide-y-0">
         <Cell label="Match state">
-          <span className={cn("nb-sticker inline-flex items-center gap-2", STATE_FILL[clock.stateKind])}>
-            <span aria-hidden className="inline-block size-2 rounded-full bg-[var(--nb-ink)]" />
+          <span className={cn("nb-sticker inline-flex max-w-full items-center gap-2 whitespace-normal", STATE_FILL[clock.stateKind])}>
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--nb-ink)]" />
             {clock.stateLabel}
           </span>
         </Cell>

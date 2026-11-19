@@ -69,13 +69,7 @@ test("raw OpenAPI YAML route serves the participant spec", async ({
   expect(body).not.toContain("/api/v2/services/{challenge_id}/unlock");
 });
 
-test("legacy platform manual route redirects to the participant manual", async ({
-  page,
-}) => {
-  await page.goto("/docs/platform-manual.md");
-
-  await expect(page).toHaveURL(/\/docs\/participant$/);
-  await expect(
-    page.locator("h1", { hasText: "Participant Manual" }),
-  ).toBeVisible();
+test("the retired manual URL returns 404", async ({ request }) => {
+  const response = await request.get("/docs/platform-manual.md", { maxRedirects: 0 });
+  expect(response.status()).toBe(404);
 });

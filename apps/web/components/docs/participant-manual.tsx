@@ -55,7 +55,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
       <div className="min-w-0 space-y-4 [&_code]:wrap-anywhere">
         <Card>
           <CardHeader>
-            <CardTitle>Participant Flow</CardTitle>
+            <CardTitle as="h2">Participant Flow</CardTitle>
             <CardDescription>
               Start here for the normal participant workflow. Use Swagger for the full request and response contract.
             </CardDescription>
@@ -69,7 +69,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
 
         <Card>
           <CardHeader>
-            <CardTitle>Direct Patch Workflow</CardTitle>
+            <CardTitle as="h2">Direct Patch Workflow</CardTitle>
             <CardDescription>
               Participant patching uses direct container access after unlock. There is no participant image redeploy endpoint.
             </CardDescription>
@@ -85,7 +85,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
       <div className="min-w-0 space-y-4 [&_code]:wrap-anywhere">
         <Card>
           <CardHeader>
-            <CardTitle>API Reference</CardTitle>
+            <CardTitle as="h2">API Reference</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             <Button asChild variant="outline">
@@ -99,7 +99,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
 
         <Card>
           <CardHeader>
-            <CardTitle>Bearer Auth</CardTitle>
+            <CardTitle as="h2">Bearer Auth</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>Authenticate first with <code>POST /api/v2/authenticate</code>.</p>
@@ -110,7 +110,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
 
         <Card>
           <CardHeader>
-            <CardTitle>Practical Notes</CardTitle>
+            <CardTitle as="h2">Practical Notes</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>Service traffic and SSH both use the same service IP.</p>

@@ -20,7 +20,7 @@ export function CardTitle({
   as: Heading = 'h3',
   className,
   ...props
-}: React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h2' | 'h3' | 'h4' }) {
+}: React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h1' | 'h2' | 'h3' | 'h4' }) {
   return <Heading data-slot="card-title" className={cn('text-base font-semibold leading-6 tracking-tight', className)} {...props} />;
 }
 

@@ -12,6 +12,8 @@ const ibmPlexSans = IBM_Plex_Sans({
   weight: ['400', '500', '600', '700'],
   variable: '--font-plex',
   display: 'swap',
+  // Let the active scheme's CSS request Plex when it needs it.
+  preload: false,
 });
 
 // Face for the Neubrutalism theme. Not preloaded: only pages whose theme CSS

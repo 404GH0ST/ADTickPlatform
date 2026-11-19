@@ -78,7 +78,7 @@ export function BulkImportPanel(): ReactElement {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Upload className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Bulk team import</CardTitle>
+          <CardTitle as="h2" className="text-base">Bulk team import</CardTitle>
         </div>
         <CardDescription id={csvDescription} className="wrap-anywhere">
           CSV columns: team_name, contact_email, optional player_display_name,

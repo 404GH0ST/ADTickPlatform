@@ -43,6 +43,7 @@ const DETAIL_OPEN_MAX_TEAMS = 8;
  */
 export function NbStandings({
   rows,
+  teamCount = rows.length,
   currentTeamName,
   showDelta = false,
   title = "Standings",
@@ -52,6 +53,7 @@ export function NbStandings({
   testId,
 }: {
   rows: ScoreRow[];
+  teamCount?: number;
   currentTeamName?: string;
   showDelta?: boolean;
   title?: string;
@@ -61,7 +63,8 @@ export function NbStandings({
   testId?: string;
 }) {
   const hasDetail = rows.some((row) => row.services && row.services.length > 0);
-  const [showDetail, setShowDetail] = useState(rows.length <= DETAIL_OPEN_MAX_TEAMS);
+  const [detailPreference, setDetailPreference] = useState<boolean | null>(null);
+  const showDetail = detailPreference ?? (teamCount <= DETAIL_OPEN_MAX_TEAMS);
   return (
     <div className="nb-panel @container overflow-hidden" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-[3px] border-border px-5 py-3">
@@ -75,8 +78,11 @@ export function NbStandings({
               <button
                 type="button"
                 aria-pressed={showDetail}
-                onClick={() => setShowDetail((open) => !open)}
-                className="nb-sticker nb-stat min-h-9 max-w-full cursor-pointer gap-1.5 px-3 py-1 text-xs wrap-anywhere whitespace-normal"
+                onClick={() => setDetailPreference(!showDetail)}
+                className={cn(
+                  "nb-sticker nb-stat min-h-9 max-w-full cursor-pointer gap-1.5 px-3 py-1 text-xs wrap-anywhere whitespace-normal",
+                  showDetail && "nb-selected",
+                )}
               >
                 {showDetail ? (
                   <ListCollapse className="size-4 shrink-0" strokeWidth={2.4} aria-hidden />

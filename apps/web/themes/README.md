@@ -137,9 +137,8 @@ export default defineTheme({
 | `OrganizerAudit` | `/admin/audit` body | `OrganizerAuditViewProps` |
 
 Every page in the app is covered: each participant page, each organizer page,
-and the docs pages. (`/admin/api` returns 404 and the legacy `.md` URL is a
-redirect, so neither has UI to theme.) Any slot you leave out uses the stock
-view, restyled by your colors.
+and the docs pages. Any slot you leave out uses the stock view, restyled by
+your colors.
 
 You can replace a whole page or just part of one. `ThemeSlotProps["OrganizerGame"]`
 etc. give the exact prop types for the organizer tabs. The stock tabs carry

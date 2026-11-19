@@ -223,17 +223,17 @@ export function NbShell({
       <div className="flex min-w-0 flex-col gap-6 px-3 pb-10 pt-1 sm:px-6 lg:px-8 lg:pt-4">
         {/* Title banner and header keys share one row when there is room, so
             content starts one banner-height from the top, not two. */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-          <header className="nb-banner flex min-w-[min(100%,20rem)] flex-1 flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6 sm:py-4">
+        <header className="flex flex-wrap items-center gap-x-5 gap-y-4">
+          <div className="nb-banner flex min-w-[min(100%,20rem)] flex-1 flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6 sm:py-4">
             <h1 className="min-w-0 max-w-full wrap-anywhere text-balance text-3xl font-extrabold leading-none tracking-[-0.03em] sm:text-4xl">{title}</h1>
             {navActions ? <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">{navActions}</div> : null}
-          </header>
+          </div>
           <div className="nb-header-actions relative flex max-w-full flex-wrap items-center gap-2.5">
             <AppearanceControls />
             {organizer || !headerActions ? headerActions : <NbMenu>{headerActions}</NbMenu>}
             {primaryHeaderAction}
           </div>
-        </div>
+        </header>
         <main id="nb-main" tabIndex={-1} className="flex min-h-0 flex-1 flex-col gap-6 outline-none">
           {belowNav}
           {organizer || activePath === "/" ? summarySection : null}

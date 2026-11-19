@@ -20,7 +20,7 @@ export function AdminRegistryCard({
     <Card className="flex h-full flex-col">
       <CardHeader className="flex flex-col items-start gap-3 space-y-0 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 max-w-full space-y-1.5 wrap-anywhere">
-          <CardTitle>{title}</CardTitle>
+          <CardTitle as="h2">{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </div>
         <Button onClick={onCreate} className="shrink-0" size="sm">

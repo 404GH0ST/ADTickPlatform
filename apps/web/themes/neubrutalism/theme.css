@@ -681,7 +681,7 @@
     padding-right: 0.75rem !important;
   }
 
-  :root[data-scheme="neubrutalism"] :is(select, [data-slot="button"] ~ select):focus-visible {
+  :root[data-scheme="neubrutalism"] :is([data-slot="input"], textarea, select, [data-slot="button"] ~ select):focus-visible {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
@@ -690,6 +690,14 @@
     forced-color-adjust: none;
     background: Highlight;
     color: HighlightText;
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-selected[aria-pressed="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+    outline-color: Highlight;
   }
 }
 
@@ -1007,6 +1015,7 @@
   :root[data-scheme="neubrutalism"] .nb-rail-column {
     --nb-rail-fill: var(--nb-blue);
     --nb-rail-stroke: var(--nb-ink);
+    --nb-rail-hover: color-mix(in oklab, var(--nb-rail-fill) 88%, var(--nb-ink));
   }
 
   :root[data-scheme="neubrutalism"] .nb-rail {
@@ -1031,6 +1040,7 @@
   :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-rail-column {
     --nb-rail-fill: var(--nb-sheet);
     --nb-rail-stroke: var(--nb-chalk);
+    --nb-rail-hover: color-mix(in oklab, var(--nb-on-blue) 12%, transparent);
   }
 
   :root[data-scheme="neubrutalism"][data-theme="dark"] .nb-rail {
@@ -1052,7 +1062,7 @@
     box-shadow: 3px 3px 0 var(--nb-shadow);
   }
 
-  /* Rail links: white type on blue; the current page is an aqua key. */
+  /* Rail links: white type on blue; the current page is a white key. */
   :root[data-scheme="neubrutalism"] .nb-nav-link {
     display: flex;
     flex-shrink: 0;
@@ -1082,7 +1092,7 @@
 
   :root[data-scheme="neubrutalism"] .nb-nav-link:hover {
     border-color: color-mix(in oklab, var(--nb-on-blue) 70%, transparent);
-    background: color-mix(in oklab, var(--nb-on-blue) 12%, transparent);
+    background: var(--nb-rail-hover);
   }
 
   /* Current page: a white key on the blue rail (selection, not status). */
@@ -1770,7 +1780,7 @@
 }
 
 /* Closing banner: a stamped sticker card. */
-:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"] {
+:root[data-scheme="neubrutalism"] [data-first-blood-banner] {
   color: var(--nb-ink) !important;
 }
 
@@ -1868,6 +1878,85 @@
   0% { opacity: 1; transform: none; }
   30% { opacity: 1; transform: translate(-4px, -6px) rotate(-1deg); }
   100% { opacity: 0; transform: translate(40px, 120px) rotate(10deg); }
+}
+
+/* Small globes keep the result in the reading order above the map. */
+@container (width < 26rem) {
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] + [data-fx="map-canvas"] {
+    overflow-anchor: none;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] {
+    display: block;
+    pointer-events: auto;
+    position: static;
+    overflow: visible;
+    padding: 0.25rem;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner] {
+    pointer-events: auto;
+    position: relative;
+    inset: auto;
+    translate: none;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner-panel] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.35rem 0.25rem;
+    text-align: start;
+    box-shadow: 4px 4px 0 var(--nb-ink);
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner][data-reduced-motion] :is(
+    [data-first-blood-banner-panel],
+    [data-first-blood-banner-panel] h3,
+    [data-first-blood-banner-body] > *
+  ) {
+    animation: none;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner-header] {
+    display: flex;
+    min-inline-size: 0;
+    flex-wrap: wrap;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.25rem;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner-panel] h3 {
+    justify-self: start;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+    transform: none;
+    box-shadow: none;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-dismiss] {
+    display: inline-flex;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-testid="first-blood-banner-team"] {
+    font-size: 0.875rem;
+    text-wrap: wrap;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-testid="first-blood-banner-challenge"] {
+    display: inline-block;
+    max-inline-size: 100%;
+    padding-inline: 0.2em;
+    border-radius: 0.2em;
+    font-size: 0.75rem;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner-slash] {
+    display: none;
+  }
 }
 
 /* ---------- Run-2 additions ---------- */

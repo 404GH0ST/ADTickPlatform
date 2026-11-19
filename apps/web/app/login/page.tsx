@@ -34,7 +34,7 @@ export default async function ParticipantLoginPage() {
         )}
         <Card className="w-full border-border bg-background shadow-none">
           <CardHeader>
-            <CardTitle>Sign In</CardTitle>
+            <CardTitle as="h1">Sign In</CardTitle>
             <CardDescription>
               AD Platform team console. Use your team member account, or
               register with your team's join key.

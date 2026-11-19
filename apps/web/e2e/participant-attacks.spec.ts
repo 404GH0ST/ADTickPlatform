@@ -125,19 +125,14 @@ test("participant attack map maximize dialog expands beyond the inline panel and
   await expect(maximize).toBeFocused();
 });
 
-test("participant attack table route redirects to the unified attacks page", async ({
-  page,
-}) => {
-  await page.goto("/attacks/table");
-
-  await expect(page).toHaveURL(/\/attacks$/);
-  await expect(page.locator("h1", { hasText: "Attacks" })).toBeVisible();
-  await expect(
-    page.getByText("first valid submission accepted").first(),
-  ).toBeVisible();
+test("retired attack page URLs return 404", async ({ request }) => {
+  for (const path of ["/attacks/map", "/attacks/table"]) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(404);
+  }
 });
 
-test("participant attacks routes show empty-state messaging when no accepted attacks exist", async ({
+test("the participant attacks page shows empty-state messaging when no accepted attacks exist", async ({
   page,
   request,
 }) => {
@@ -148,12 +143,9 @@ test("participant attacks routes show empty-state messaging when no accepted att
   await page.goto("/attacks");
   await expect(page.getByText("Showing 0-0 of 0")).toBeVisible();
   await assertEmptyAttacksState(page);
-
-  await page.goto("/attacks/table");
-  await assertEmptyAttacksState(page);
 });
 
-test("participant attacks routes show degraded warning and empty-state messaging when the attack feed fails", async ({
+test("the participant attacks page shows a warning and empty state when the attack feed fails", async ({
   page,
   request,
 }) => {
@@ -168,14 +160,6 @@ test("participant attacks routes show degraded warning and empty-state messaging
     ),
   ).toBeVisible();
   await expect(page.getByText("Showing 0-0 of 0")).toBeVisible();
-  await assertEmptyAttacksState(page);
-
-  await page.goto("/attacks/table");
-  await expect(
-    page.getByText(
-      "Participant data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
-    ),
-  ).toBeVisible();
   await assertEmptyAttacksState(page);
 });
 

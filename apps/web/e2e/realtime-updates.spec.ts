@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { FIRST_BLOOD_INTRO_MS } from "../lib/first-blood";
 import { mockApiBaseUrl, realtimeTest as test } from "./test-utils";
 
 async function installMockAttackSfx(page: Page) {
@@ -207,6 +208,8 @@ test("organizer attacks route applies realtime updates to the loaded attack coun
 for (const muted of [false, true]) {
   test(`first blood has an exclusive route and ${muted ? 'respects mute' : 'plays a fanfare'}`, async ({ page, request }) => {
     await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'default' } });
+    const startedAt = Date.now();
+    await page.clock.install({ time: startedAt });
     await installMockAttackSfx(page);
     await page.emulateMedia({ colorScheme: muted ? 'dark' : 'light', reducedMotion: 'reduce' });
     if (muted) await page.setViewportSize({ width: 390, height: 844 });
@@ -221,6 +224,8 @@ for (const muted of [false, true]) {
     await expect(autoCamera).toHaveAttribute('aria-pressed', 'false');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect(autoCamera).toHaveAttribute('aria-pressed', 'true');
+    // Keep the announcement in its attack phase while taking screenshots and resizing.
+    await page.clock.pauseAt(startedAt + 30_000);
     await page.mouse.click(24, 24);
     await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood' } });
     await expect(page.getByText('Showing 1-13 of 13')).toBeVisible();
@@ -243,6 +248,7 @@ for (const muted of [false, true]) {
       element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
     ));
     await globe.screenshot({ path: `test-results/first-blood-intro-${muted ? 'dark' : 'light'}.png` });
+    await page.clock.runFor(FIRST_BLOOD_INTRO_MS + 100);
     await expect(globe).toHaveAttribute('data-first-blood-phase', 'attack');
     await expect(globe.getByTestId('first-blood-intro')).toHaveCount(0);
     await expect(globe.getByTestId('first-blood-announcement')).toContainText('First blood · college-http');
@@ -264,6 +270,7 @@ for (const muted of [false, true]) {
     await revealGlobe(globe);
     await expect(globe.getByTestId('first-blood-announcement')).toBeVisible();
     await globe.screenshot({ path: `test-results/first-blood-mobile-${muted ? 'dark' : 'light'}.png` });
+    await page.clock.resume();
     // The live moment ends even while the original capture stays featured.
     await expect(globe.getByTestId('first-blood-announcement')).toHaveCount(0, { timeout: 6000 });
     await expect(globe.getByTestId('first-blood-banner')).toBeVisible();

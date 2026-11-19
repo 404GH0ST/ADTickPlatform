@@ -497,7 +497,7 @@ export function AttacksPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Accepted attacks</CardTitle>
+        <CardTitle as="h2">Accepted attacks</CardTitle>
         <CardDescription>
           Filter by team, service, and tick range. The globe and table share the
           same paginated attack slice.

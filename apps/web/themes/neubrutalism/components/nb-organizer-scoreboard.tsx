@@ -35,6 +35,7 @@ export function NbOrganizerScoreboard({
         testId="authoritative-scoreboard-card"
         title="Live standings"
         rows={rows}
+        teamCount={scoreRows.length}
         showDelta
         emptyMessage={query ? "No teams match this filter." : "No score rows persisted yet."}
         meta={

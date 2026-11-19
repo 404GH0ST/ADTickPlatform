@@ -1,23 +1,29 @@
 'use client';
 
 import { useId, type ReactElement } from 'react';
+import { X } from 'lucide-react';
 
 import {
   FIRST_BLOOD_BANNER_EXIT_MS,
   FIRST_BLOOD_BANNER_MAX_ROWS,
 } from '@/lib/first-blood';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import type { CyberAttackEvent } from './cyber-attack-map';
 
 export function FirstBloodBanner({
   attacks,
   leaving,
   reducedMotion,
+  retained,
+  onDismiss,
 }: {
   /** The lead capture first; simultaneous first bloods follow as compact rows. */
   attacks: CyberAttackEvent[];
   leaving: boolean;
   reducedMotion: boolean;
+  retained: boolean;
+  onDismiss: () => void;
 }): ReactElement | null {
   const headingId = useId();
   const [attack, ...others] = attacks;
@@ -31,7 +37,8 @@ export function FirstBloodBanner({
       role="status"
       aria-atomic="true"
       aria-labelledby={headingId}
-      data-testid="first-blood-banner"
+      data-testid={retained ? 'first-blood-result' : 'first-blood-banner'}
+      data-first-blood-banner
       data-attack-id={attack.id}
       data-banner-phase={leaving ? 'exit' : 'hold'}
       data-reduced-motion={reducedMotion ? 'true' : 'false'}
@@ -64,16 +71,29 @@ export function FirstBloodBanner({
             />
           </>
         )}
-        <h3
-          id={headingId}
-          className={cn(
-            'font-semibold uppercase leading-tight tracking-[0.08em] sm:text-3xl',
-            dense ? 'text-xl' : 'text-2xl',
-          )}
-          style={{ color: 'var(--signal-negative)' }}
-        >
-          {attacks.length > 1 ? `${attacks.length} first bloods` : 'First blood'}
-        </h3>
+        <div data-first-blood-banner-header className="contents">
+          <h3
+            id={headingId}
+            className={cn(
+              'font-semibold uppercase leading-tight tracking-[0.08em] sm:text-3xl',
+              dense ? 'text-xl' : 'text-2xl',
+            )}
+            style={{ color: 'var(--signal-negative)' }}
+          >
+            {attacks.length > 1 ? `${attacks.length} first bloods` : 'First blood'}
+          </h3>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="Dismiss first blood"
+            data-first-blood-dismiss
+            className="hidden size-[44px]"
+            onClick={onDismiss}
+          >
+            <X className="size-4" aria-hidden />
+          </Button>
+        </div>
         <div
           data-first-blood-banner-body="true"
           className={cn('min-w-0', dense ? 'space-y-2' : 'space-y-3')}

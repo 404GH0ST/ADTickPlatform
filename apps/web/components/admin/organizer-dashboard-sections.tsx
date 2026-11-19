@@ -497,6 +497,7 @@ export function TeamsTab({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge
                         className={team.active ? "tone-success" : "tone-danger"}
+                        variant="outline"
                         data-testid={`team-status-${team.id}`}
                       >
                         {team.active ? "Active" : "Inactive"}
@@ -1081,6 +1082,7 @@ function PlayerRegistryCard({
                   <TableCell>
                     <Badge
                       className={cn(statusChipClass, player.active ? "tone-success" : "tone-danger")}
+                      variant="outline"
                       data-testid={`player-status-${player.id}`}
                     >
                       {player.active ? "Active" : "Inactive"}
@@ -4487,7 +4489,7 @@ export function GameAttacksCard({
       <CardHeader>
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
           <div className="min-w-0 wrap-anywhere">
-            <CardTitle>Accepted Attacks</CardTitle>
+            <CardTitle as="h2">Accepted Attacks</CardTitle>
             <CardDescription>
               Organizer feed with direct filters, pagination, and live accepted
               attack updates.

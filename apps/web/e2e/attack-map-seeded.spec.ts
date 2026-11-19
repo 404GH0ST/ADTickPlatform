@@ -177,7 +177,7 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
   expect(appearance.ok()).toBeTruthy();
   await page.setViewportSize({ width: 320, height: 660 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/attacks/map");
+  await page.goto("/attacks");
 
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
   const globe = page.getByTestId("cyber-attack-map");
@@ -198,7 +198,7 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
 
 test("pausing the automatic camera holds its view through manual input, maximize, and reload", async ({ page }) => {
   await page.clock.install();
-  await page.goto("/attacks/map");
+  await page.goto("/attacks");
   const globe = page.getByRole("region", { name: "Interactive attack globe" });
   const autoCamera = globe.getByRole("button", { name: "Auto camera", pressed: true });
   await globe.locator('[data-fx="map-canvas"]').scrollIntoViewIfNeeded();
@@ -232,7 +232,7 @@ test("pausing the automatic camera holds its view through manual input, maximize
 test("reduced motion starts with a stationary camera and allows an explicit resume", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.clock.install();
-  await page.goto("/attacks/map");
+  await page.goto("/attacks");
   const globe = page.getByRole("region", { name: "Interactive attack globe" });
   const autoCamera = globe.getByRole("button", { name: "Auto camera" });
   const canvas = globe.locator('[data-fx="map-canvas"]');
@@ -258,7 +258,7 @@ test("attack feed selection is exposed and retains its check in forced colors", 
   });
   expect(appearance.ok()).toBeTruthy();
   await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
-  await page.goto("/attacks/map");
+  await page.goto("/attacks");
   const group = page.getByRole("group", { name: "View", exact: true });
   for (const label of ["Recent", "Current Tick", "All Feed"]) {
     const option = group.getByRole("button", { name: label, exact: true });

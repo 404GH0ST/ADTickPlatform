@@ -1,5 +1,6 @@
 import { chromium, expect, test, type APIRequestContext } from "@playwright/test";
 
+import { expectNoHorizontalOverflow } from "./test-layout-utils";
 import { mockApiBaseUrl, participantStorageState, resetMockApi } from "./test-utils";
 
 /*
@@ -223,16 +224,142 @@ test.describe("as a participant", () => {
     await expect(menu).toBeFocused();
   });
 
+  test("enlarged service facts and the match clock fit inside their panels", async ({ baseURL, request }) => {
+    const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+    try {
+      const page = await browser.newPage({
+        baseURL,
+        storageState: participantStorageState,
+        viewport: { width: 320, height: 740 },
+      });
+      const clock = page.getByRole("region", { name: "Match progress" });
+      const service = page.getByTestId("nb-service-svc-1");
+
+      for (const mode of ["light", "dark"]) {
+        await page.context().addCookies([{ name: "ad-platform-theme", value: mode, url: baseURL! }]);
+        await page.goto("/services");
+        await expect(page.locator("html")).toHaveAttribute("data-theme", mode);
+        await expect(clock.getByText("Scheduling…", { exact: true })).toBeVisible();
+        await expect(service.getByText(/to unlock SSH automatically/)).toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
+        await expectNoHorizontalOverflow(service);
+        await expectNoHorizontalOverflow(clock);
+      }
+
+      const started = await request.post(`${mockApiBaseUrl}/api/v2/admin/game/scheduler/start`);
+      expect(started.ok()).toBeTruthy();
+      await page.reload();
+      await expect(clock.locator(".nb-countdown")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await expectNoHorizontalOverflow(clock);
+    } finally {
+      await browser.close();
+    }
+  });
+
   test("the manual fits and the attack table scrolls by keyboard on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 660 });
     await page.goto("/docs/participant");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
 
-    await page.goto("/attacks/table");
+    await page.goto("/attacks");
     const region = page.getByRole("region", { name: "Accepted attacks" });
     await expect(region).toHaveAttribute("tabindex", "0");
     await region.press("ArrowRight");
     await expect.poll(() => region.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  });
+
+  test("attack map view controls stay in place when the selected view changes", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/attacks");
+    const group = page.getByRole("group", { name: "View", exact: true });
+    for (const width of [1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => document.fonts.ready);
+      const all = group.getByRole("button", { name: "All Feed", exact: true });
+      await all.press("Enter");
+      const positions = () => group.getByRole("button").evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const { x, y, width, height } = button.getBoundingClientRect();
+          return { x, y: y + window.scrollY, width, height };
+        }),
+      );
+      const initial = await positions();
+      expect(initial).toHaveLength(3);
+      for (const name of ["Recent", "Current Tick"]) {
+        const button = group.getByRole("button", { name, exact: true });
+        await button.press("Enter");
+        await expect(button).toHaveAttribute("aria-pressed", "true");
+        expect(await positions()).toEqual(initial);
+      }
+    }
+  });
+
+  test("attack map view and sound controls keep 44px touch targets on phones and tablets", async ({ browser, baseURL }) => {
+    const page = await browser.newPage({ baseURL, hasTouch: true, isMobile: true, storageState: participantStorageState });
+    try {
+      for (const width of [390, 768]) {
+        await page.setViewportSize({ width, height: 850 });
+        await page.goto("/attacks");
+        const view = page.getByRole("group", { name: "View", exact: true });
+        await expect(view).toBeVisible();
+        for (const control of [
+          page.getByRole("button", { name: "SFX: Attack sound" }),
+          ...await view.getByRole("button").all(),
+        ]) {
+          const size = await control.boundingBox();
+          expect(size?.width).toBeGreaterThanOrEqual(44);
+          expect(size?.height).toBeGreaterThanOrEqual(44);
+        }
+      }
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  test("long live first-blood names fit outside the globe canvas with enlarged text", async ({ baseURL, request }) => {
+    await resetMockApi(request, "empty-attacks");
+    await useTheme(request, "neubrutalism");
+    const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
+    try {
+      const page = await browser.newPage({
+        baseURL,
+        storageState: participantStorageState,
+        viewport: { width: 320, height: 740 },
+        reducedMotion: "reduce",
+      });
+      await page.goto("/attacks");
+      const globe = page.getByTestId("cyber-attack-map");
+      const canvas = globe.locator('[data-fx="map-canvas"]');
+      await canvas.scrollIntoViewIfNeeded();
+      await expect(globe).toHaveAttribute("data-surface-active", "true");
+      await resetMockApi(request, "realtime-first-blood-long-names");
+      const banner = globe.getByTestId("first-blood-banner");
+      await expect(banner).toBeVisible({ timeout: 12_000 });
+      await expect(canvas.getByTestId("first-blood-banner")).toHaveCount(0);
+      await expect(banner.getByTestId("first-blood-banner-team")).toHaveText(/International Cyber Defense/);
+      await expect(banner.getByTestId("first-blood-banner-challenge")).toHaveText(/RegionalReplicasAndSecondaryFailover$/);
+      await page.evaluate(() => document.fonts.ready);
+      await expectNoHorizontalOverflow(banner);
+      const fittingNames = await banner.evaluate((element) => {
+        const panel = element.getBoundingClientRect();
+        return Array.from(element.querySelectorAll('[data-testid^="first-blood-banner-"]')).every((name) => {
+          const range = document.createRange();
+          range.selectNodeContents(name);
+          return Array.from(range.getClientRects()).every((line) => line.left >= panel.left && line.right <= panel.right);
+        });
+      });
+      expect(fittingNames).toBe(true);
+
+      const retained = globe.getByTestId("first-blood-result");
+      await expect(retained).toBeVisible({ timeout: 6500 });
+      await expect(retained.getByTestId("first-blood-banner-challenge")).toHaveText(/RegionalReplicasAndSecondaryFailover$/);
+      await retained.getByRole("button", { name: "Dismiss first blood" }).press("Enter");
+      await expect(retained).toHaveCount(0);
+      await expect(globe.locator('[data-fx="map-control"]').first()).toBeFocused();
+    } finally {
+      await browser.close();
+    }
   });
 });
 
@@ -400,6 +527,40 @@ test("organizer scoreboard fits long team names and large service scores", async
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1024);
 });
 
+test("organizer details follow the live roster size until explicitly changed", async ({ page }) => {
+  const service = { challenge_id: 1, service: "Fixture service", attack: 5, defense: 4, sla: 3, total: 12 };
+  const rows = Array.from({ length: 12 }, (_, index) => ({
+    rank: index + 1, team: `Fixture team ${index + 1}`, attack: 5, defense: 4, sla: 3, total: 12, delta: "0", services: [service],
+  }));
+  let publish!: () => void;
+  const update = new Promise<void>((resolve) => { publish = resolve; });
+  await page.route("**/api/admin/realtime/game/scoreboard/stream", async (route) => {
+    await update;
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify(rows)}\n\n`,
+    });
+  });
+
+  await page.goto("/admin/scoreboard");
+  const toggle = page.getByRole("button", { name: "Per-service scores" });
+  const scores = page.getByTestId("nb-service-score");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  publish();
+  await expect(page.getByTestId("nb-score-row")).toHaveCount(rows.length);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(scores).toHaveCount(0);
+
+  const filter = page.getByLabel("Team filter");
+  await filter.fill("Fixture team 2");
+  await expect(page.getByTestId("nb-score-row")).toHaveCount(1);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await filter.clear();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(scores).toHaveCount(rows.length);
+});
+
 test("the player registry fits on mobile and returns focus after closing its form", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 450 });
   await page.goto("/admin/players");
@@ -430,6 +591,13 @@ test("appearance shows the checked mode in forced colors", async ({ page }) => {
   await expect(dark).toHaveAttribute("aria-checked", "true");
   await expect(dark.locator(".lucide-check")).toBeVisible();
   await expect(light.locator(".lucide-check")).not.toBeVisible();
+
+  await page.goto("/admin/scoreboard");
+  const filter = page.getByLabel("Team filter");
+  await filter.focus();
+  await expect(filter).toBeFocused();
+  await expect(filter).toHaveCSS("outline-style", "solid");
+  await expect(filter).toHaveCSS("outline-width", "2px");
 });
 
 test("selects use native appearance when the forced palette differs from the app mode", async ({ page }) => {
@@ -468,7 +636,7 @@ test("participant and organizer pages reflow with a 32px browser default font on
   const browser = await chromium.launch({ args: ["--blink-settings=defaultFontSize=32"] });
   try {
     const cases = [
-      { storageState: participantStorageState, routes: ["/", "/services", "/scoreboard", "/attacks/map", "/docs/participant"] },
+      { storageState: participantStorageState, routes: ["/", "/services", "/scoreboard", "/attacks", "/docs/participant"] },
       { storageState: await context.storageState(), routes: ["/admin/players", "/admin/scoreboard", "/admin/submissions"] },
     ];
     for (const { storageState, routes } of cases) {

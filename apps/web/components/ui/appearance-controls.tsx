@@ -129,8 +129,3 @@ export function AppearanceControls({ className }: { className?: string }) {
     </details>
   );
 }
-
-/** @deprecated Prefer AppearanceControls; kept for import compatibility. */
-export function ThemeToggle() {
-  return <AppearanceControls />;
-}

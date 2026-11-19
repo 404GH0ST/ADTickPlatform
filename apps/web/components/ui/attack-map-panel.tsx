@@ -588,7 +588,7 @@ export function AttackMapPanel({
     <div
       data-testid="attack-map-panel"
       className={cn(
-        'space-y-3 rounded-sm border border-border/70 bg-card px-1 py-3 sm:px-3',
+        'space-y-3 rounded-sm border border-border/70 bg-card px-1 py-3 sm:px-3 any-pointer-coarse:[&_[data-size=touch]]:min-h-11 any-pointer-coarse:[&_[data-size=touch]]:min-w-11',
         className,
       )}
     >
@@ -608,14 +608,14 @@ export function AttackMapPanel({
             {visibleServiceCount} services
           </Badge>
           <div
-            className="flex h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
+            className="flex min-h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
             data-testid="attack-sfx-control"
           >
             <Button
               aria-label="SFX: Attack sound"
               aria-pressed={attackSfx.enabled}
-              className="h-7 px-2 text-xs"
-              size="sm"
+              className="h-7 px-2 text-xs sm:h-7"
+              size="touch"
               title={attackSfx.enabled ? 'Mute attack sound' : 'Enable attack sound'}
               variant="ghost"
               onClick={toggleEnabled}
@@ -640,9 +640,9 @@ export function AttackMapPanel({
             />
             <Button
               aria-label="Test attack sound"
-              className="hidden h-7 px-2 text-xs sm:inline-flex"
+              className="hidden h-7 px-2 text-xs sm:inline-flex sm:h-7"
               disabled={!attackSfx.enabled}
-              size="sm"
+              size="touch"
               title="Test attack sound"
               variant="ghost"
               onClick={previewAttackSfx}
@@ -651,7 +651,7 @@ export function AttackMapPanel({
             </Button>
           </div>
           <Button
-            size="sm"
+            size="touch"
             variant="outline"
             onClick={(event) => {
               maximizeTrigger.current = event.currentTarget;
@@ -665,9 +665,9 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="grid grid-cols-1 gap-3 rounded-sm border border-border/70 bg-muted/20 px-1 py-3 sm:px-3">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-end">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="@container grid grid-cols-1 gap-3 rounded-sm border border-border/70 bg-muted/20 px-1 py-3 sm:px-3">
+          <div className="grid grid-cols-1 gap-3 @[48rem]:grid-cols-[minmax(0,1fr)_15rem] @[48rem]:items-start">
+            <div className="grid min-w-0 grid-cols-1 gap-3 @[38rem]:grid-cols-[minmax(0,1fr)_auto] @[38rem]:items-end">
               <div className="space-y-2">
                 <label
                   htmlFor={`${title}-team-search`}
@@ -709,14 +709,14 @@ export function AttackMapPanel({
                 </div>
               </div>
             </div>
-            <div className="space-y-1 lg:text-right">
+            <div className="min-w-0 space-y-1 wrap-anywhere @[48rem]:text-right">
               <p
                 className="text-sm font-medium text-foreground"
                 data-testid="attack-map-selected-tick"
               >
                 {selectedTickValue > 0 ? `Tick #${selectedTickValue}` : 'No ticks'}
               </p>
-              <p className="max-w-[34rem] text-sm text-muted-foreground lg:max-w-[20rem]">
+              <p className="max-w-[34rem] text-sm text-muted-foreground">
                 {normalizedTeamQuery === ''
                   ? `${describeViewMode(viewMode)} view across ${formatTickWindow(visibleTicks)}.`
                   : `Showing labels for ${searchedTeams.length} matching team(s).`}
@@ -770,7 +770,7 @@ export function AttackMapPanel({
               <select
                 id={`${title}-playback-speed`}
                 aria-label="Playback speed"
-                className="flex h-11 rounded-sm border border-input bg-card px-3 text-sm"
+                className="flex h-11 rounded-sm border border-input bg-card px-3 text-sm any-pointer-coarse:min-h-11"
                 value={String(playbackSpeed)}
                 onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
               >
