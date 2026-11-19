@@ -95,3 +95,47 @@ test("admin realtime proxy prefers REALTIME_ADMIN_TOKEN over ADMIN_API_TOKEN", a
 
   expect(authorization).toBe("Bearer realtime-stream-token");
 });
+
+test("admin realtime follows the request lifetime and caps each subscription", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  const previousToken = process.env.REALTIME_ADMIN_TOKEN;
+  const request = new AbortController();
+  const expiry = new AbortController();
+  const upstreamSignals: Array<AbortSignal | null | undefined> = [];
+  process.env.REALTIME_ADMIN_TOKEN = "realtime-stream-token";
+  AbortSignal.timeout = (milliseconds) => {
+    expect(milliseconds).toBe(60_000);
+    return expiry.signal;
+  };
+  globalThis.fetch = async (_input, init) => {
+    upstreamSignals.push(init?.signal);
+    return new Response("data: []\n\n");
+  };
+
+  try {
+    for (let count = 0; count < 2; count += 1) {
+      const browserRequest = new Request("https://example.test", {
+        signal: count === 0 ? request.signal : undefined,
+      });
+      const response = await proxyAdminRealtimeStream(
+        "/admin/v1/game/status/stream", "admin stream unavailable", browserRequest,
+      );
+      expect(await response.text()).toBe("data: []\n\n");
+    }
+    expect(upstreamSignals.map((signal) => signal?.aborted)).toEqual([false, false]);
+    request.abort();
+    expect(upstreamSignals.map((signal) => signal?.aborted)).toEqual([true, false]);
+    expiry.abort();
+    expect(upstreamSignals.map((signal) => signal?.aborted)).toEqual([true, true]);
+    expect(upstreamSignals[1]?.reason.name).toBe("AbortError");
+  } finally {
+    globalThis.fetch = originalFetch;
+    AbortSignal.timeout = originalTimeout;
+    if (previousToken === undefined) {
+      delete process.env.REALTIME_ADMIN_TOKEN;
+    } else {
+      process.env.REALTIME_ADMIN_TOKEN = previousToken;
+    }
+  }
+});

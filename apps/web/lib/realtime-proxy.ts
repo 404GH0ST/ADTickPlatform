@@ -1,5 +1,7 @@
 import { firstForwardedAddress } from '@/lib/api-utils';
 
+const adminStreamMaxAgeMs = 60_000;
+
 const streamResponseHeaders = {
   'Content-Type': 'text/event-stream',
   'Cache-Control': 'no-cache, no-transform',
@@ -35,9 +37,13 @@ export async function proxyPublicRealtimeStream(path: string, failureMessage: st
 }
 
 export async function proxyAdminRealtimeStream(path: string, failureMessage: string, request?: Request) {
+  // EventSource reconnects through the authorization check as each stream expires.
+  const expiration = new AbortController();
+  AbortSignal.timeout(adminStreamMaxAgeMs).addEventListener('abort', () => expiration.abort(), { once: true });
+  const signal = request ? AbortSignal.any([request.signal, expiration.signal]) : expiration.signal;
   return proxyRealtimeStream(path, failureMessage, request, {
     Authorization: `Bearer ${adminRealtimeToken()}`,
-  });
+  }, signal);
 }
 
 async function proxyRealtimeStream(
@@ -45,6 +51,7 @@ async function proxyRealtimeStream(
   failureMessage: string,
   request?: Request,
   headers: HeadersInit = {},
+  signal = request?.signal,
 ) {
   const forwardedFor = firstForwardedAddress(request?.headers.get('x-forwarded-for') ?? null);
   const upstream = await fetch(`${realtimeBaseUrl()}${path}`, {
@@ -54,6 +61,7 @@ async function proxyRealtimeStream(
       ...headers,
     },
     cache: 'no-store',
+    signal,
   });
 
   if (!upstream.ok) {
