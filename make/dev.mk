@@ -1,4 +1,4 @@
-.PHONY: fmt test build build-linux-arm64 ci e2e premerge release-notes audit-checker-contracts import-local-challenges \
+.PHONY: fmt test coverage build build-linux-arm64 ci e2e premerge release-notes audit-checker-contracts import-local-challenges \
 	run-api-gateway run-api-gateway-postgres run-game-core run-submission-service \
 	run-checker-runner run-controller-service run-scoring-worker run-realtime-gateway \
 	run-wireguard-gateway run-backend-stack run-backend-stack-postgres \
@@ -17,6 +17,13 @@ fmt:
 test:
 	@mkdir -p $(GOCACHE)
 	GOCACHE=$(GOCACHE) go test -race ./...
+
+coverage:
+	@mkdir -p $(CURDIR)/coverage
+	go test -coverpkg=adplatform/... -coverprofile=coverage/go.out ./...
+	go tool cover -func=coverage/go.out > coverage/go-functions.txt
+	@tail -n 1 coverage/go-functions.txt
+	cd apps/web && bun run themes && bun test ./lib --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=../../coverage/web
 
 build:
 	@mkdir -p $(GOCACHE)

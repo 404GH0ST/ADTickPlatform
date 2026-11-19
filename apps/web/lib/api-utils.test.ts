@@ -3,8 +3,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   authenticatedFetch,
+  buildQueryString,
   firstForwardedAddress,
+  parseTeamBody,
   PlatformAPIError,
+  processApiResponse,
   upstreamErrorDetails,
 } from "./api-utils";
 
@@ -25,6 +28,10 @@ describe("upstreamErrorDetails", () => {
   test("maps transport failures to bad gateway", () => {
     expect(upstreamErrorDetails(new Error("connection refused"), "request failed")).toEqual({
       detail: "connection refused",
+      status: 502,
+    });
+    expect(upstreamErrorDetails(null, "request failed")).toEqual({
+      detail: "request failed",
       status: 502,
     });
   });
@@ -68,4 +75,59 @@ describe("authenticatedFetch", () => {
     );
     expect(capturedHeaders.get("X-Forwarded-For")).toBe("203.0.113.5");
   });
+
+  test("preserves a caller content type on a request without a bearer token", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      expect(new Headers(init?.headers).get("content-type")).toBe("text/plain");
+      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+      expect(init?.cache).toBe("no-store");
+      return Response.json({ ok: true });
+    };
+    try {
+      expect(await authenticatedFetch("http://api-gateway:8080", "/healthz", null, {
+        headers: { "Content-Type": "text/plain" },
+      })).toEqual({ ok: true });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("query strings retain zero and encode filter text", () => {
+  expect(buildQueryString({ offset: 0, attacker: "Team A + B", blank: "", invalid: NaN, missing: undefined }))
+    .toBe("?offset=0&attacker=Team+A+%2B+B");
+  expect(buildQueryString({})).toBe("");
+});
+
+test("team request parsing trims names and handles malformed JSON", async () => {
+  expect(await parseTeamBody(new Request("http://example.test", {
+    method: "POST",
+    body: JSON.stringify({ name: "  Team A ", contact_email: " team@example.test " }),
+  }))).toEqual({ name: "Team A", contactEmail: "team@example.test" });
+  expect(await parseTeamBody(new Request("http://example.test", { method: "POST", body: "{" })))
+    .toEqual({ name: undefined, contactEmail: undefined });
+});
+
+test("response handling preserves useful errors and permits empty successes", async () => {
+  const path = "/api/v2/challenges";
+  const fallback = `API request to ${path} failed with status 503`;
+  expect(await processApiResponse(new Response(null, { status: 204 }), path)).toBeUndefined();
+  for (const [response, message] of [
+    [Response.json({ detail: "Try again", title: "Unavailable" }, { status: 503, headers: {
+      "Content-Type": "application/problem+json", "Retry-After": " 8 ",
+    } }), "Try again"],
+    [Response.json({ title: "Unavailable" }, { status: 503 }), "Unavailable"],
+    [Response.json({ message: "Maintenance" }, { status: 503 }), "Maintenance"],
+    [Response.json({}, { status: 503 }), fallback],
+    [new Response("{", { status: 503, headers: { "Content-Type": "application/json" } }), fallback],
+    [new Response("Offline", { status: 503 }), fallback],
+  ] as const) {
+    await expect(processApiResponse(response, path)).rejects.toMatchObject({
+      name: "PlatformAPIError",
+      message,
+      status: 503,
+      retryAfter: response.headers.get("retry-after") ?? undefined,
+    });
+  }
 });

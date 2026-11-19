@@ -30,3 +30,16 @@ func TestPlanDockerNetworkRejectsInvalidIP(t *testing.T) {
 		t.Fatal("expected invalid ip error")
 	}
 }
+
+func TestSharedNetworkNamesAreCanonical(t *testing.T) {
+	for _, tt := range []struct{ name, want string }{
+		{"  Game--Net  ", "game_net"},
+		{"", "adplatform_game"},
+		{"---", "adplatform_game"},
+	} {
+		plan, err := PlanDockerNetwork(tt.name, " SHARED ", "")
+		if err != nil || plan.Name != tt.want || plan.Layout != LayoutShared {
+			t.Errorf("PlanDockerNetwork(%q) = %+v, %v; want %q", tt.name, plan, err, tt.want)
+		}
+	}
+}

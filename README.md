@@ -177,10 +177,13 @@ Full guide: [Deployment: Host (Debian/Ubuntu/Arch)](docs/deployment-host.md).
 | Go unit tests | `make test` |
 | Web typecheck | `bun run web:typecheck` |
 | Web unit tests | `bun run web:test` |
+| Go and web unit coverage | `make coverage` |
 | End-to-end and visual regression | `bunx playwright install chromium && make e2e` |
 | Sample challenge smoke test | `make smoke-sample-challenge-docker` |
 | Attack map load simulation | `make simulate-attack-map-load` |
 | Database restore drill | `make smoke-prod-db-restore` |
+
+`make coverage` writes the Go profile to `coverage/go.out` and the Bun LCOV report to `coverage/web/lcov.info`. To include PostgreSQL integration tests, set `TEST_POSTGRES_DSN`, `SUBMISSION_TEST_POSTGRES_DSN`, and `FIRST_BLOOD_TEST_POSTGRES_DSN` to a disposable test database. Bun measures the modules loaded by the unit suite. Playwright runs separately.
 
 Reset the database and runtime files to a clean match:
 
