@@ -20,7 +20,6 @@ import {
 import { useAttackSfx } from '@/components/hooks/use-attack-sfx';
 import { useActiveTheme } from '@/components/theme/active-theme-provider';
 import { ScrollableRegion } from '@/components/ui/scrollable-region';
-import globeJson from '@/data/globe.json';
 import { FirstBloodBanner } from './first-blood-banner';
 import { cn } from '@/lib/utils';
 
@@ -79,6 +78,7 @@ type GlobeVector = [x: number, y: number, z: number];
 
 type CountryRing = {
   points: GlobeVector[];
+  motionPoints: GlobeVector[];
   /** 0-4, chosen so countries that share a border never share a tint. */
   tint: number;
 };
@@ -215,7 +215,17 @@ const LANDMARKS: Landmark[] = [
   { code: 'france-central', name: 'France', lat: 46.6, lon: 2.4 },
 ];
 
-const COUNTRY_RINGS = parseCountryRings(globeJson as GlobeFeatureCollection);
+let countryRingsRequest: Promise<CountryRing[]> | undefined;
+
+function loadCountryRings(): Promise<CountryRing[]> {
+  return countryRingsRequest ??= import('@/data/globe.json')
+    .then(({ default: globe }) => parseCountryRings(globe as GlobeFeatureCollection))
+    .catch((error: unknown) => {
+      countryRingsRequest = undefined;
+      throw error;
+    });
+}
+
 const LATITUDE_LINES = [-60, -30, 0, 30, 60].map((lat) => ({
   lat,
   points: Array.from({ length: 73 }, (_, index) => toGlobeVector({ lat, lon: -180 + index * 5 })),
@@ -279,6 +289,7 @@ export function CyberAttackMap({
   const [featuredAttackId, setFeaturedAttackId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [autoRotating, setAutoRotating] = useState(false);
   const [rotation, setRotation] = useState<GlobeRotation>({ lat: -6, lon: 34 });
   const [cameraCenter, setCameraCenter] = useState({ x: CENTER_X, y: CENTER_Y });
   const [firstBloodSequence, setFirstBloodSequence] = useState<FirstBloodSequence | null>(null);
@@ -954,6 +965,7 @@ export function CyberAttackMap({
     if (animationFrameRef.current !== null) {
       window.cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
+      setAutoRotating(false);
     }
   }
 
@@ -1016,6 +1028,8 @@ export function CyberAttackMap({
     const startTime = window.performance.now();
     const deltaLon = normalizeLongitude(target.lon - start.lon);
     const deltaLat = target.lat - start.lat;
+    const halfPixelInDegrees = 0.5 * 180 / (Math.PI * GLOBE_RADIUS * zoom);
+    setAutoRotating(true);
 
     function tick(timestamp: number): void {
       const progress = clamp((timestamp - startTime) / duration, 0, 1);
@@ -1024,12 +1038,19 @@ export function CyberAttackMap({
         lat: start.lat + deltaLat * eased,
         lon: normalizeLongitude(start.lon + deltaLon * eased),
       };
-      rotationRef.current = nextRotation;
-      setRotation(nextRotation);
+      const displayed = rotationRef.current;
+      const angularChange = Math.abs(nextRotation.lat - displayed.lat)
+        + Math.abs(normalizeLongitude(nextRotation.lon - displayed.lon));
+      // Skip subpixel steps as the camera eases to a stop.
+      if (progress === 1 || angularChange >= halfPixelInDegrees) {
+        rotationRef.current = nextRotation;
+        setRotation(nextRotation);
+      }
       if (progress < 1) {
         animationFrameRef.current = window.requestAnimationFrame(tick);
       } else {
         animationFrameRef.current = null;
+        setAutoRotating(false);
       }
     }
 
@@ -1401,7 +1422,7 @@ export function CyberAttackMap({
             </defs>
 
             <g opacity={firstBloodSequence && firstBloodSequence.stage !== 'recover' ? 0.48 : closingFirstBlood ? 0.65 : 1} style={{ transition: `opacity ${FIRST_BLOOD_RECOVER_MS}ms ease` }}>
-              <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} />
+              <GlobeSurface clipId={clipId} mapId={mapId} rotation={rotation} simplify={autoRotating} />
             </g>
 
             <g clipPath={`url(#${clipId})`}>
@@ -2095,24 +2116,50 @@ const GlobeSurface = memo(function GlobeSurface({
   clipId,
   mapId,
   rotation,
+  simplify,
 }: {
   clipId: string;
   mapId: string;
   rotation: GlobeRotation;
+  simplify: boolean;
 }): ReactElement {
+  const surfaceRef = useRef<SVGGElement>(null);
+  const [countryRings, setCountryRings] = useState<CountryRing[]>([]);
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    let mounted = true;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      void loadCountryRings().then((rings) => {
+        if (mounted) setCountryRings(rings);
+        observer.disconnect();
+      }, () => {
+        // The globe stays usable with graticules and attack markers. A later
+        // intersection can retry the background geometry.
+      });
+    }, { rootMargin: '200px' });
+    observer.observe(surface);
+    return () => {
+      mounted = false;
+      observer.disconnect();
+    };
+  }, []);
+
   const projection = createGlobeLineProjection(rotation);
   const landByTint = Array.from({ length: COUNTRY_TINT_COUNT }, () => '');
   let outline = '';
   // A ring's projected line already outlines its fill when the whole ring is
   // visible. Batch by paint so rotating the surface updates only a few paths.
-  for (const country of COUNTRY_RINGS) {
-    const { path, fullyVisible } = projectGlobeLine(country.points, projection);
+  for (const country of countryRings) {
+    const { path, fullyVisible } = projectGlobeLine(simplify ? country.motionPoints : country.points, projection);
     outline += path;
     if (fullyVisible) landByTint[country.tint] += `${path} Z`;
   }
 
   return (
-    <g pointerEvents="none">
+    <g ref={surfaceRef} pointerEvents="none">
       <circle
         cx={CENTER_X}
         cy={CENTER_Y}
@@ -2781,34 +2828,38 @@ function findHorizonPoint(
   hiddenPoint: GeoPoint,
   rotation: GlobeRotation,
 ): ArcPoint {
+  const tilt = toRadians(rotation.lat);
+  const sinTilt = Math.sin(tilt);
+  const cosTilt = Math.cos(tilt);
+  const startLat = toRadians(visiblePoint.lat);
+  const startLon = toRadians(visiblePoint.lon - rotation.lon);
+  const latDelta = toRadians(hiddenPoint.lat - visiblePoint.lat);
+  const lonDelta = normalizeLongitude(hiddenPoint.lon - visiblePoint.lon);
+  const lonDeltaRadians = toRadians(lonDelta);
   let low = 0;
   let high = 1;
-  let projected = projectGlobePoint(visiblePoint, rotation);
 
-  for (let index = 0; index < 24; index += 1) {
+  // Sixteen bisections resolve even a 180-degree span to subpixel precision.
+  // The search only needs depth. Project and round screen coordinates once.
+  for (let index = 0; index < 16; index += 1) {
     const middle = (low + high) / 2;
-    const candidate = interpolateGeoPoint(visiblePoint, hiddenPoint, middle);
-    const candidateProjection = projectGlobePoint(candidate, rotation);
-
-    if (candidateProjection.z > 0.015) {
+    const lat = startLat + latDelta * middle;
+    const lon = startLon + lonDeltaRadians * middle;
+    const depth = Math.sin(lat) * sinTilt + Math.cos(lat) * Math.cos(lon) * cosTilt;
+    if (depth > 0.015) {
       low = middle;
-      projected = candidateProjection;
     } else {
       high = middle;
     }
   }
 
   return {
-    ...projected,
+    ...projectGlobePoint({
+      lat: visiblePoint.lat + (hiddenPoint.lat - visiblePoint.lat) * low,
+      lon: normalizeLongitude(visiblePoint.lon + lonDelta * low),
+    }, rotation),
     id: `${hiddenPoint.lat}:${hiddenPoint.lon}:horizon`,
     visible: true,
-  };
-}
-
-function interpolateGeoPoint(start: GeoPoint, end: GeoPoint, progress: number): GeoPoint {
-  return {
-    lat: start.lat + (end.lat - start.lat) * progress,
-    lon: normalizeLongitude(start.lon + normalizeLongitude(end.lon - start.lon) * progress),
   };
 }
 
@@ -2853,12 +2904,51 @@ function projectGlobeLine(points: GlobeVector[], { sinLon, cosLon, sinTilt, cosT
       fullyVisible = false;
       continue;
     }
-    const screenX = roundCoord(CENTER_X + GLOBE_RADIUS * (y * cosLon - x * sinLon));
-    const screenY = roundCoord(CENTER_Y - GLOBE_RADIUS * (z * cosTilt - depth * sinTilt));
-    path += `${drawing ? ' L' : ' M'} ${screenX} ${screenY}`;
+    const screenX = Math.round(10 * (CENTER_X + GLOBE_RADIUS * (y * cosLon - x * sinLon))) / 10;
+    const screenY = Math.round(10 * (CENTER_Y - GLOBE_RADIUS * (z * cosTilt - depth * sinTilt))) / 10;
+    // Additional coordinate pairs after a move are implicit line commands.
+    path += `${drawing ? ' ' : 'M'}${screenX} ${screenY}`;
     drawing = true;
   }
   return { path, fullyVisible };
+}
+
+function simplifyCountryRing(points: GlobeVector[]): GlobeVector[] {
+  // Use a one-unit tolerance in the globe's viewBox, measured on the sphere
+  // so the simplification works at every camera angle and across the dateline.
+  const toleranceSquared = 1 / (GLOBE_RADIUS * GLOBE_RADIUS);
+  const last = points.length - 1;
+  const kept = new Set([0, last]);
+  const segments = [[0, last]];
+  while (segments.length > 0) {
+    const [start, end] = segments.pop()!;
+    const [x, y, z] = points[start];
+    const [endX, endY, endZ] = points[end];
+    const dx = endX - x;
+    const dy = endY - y;
+    const dz = endZ - z;
+    const lengthSquared = dx * dx + dy * dy + dz * dz;
+    let maxDistance = toleranceSquared;
+    let split = -1;
+    for (let index = start + 1; index < end; index += 1) {
+      const [px, py, pz] = points[index];
+      const offsetX = px - x;
+      const offsetY = py - y;
+      const offsetZ = pz - z;
+      const along = lengthSquared === 0 ? 0
+        : clamp((offsetX * dx + offsetY * dy + offsetZ * dz) / lengthSquared, 0, 1);
+      const distance = (offsetX - along * dx) ** 2 + (offsetY - along * dy) ** 2 + (offsetZ - along * dz) ** 2;
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        split = index;
+      }
+    }
+    if (split !== -1) {
+      kept.add(split);
+      segments.push([start, split], [split, end]);
+    }
+  }
+  return kept.size < 4 ? points : points.filter((_, index) => kept.has(index));
 }
 
 function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
@@ -2871,12 +2961,8 @@ function parseCountryRings(collection: GlobeFeatureCollection): CountryRing[] {
       if (!outerRing || outerRing.length < 3) {
         return [];
       }
-      return [
-        {
-          points: outerRing.map(([lon, lat]) => toGlobeVector({ lat, lon })),
-          tint,
-        },
-      ];
+      const points = outerRing.map(([lon, lat]) => toGlobeVector({ lat, lon }));
+      return [{ points, motionPoints: simplifyCountryRing(points), tint }];
     });
   });
 }

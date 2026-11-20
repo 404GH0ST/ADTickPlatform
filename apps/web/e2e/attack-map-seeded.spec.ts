@@ -182,6 +182,10 @@ test("neubrutalism keeps dense globe controls usable on mobile", async ({ page, 
   await expect(page.locator("html")).toHaveAttribute("data-scheme", "neubrutalism");
   const globe = page.getByTestId("cyber-attack-map");
   await expect(globe).toHaveAttribute("data-keyboard-mode", "jump");
+  const borders = globe.locator('[data-fx="globe-borders"]');
+  await expect(borders).toHaveAttribute("d", "");
+  await globe.locator('[data-fx="map-canvas"]').scrollIntoViewIfNeeded();
+  await expect(borders).toHaveAttribute("d", /^M.+/);
   await expect(globe.locator('[data-fx="map-legend"] > span:last-child').first()).toHaveCSS("font-size", "12px");
   for (const [region, longitude] of [["Americas", "-82.00"], ["APAC", "118.00"], ["EMEA", "34.00"]]) {
     await globe.getByRole("button", { name: region, exact: true }).click();
