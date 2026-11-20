@@ -234,12 +234,16 @@ func legacyMD5Secret(value string) string {
 }
 
 const (
-	passwordHashScheme     = "pbkdf2-sha256"
-	passwordHashIterations = 210000
-	passwordHashSaltBytes  = 16
-	passwordHashKeyBytes   = 32
-	minimumPasswordLength  = 8
+	passwordHashScheme    = "pbkdf2-sha256"
+	passwordHashSaltBytes = 16
+	passwordHashKeyBytes  = 32
+	minimumPasswordLength = 8
 )
+
+// passwordHashIterations is the PBKDF2 work factor for new hashes. Verification
+// reads the count stored in each hash, so it is a variable only so this
+// package's tests can lower it (see TestMain); production never changes it.
+var passwordHashIterations = 210000
 
 var invalidCredentialsPasswordHash = hashPassword("invalid-credentials-dummy-password")
 
