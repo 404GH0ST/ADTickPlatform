@@ -42,11 +42,17 @@ test("participant API page exposes the raw YAML route and manual link", async ({
 test("participant API page shows a fallback warning when Swagger CDN assets are blocked", async ({
   page,
 }) => {
-  await page.route("https://unpkg.com/swagger-ui-dist@5.*/**", (route) =>
-    route.abort(),
-  );
+  const assetRequests: string[] = [];
+  await page.route("https://unpkg.com/swagger-ui-dist@5.*/**", (route) => {
+    assetRequests.push(route.request().url());
+    return route.abort();
+  });
 
   await page.goto("/docs/platform-api");
+  const load = page.getByRole("button", { name: "Load API explorer" });
+  await expect(load).toBeEnabled();
+  expect(assetRequests).toHaveLength(0);
+  await load.press("Enter");
 
   await expect(
     page.getByText("Swagger UI assets could not be loaded from the CDN."),

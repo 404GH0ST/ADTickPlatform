@@ -59,6 +59,13 @@ export function swaggerAccessibility({ React }: {
       element(CopyButton, copyProps),
       element('a', {
         className: 'operation-permalink',
+        ref: (link: HTMLAnchorElement | null) => {
+          // Swagger names both its generic wrapper and the real copy button.
+          const wrapper = link?.previousElementSibling;
+          if (wrapper?.classList.contains('copy-to-clipboard')) {
+            wrapper.removeAttribute('aria-label');
+          }
+        },
         href: `#/${hash}`,
         'aria-label': `Link to ${operation.method.toUpperCase()} ${operation.path}`,
         onClick: (event: MouseEvent<HTMLAnchorElement>) => {
@@ -194,10 +201,12 @@ export function swaggerAccessibility({ React }: {
         },
       Servers: (Original: SwaggerComponent) =>
         function Servers(props: Record<string, unknown>) {
-          return element(fragment, null,
-            element('label', { className: 'sr-only', htmlFor: 'servers' }, 'Server'),
-            element(Original, props),
-          );
+          return element('div', {
+            className: 'contents',
+            ref: (wrapper: HTMLDivElement | null) => {
+              wrapper?.querySelector('select#servers')?.setAttribute('aria-label', 'Server');
+            },
+          }, element(Original, props));
         },
       ExamplesSelect: (Original: SwaggerComponent) =>
         function ExamplesSelect(props: Record<string, unknown>) {

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Script from 'next/script';
 
 import { swaggerAccessibility } from '@/components/docs/swagger-accessibility';
+import { Button } from '@/components/ui/button';
 
 // The accessibility plugin wraps components from this Swagger UI release.
 const SWAGGER_ASSETS = 'https://unpkg.com/swagger-ui-dist@5.35.0';
@@ -25,15 +26,20 @@ type Props = {
 };
 
 export function SwaggerUIBrowser({ specURL }: Props) {
-  const [ready, setReady] = useState(false);
+  const [requested, setRequested] = useState(false);
+  const [scriptReady, setScriptReady] = useState(false);
+  const [stylesReady, setStylesReady] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState('');
-
-  const domID = useMemo(() => '#participant-swagger-ui', []);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const explorer = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!ready) {
-      return;
-    }
+    if (window.location.hash.startsWith('#/')) setRequested(true);
+  }, []);
+
+  useEffect(() => {
+    if (!scriptReady || !stylesReady || !explorer.current) return;
 
     const bundle = (window as WindowWithSwagger).SwaggerUIBundle;
     if (!bundle) {
@@ -44,7 +50,7 @@ export function SwaggerUIBrowser({ specURL }: Props) {
     try {
       bundle({
         url: specURL,
-        dom_id: domID,
+        domNode: explorer.current,
         deepLinking: true,
         docExpansion: 'list',
         defaultModelsExpandDepth: 1,
@@ -54,35 +60,66 @@ export function SwaggerUIBrowser({ specURL }: Props) {
         plugins: [swaggerAccessibility],
         layout: 'BaseLayout',
       });
+      if (trigger.current === document.activeElement) explorer.current.focus();
+      setInitialized(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Swagger UI initialization failed.');
     }
-  }, [domID, ready, specURL]);
+  }, [scriptReady, stylesReady, specURL]);
+
+  const showAssetError = () => setError('Swagger UI assets could not be loaded from the CDN.');
 
   return (
-    <>
-      <link
-        rel="stylesheet"
-        href={`${SWAGGER_ASSETS}/swagger-ui.css`}
-        integrity={SWAGGER_CSS_INTEGRITY}
-        crossOrigin="anonymous"
-      />
-      <Script
-        src={`${SWAGGER_ASSETS}/swagger-ui-bundle.js`}
-        integrity={SWAGGER_BUNDLE_INTEGRITY}
-        crossOrigin="anonymous"
-        strategy="afterInteractive"
-        onLoad={() => setReady(true)}
-        onError={() => setError('Swagger UI assets could not be loaded from the CDN.')}
-      />
-
-      {error ? (
-        <div className="rounded-sm border px-4 py-3 text-sm text-muted-foreground">{error}</div>
-      ) : null}
-
-      <div className="rounded-sm border bg-card p-4">
-        <div id="participant-swagger-ui" className="swagger-shell min-h-[44rem]" />
-      </div>
-    </>
+    <div className="space-y-3">
+      {!initialized && (
+        <Button asChild>
+          <button
+            ref={trigger}
+            type="button"
+            aria-disabled={requested || undefined}
+            onClick={() => setRequested(true)}
+          >
+            Load API explorer
+          </button>
+        </Button>
+      )}
+      {requested && !initialized && !error && (
+        <p role="status" className="text-sm text-muted-foreground">Loading API explorer…</p>
+      )}
+      {error && (
+        <p role="alert" className="rounded-sm border px-4 py-3 text-sm text-muted-foreground">
+          {error} Use the raw YAML link above.
+        </p>
+      )}
+      {requested && (
+        <>
+          <link
+            rel="stylesheet"
+            href={`${SWAGGER_ASSETS}/swagger-ui.css`}
+            integrity={SWAGGER_CSS_INTEGRITY}
+            crossOrigin="anonymous"
+            onLoad={() => setStylesReady(true)}
+            onError={showAssetError}
+          />
+          <Script
+            src={`${SWAGGER_ASSETS}/swagger-ui-bundle.js`}
+            integrity={SWAGGER_BUNDLE_INTEGRITY}
+            crossOrigin="anonymous"
+            strategy="afterInteractive"
+            onReady={() => setScriptReady(true)}
+            onError={showAssetError}
+          />
+          <div className={initialized ? 'rounded-sm border bg-card p-4' : undefined}>
+            <div
+              ref={explorer}
+              role="region"
+              aria-label="API explorer"
+              tabIndex={-1}
+              className="swagger-shell"
+            />
+          </div>
+        </>
+      )}
+    </div>
   );
 }

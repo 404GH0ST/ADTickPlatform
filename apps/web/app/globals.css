@@ -583,6 +583,31 @@
   overflow-wrap: anywhere;
 }
 
+.swagger-shell .swagger-ui .opblock-summary > .opblock-control-arrow {
+  display: none;
+}
+
+.swagger-shell .swagger-ui .opblock-summary-control {
+  position: relative;
+  padding-inline-end: 1.75rem;
+}
+
+.swagger-shell .swagger-ui .opblock-summary-control::after {
+  position: absolute;
+  inset-inline-end: 0.75rem;
+  top: calc(50% - 0.25rem);
+  inline-size: 0.45rem;
+  block-size: 0.45rem;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(45deg);
+  content: "";
+}
+
+.swagger-shell .swagger-ui .opblock-summary-control[aria-expanded="true"]::after {
+  transform: rotate(225deg);
+}
+
 .swagger-shell .swagger-ui .opblock .opblock-summary > .view-line-link.copy-to-clipboard {
   flex: 0 0 2rem;
   min-inline-size: 2rem;
