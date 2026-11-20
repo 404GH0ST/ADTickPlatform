@@ -57,7 +57,7 @@ function AttackLeaderboardPanel({
       {items.length === 0 ? (
         <EmptyStateText message={emptyMessage} />
       ) : (
-        <ol className="space-y-2 text-sm">
+        <ol className="grid gap-2 text-sm">
           {items.map((item, index) => (
             <li key={`${title}:${item.label}`} className="flex items-center justify-between gap-3">
               <span className="min-w-0 wrap-anywhere text-muted-foreground">
