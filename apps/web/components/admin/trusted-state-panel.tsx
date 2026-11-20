@@ -31,7 +31,7 @@ function TruthRow({
 }) {
   const tone = toneForState(state);
   return (
-    <div className="rounded-sm border border-border/60 px-3 py-2">
+    <div data-slot="well" className="rounded-sm border border-border/60 px-3 py-2">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd className={`mt-1 text-sm font-semibold ${toneClass(tone)}`}>
         {state?.trim() || "unknown"}

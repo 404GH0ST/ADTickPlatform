@@ -273,19 +273,19 @@ export function PlatformSettingsCard(): ReactElement {
         </div>
 
         <div className="grid gap-2 sm:grid-cols-4">
-          <div className="rounded border border-border bg-card/40 p-3">
+          <div data-slot="well" className="rounded border border-border bg-card/40 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Stored</p>
             <p className="mt-1 font-mono text-sm">
               {settings?.flag_format_prefix ?? "—"}
             </p>
           </div>
-          <div className="rounded border border-border bg-card/40 p-3">
+          <div data-slot="well" className="rounded border border-border bg-card/40 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Active in game-core</p>
             <p className="mt-1 font-mono text-sm">
               {settings?.flag_format_active ?? "—"}
             </p>
           </div>
-          <div className="rounded border border-border bg-card/40 p-3">
+          <div data-slot="well" className="rounded border border-border bg-card/40 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Sync</p>
             <p className="mt-1 flex items-center gap-2 text-sm">
               {inSync ? (
@@ -299,7 +299,7 @@ export function PlatformSettingsCard(): ReactElement {
               )}
             </p>
           </div>
-          <div className="rounded border border-border bg-card/40 p-3">
+          <div data-slot="well" className="rounded border border-border bg-card/40 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Team Limit</p>
             <p className="mt-1 font-mono text-sm">
               {settings?.max_team_members && settings.max_team_members > 0

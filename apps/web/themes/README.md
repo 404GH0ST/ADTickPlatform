@@ -80,6 +80,25 @@ allowed. Put it under `@layer components { :root[data-scheme="my-theme"] ... }`
 so utilities can still override it. `lib/themes.test.ts` fails if a theme's
 CSS mentions another theme's `data-scheme`.
 
+**Restyling stock views:** target the attributes stock components expose,
+not their Tailwind classes, so a class refactor in a stock view cannot
+silently change your theme:
+
+- `data-slot` on primitives (`card`, `button`, `input`, `badge`,
+  `table-container`, `info-panel`, `summary-strip`, …) and `data-slot="well"`
+  on inner boxes: stat boxes, disclosures and list frames that sit inside a
+  card. A danger well also carries `data-tone="danger"`.
+- `data-tone` on `InfoPanel` (`muted`, `surface`, `warning`).
+- `aria-pressed`, `aria-checked` and `data-active` for selected state.
+- `data-fx` on attack-map parts. Some ship hidden (`display="none"`) for a
+  theme to switch on: `globe-texture`, `arc-casing`, and the hard-shadow
+  shapes `globe-sphere-shadow`, `team-core-shadow` and `team-plate-shadow`.
+  Prefer them to `filter: drop-shadow()`, which re-rasterizes on every frame
+  of the rotating globe.
+
+When you add a bordered inner box to a stock view, give it
+`data-slot="well"`.
+
 Graphite's fallback tokens are loaded globally. The root layout loads the
 selected theme stylesheet separately. Use lazy imports for view overrides to
 load each view only where its slot renders.

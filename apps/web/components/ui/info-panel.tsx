@@ -44,6 +44,7 @@ export function InfoPanel({
   return (
     <div
       data-slot="info-panel"
+      data-tone={tone}
       className={cn(
         layoutClassName[layout],
         compact ? 'p-3' : 'p-4',

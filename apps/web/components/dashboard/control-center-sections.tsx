@@ -577,7 +577,7 @@ export function AttacksPanel({
               Selected view: {formatAttackFilterSummary(attackFilters)}. Choose Apply view to refresh the feed.
             </p>
           ) : null}
-          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+          <details data-slot="well" className="rounded-sm border border-border/70 bg-muted/10 p-3">
             <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced filters</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <Field label="Tick from" htmlFor="attack-tick-from"><Input id="attack-tick-from" type="number" min="0" value={attackFilters.tickFrom} onChange={(event) => onTickFromChange(event.target.value)} placeholder="240" /></Field>
@@ -623,7 +623,7 @@ export function AttacksPanel({
         />
 
         {visibleRows.length === 0 ? (
-          <div className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
+          <div data-slot="well" className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
             <p className="text-sm font-medium text-foreground">No accepted attacks in this view</p>
             <EmptyStateText message={filtersApplied ? 'The active team, service, or tick filters exclude every accepted attack. Reset the view to return to the live feed.' : 'Accepted attacks will appear here automatically after a valid flag is submitted.'} />
             {filtersApplied ? <Button size="sm" variant="outline" onClick={onResetFilters}>Reset view</Button> : null}

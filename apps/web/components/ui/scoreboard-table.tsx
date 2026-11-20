@@ -130,7 +130,7 @@ function ServiceCell({
 }): ReactElement {
   if (!value) {
     return (
-      <div className="flex h-16 w-full items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-muted-foreground/35 select-none">
+      <div data-slot="well" className="flex h-16 w-full items-center justify-center rounded-sm border border-border/20 bg-muted/10 text-muted-foreground/35 select-none">
         —
       </div>
     );
@@ -530,7 +530,7 @@ function MobileScoreboardCards({
 
   return (
     <div className="grid gap-3 md:hidden">
-      <div className="flex flex-col gap-2 rounded-sm border border-border/75 bg-muted/10 p-2.5">
+      <div data-slot="well" className="flex flex-col gap-2 rounded-sm border border-border/75 bg-muted/10 p-2.5">
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           <span><span className="font-semibold text-foreground">A</span> Attack</span>
           <span><span className="font-semibold text-foreground">D</span> Defense</span>
@@ -616,7 +616,7 @@ function MobileScoreboardCards({
             {allServices.length > 0 ? (
               <div className="mt-3 space-y-2">
                 {visibleServices.map((service) => (
-                  <div
+                  <div data-slot="well"
                     key={serviceColumnKey(service)}
                     className="rounded-sm border border-border/55 bg-muted/20 p-2"
                   >

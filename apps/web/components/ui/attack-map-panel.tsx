@@ -584,7 +584,7 @@ export function AttackMapPanel({
       >
         <Suspense
           fallback={
-            <div
+            <div data-slot="well"
               role="status"
               className={cn('grid place-items-center rounded-sm border bg-card p-4 text-sm text-muted-foreground', mapSize)}
             >
@@ -634,7 +634,7 @@ export function AttackMapPanel({
   }
 
   return (
-    <div
+    <div data-slot="well"
       data-testid="attack-map-panel"
       className={cn(
         'space-y-3 rounded-sm border border-border/70 bg-card px-1 py-3 sm:px-3 any-pointer-coarse:[&_[data-size=touch]]:min-h-11 any-pointer-coarse:[&_[data-size=touch]]:min-w-11',
@@ -656,7 +656,7 @@ export function AttackMapPanel({
           <Badge data-testid="attack-map-visible-services" variant="secondary">
             {visibleServiceCount} services
           </Badge>
-          <div
+          <div data-slot="well"
             className="flex min-h-9 items-center gap-2 rounded-sm border border-border/70 bg-muted/20 px-2"
             data-testid="attack-sfx-control"
           >
@@ -714,7 +714,7 @@ export function AttackMapPanel({
       </div>
 
       {attackRows.length > 0 ? (
-        <div className="@container grid grid-cols-1 gap-3 rounded-sm border border-border/70 bg-muted/20 px-1 py-3 sm:px-3">
+        <div data-slot="well" className="@container grid grid-cols-1 gap-3 rounded-sm border border-border/70 bg-muted/20 px-1 py-3 sm:px-3">
           <div className="grid grid-cols-1 gap-3 @[48rem]:grid-cols-[minmax(0,1fr)_15rem] @[48rem]:items-start">
             <div className="grid min-w-0 grid-cols-1 gap-3 @[38rem]:grid-cols-[minmax(0,1fr)_auto] @[38rem]:items-end">
               <div className="space-y-2">
@@ -911,7 +911,7 @@ function InspectorCard({
   title: string;
 } & React.HTMLAttributes<HTMLDivElement>): ReactElement {
   return (
-    <div
+    <div data-slot="well"
       className={cn("min-w-0 space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3", className)}
       {...props}
     >

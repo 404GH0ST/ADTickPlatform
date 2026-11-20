@@ -1787,7 +1787,7 @@ export function GameTab({
                 onStopScheduler={onStopScheduler}
                 onUpdateScheduler={onUpdateScheduler}
               />
-              <details
+              <details data-slot="well"
                 className="rounded-sm border border-border/70 bg-muted/10 p-3"
                 data-testid="checker-investigation-disclosure"
                 open={checkerAttentionActive}
@@ -2504,7 +2504,7 @@ function MatchLifecycleCard({
           </Button>
           </div>
           {canStop ? (
-            <details className="rounded-sm border border-danger/30 bg-danger/5 p-3">
+            <details data-slot="well" data-tone="danger" className="rounded-sm border border-danger/30 bg-danger/5 p-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">End match</summary>
               <div className="mt-3 grid justify-items-start gap-3">
                 <p className="text-sm text-muted-foreground">Stopping closes participant submissions and ends the active match. Verify the current tick before continuing.</p>
@@ -2570,7 +2570,7 @@ function MatchScheduleCard({
             valueClassName="font-mono"
           />
         </InfoPanel>
-        <div className="grid grid-cols-1 gap-3 sm:rounded-sm sm:border sm:border-border/70 sm:bg-background sm:p-3">
+        <div data-slot="well" className="grid grid-cols-1 gap-3 sm:rounded-sm sm:border sm:border-border/70 sm:bg-background sm:p-3">
           <div className="grid grid-cols-1 items-start gap-3 @min-[24rem]:grid-cols-2">
             <div className="grid grid-cols-1 gap-3">
               <Field
@@ -2772,7 +2772,7 @@ function QuickActionsCard({
               Audit scores
             </Button>
           </CardActionRow>
-          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+          <details data-slot="well" className="rounded-sm border border-border/70 bg-muted/10 p-3">
             <summary className="cursor-pointer text-sm font-medium text-foreground">Manual interventions</summary>
             <p className="mt-2 text-sm text-muted-foreground">These operations modify live progression or rebuild rankings. Use them only after checking runtime health and the latest tick.</p>
             <CardActionRow className="mt-3">
@@ -2921,7 +2921,7 @@ function RuntimeHealthCard({
           />
         ) : null}
         {snapshot.warnings.length === 0 ? (
-          <div className="flex flex-col gap-3 rounded-sm border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between">
+          <div data-slot="well" className="flex flex-col gap-3 rounded-sm border border-border/70 bg-background p-3 md:flex-row md:items-center md:justify-between">
             <RuntimeActionButton
               actionID="runtime:health"
               label="Refresh Runtime"
@@ -2938,7 +2938,7 @@ function RuntimeHealthCard({
             </div>
           </div>
         ) : null}
-        <details className="rounded-sm border border-border/70 bg-muted/10 p-3 text-sm">
+        <details data-slot="well" className="rounded-sm border border-border/70 bg-muted/10 p-3 text-sm">
           <summary className="cursor-pointer font-medium text-foreground">
             Inspect trust inputs
           </summary>
@@ -3351,7 +3351,7 @@ function OperationsAlertsCard({
             {alerts.map((alert) => {
               const action = operationsAlertAction(alert);
               return (
-                <div
+                <div data-slot="well"
                   key={alert.id}
                   className="rounded-sm border border-border/70 bg-background p-3"
                 >
@@ -3449,7 +3449,7 @@ function OperationsMetricsCard({
                 }
                 variant={unhealthyCount === 0 ? "success" : "warning"}
               />
-              <div className="rounded-sm border border-border/70 bg-background p-3">
+              <div data-slot="well" className="rounded-sm border border-border/70 bg-background p-3">
                 <div className="flex flex-wrap gap-2">
                   {serviceHealth.map((entry) => (
                     <Badge
@@ -3503,7 +3503,7 @@ function OperationsMetricsCard({
                   valueClassName="font-mono"
                 />
               </InfoPanel>
-              <div className="rounded-sm border border-border/70 bg-background p-3">
+              <div data-slot="well" className="rounded-sm border border-border/70 bg-background p-3">
                 <p className="text-sm font-medium text-foreground">
                   Service watchlist
                 </p>
@@ -3519,7 +3519,7 @@ function OperationsMetricsCard({
                 </div>
               </div>
             </div>
-            <details className="rounded-sm border border-border/70 bg-background p-3">
+            <details data-slot="well" className="rounded-sm border border-border/70 bg-background p-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">
                 Inspect per-service metrics
               </summary>
@@ -3715,7 +3715,7 @@ function MetricsServicePanel({
   lines: { label: string; value: string }[];
 }): ReactElement {
   return (
-    <div className="min-w-0 wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 sm:p-4">
+    <div data-slot="well" className="min-w-0 wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 sm:p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {health ? (
@@ -3947,7 +3947,7 @@ function SchedulerCard({
             onStartScheduler={onStartScheduler}
             onStopScheduler={onStopScheduler}
           />
-          <details
+          <details data-slot="well"
             className="rounded-sm border border-border/70 bg-muted/10 p-3"
             data-testid="scheduler-audit-disclosure"
             open={auditExpanded}
@@ -4221,7 +4221,7 @@ function SchedulerAuditFilters({
   onFilterChange: (next: GameFilters["schedulerEvent"]) => void;
 }): ReactElement {
   return (
-    <div
+    <div data-slot="well"
       data-testid="scheduler-audit-filters"
       className="mb-4 flex flex-wrap gap-3 rounded-sm border border-border/70 bg-muted/20 p-3"
     >
@@ -4357,7 +4357,7 @@ function SchedulerEventRow({
   event: AdminSchedulerEventPage["items"][number];
 }): ReactElement {
   return (
-    <div className="wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+    <div data-slot="well" className="wrap-anywhere rounded-sm border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="min-w-0">{event.event_type}</Badge>
@@ -4635,7 +4635,7 @@ export function GameAttacksCard({
               Selected filters are ready. Choose Apply view to refresh the organizer feed.
             </p>
           ) : null}
-          <details className="rounded-sm border border-border/70 bg-muted/10 p-3">
+          <details data-slot="well" className="rounded-sm border border-border/70 bg-muted/10 p-3">
             <summary className="cursor-pointer text-sm font-medium text-foreground">Advanced filters</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <Field label="Tick from" htmlFor="admin-attack-tick-from"><Input id="admin-attack-tick-from" type="number" min="0" value={filters.tickFrom} onChange={(event) => onFilterChange({ ...filters, tickFrom: event.target.value })} placeholder="240" /></Field>
@@ -4679,7 +4679,7 @@ export function GameAttacksCard({
           title="Attack flow"
         />
         {attackRows.length === 0 ? (
-          <div className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
+          <div data-slot="well" className="grid justify-items-start gap-2 rounded-sm border border-border/70 bg-muted/10 p-4">
             <p className="text-sm font-medium text-foreground">No accepted attacks in this view</p>
             <p className="text-sm text-muted-foreground">{filtersApplied ? 'The active filters exclude every accepted attack. Reset the view to return to the live organizer feed.' : 'Accepted attacks will appear here automatically after participants submit valid flags.'}</p>
             {filtersApplied ? <Button size="sm" variant="outline" onClick={onResetFilters}>Reset view</Button> : null}
@@ -4766,7 +4766,7 @@ export function ScoringAuditCard({
           </InfoPanel>
         </div>
         {mismatches.length > 0 ? (
-          <div className="overflow-hidden rounded-sm border border-border">
+          <div data-slot="table-container" className="overflow-hidden rounded-sm border border-border">
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
                 <tr>
@@ -4961,7 +4961,7 @@ function CheckerRunsCard({
             <Link href="/admin/game#runtime-health-card">Back to Runtime Health</Link>
           </Button>
         </div>
-        <details
+        <details data-slot="well"
           className="rounded-sm border border-border/70 bg-muted/10 p-3"
           data-testid="checker-runs-disclosure"
           open={detailExpanded}
@@ -4973,7 +4973,7 @@ function CheckerRunsCard({
             Phase-level history, filters, and paging for checker investigation.
           </p>
           <div className="mt-3 space-y-4">
-            <div className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3">
+            <div data-slot="well" className="space-y-3 rounded-sm border border-border/70 bg-muted/20 p-3">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Page Size" htmlFor="checker-limit">
                   <select
@@ -5269,7 +5269,7 @@ function RuntimeStatusBlock({
   error?: string;
 }): ReactElement {
   return (
-    <div className="surface-inset grid grid-cols-1 gap-2 rounded-sm border p-3 text-sm">
+    <div data-slot="well" className="surface-inset grid grid-cols-1 gap-2 rounded-sm border p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="font-medium text-foreground">Runtime status</span>
         <Badge className={tone} variant="outline">
