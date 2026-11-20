@@ -2168,6 +2168,18 @@ const GlobeSurface = memo(function GlobeSurface({
         fill="var(--attack-map-node-highlight-halo)"
         fillOpacity="var(--attack-map-outer-glow-opacity)"
       />
+      {/* Hard offset shadow: hidden unless a theme shows it. A drawn shape
+          instead of a CSS drop-shadow filter, which would re-rasterize the
+          whole sphere on every rotation frame. */}
+      <circle
+        cx={CENTER_X}
+        cy={CENTER_Y}
+        r={GLOBE_RADIUS}
+        data-fx="globe-sphere-shadow"
+        display="none"
+        fill="none"
+        pointerEvents="none"
+      />
       <circle
         cx={CENTER_X}
         cy={CENTER_Y}
@@ -2669,6 +2681,15 @@ function TeamNodeDot({
         stroke="var(--attack-map-node-highlight)"
         strokeOpacity={emphasized ? '0.5' : '0.16'}
       />
+      {/* Offset shadow under the pin: hidden unless a theme shows it. */}
+      <circle
+        cx={node.x}
+        cy={node.y}
+        r={coreRadius}
+        data-fx="team-core-shadow"
+        display="none"
+        fill="none"
+      />
       <circle
         cx={node.x}
         cy={node.y}
@@ -2688,18 +2709,31 @@ function TeamLabelPlate({ node }: { node: TeamNode }): ReactElement {
   const box = getLabelBox(node);
 
   return (
-    <rect
-      data-fx="team-plate"
-      data-selected={node.selected ? 'true' : undefined}
-      x={box.left}
-      y={node.labelY - 23}
-      width={width}
-      height="40"
-      rx="3"
-      fill="var(--attack-map-legend-background)"
-      stroke="var(--attack-map-legend-border)"
-      strokeOpacity={node.selected ? '0.95' : '0.72'}
-    />
+    <>
+      {/* Offset shadow under the plate: hidden unless a theme shows it. */}
+      <rect
+        data-fx="team-plate-shadow"
+        x={box.left}
+        y={node.labelY - 23}
+        width={width}
+        height="40"
+        rx="3"
+        display="none"
+        fill="none"
+      />
+      <rect
+        data-fx="team-plate"
+        data-selected={node.selected ? 'true' : undefined}
+        x={box.left}
+        y={node.labelY - 23}
+        width={width}
+        height="40"
+        rx="3"
+        fill="var(--attack-map-legend-background)"
+        stroke="var(--attack-map-legend-border)"
+        strokeOpacity={node.selected ? '0.95' : '0.72'}
+      />
+    </>
   );
 }
 
