@@ -24,6 +24,8 @@
   --nb-ink: oklch(0.17 0.01 265);
   --nb-paper: oklch(0.995 0.002 265);
   --nb-sheet: oklch(1 0 0);
+  --nb-selected-fill: var(--nb-ink);
+  --nb-selected-text: var(--nb-paper);
   --nb-shadow: var(--nb-ink);
   --nb-grid: oklch(0.2 0.01 265 / 0.07);
   --nb-line: 3px;
@@ -140,6 +142,8 @@
   --nb-paper: oklch(0.165 0.014 265);
   --nb-sheet: oklch(0.215 0.016 265);
   --nb-chalk: oklch(0.95 0.018 85);
+  --nb-selected-fill: var(--nb-chalk);
+  --nb-selected-text: var(--nb-ink);
   --nb-shadow: oklch(0.06 0.01 265);
   --nb-grid: oklch(0.95 0.018 85 / 0.045);
   --nb-zebra: oklch(0.245 0.016 265);
@@ -670,8 +674,8 @@
 }
 
 :root[data-scheme="neubrutalism"] .mode-option[aria-checked="true"] {
-  background: var(--nb-yellow);
-  color: var(--nb-ink);
+  background: var(--nb-selected-fill);
+  color: var(--nb-selected-text);
 }
 
 @media (forced-colors: active) {
@@ -690,6 +694,7 @@
     forced-color-adjust: none;
     background: Highlight;
     color: HighlightText;
+    outline-color: Highlight;
   }
 
   :root[data-scheme="neubrutalism"] .nb-selected[aria-pressed="true"] {
@@ -784,22 +789,10 @@
 
 :root[data-scheme="neubrutalism"] .section-tab[data-active="true"],
 :root[data-scheme="neubrutalism"] .nb-selected {
-  border-color: var(--nb-ink);
-  background: var(--nb-ink);
-  color: var(--nb-paper);
+  border-color: var(--nb-selected-fill);
+  background: var(--nb-selected-fill);
+  color: var(--nb-selected-text);
   box-shadow: 3px 3px 0 var(--nb-shadow);
-}
-
-:root[data-scheme="neubrutalism"][data-theme="dark"] .nb-selected {
-  border-color: var(--nb-chalk);
-  background: var(--nb-chalk);
-  color: var(--nb-ink);
-}
-
-:root[data-scheme="neubrutalism"][data-theme="dark"] .section-tab[data-active="true"] {
-  border-color: var(--nb-chalk);
-  background: var(--nb-chalk);
-  color: var(--nb-ink);
 }
 
 :root[data-scheme="neubrutalism"] .section-tab-count {
@@ -820,8 +813,7 @@
 @media (hover: none) {
   :root[data-scheme="neubrutalism"] [data-slot="button"]:hover:not(:disabled):not(:active),
   :root[data-scheme="neubrutalism"] [data-theme-option]:hover:not(:disabled),
-  :root[data-scheme="neubrutalism"] .mode-picker:not([open]) > summary:hover:not(:active),
-  :root[data-scheme="neubrutalism"] .nb-lift:hover:not(:active) {
+  :root[data-scheme="neubrutalism"] .mode-picker:not([open]) > summary:hover:not(:active) {
     transform: none;
   }
 }
@@ -1008,14 +1000,24 @@
       box-shadow 160ms var(--nb-snap);
   }
 
-  :root[data-scheme="neubrutalism"] .nb-lift:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: 8px 8px 0 var(--nb-shadow);
+  @media (hover: hover) {
+    :root[data-scheme="neubrutalism"] .nb-lift:hover {
+      box-shadow: 8px 8px 0 var(--nb-shadow);
+    }
   }
 
   :root[data-scheme="neubrutalism"] .nb-lift:active {
-    transform: translate(3px, 3px);
     box-shadow: 1px 1px 0 var(--nb-shadow);
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    :root[data-scheme="neubrutalism"] .nb-lift:hover {
+      transform: translate(-2px, -2px);
+    }
+
+    :root[data-scheme="neubrutalism"] .nb-lift:active {
+      transform: translate(3px, 3px);
+    }
   }
 
   /* Countdown: digits in a white display window, like a scoreboard clock. */
@@ -1355,19 +1357,32 @@
 }
 
 :root[data-scheme="neubrutalism"] [data-theme-option]:hover:not(:disabled) {
-  background: var(--card);
   box-shadow: 3px 3px 0 var(--nb-shadow);
   transform: translate(-1px, -1px);
 }
 
 :root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] {
-  background: var(--nb-yellow);
-  color: var(--nb-ink);
+  background: var(--nb-selected-fill);
+  color: var(--nb-selected-text);
   box-shadow: 3px 3px 0 var(--nb-shadow);
 }
 
 :root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] * {
-  color: var(--nb-ink);
+  color: inherit;
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] .border {
+  border-color: currentColor;
+}
+
+@media (forced-colors: active) {
+  :root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+    outline-color: Highlight;
+  }
 }
 
 :root[data-scheme="neubrutalism"] [data-theme-option] > span:first-child {
