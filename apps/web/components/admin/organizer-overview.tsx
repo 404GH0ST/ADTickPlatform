@@ -39,9 +39,9 @@ export function DefaultOrganizerOverviewView({
             <li key={link.id}>
               <Link
                 href={link.href}
-                className="group grid gap-0.5 px-3.5 py-2.5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="group grid min-w-0 gap-0.5 px-3.5 py-2.5 wrap-anywhere transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <span className="flex items-baseline justify-between gap-3">
+                <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                   <span className="text-sm font-semibold text-foreground">{link.title}</span>
                   <span className="text-xs tabular-nums text-muted-foreground">{link.meta}</span>
                 </span>

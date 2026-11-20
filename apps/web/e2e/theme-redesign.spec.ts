@@ -758,9 +758,15 @@ test("populated organizer views and scheduling values fit at narrow widths with 
       await page.goto(route);
       await expect(ready).toBeVisible();
       await expectReflow(route);
+      if (route === "/admin") {
+        await expectNoHorizontalOverflow(page.getByRole("navigation", { name: "Organizer sections" }));
+      }
     }
 
-    await page.getByLabel("Scheduled Start Date").fill("2029-06-07");
+    const startDate = page.getByLabel("Scheduled Start Date");
+    await startDate.fill("2029-06-07");
+    await expectNoHorizontalOverflow(startDate);
+    await expectNoHorizontalOverflow(page.getByLabel("Scheduled End Date"));
     const time = page.getByLabel("Scheduled Start Time");
     await time.fill("19:45");
     await expect(time).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
@@ -771,10 +777,12 @@ test("populated organizer views and scheduling values fit at narrow widths with 
     const freeze = page.getByRole("group", { name: "Freeze at", exact: true });
     const freezeTime = freeze.getByLabel("Time", { exact: true });
     await freezeTime.fill("19:45");
-    await freeze.getByLabel("Date", { exact: true }).fill("2029-06-07");
+    const freezeDate = freeze.getByLabel("Date", { exact: true });
+    await freezeDate.fill("2029-06-07");
     await expect(freezeTime).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
     await expect(page.locator("time[datetime='2029-06-07T19:45:00.000Z']")).toBeVisible();
     await expectReflow("filled freeze schedule");
+    await expectNoHorizontalOverflow(freezeDate);
   } finally {
     await browser.close();
   }

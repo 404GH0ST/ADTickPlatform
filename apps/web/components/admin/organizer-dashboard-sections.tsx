@@ -2073,6 +2073,7 @@ function freezeStateLabel(status: AdminScoreboardFreeze | null): {
 
 type FreezeDateTime = { date: string; time: string };
 const emptyFreezeDateTime: FreezeDateTime = { date: "", time: "" };
+const scheduleDateClassName = "px-0.5 sm:px-3 [&::-webkit-calendar-picker-indicator]:px-0";
 
 function FreezeDateTimeFields({
   id,
@@ -2096,7 +2097,7 @@ function FreezeDateTimeFields({
           id={`${id}-date`}
           type="date"
           aria-describedby={complete ? previewId : undefined}
-          className="px-1 sm:px-3"
+          className={scheduleDateClassName}
           value={value.date}
           onChange={(event) => onChange({ ...value, date: event.target.value })}
         />
@@ -2224,7 +2225,7 @@ export function ScoreboardFreezeControl(): ReactElement {
           the live board.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 px-2 sm:px-5">
+      <CardContent className="@container grid grid-cols-1 gap-3 px-[min(0.5rem,1.25vw)] sm:px-5">
         <div className="flex flex-wrap items-center gap-2">
           <span className="wrap-anywhere text-sm text-muted-foreground">Participant board:</span>
           <Badge className={state.tone} data-testid="scoreboard-freeze-state">
@@ -2239,7 +2240,7 @@ export function ScoreboardFreezeControl(): ReactElement {
             </span>
           )}
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 @min-[22rem]:grid-cols-2">
           <FreezeDateTimeFields
             id="scoreboard-freeze-at"
             label="Freeze at"
@@ -2252,7 +2253,7 @@ export function ScoreboardFreezeControl(): ReactElement {
             value={unfreezeAt}
             onChange={setUnfreezeAt}
           />
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
+          <div className="col-span-full flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={busy}
@@ -2556,7 +2557,7 @@ function MatchScheduleCard({
           Configure the planned start and end timestamps used by game-core.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 px-2 sm:px-5">
+      <CardContent className="@container space-y-4 px-[min(0.5rem,1.25vw)] sm:px-5">
         <InfoPanel layout="grid">
           <InfoLine
             label="Scheduled start"
@@ -2570,7 +2571,7 @@ function MatchScheduleCard({
           />
         </InfoPanel>
         <div className="grid grid-cols-1 gap-3 sm:rounded-sm sm:border sm:border-border/70 sm:bg-background sm:p-3">
-          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 items-start gap-3 @min-[24rem]:grid-cols-2">
             <div className="grid grid-cols-1 gap-3">
               <Field
                 label="Scheduled Start Date"
@@ -2580,7 +2581,7 @@ function MatchScheduleCard({
                   id="match-scheduled-start-date"
                   type="date"
                   aria-describedby={draftScheduledStart ? "match-start-preview" : undefined}
-                  className="px-1 sm:px-3"
+                  className={scheduleDateClassName}
                   value={datePartFromDateTimeLocalValue(draftScheduledStart)}
                   onChange={(event) =>
                     setDraftScheduledStart(
@@ -2624,7 +2625,7 @@ function MatchScheduleCard({
                   id="match-scheduled-end-date"
                   type="date"
                   aria-describedby={draftScheduledEnd ? "match-end-preview" : undefined}
-                  className="px-1 sm:px-3"
+                  className={scheduleDateClassName}
                   value={datePartFromDateTimeLocalValue(draftScheduledEnd)}
                   onChange={(event) =>
                     setDraftScheduledEnd(
