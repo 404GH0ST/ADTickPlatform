@@ -96,7 +96,7 @@ export function NbLogin({
       </div>
       {error ? <StatusBanner message={error} variant="error" /> : null}
       <Button type="submit" size="lg" className="mt-1 h-12 w-full text-base" disabled={pending}>
-        {pending ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+        {pending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden /> : null}
         {pending ? (register ? "Registering…" : "Signing in…") : register ? "Register" : "Sign In"}
       </Button>
     </form>

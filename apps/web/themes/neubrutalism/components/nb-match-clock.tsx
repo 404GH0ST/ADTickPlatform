@@ -4,10 +4,12 @@ import type { ReactNode } from "react";
 
 import { cn, useMatchClock, type PlatformOverview } from "@/components/theme/kit";
 
+// Idle (not started, finished) is no status at all, so it takes the neutral
+// sticker: lilac means held or "you" everywhere else in this theme.
 const STATE_FILL = {
   running: "nb-fill-aqua",
   paused: "nb-fill-orange",
-  idle: "nb-fill-lilac",
+  idle: "nb-stat",
 } as const;
 
 const CELL_PADDING = "px-5 py-4 @max-[10.5rem]:px-2 @max-[9rem]:px-1";
@@ -40,7 +42,7 @@ export function NbMatchClock({ overview }: { overview: PlatformOverview }) {
       <dl className="grid grid-cols-1 divide-y-2 divide-border sm:grid-cols-3 sm:divide-x-2 sm:divide-y-0">
         <Cell label="Match state">
           <span className={cn("nb-sticker inline-flex max-w-full items-center gap-2 whitespace-normal", STATE_FILL[clock.stateKind])}>
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--nb-ink)]" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-current" />
             {clock.stateLabel}
           </span>
         </Cell>

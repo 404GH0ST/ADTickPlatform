@@ -139,7 +139,7 @@ export function NbServices({
                       onClick={() => onSelectPrimaryAction(service)}
                     >
                       {view.ssh.pending ? (
-                        <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                        <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
                       ) : !service.unlocked && view.ssh.disabled ? (
                         <Lock className="size-4" strokeWidth={2.4} aria-hidden />
                       ) : (
@@ -149,7 +149,7 @@ export function NbServices({
                     </Button>
                     <Button variant="secondary" disabled={view.restart.disabled} onClick={() => onRestart(service)}>
                       {view.restart.pending ? (
-                        <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                        <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
                       ) : (
                         <RotateCcw className="size-4" strokeWidth={2.4} aria-hidden />
                       )}
@@ -161,7 +161,7 @@ export function NbServices({
                       disabled={view.reset.disabled}
                       onClick={() => onSelectReset(service)}
                     >
-                      {view.reset.pending ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+                      {view.reset.pending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden /> : null}
                       Factory Reset{view.reset.cooldownSeconds > 0 ? ` ${view.reset.cooldownSeconds}s` : ""}
                     </Button>
                     {view.sourceHref ? (

@@ -57,7 +57,7 @@ export function NbOrganizerScoreboard({
             />
             <Button disabled={pendingAction !== null} size="sm" variant="outline" onClick={onRefresh}>
               {pendingAction === "game:scoreboard" ? (
-                <LoaderCircle className="size-4 animate-spin" aria-hidden />
+                <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
               ) : (
                 <RefreshCw className="size-4" aria-hidden />
               )}

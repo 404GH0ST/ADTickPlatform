@@ -70,18 +70,19 @@ Rules:
 Neubrutalism is a deliberate, loud exception to the Tactical Workroom bans. It is allowed:
 - A body-wide 44px graph-paper grid.
 - A yellow title banner on every page. It stays compact (`text-3xl`/`text-4xl`, one row shared with the header keys), never a marketing hero.
-- Hard, unblurred offset shadows and 3px ink outlines on cards, keys and inputs.
+- Hard, unblurred offset shadows and 3px ink outlines on cards, keys and inputs. In dark mode the shadow is a lifted slate (`--nb-shadow`), because black would vanish on the blue-black paper.
 - In dark mode, big colour blocks become slate panels with a 10px coloured edge stripe (and an 8px yellow stripe on the banner).
 - Display face Lexend instead of IBM Plex Sans.
 
 Even here, these rules hold:
-- **Status colours keep one meaning:** aqua = healthy, yellow = primary action or attention, pink = failing or danger (alert counts included), orange = paused (also used for the Pause key), lilac = held (locked SSH, frozen board) or "you".
+- **Status colours keep one meaning:** aqua = healthy, yellow = primary action or attention, pink = failing or danger (alert counts included), orange = paused (also used for the Pause key), lilac = held (locked SSH, frozen board) or "you", sky (`--nb-sky`) = info (scheduled, deploying, notices).
 - **Chrome colour is blue (rail, icon keys) and yellow (banner, logo).** Home destination blocks are white sheets with a blue icon key, never a status fill.
-- **Selection is neutral:** the current nav key is white on the rail. Active tabs and chosen toggles are ink (cream in dark mode) via `.nb-selected`.
+- **Selection is neutral:** the current nav key is white on the rail. In forced-colors mode the current nav key, active tab and pressed toggles take the system Highlight. Active tabs and chosen toggles are ink (cream in dark mode) via `.nb-selected`, and so is any stock key with `aria-pressed="true"`, whatever its variant. Idle or finished match state is the neutral sticker, not lilac. The primary key stays yellow in dark mode, so a cream fill always means "selected", never "press me".
+- **One box per card:** the 3px card outline is the only frame. Wells inside a card or panel (info panels, stat boxes, disclosures) drop their outline and sit on a `--nb-zebra` shift; a table inside a card loses its own outline. Stock views mark wells with `data-slot="well"` (see `apps/web/themes/README.md`); the theme never infers a well from utility classes.
 - **Score data has its own hues:** A violet, D cobalt, SLA slate-teal (`--nb-score-*`), as outlined stickers (`.nb-stat-a|d|sla`). The "new" rank sticker is plain `.nb-stat`.
 - **The frozen scoreboard is an inverted ink bar** (`.nb-frozen`, a cream bar with a lilac edge in dark mode), unlike any chrome or status fill. The scoreboard page shows only this bar, with no second shell alert. Organizer pages show a "Board frozen" chip beside the title.
-- **Podium fills follow the medal ramp** (yellow, lilac, orange) with ink numbers. The DOM order is rank order.
-- **Contrast:** text on any fill is fully opaque and ≥4.5:1. Dark-mode `--nb-blue` stays dark enough for cream text.
+- **Podium fills follow the medal ramp** (yellow, silver grey `--nb-silver`, orange) with ink numbers, so #2 never reads as the lilac "you" row. The DOM order is rank order; phones keep the 2-1-3 podium as three short columns.
+- **Contrast:** text on any fill is fully opaque and ≥4.5:1. Dark-mode `--nb-blue` stays dark enough for cream text. `apps/web/lib/theme-contrast.test.ts` checks the token pairs for every theme and mode, including status and info text on zebra, hover and "you" rows. Outlines and shadows on page surfaces use `--border` and `--nb-shadow`, never raw `--nb-ink`, which vanishes on night slate.
 - **Focus rings stay visible on every surface.** On the blue rail the ring is yellow.
 - **Destructive keys** (`.button-danger-subtle`) show a pink wash at rest, not only on hover. Ghost destructive icons keep an ink outline, and disabled ones go dashed and grey.
 - **The bounce easing is reserved for the first-blood banner.** Everyday hovers use `--nb-snap`, an ease-out curve with no overshoot.

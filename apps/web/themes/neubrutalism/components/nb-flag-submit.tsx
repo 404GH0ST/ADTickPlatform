@@ -29,11 +29,11 @@ export function NbFlagSubmit({
   return (
     <section data-testid="flag-submit-panel" aria-label="Submit flags" className="nb-panel overflow-hidden">
       <form onSubmit={onSubmit} aria-busy={pending || undefined} className="grid grid-cols-1 gap-0 md:grid-cols-[13rem_minmax(0,1fr)]">
-        <div className="flex flex-wrap items-center gap-3 border-b-[3px] border-border bg-[var(--nb-zebra)] px-4 py-4 sm:px-5 md:flex-col md:flex-nowrap md:items-start md:justify-between md:border-b-0 md:border-r-[3px]">
+        <div className="flex flex-wrap items-center gap-3 border-b-[3px] border-border bg-[var(--nb-zebra)] px-4 py-4 sm:px-5 md:flex-nowrap md:items-start md:border-b-0 md:border-r-[3px]">
           <span className="nb-icon-key grid size-11 shrink-0 place-items-center rounded-[var(--nb-radius-sm)]">
             <Flag className="size-5" strokeWidth={2.4} aria-hidden />
           </span>
-          <div className="grid min-w-0 grow basis-28 grid-cols-1 gap-0.5 wrap-anywhere md:grow-0 md:basis-auto">
+          <div className="grid min-w-0 grow basis-28 grid-cols-1 content-center gap-0.5 wrap-anywhere md:min-h-11 md:basis-0">
             <h2 className="text-2xl font-extrabold leading-none">Submit flags</h2>
             {closed ? <span className="text-sm font-bold">Submissions closed</span> : null}
           </div>
@@ -80,7 +80,7 @@ export function NbFlagSubmit({
                       key={`${verdict.flag}-${index}`}
                       data-testid="flag-verdict"
                       data-verdict={verdict.outcome}
-                      className="grid min-w-0 grid-cols-1 gap-1 rounded-[var(--nb-radius-sm)] border-2 border-border bg-muted p-2 text-xs wrap-anywhere"
+                      className="grid min-w-0 grid-cols-1 gap-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent bg-[var(--nb-zebra)] p-2 text-xs wrap-anywhere"
                     >
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className={cn("nb-sticker max-w-full uppercase", VERDICT_FILL[verdict.outcome] ?? "nb-fill-pink")}>

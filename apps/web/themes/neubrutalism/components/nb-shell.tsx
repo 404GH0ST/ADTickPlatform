@@ -165,7 +165,7 @@ export function NbShell({
             id="nb-rail"
             className="nb-rail lg:flex lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden"
           >
-            <div className="nb-rail-brand flex items-center px-4 pb-2 pt-4 lg:px-5 lg:pb-5 lg:pt-5">
+            <div className="nb-rail-brand flex items-center px-4 pb-1 pt-3 lg:px-5 lg:pb-5 lg:pt-5">
               <Link href={organizer ? "/admin" : "/"} className="min-w-0">
                 <Brand organizer={organizer} />
               </Link>
@@ -173,7 +173,7 @@ export function NbShell({
             <nav
               ref={navRef}
               aria-label="Primary"
-              className="flex gap-1.5 overflow-x-auto scroll-px-3 px-3 pb-3 pt-2 lg:grid lg:gap-1 lg:overflow-visible lg:px-3 lg:pb-6 lg:pt-1"
+              className="flex gap-1.5 overflow-x-auto scroll-px-3 px-3 pb-2.5 pt-1.5 lg:grid lg:gap-1 lg:overflow-visible lg:px-3 lg:pb-6 lg:pt-1"
               onFocus={(event) => {
                 const nav = event.currentTarget;
                 const link = event.target.closest<HTMLAnchorElement>("a.nb-nav-link");
@@ -222,15 +222,30 @@ export function NbShell({
 
       <div className="flex min-w-0 flex-col gap-6 px-3 pb-10 pt-1 sm:px-6 lg:px-8 lg:pt-4">
         {/* Title banner and header keys share one row when there is room, so
-            content starts one banner-height from the top, not two. */}
-        <header className="flex flex-wrap items-center gap-x-5 gap-y-4">
-          <div className="nb-banner flex min-w-[min(100%,20rem)] flex-1 flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6 sm:py-4">
-            <h1 className="min-w-0 max-w-full wrap-anywhere text-balance text-3xl font-extrabold leading-none tracking-[-0.03em] sm:text-4xl">{title}</h1>
+            content starts one banner-height from the top, not two. On phones
+            the keys fold to icons, so two icon keys still fit beside the
+            banner; a text key such as Sign In needs more room than the title
+            can give up, so the keys then wrap to their own row under it. */}
+        <header className="relative flex flex-wrap items-center gap-x-3 gap-y-4 sm:gap-x-5">
+          <div className="nb-banner flex min-w-[min(100%,12rem)] flex-1 flex-wrap items-center justify-between gap-3 px-4 py-3 sm:min-w-[min(100%,20rem)] sm:px-6 sm:py-4">
+            <h1 className="min-w-0 max-w-full wrap-anywhere text-balance text-2xl font-extrabold leading-none tracking-[-0.03em] sm:text-4xl">{title}</h1>
             {navActions ? <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">{navActions}</div> : null}
           </div>
           <div className="nb-header-actions relative flex max-w-full flex-wrap items-center gap-2.5">
             <AppearanceControls />
-            {organizer || !headerActions ? headerActions : <NbMenu>{headerActions}</NbMenu>}
+            {/* Organizers keep their keys in view from sm up; on phones they
+                fold into the same Menu key participants use, so the header
+                stays one row beside the banner. */}
+            {organizer && headerActions ? (
+              <>
+                <div className="contents max-sm:hidden">{headerActions}</div>
+                <div className="sm:hidden">
+                  <NbMenu>{headerActions}</NbMenu>
+                </div>
+              </>
+            ) : headerActions ? (
+              <NbMenu>{headerActions}</NbMenu>
+            ) : null}
             {primaryHeaderAction}
           </div>
         </header>

@@ -159,7 +159,7 @@ export function NbStandings({
                         <li
                           key={service.challenge_id}
                           data-testid="nb-service-score"
-                          className="@container grid grid-cols-1 gap-1 rounded-[var(--nb-radius-sm)] border-2 border-border bg-card px-1.5 py-2 text-xs text-card-foreground @[12rem]:px-3"
+                          className="@container grid grid-cols-1 gap-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent bg-[var(--nb-zebra)] px-1.5 py-2 text-xs text-card-foreground @[12rem]:px-3"
                         >
                           <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1 wrap-anywhere">
                             <span className="text-sm font-bold">{service.service}</span>
