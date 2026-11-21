@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "themes": "bun scripts/generate-themes.mjs",
-    "dev": "bun run themes && next dev",
+    "dev": "bun run themes && next dev --webpack",
     "build": "bun run themes && next build --webpack",
     "start": "next start",
     "typecheck": "bun run themes && next typegen && tsc --noEmit",
