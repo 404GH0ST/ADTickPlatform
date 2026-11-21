@@ -196,10 +196,13 @@ func TestWarmupAndMatchHandlers(t *testing.T) {
 	if response := call(mux, http.MethodPost, "/internal/v1/game/match/stop", ""); response.Code != http.StatusOK {
 		t.Fatalf("stop: %d", response.Code)
 	}
-	for _, path := range []string{"/internal/v1/game/match/pause", "/internal/v1/game/match/resume", "/internal/v1/game/match/start"} {
+	for _, path := range []string{"/internal/v1/game/match/pause", "/internal/v1/game/match/resume"} {
 		if response := call(mux, http.MethodPost, path, ""); response.Code != http.StatusConflict {
 			t.Errorf("%s after the match ended: want 409, got %d", path, response.Code)
 		}
+	}
+	if response := call(mux, http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"running"`) {
+		t.Errorf("starting a finished match reopens it: %d %s", response.Code, response.Body.String())
 	}
 
 	failingStart := newGameCoreServer("dev-admin-token", faultingGameStore{inner: newMemoryGameStore(), faults: &callFaults{}}, erroringChecker{}, newFlagCodec("s", "PLAYIT"), &testGameScheduler{}, []string{"put"}, 15).WithWarmupPutRetries(0)
@@ -275,6 +278,85 @@ func TestMatchWindowFillsFinishedTimes(t *testing.T) {
 	if _, err := newTickServer(failingGameStore{}).submitFlags(ctx, 1, []string{"x"}); err == nil {
 		t.Fatal("submissions fail when the match state is unreadable")
 	}
+}
+
+// Restarting a match whose scheduled end has passed clears that end, or the
+// window would finish the match again on its next status read. Ticks and the
+// scheduled start carry over.
+func TestStartMatchRestartsAFinishedMatch(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryGameStore()
+	server := newTickServer(store)
+	start, end := time.Now().Add(-2*time.Hour).UTC().Truncate(time.Second), time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	if _, err := store.StartMatch(ctx, start); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateMatchSchedule(ctx, &start, &end); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StopMatch(ctx, end); err != nil {
+		t.Fatal(err)
+	}
+	mux := serverMux(server)
+	if response := call(mux, http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusOK {
+		t.Fatalf("restart: %d %s", response.Code, response.Body.String())
+	}
+	status, err := server.matchStatus(ctx)
+	if err != nil || status.State != "running" || !status.AcceptingSubmissions || status.EndedAt != "" {
+		t.Fatalf("a restarted match stays running: %+v %v", status, err)
+	}
+	if status.ScheduledEndAt != "" || status.ScheduledStartAt != start.Format(time.RFC3339) {
+		t.Fatalf("the passed end is cleared and the start kept: %+v", status)
+	}
+	tick, err := server.advanceTick(ctx)
+	if err != nil || tick.ID != 2 {
+		t.Fatalf("ticks continue after a restart: %+v %v", tick, err)
+	}
+
+	// An end still ahead is left for the window to apply.
+	future := newMemoryGameStore()
+	futureServer := newTickServer(future)
+	ahead := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	if _, err := future.UpdateMatchSchedule(ctx, nil, &ahead); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := future.StartMatch(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := future.StopMatch(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if response := call(serverMux(futureServer), http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusOK {
+		t.Fatalf("restart before the scheduled end: %d", response.Code)
+	}
+	if status, _ := futureServer.matchStatus(ctx); status.State != "running" || status.ScheduledEndAt != ahead.Format(time.RFC3339) {
+		t.Fatalf("a future end is kept: %+v", status)
+	}
+
+	// A failure to clear the passed end leaves the match finished.
+	faulty := newMemoryGameStore()
+	if _, err := faulty.UpdateMatchSchedule(ctx, nil, &end); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := faulty.StopMatch(ctx, end); err != nil {
+		t.Fatal(err)
+	}
+	failing := newTickServer(scheduleFails{gameStore: faulty})
+	if response := call(serverMux(failing), http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusInternalServerError {
+		t.Fatalf("a schedule write failure fails the restart: %d", response.Code)
+	}
+	if status, _ := failing.matchStatus(ctx); status.State != "finished" {
+		t.Fatalf("the match stays finished: %+v", status)
+	}
+}
+
+type scheduleFails struct{ gameStore }
+
+func (scheduleFails) UpdateMatchSchedule(context.Context, *time.Time, *time.Time) (apigateway.GameMatchStatus, error) {
+	return apigateway.GameMatchStatus{}, errScripted
 }
 
 func TestTickAccessReconcileFailureIsNotFatal(t *testing.T) {

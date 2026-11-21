@@ -58,6 +58,17 @@ func TestMemoryMatchTransitionsGuardState(t *testing.T) {
 			t.Errorf("%s after the match finished: %v", name, err)
 		}
 	}
+	later := now.Add(time.Minute)
+	reopened, err := s.RestartMatch(ctx, later)
+	if err != nil || reopened.State != "running" || reopened.EndedAt != "" || !reopened.AcceptingSubmissions {
+		t.Fatalf("restarting a finished match reopens it: %+v %v", reopened, err)
+	}
+	if reopened.StartedAt != later.UTC().Format(time.RFC3339) {
+		t.Fatalf("a restarted match starts at the restart time: %q", reopened.StartedAt)
+	}
+	if status, err := s.RestartMatch(ctx, later.Add(time.Minute)); err != nil || status.StartedAt != reopened.StartedAt {
+		t.Fatalf("restarting a running match is a no-op: %+v %v", status, err)
+	}
 	end := now.Add(time.Hour)
 	if status, _ := s.UpdateMatchSchedule(ctx, nil, &end); status.ScheduledEndAt == "" {
 		t.Fatal("end schedule not stored")

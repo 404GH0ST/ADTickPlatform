@@ -135,6 +135,10 @@ type gameStore interface {
 	ListAttackFeed(ctx context.Context, query apigateway.AttackFeedQuery) (apigateway.AttackFeedPage, error)
 	MatchStatus(ctx context.Context) (apigateway.GameMatchStatus, error)
 	StartMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
+	// RestartMatch reopens a finished match: it runs again from now with no
+	// end time, while ticks, flags and scores carry on. Any other state is
+	// returned unchanged.
+	RestartMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	PauseMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	ResumeMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
 	StopMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error)
@@ -674,6 +678,20 @@ func (s *memoryGameStore) StartMatch(_ context.Context, now time.Time) (apigatew
 		}
 		return s.match, nil
 	}
+}
+
+func (s *memoryGameStore) RestartMatch(_ context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.match.State != "finished" {
+		return s.match, nil
+	}
+	s.match.State = "running"
+	s.match.StartedAt = now.UTC().Format(time.RFC3339)
+	s.match.EndedAt = ""
+	s.match.AcceptingSubmissions = true
+	return s.match, nil
 }
 
 func (s *memoryGameStore) PauseMatch(_ context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
@@ -2373,6 +2391,19 @@ func (s *postgresGameStore) StartMatch(ctx context.Context, now time.Time) (apig
 		ScheduleConfigured:   current.ScheduleConfigured,
 		AcceptingSubmissions: true,
 	}, nil
+}
+
+func (s *postgresGameStore) RestartMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error) {
+	// The state guard keeps the reopen atomic: a match that is not finished
+	// (already restarted by a concurrent call, for one) is left as it is.
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE game_match_state
+		SET state = 'running', started_at = $1, ended_at = NULL, updated_at = $1
+		WHERE singleton = TRUE AND state = 'finished'
+	`, now.UTC()); err != nil {
+		return apigateway.GameMatchStatus{}, err
+	}
+	return s.MatchStatus(ctx)
 }
 
 func (s *postgresGameStore) PauseMatch(ctx context.Context, now time.Time) (apigateway.GameMatchStatus, error) {

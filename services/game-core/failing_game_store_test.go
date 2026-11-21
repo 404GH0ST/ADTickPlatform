@@ -130,6 +130,11 @@ func (failingGameStore) StartMatch(ctx context.Context, now time.Time) (r0 apiga
 	return
 }
 
+func (failingGameStore) RestartMatch(ctx context.Context, now time.Time) (r0 apigateway.GameMatchStatus, err error) {
+	err = errGameStoreDown
+	return
+}
+
 func (failingGameStore) PauseMatch(ctx context.Context, now time.Time) (r0 apigateway.GameMatchStatus, err error) {
 	err = errGameStoreDown
 	return

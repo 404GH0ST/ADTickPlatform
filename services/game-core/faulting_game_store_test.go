@@ -223,6 +223,14 @@ func (s faultingGameStore) StartMatch(ctx context.Context, now time.Time) (r0 ap
 	return s.inner.StartMatch(ctx, now)
 }
 
+func (s faultingGameStore) RestartMatch(ctx context.Context, now time.Time) (r0 apigateway.GameMatchStatus, err error) {
+	if s.faults.fail() {
+		err = errGameStoreDown
+		return
+	}
+	return s.inner.RestartMatch(ctx, now)
+}
+
 func (s faultingGameStore) PauseMatch(ctx context.Context, now time.Time) (r0 apigateway.GameMatchStatus, err error) {
 	if s.faults.fail() {
 		err = errGameStoreDown

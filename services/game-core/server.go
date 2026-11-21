@@ -441,10 +441,9 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		writeData(w, http.StatusOK, current)
 		return
 	}
-	if current.State == "finished" {
-		writeProblem(w, http.StatusConflict, "Request rejected", errContestOver.Error())
-		return
-	}
+	// A finished match can be started again: it reopens and carries on from
+	// its existing ticks and scores.
+	restarting := current.State == "finished"
 
 	if s.warmupRequired {
 		warmup, warmupErr := s.runWarmup(r.Context())
@@ -458,7 +457,12 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	status, err := s.store.StartMatch(r.Context(), s.now())
+	var status apigateway.GameMatchStatus
+	if restarting {
+		status, err = s.restartFinishedMatch(r.Context(), current)
+	} else {
+		status, err = s.store.StartMatch(r.Context(), s.now())
+	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		if errors.Is(err, errContestOver) {
@@ -493,6 +497,20 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 	}
 
 	writeData(w, http.StatusOK, status)
+}
+
+// restartFinishedMatch reopens a finished match. A scheduled end that has
+// already passed would finish it again on the next status read, so that end is
+// cleared first; the scheduled start is kept.
+func (s *gameCoreServer) restartFinishedMatch(ctx context.Context, current apigateway.GameMatchStatus) (apigateway.GameMatchStatus, error) {
+	now := s.now()
+	if endAt := parseOptionalRFC3339(current.ScheduledEndAt); endAt != nil && !now.Before(endAt.UTC()) {
+		startAt := parseOptionalRFC3339(current.ScheduledStartAt)
+		if _, err := s.store.UpdateMatchSchedule(ctx, startAt, nil); err != nil {
+			return apigateway.GameMatchStatus{}, fmt.Errorf("clear the passed scheduled end: %w", err)
+		}
+	}
+	return s.store.RestartMatch(ctx, now)
 }
 
 func (s *gameCoreServer) handlePauseMatch(w http.ResponseWriter, r *http.Request) {
