@@ -2,6 +2,7 @@
 
 import { ThemeSlot } from "@/components/theme/theme-slot";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -10,10 +11,34 @@ import {
   useParticipantLogin,
 } from "@/components/dashboard/use-participant-login";
 
-/** Login / register form. Logic lives in useParticipantLogin; themes can replace the view via the Login slot. */
-export function ParticipantLoginForm() {
+/**
+ * Login / register card; the heading follows the mode. Logic lives in
+ * useParticipantLogin; themes can replace the form via the Login slot.
+ */
+export function ParticipantLoginCard() {
   const state = useParticipantLogin();
-  return <ThemeSlot name="Login" fallback={DefaultLoginView} props={state} />;
+  const [title, otherTitle] = state.mode === "register" ? ["Register", "Sign In"] : ["Sign In", "Register"];
+  return (
+    <Card className="w-full border-border bg-background shadow-none">
+      <CardHeader>
+        {/* The unused title holds its height: at large text sizes only one of them wraps. */}
+        <CardTitle
+          as="h1"
+          data-reserve={otherTitle}
+          className="grid after:invisible after:col-start-1 after:row-start-1 after:content-[attr(data-reserve)]"
+        >
+          <span className="col-start-1 row-start-1">{title}</span>
+        </CardTitle>
+        <CardDescription>
+          AD Platform team console. Use your team member account, or
+          register with your team&apos;s join key.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <ThemeSlot name="Login" fallback={DefaultLoginView} props={state} />
+      </CardContent>
+    </Card>
+  );
 }
 
 export function DefaultLoginView({
@@ -25,6 +50,7 @@ export function DefaultLoginView({
   setEmail,
   password,
   setPassword,
+  fieldRefs,
   pending,
   error,
   minPasswordLength,
@@ -61,6 +87,7 @@ export function DefaultLoginView({
         <div className="grid gap-2">
           <Label htmlFor="participant-display-name">Display name</Label>
           <Input
+            ref={fieldRefs.displayName}
             id="participant-display-name"
             autoComplete="name"
             value={displayName}
@@ -73,6 +100,7 @@ export function DefaultLoginView({
       <div className="grid gap-2">
         <Label htmlFor="participant-email">Email</Label>
         <Input
+          ref={fieldRefs.email}
           id="participant-email"
           type="email"
           autoComplete="username"
@@ -85,6 +113,7 @@ export function DefaultLoginView({
       <div className="grid gap-2">
         <Label htmlFor="participant-password">Password</Label>
         <Input
+          ref={fieldRefs.password}
           id="participant-password"
           type="password"
           autoComplete={mode === "register" ? "new-password" : "current-password"}
@@ -98,7 +127,7 @@ export function DefaultLoginView({
       {error ? <StatusBanner message={error} variant="error" /> : null}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" className="w-full" disabled={pending}>
+        <Button type="submit" className="w-full" disabled={pending} holdFocus>
           {pending
             ? mode === "register"
               ? "Registering..."

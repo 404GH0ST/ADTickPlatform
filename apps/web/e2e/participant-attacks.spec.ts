@@ -145,7 +145,7 @@ test("the participant attacks page shows empty-state messaging when no accepted 
   await assertEmptyAttacksState(page);
 });
 
-test("the participant attacks page shows a warning and empty state when the attack feed fails", async ({
+test("the participant attacks page says the feed is unavailable when it fails", async ({
   page,
   request,
 }) => {
@@ -159,8 +159,11 @@ test("the participant attacks page shows a warning and empty state when the atta
       "Participant data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Showing 0-0 of 0")).toBeVisible();
-  await assertEmptyAttacksState(page);
+  await expect(page.getByTestId("data-unavailable")).toContainText("Attacks can't be loaded");
+  await expect(page.getByTestId("attack-map-panel")).toHaveCount(0);
+  await expect(page.getByLabel("Attacker")).toHaveCount(0);
+  await expect(page.getByText("Showing 0-0 of 0")).toHaveCount(0);
+  await expect(page.getByText("No accepted attacks in this view")).toHaveCount(0);
 });
 
 test("accepted enemy flag opens SSH before restart and factory reset", async ({

@@ -18,9 +18,18 @@ function apiBaseUrl() {
   );
 }
 
+// Every page waits on this check, so a silent gateway must not hold it open.
+const SESSION_CHECK_TIMEOUT_MS = 3_000;
+
+/**
+ * "unavailable" means the gateway could not answer, not that the session is
+ * bad. It grants nothing: callers must keep access closed, but should say the
+ * platform is unreachable instead of asking the person to sign in again.
+ */
 export type ParticipantSessionValidation =
   | ValidatedParticipantSession
   | "deactivated"
+  | "unavailable"
   | null;
 
 export async function validateParticipantSessionWithAPI(
@@ -36,6 +45,7 @@ export async function validateParticipantSessionWithAPI(
         Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS),
     });
     if (!response.ok) {
       // A deactivated player/team is reported by the gateway as a 403 with the
@@ -50,6 +60,9 @@ export async function validateParticipantSessionWithAPI(
         } catch {
           // fall through to the generic null result below
         }
+      }
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        return "unavailable";
       }
       return null;
     }
@@ -74,6 +87,7 @@ export async function validateParticipantSessionWithAPI(
       role: payload.role,
     };
   } catch {
-    return null;
+    // Network failure or an unreadable response from the gateway.
+    return "unavailable";
   }
 }

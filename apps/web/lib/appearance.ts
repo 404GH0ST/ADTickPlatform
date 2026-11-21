@@ -1,6 +1,8 @@
 export const THEME_STORAGE_KEY = "ad-platform-theme";
 export const THEME_COOKIE_PATTERN = /(?:^|;\s*)ad-platform-theme=(dark|light|system)(?:;|$)/;
 export const SYSTEM_COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
+/** Last organizer theme the API confirmed. Only used while the API is unreachable. */
+export const ACTIVE_THEME_COOKIE = "ad-platform-active-scheme";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -23,6 +25,10 @@ export function persistThemePreference(preference: ThemePreference) {
     window.localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {}
   document.cookie = `${THEME_STORAGE_KEY}=${preference}; path=/; max-age=31536000; samesite=lax`;
+}
+
+export function rememberActiveTheme(themeId: string) {
+  document.cookie = `${ACTIVE_THEME_COOKIE}=${encodeURIComponent(themeId)}; path=/; max-age=31536000; samesite=lax`;
 }
 
 export function readStoredThemePreference(): ThemePreference | null {

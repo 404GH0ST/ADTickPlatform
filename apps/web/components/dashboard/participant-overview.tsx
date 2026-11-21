@@ -12,6 +12,7 @@ export function ParticipantOverview({
   serviceCount,
   attackCount,
   teamName,
+  unavailable,
 }: Omit<OverviewViewProps, "links">): ReactElement {
   const links: OverviewLink[] = [
     {
@@ -19,21 +20,25 @@ export function ParticipantOverview({
       href: "/scoreboard",
       title: "Scoreboard",
       description: "See the live standings without the rest of the participant controls.",
-      meta: `${scoreCount} ${scoreCount === 1 ? "team" : "teams"} live`,
+      meta: unavailable?.scores
+        ? "Standings unavailable"
+        : `${scoreCount} ${scoreCount === 1 ? "team" : "teams"} live`,
     },
     {
       id: "services",
       href: "/services",
       title: "Services",
       description: "Submit flags and manage unlocks, SSH access, restarts, and resets.",
-      meta: `${serviceCount} ${serviceCount === 1 ? "service" : "services"} assigned to your team`,
+      meta: unavailable?.services
+        ? "Service list unavailable"
+        : `${serviceCount} ${serviceCount === 1 ? "service" : "services"} assigned to your team`,
     },
     {
       id: "attacks",
       href: "/attacks",
       title: "Attacks",
       description: "Review accepted submissions and recent attack activity.",
-      meta: `${attackCount} accepted events`,
+      meta: unavailable?.attacks ? "Attack feed unavailable" : `${attackCount} accepted events`,
     },
     {
       id: "docs",
@@ -47,7 +52,7 @@ export function ParticipantOverview({
     <ThemeSlot
       name="Overview"
       fallback={DefaultOverviewView}
-      props={{ links, teamName, scoreCount, serviceCount, attackCount }}
+      props={{ links, teamName, scoreCount, serviceCount, attackCount, unavailable }}
     />
   );
 }

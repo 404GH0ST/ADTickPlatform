@@ -513,6 +513,7 @@ test("organizer match controls handle manual match operations and recompute logi
   );
   await expect(matchCard.getByText("finished").first()).toBeVisible();
   await expect(matchCard.getByText("closed").first()).toBeVisible();
+  await expect(page.getByTestId("start-match")).toHaveText(/Start again/);
 
   await quickActionsCard.getByText("Manual interventions", { exact: true }).click();
   await page.getByTestId("advance-tick").click();

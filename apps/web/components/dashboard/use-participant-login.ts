@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type RefCallback } from "react";
 
-import { parseApiError } from "@/lib/api-utils";
+import { browserRequestErrorMessage, parseApiError } from "@/lib/api-utils";
+import { keepEarlyInput } from "@/lib/early-input";
 
 export type ParticipantLoginMode = "login" | "register";
 
@@ -21,6 +22,12 @@ export type ParticipantLoginState = {
   setEmail: (value: string) => void;
   password: string;
   setPassword: (value: string) => void;
+  /** Attach to each field so text typed before the page loads is kept. */
+  fieldRefs: {
+    displayName: RefCallback<HTMLInputElement>;
+    email: RefCallback<HTMLInputElement>;
+    password: RefCallback<HTMLInputElement>;
+  };
   pending: boolean;
   error: string | null;
   /** Minimum password length enforced on registration. */
@@ -37,6 +44,14 @@ export function useParticipantLogin(): ParticipantLoginState {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fieldRefs = useMemo(
+    () => ({
+      displayName: keepEarlyInput(setDisplayName),
+      email: keepEarlyInput(setEmail),
+      password: keepEarlyInput(setPassword),
+    }),
+    [],
+  );
 
   function setMode(next: ParticipantLoginMode) {
     setModeState(next);
@@ -66,11 +81,10 @@ export function useParticipantLogin(): ParticipantLoginState {
       router.refresh();
     } catch (submitError) {
       setError(
-        submitError instanceof Error
-          ? submitError.message
-          : mode === "register"
-            ? "player registration failed"
-            : "participant login failed",
+        browserRequestErrorMessage(
+          submitError,
+          mode === "register" ? "Registration failed. Try again." : "Sign in failed. Try again.",
+        ),
       );
     } finally {
       setPending(false);
@@ -94,6 +108,7 @@ export function useParticipantLogin(): ParticipantLoginState {
     setEmail,
     password,
     setPassword,
+    fieldRefs,
     pending,
     error,
     minPasswordLength: 8,

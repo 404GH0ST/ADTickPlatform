@@ -1,15 +1,17 @@
 "use client";
 
 import {
+  useCallback,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
-  type RefObject,
+  type RefCallback,
 } from "react";
 
-import { parseApiError } from "@/lib/api-utils";
+import { browserRequestErrorMessage, parseApiError } from "@/lib/api-utils";
+import { keepEarlyInput } from "@/lib/early-input";
 
 export type FlagVerdictOutcome = "accepted" | "duplicate" | "rejected";
 
@@ -48,8 +50,8 @@ export type FlagSubmitState = {
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
   /** Optional: submits on ⌘/Ctrl+Enter when attached to the textarea. */
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  /** Attach to the textarea so validation errors can focus it. */
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** Attach to the textarea: focuses it on errors and keeps text typed before the page loads. */
+  inputRef: RefCallback<HTMLTextAreaElement>;
 };
 
 export function verdictOutcome(status: string): FlagVerdictOutcome {
@@ -85,8 +87,12 @@ export function useFlagSubmit({
 }: {
   acceptingSubmissions?: boolean;
 }): FlagSubmitState {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputNode = useRef<HTMLTextAreaElement>(null);
   const [rawFlags, setRawFlagsState] = useState("");
+  const inputRef = useCallback((node: HTMLTextAreaElement | null) => {
+    inputNode.current = node;
+    keepEarlyInput(setRawFlagsState)(node);
+  }, []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<FlagSubmitNote | null>(null);
@@ -109,7 +115,7 @@ export function useFlagSubmit({
       setError("Paste at least one flag.");
       setNote(null);
       setVerdicts([]);
-      inputRef.current?.focus();
+      inputNode.current?.focus();
       return;
     }
 
@@ -148,9 +154,7 @@ export function useFlagSubmit({
         window.dispatchEvent(new Event("platform:flag-accepted"));
       }
     } catch (submitError) {
-      setError(
-        submitError instanceof Error ? submitError.message : "Flag submit failed.",
-      );
+      setError(browserRequestErrorMessage(submitError, "Flag submit failed."));
     } finally {
       setPending(false);
     }

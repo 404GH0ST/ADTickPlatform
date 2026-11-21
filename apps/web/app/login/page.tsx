@@ -1,10 +1,12 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
-import { ParticipantLoginForm } from '@/components/dashboard/participant-login-form';
+import { ParticipantLoginCard } from '@/components/dashboard/participant-login-form';
 import { AppearanceControls } from '@/components/ui/appearance-controls';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { WorkspaceFrame } from '@/components/ui/workspace-frame';
 import { getParticipantSession } from '@/lib/platform-api';
+
+export const metadata: Metadata = { title: 'Sign In' };
 
 export const dynamic = 'force-dynamic';
 
@@ -15,10 +17,11 @@ export default async function ParticipantLoginPage() {
   }
 
   const deactivated = session.reason === 'deactivated';
+  const unavailable = session.reason === 'unavailable';
 
   return (
-    <main className="workspace-canvas flex items-center justify-center text-foreground">
-      <WorkspaceFrame className="min-h-0 w-full max-w-md" bodyClassName="gap-3">
+    <main className="workspace-canvas flex items-start justify-center text-foreground">
+      <WorkspaceFrame className="workspace-frame-auth min-h-0 w-full max-w-md" bodyClassName="gap-3">
         <div className="flex justify-end">
           <AppearanceControls />
         </div>
@@ -32,18 +35,17 @@ export default async function ParticipantLoginPage() {
             them if you believe this is a mistake.
           </div>
         )}
-        <Card className="w-full border-border bg-background shadow-none">
-          <CardHeader>
-            <CardTitle as="h1">Sign In</CardTitle>
-            <CardDescription>
-              AD Platform team console. Use your team member account, or
-              register with your team's join key.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <ParticipantLoginForm />
-          </CardContent>
-        </Card>
+        {unavailable && (
+          <div
+            role="alert"
+            data-testid="session-unavailable-notice"
+            className="tone-warning rounded-md border px-3 py-2 text-sm"
+          >
+            The platform API can&apos;t be reached, so your session couldn&apos;t be checked.
+            You have not been signed out. Try again in a moment.
+          </div>
+        )}
+        <ParticipantLoginCard />
       </WorkspaceFrame>
     </main>
   );

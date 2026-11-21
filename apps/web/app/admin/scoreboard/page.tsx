@@ -1,7 +1,10 @@
+import type { Metadata } from 'next';
 import { OrganizerDashboard } from '@/components/admin/organizer-dashboard';
 import { ExportDataPanel } from '@/components/admin/export-data-panel';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
 import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
+
+export const metadata: Metadata = { title: 'Scoreboard' };
 
 export const dynamic = 'force-dynamic';
 

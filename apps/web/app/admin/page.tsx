@@ -1,8 +1,11 @@
+import type { Metadata } from 'next';
 import { AnnouncementsPanel } from '@/components/admin/announcements-panel';
 import { OrganizerOverview } from '@/components/admin/organizer-overview';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
 import { TrustedStatePanel } from '@/components/admin/trusted-state-panel';
 import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
+
+export const metadata: Metadata = { title: { absolute: 'Overview | Organizer | AD Platform' } };
 
 export const dynamic = 'force-dynamic';
 

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   authenticatedFetch,
+  browserRequestErrorMessage,
   buildQueryString,
   firstForwardedAddress,
   parseTeamBody,
@@ -34,6 +35,31 @@ describe("upstreamErrorDetails", () => {
       detail: "request failed",
       status: 502,
     });
+  });
+});
+
+describe("network failures", () => {
+  test("a refused connection never exposes the raw fetch error", () => {
+    expect(upstreamErrorDetails(new TypeError("fetch failed"), "request failed")).toEqual({
+      detail: "The platform API can't be reached. Try again in a moment.",
+      status: 502,
+    });
+  });
+
+  test("a timed-out request reports a gateway timeout", () => {
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+    expect(upstreamErrorDetails(timeout, "request failed")).toEqual({
+      detail: "The platform API didn't respond in time. Try again in a moment.",
+      status: 504,
+    });
+  });
+
+  test("browser messages replace network errors and keep API errors", () => {
+    expect(browserRequestErrorMessage(new TypeError("Failed to fetch"), "fallback")).toBe(
+      "Can't reach the platform. Check your connection and try again.",
+    );
+    expect(browserRequestErrorMessage(new Error("invalid credentials"), "fallback")).toBe("invalid credentials");
+    expect(browserRequestErrorMessage(null, "fallback")).toBe("fallback");
   });
 });
 

@@ -3,8 +3,11 @@ import { resolveThemeId } from "@/lib/themes";
 /*
  * Server-side read of the organizer's theme choice. The root layout calls this
  * on every render, so the value is cached in-process for a few seconds and a
- * slow or unreachable gateway falls back to the last known (or default) theme
- * instead of blocking the page, including the login page.
+ * slow or unreachable gateway falls back instead of blocking the page,
+ * including the login page.
+ *
+ * This process's memory is empty after a restart, so the browser keeps the last
+ * confirmed theme in a cookie and the layout passes it in as the fallback.
  */
 
 const CACHE_TTL_MS = (() => {
@@ -13,16 +16,27 @@ const CACHE_TTL_MS = (() => {
 })();
 const FETCH_TIMEOUT_MS = 1_500;
 
-let cached: { themeId: string; expiresAt: number } | null = null;
+let confirmed: { themeId: string; expiresAt: number } | null = null;
+// With nothing confirmed yet, avoid hammering a down gateway on every render.
+let retryAt = 0;
+
+export type ActiveTheme = {
+  themeId: string;
+  /** False when the API has not confirmed this theme since the server started. */
+  confirmed: boolean;
+};
 
 function apiBaseUrl() {
   return (process.env.AD_PLATFORM_API_URL ?? "http://127.0.0.1:8080").trim().replace(/\/+$/, "");
 }
 
-export async function getActiveThemeId(): Promise<string> {
+export async function getActiveTheme(lastKnownThemeId?: string): Promise<ActiveTheme> {
   const now = Date.now();
-  if (cached && cached.expiresAt > now) {
-    return cached.themeId;
+  if (confirmed && confirmed.expiresAt > now) {
+    return { themeId: confirmed.themeId, confirmed: true };
+  }
+  if (!confirmed && retryAt > now) {
+    return { themeId: resolveThemeId(lastKnownThemeId), confirmed: false };
   }
   try {
     const response = await fetch(`${apiBaseUrl()}/api/v2/platform/appearance`, {
@@ -34,17 +48,19 @@ export async function getActiveThemeId(): Promise<string> {
     }
     const body = (await response.json()) as { theme_id?: string };
     const themeId = resolveThemeId(body.theme_id);
-    cached = { themeId, expiresAt: now + CACHE_TTL_MS };
-    return themeId;
+    confirmed = { themeId, expiresAt: now + CACHE_TTL_MS };
+    return { themeId, confirmed: true };
   } catch {
-    // Keep serving the stale value briefly rather than hammering a down gateway.
-    const themeId = cached?.themeId ?? resolveThemeId(null);
-    cached = { themeId, expiresAt: now + CACHE_TTL_MS };
-    return themeId;
+    if (confirmed) {
+      confirmed = { themeId: confirmed.themeId, expiresAt: now + CACHE_TTL_MS };
+      return { themeId: confirmed.themeId, confirmed: true };
+    }
+    retryAt = now + CACHE_TTL_MS;
+    return { themeId: resolveThemeId(lastKnownThemeId), confirmed: false };
   }
 }
 
 /** Called after the organizer saves, so this process reflects the change at once. */
 export function setCachedActiveThemeId(themeId: string) {
-  cached = { themeId: resolveThemeId(themeId), expiresAt: Date.now() + CACHE_TTL_MS };
+  confirmed = { themeId: resolveThemeId(themeId), expiresAt: Date.now() + CACHE_TTL_MS };
 }

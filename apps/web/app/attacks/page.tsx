@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { ControlCenter } from "@/components/dashboard/control-center";
 import { ParticipantShell } from "@/components/dashboard/participant-shell";
 import { loadDashboardData } from "@/lib/dashboard-data";
+
+export const metadata: Metadata = { title: "Attacks" };
 
 export const dynamic = "force-dynamic";
 

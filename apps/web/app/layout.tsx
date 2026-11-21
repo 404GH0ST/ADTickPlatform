@@ -4,14 +4,16 @@ import { cookies } from 'next/headers';
 
 import { ActiveThemeProvider } from '@/components/theme/active-theme-provider';
 import { DocumentAppearance } from '@/components/theme/document-appearance';
+import { RememberActiveTheme } from '@/components/theme/remember-active-theme';
 import {
+  ACTIVE_THEME_COOKIE,
   DEFAULT_THEME_PREFERENCE,
   isThemePreference,
   SYSTEM_COLOR_SCHEME_QUERY,
   THEME_COOKIE_PATTERN,
   THEME_STORAGE_KEY,
 } from '@/lib/appearance';
-import { getActiveThemeId } from '@/lib/platform-appearance';
+import { getActiveTheme } from '@/lib/platform-appearance';
 import { getTheme } from '@/lib/themes';
 import { ActiveThemeStyles } from '@/themes/styles.generated';
 import './globals.css';
@@ -35,14 +37,15 @@ const lexend = Lexend({
 });
 
 export const metadata: Metadata = {
-  title: 'AD Platform',
+  title: { default: 'AD Platform', template: '%s | AD Platform' },
   description: 'Attack-Defense Tick platform control surface',
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // The organizer sets the theme. The browser owns the visitor's color mode
   // after the initial server render.
-  const [cookieStore, themeId] = await Promise.all([cookies(), getActiveThemeId()]);
+  const cookieStore = await cookies();
+  const { themeId, confirmed } = await getActiveTheme(cookieStore.get(ACTIVE_THEME_COOKIE)?.value);
   const storedTheme = cookieStore.get(THEME_STORAGE_KEY)?.value;
   const themeDefaultMode = getTheme(themeId).defaultMode ?? DEFAULT_THEME_PREFERENCE;
 
@@ -88,6 +91,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body className={ibmPlexSans.className}>
         <ActiveThemeStyles themeId={themeId} />
+        {confirmed ? <RememberActiveTheme themeId={themeId} /> : null}
         <ActiveThemeProvider themeId={themeId}>{children}</ActiveThemeProvider>
       </body>
     </DocumentAppearance>

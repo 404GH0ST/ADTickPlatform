@@ -24,7 +24,8 @@ test("participant overview shows degraded-data warning when public feeds fail", 
       "Participant login is required for owned services, unlock, SSH, and reset actions. Participant data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("0 accepted events")).toBeVisible();
+  await expect(page.getByText("Attack feed unavailable")).toBeVisible();
+  await expect(page.getByText("0 accepted events")).toHaveCount(0);
 });
 
 test("organizer overview shows degraded-data warning when admin feeds fail", async ({

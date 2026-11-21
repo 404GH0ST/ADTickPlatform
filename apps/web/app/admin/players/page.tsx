@@ -1,6 +1,9 @@
+import type { Metadata } from 'next';
 import { OrganizerDashboard } from '@/components/admin/organizer-dashboard';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
 import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
+
+export const metadata: Metadata = { title: 'Players' };
 
 export const dynamic = 'force-dynamic';
 

@@ -190,6 +190,8 @@ function renderControlCenterPanel({
           frozen: overview.scoreboardFrozen,
           freezeAt: overview.scoreboardFreezeAt,
           unfreezeAt: overview.scoreboardUnfreezeAt,
+          // Live updates can fill the board after a failed first load.
+          unavailable: Boolean(overview.scoresUnavailable) && scoreRows.length === 0,
         }}
       />
     );
@@ -232,6 +234,7 @@ function renderControlCenterPanel({
         highlightedAttackIDs,
         attackPage,
         attackLiveMode,
+        unavailable: Boolean(overview.attacksUnavailable) && attackPage.items.length === 0,
         pendingAction,
         currentTeamName,
         serviceOptions,

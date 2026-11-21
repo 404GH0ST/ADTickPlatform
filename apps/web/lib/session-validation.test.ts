@@ -39,12 +39,27 @@ test("session validation requests current identity without caching it", async ()
   });
 });
 
-test("session validation preserves deactivation and fails closed on unusable responses", async () => {
+test("session validation gives up on a gateway that never answers", async () => {
+  let signal: AbortSignal | null | undefined;
+  await withSessionUpstream(async (_input, init) => {
+    signal = init?.signal;
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  }, async () => {
+    expect(await validateParticipantSessionWithAPI("session-test-token")).toBe("unavailable");
+  });
+  expect(signal).toBeInstanceOf(AbortSignal);
+});
+
+test("session validation separates rejected sessions from an unreachable gateway", async () => {
   for (const [response, expected] of [
     [Response.json({ title: "Access deactivated" }, { status: 403 }), "deactivated"],
     [Response.json({ title: "Authentication required" }, { status: 403 }), null],
     [new Response("unavailable", { status: 403 }), null],
-    [new Response("unavailable", { status: 502 }), null],
+    [new Response("missing", { status: 404 }), null],
+    [new Response("timeout", { status: 408 }), "unavailable"],
+    [new Response("slow down", { status: 429 }), "unavailable"],
+    [new Response("unavailable", { status: 502 }), "unavailable"],
+    [new Response("<html>proxy page</html>", { status: 200 }), "unavailable"],
     [Response.json({ player_id: 3 }), null],
     [Response.json({ player_id: 3, team_id: 7, role: "participant" }), {
       player_id: 3, team_id: 7, role: "participant", team_name: "", team_contact_email: "", display_name: "", email: "",
@@ -62,7 +77,7 @@ test("session validation preserves deactivation and fails closed on unusable res
   }, async () => {
     expect(await validateParticipantSessionWithAPI(" ")).toBeNull();
     expect(calls).toBe(0);
-    expect(await validateParticipantSessionWithAPI("session-test-token")).toBeNull();
+    expect(await validateParticipantSessionWithAPI("session-test-token")).toBe("unavailable");
     expect(calls).toBe(1);
   });
 });

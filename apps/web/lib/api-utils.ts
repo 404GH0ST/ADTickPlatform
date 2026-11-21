@@ -25,6 +25,10 @@ export type UpstreamErrorDetails = {
   status: number;
 };
 
+function errorName(error: unknown) {
+  return error && typeof error === "object" && "name" in error ? error.name : undefined;
+}
+
 export function upstreamErrorDetails(
   error: unknown,
   fallback: string,
@@ -36,10 +40,31 @@ export function upstreamErrorDetails(
       status: error.status,
     };
   }
+  if (errorName(error) === "TimeoutError" || errorName(error) === "AbortError") {
+    return {
+      detail: "The platform API didn't respond in time. Try again in a moment.",
+      status: 504,
+    };
+  }
+  // Node's fetch reports every connection failure with this one message.
+  if (error instanceof TypeError && error.message === "fetch failed") {
+    return {
+      detail: "The platform API can't be reached. Try again in a moment.",
+      status: 502,
+    };
+  }
   return {
     detail: error instanceof Error ? error.message : fallback,
     status: 502,
   };
+}
+
+/** Message for a failed browser request. A browser fetch rejects with TypeError when the network fails. */
+export function browserRequestErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof TypeError) {
+    return "Can't reach the platform. Check your connection and try again.";
+  }
+  return error instanceof Error ? error.message : fallback;
 }
 
 export function buildQueryString(

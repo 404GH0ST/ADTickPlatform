@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { OrganizerShell } from '@/components/admin/organizer-shell';
 import { RefreshSubmissions } from '@/components/admin/submissions-table';
@@ -9,6 +10,8 @@ import { loadAdminDashboardData } from '@/lib/admin-dashboard-data';
 import { listAdminSubmissions } from '@/lib/admin-api';
 import { parseAttackFeedQuery } from '@/lib/route-query';
 import { buildAttackFilterOptions } from '@/lib/dashboard-utils';
+
+export const metadata: Metadata = { title: 'Submissions' };
 
 export const dynamic = 'force-dynamic';
 type SearchParams = Record<string, string | string[] | undefined>;

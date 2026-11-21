@@ -82,6 +82,25 @@ async function organizerSession(request: NextRequest) {
   return validated === "deactivated" ? null : validated;
 }
 
+/**
+ * The role could not be checked, so organizer routes stay closed. Pages get an
+ * explanation in place (the URL survives for Try again); a rewrite rather than
+ * next() because a client navigation can skip the admin layout's own check.
+ */
+function organizerCheckUnavailable(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/admin/")) {
+    return NextResponse.json(
+      {
+        title: "Platform unavailable",
+        status: 503,
+        detail: "The platform API can't be reached, so this request couldn't be authorized.",
+      },
+      { status: 503, headers: { "Content-Type": "application/problem+json" } },
+    );
+  }
+  return NextResponse.rewrite(new URL("/service-unavailable", request.url));
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (!sameOriginBrowserMutation(request)) {
@@ -89,6 +108,10 @@ export async function proxy(request: NextRequest) {
   }
 
   const session = await organizerSession(request);
+  if (session === "unavailable") {
+    const organizerRoute = pathname.startsWith("/api/admin/") || pathname.startsWith("/admin");
+    return organizerRoute ? organizerCheckUnavailable(request) : NextResponse.next();
+  }
   const organizer = session?.role === "organizer";
 
   if (pathname.startsWith("/api/admin/")) {

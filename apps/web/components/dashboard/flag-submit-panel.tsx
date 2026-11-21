@@ -67,7 +67,7 @@ export function DefaultFlagSubmitView({
       >
         <div className="grid gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Flag className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <Flag className="h-4 w-4 shrink-0 text-primary-ink" aria-hidden />
             <h2 className="text-sm font-semibold">Submit flags</h2>
             {closed ? (
               <Badge className="tone-warning" variant="outline">
@@ -97,7 +97,8 @@ export function DefaultFlagSubmitView({
               value={rawFlags}
               onChange={(event) => setRawFlags(event.target.value)}
               onKeyDown={onKeyDown}
-              disabled={pending || closed}
+              readOnly={pending}
+              disabled={closed}
               spellCheck={false}
               autoComplete="off"
               aria-invalid={error ? true : undefined}
@@ -117,6 +118,7 @@ export function DefaultFlagSubmitView({
                 size="sm"
                 className="min-h-8 min-w-[5.5rem] shrink-0"
                 disabled={pending || closed}
+                holdFocus={pending}
               >
                 {pending ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden />
@@ -129,10 +131,10 @@ export function DefaultFlagSubmitView({
 
         {hasFeedback ? (
           <div id={feedbackId} className="grid gap-2" aria-live="polite">
-            {error ? <StatusBanner message={error} variant="error" /> : null}
+            {error ? <StatusBanner message={error} variant="error" announce="inherit" /> : null}
             {note ? (
               <div data-testid="flag-submit-summary" data-variant={note.variant}>
-                <StatusBanner message={note.message} variant={note.variant} />
+                <StatusBanner message={note.message} variant={note.variant} announce="inherit" />
               </div>
             ) : null}
             {verdicts.length > 0 ? (

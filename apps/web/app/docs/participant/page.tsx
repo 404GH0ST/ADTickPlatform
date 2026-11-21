@@ -1,6 +1,9 @@
+import type { Metadata } from 'next';
 import { ParticipantShell } from '@/components/dashboard/participant-shell';
 import { PARTICIPANT_MANUAL_STEPS, ParticipantManual } from '@/components/docs/participant-manual';
 import { loadDashboardData } from '@/lib/dashboard-data';
+
+export const metadata: Metadata = { title: 'Participant Manual' };
 
 export default async function ParticipantManualPage() {
   const { platform } = await loadDashboardData();

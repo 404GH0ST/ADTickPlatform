@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { OrganizerShell } from "@/components/admin/organizer-shell";
 import { ThemedAuditView } from "@/components/admin/themed-organizer-views";
 import { loadAdminDashboardData } from "@/lib/admin-dashboard-data";
@@ -49,6 +50,8 @@ function buildPageHref(
   params.set("offset", String(Math.max(0, offset)));
   return `/admin/audit?${params.toString()}`;
 }
+
+export const metadata: Metadata = { title: "Audit" };
 
 export default async function AdminAuditPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};

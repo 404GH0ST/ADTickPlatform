@@ -44,8 +44,15 @@ async function loadAnnouncements(): Promise<Announcement[] | null> {
   return announcementRequest;
 }
 
+// The banner remounts on every navigation; each announcement is read out once.
+const announcedIds = new Set<number>();
+
 export function AnnouncementBanner(): ReactElement | null {
   const [items, setItems] = useState<Announcement[]>(cachedAnnouncements);
+
+  useEffect(() => {
+    for (const item of items) announcedIds.add(item.id);
+  }, [items]);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +83,7 @@ export function AnnouncementBanner(): ReactElement | null {
           key={item.id}
           message={`Organizer: ${item.body}`}
           variant="info"
+          announce={announcedIds.has(item.id) ? "change" : "mount"}
         />
       ))}
     </div>

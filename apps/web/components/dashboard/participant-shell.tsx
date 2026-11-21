@@ -15,6 +15,7 @@ import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
 import { VpnConfigDownloadButton } from '@/components/dashboard/vpn-config-download-button';
 import { Button } from '@/components/ui/button';
+import { RetryButton } from '@/components/ui/retry-button';
 import { StatusBanner } from '@/components/ui/status-banner';
 import type { PlatformOverview } from '@/lib/dashboard-types';
 
@@ -48,6 +49,8 @@ export function ParticipantShell({
     overview.authenticated &&
     overview.role !== "organizer" &&
     (overview.teamID ?? 0) <= 0;
+  // During an outage these counts are unknown, not zero.
+  const summaryCount = (count: number) => (overview.sessionUnavailable ? '—' : String(count));
 
   return (
     <AppShell
@@ -90,11 +93,15 @@ export function ParticipantShell({
               ) : null}
               <ParticipantLogoutButton />
             </>
+          ) : overview.sessionUnavailable ? (
+            <ParticipantLogoutButton />
           ) : null}
         </>
       }
       primaryHeaderAction={
-        overview.authenticated ? null : (
+        overview.sessionUnavailable ? (
+          <RetryButton />
+        ) : overview.authenticated ? null : (
           <Button asChild>
             <Link href="/login">Sign In</Link>
           </Button>
@@ -103,15 +110,17 @@ export function ParticipantShell({
       summarySection={
         <section className="surface-inset overflow-hidden rounded-sm border" data-slot="summary-strip" data-testid="participant-summary">
           <dl className="grid grid-cols-1 gap-0 sm:grid-cols-2 xl:grid-cols-6">
-            <SummaryItem label="Challenge Catalog" value={String(overview.challengeCount)} />
-            <SummaryItem label="Owned Services" value={String(overview.ownServiceCount)} />
-            <SummaryItem label="Enemy Targets" value={String(overview.enemyTargetCount)} />
+            <SummaryItem label="Challenge Catalog" value={summaryCount(overview.challengeCount)} />
+            <SummaryItem label="Owned Services" value={summaryCount(overview.ownServiceCount)} />
+            <SummaryItem label="Enemy Targets" value={summaryCount(overview.enemyTargetCount)} />
             <SummaryItem
               label="Signed In As"
               value={
-                overview.authenticated
-                  ? overview.displayName || overview.teamName || `Team ${overview.teamID ?? ''}`
-                  : 'Not Signed In'
+                overview.sessionUnavailable
+                  ? 'Unavailable'
+                  : overview.authenticated
+                    ? overview.displayName || overview.teamName || `Team ${overview.teamID ?? ''}`
+                    : 'Not Signed In'
               }
             />
             <SummaryItem
@@ -131,10 +140,16 @@ export function ParticipantShell({
       alertSection={
         <>
           <AnnouncementBanner />
-          {overview.message ? <StatusBanner message={overview.message} variant="warning" /> : null}
+          {overview.message ? <StatusBanner message={overview.message} variant="warning" announce="change" /> : null}
+          {/* A session outage already puts Try again in the header. */}
+          {overview.source === "degraded" && !overview.sessionUnavailable ? (
+            <div>
+              <RetryButton variant="outline" size="sm" />
+            </div>
+          ) : null}
           {needsTeamJoin ? <ParticipantJoinTeamForm /> : null}
           {gameAlertMessage ? (
-            <StatusBanner message={gameAlertMessage} variant="warning" />
+            <StatusBanner message={gameAlertMessage} variant="warning" announce="change" />
           ) : null}
         </>
       }
