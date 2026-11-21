@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Flag, LoaderCircle } from "lucide-react";
+import Link from "next/link";
 import { useId } from "react";
 
 import { Button, cn, ScrollableRegion, StatusBanner, type FlagSubmitState } from "@/components/theme/kit";
@@ -17,6 +18,7 @@ export function NbFlagSubmit({
   pending,
   closed,
   error,
+  sessionEnded,
   note,
   verdicts,
   hint,
@@ -67,6 +69,11 @@ export function NbFlagSubmit({
           <p id={hintId} className="text-xs font-medium text-muted-foreground">{hint}</p>
           <div aria-live="polite" className="grid gap-2">
             {error ? <div id={errorId}><StatusBanner message={error} variant="error" announce="inherit" /></div> : null}
+            {sessionEnded ? (
+              <Button asChild variant="outline" className="justify-self-start">
+                <Link href="/login">Sign in again</Link>
+              </Button>
+            ) : null}
             {note ? (
               <div data-testid="flag-submit-summary" data-variant={note.variant}>
                 <StatusBanner message={note.message} variant={note.variant} announce="inherit" />

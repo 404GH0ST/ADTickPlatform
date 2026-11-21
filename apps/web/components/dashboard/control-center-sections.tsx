@@ -15,7 +15,11 @@ import type {
   ScoreRow,
   ServiceRow,
 } from "@/lib/dashboard-types";
-import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
+import {
+  buildAttackFilterOptions,
+  hasActiveAttackFilters,
+  isSameAttackView,
+} from "@/lib/dashboard-utils";
 import {
   cooldownMessage,
   type ServiceActionFeedback,
@@ -95,7 +99,12 @@ export type ServicesPanelProps = {
 };
 
 export type AttacksPanelProps = {
+  /** What is selected in the form, which may not be applied yet. */
   attackFilters: AttackFilters;
+  /** What the rows on screen were loaded with. Defaults to attackFilters. */
+  appliedFilters?: AttackFilters;
+  /** Why the last Apply, Reset or page change failed. The rows did not change. */
+  feedError?: string | null;
   highlightedAttackIDs: string[];
   attackPage: AttackFeedPage;
   attackLiveMode: boolean;
@@ -124,6 +133,8 @@ export type SSHSessionDialogProps = {
   issuedSession: SSHSessionData | null;
   open: boolean;
   pendingAction: string | null;
+  /** Set once the pending action has run unusually long. */
+  pendingNote?: string | null;
   onClose: () => void;
   onConfirm: () => void;
 };
@@ -133,6 +144,8 @@ export type FactoryResetDialogProps = {
   cooldownSeconds: number;
   open: boolean;
   pendingAction: string | null;
+  /** Set once the pending action has run unusually long. */
+  pendingNote?: string | null;
   target: ServiceRow | null;
   onClose: () => void;
   onConfirm: () => void;
@@ -470,6 +483,8 @@ export function ServicesPanel({
 
 export function AttacksPanel({
   attackFilters,
+  appliedFilters = attackFilters,
+  feedError,
   highlightedAttackIDs,
   attackPage,
   attackLiveMode,
@@ -490,12 +505,8 @@ export function AttacksPanel({
 }: AttacksPanelProps): ReactElement {
   const attackRows = attackPage.items;
   const latestTick = attackRows.reduce((value, row) => Math.max(value, row.tick), 0);
-  const filtersApplied =
-    attackFilters.attacker.trim() !== '' ||
-    attackFilters.victim.trim() !== '' ||
-    attackFilters.service.trim() !== '' ||
-    attackFilters.tickFrom.trim() !== '' ||
-    attackFilters.tickTo.trim() !== '';
+  const filtersApplied = hasActiveAttackFilters(appliedFilters);
+  const selectionPending = !isSameAttackView(attackFilters, appliedFilters);
   const [visibleRows, setVisibleRows] = useState<AttackEvent[]>(attackRows);
   const attackerChoices = buildAttackFilterOptions(
     [
@@ -614,9 +625,13 @@ export function AttacksPanel({
               </select>
             </Field>
           </div>
-          {filtersApplied ? (
+          {selectionPending ? (
             <p className="text-xs text-muted-foreground" role="status">
-              Selected view: {formatAttackFilterSummary(attackFilters)}. Choose Apply view to refresh the feed.
+              Selected view: {formatAttackFilterSummary(attackFilters) || "all attacks"}. Choose Apply view to load it.
+            </p>
+          ) : filtersApplied ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              Showing {formatAttackFilterSummary(appliedFilters)}.
             </p>
           ) : null}
           <details data-slot="well" className="rounded-sm border border-border/70 bg-muted/10 p-3">
@@ -644,7 +659,7 @@ export function AttacksPanel({
             <SliceCountBadge
               totalCount={attackPage.total_count}
               visibleCount={visibleRows.length}
-              offset={Number.parseInt(attackFilters.offset, 10) || 0}
+              offset={attackPage.offset ?? 0}
             />
             <LiveModeBadge
               filteredLabel="Filtered"
@@ -653,6 +668,14 @@ export function AttacksPanel({
             />
             </div>
           </div>
+          {feedError ? (
+            <div data-testid="attack-feed-error">
+              <StatusBanner
+                message={`That view couldn't be loaded. ${feedError.replace(/[.!?]?$/, ".")} The results below are from the last view that loaded.`}
+                variant="error"
+              />
+            </div>
+          ) : null}
         </section>
         <AttackSliceSummaryGrid rows={visibleRows} />
         <AttackMapPanel
@@ -706,6 +729,7 @@ export function SSHSessionDialog({
   issuedSession,
   open,
   pendingAction,
+  pendingNote,
   onClose,
   onConfirm,
 }: SSHSessionDialogProps): ReactElement {
@@ -721,6 +745,9 @@ export function SSHSessionDialog({
               <LoaderCircle className="h-4 w-4 animate-spin" />
               Loading root access…
             </div>
+          ) : null}
+          {pendingNote && pendingAction?.startsWith("ssh:") ? (
+            <StatusBanner message={pendingNote} variant="warning" />
           ) : null}
           {issuedSession ? (
             <IssuedRootCredentialBlock issuedSession={issuedSession} />
@@ -759,6 +786,7 @@ export function FactoryResetDialog({
   cooldownSeconds,
   open,
   pendingAction,
+  pendingNote,
   target,
   onClose,
   onConfirm,
@@ -774,6 +802,9 @@ export function FactoryResetDialog({
               message={cooldownMessage("reset", cooldownSeconds)}
               variant="warning"
             />
+          ) : null}
+          {pendingNote && pendingAction?.startsWith("reset:") ? (
+            <StatusBanner message={pendingNote} variant="warning" />
           ) : null}
           <ResetWarningBlock />
         </div>

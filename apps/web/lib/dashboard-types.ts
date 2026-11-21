@@ -82,6 +82,8 @@ export type PlatformOverview = {
   scoresUnavailable?: boolean;
   /** The attack feed request failed, so an empty feed says nothing about the match. */
   attacksUnavailable?: boolean;
+  /** The freeze request failed, so "not frozen" below is only a default. */
+  freezeUnavailable?: boolean;
   teamID?: number;
   playerID?: number;
   teamName?: string;

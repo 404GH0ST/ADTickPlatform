@@ -136,6 +136,7 @@ import {
   firstForwardedAddress,
   parseApiError,
   PlatformAPIError,
+  SESSION_ENDED_MESSAGE,
 } from "./api-utils";
 
 export { PlatformAPIError } from "./api-utils";
@@ -186,6 +187,8 @@ type AuthenticatedSessionSource = Exclude<ParticipantSession["source"], "none">;
 // long, and abandoning one would leave its outcome unknown.
 const READ_TIMEOUT_MS = 5_000;
 const SIGN_IN_TIMEOUT_MS = 15_000;
+// Safe to bound: resubmitting a flag that already counted reports a duplicate.
+const FLAG_SUBMIT_TIMEOUT_MS = 15_000;
 
 function apiBaseUrl() {
   return trimBaseUrl(
@@ -302,7 +305,7 @@ const getParticipantToken = cache(async () => {
     );
   }
   if (!session.authenticated || !session.token) {
-    throw new Error("participant session is not authenticated.");
+    throw new Error(SESSION_ENDED_MESSAGE);
   }
 
   return session.token;
@@ -593,6 +596,7 @@ export async function submitFlags(flags: string[]) {
   return participantFetch<SubmissionResult>("/api/v2/submit", {
     method: "POST",
     body: JSON.stringify({ flags }),
+    signal: AbortSignal.timeout(FLAG_SUBMIT_TIMEOUT_MS),
   });
 }
 

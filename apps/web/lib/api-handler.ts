@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { upstreamErrorDetails } from "@/lib/api-utils";
+import { SESSION_ENDED_MESSAGE, upstreamErrorDetails } from "@/lib/api-utils";
 
 export async function handleAdminIdRoute<T>(
   context: { params: Promise<Record<string, string>> },
@@ -75,7 +75,7 @@ export function upstreamErrorResponse(
 ) {
   if (
     error instanceof Error &&
-    error.message === "participant session is not authenticated."
+    error.message === SESSION_ENDED_MESSAGE
   ) {
     return problemResponse(403, "Authentication required", error.message);
   }

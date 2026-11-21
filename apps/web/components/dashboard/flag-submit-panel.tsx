@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
+import Link from "next/link";
 import { CircleCheck, CircleMinus, CircleX, Flag, LoaderCircle } from "lucide-react";
 
 import { ThemeSlot } from "@/components/theme/theme-slot";
@@ -30,10 +31,13 @@ const verdictPresentation: Record<
  */
 export function FlagSubmitPanel({
   acceptingSubmissions,
+  draftOwner,
 }: {
   acceptingSubmissions?: boolean;
+  /** Who unsent text is saved for, as "team:player". Without it, nothing is saved. */
+  draftOwner?: string;
 }): ReactElement {
-  const state = useFlagSubmit({ acceptingSubmissions });
+  const state = useFlagSubmit({ acceptingSubmissions, draftOwner });
   return <ThemeSlot name="FlagSubmit" fallback={DefaultFlagSubmitView} props={state} />;
 }
 
@@ -43,6 +47,7 @@ export function DefaultFlagSubmitView({
   pending,
   closed,
   error,
+  sessionEnded,
   note,
   verdicts,
   hasFeedback,
@@ -132,6 +137,11 @@ export function DefaultFlagSubmitView({
         {hasFeedback ? (
           <div id={feedbackId} className="grid gap-2" aria-live="polite">
             {error ? <StatusBanner message={error} variant="error" announce="inherit" /> : null}
+            {sessionEnded ? (
+              <Button asChild variant="outline" size="sm" className="justify-self-start">
+                <Link href="/login">Sign in again</Link>
+              </Button>
+            ) : null}
             {note ? (
               <div data-testid="flag-submit-summary" data-variant={note.variant}>
                 <StatusBanner message={note.message} variant={note.variant} announce="inherit" />

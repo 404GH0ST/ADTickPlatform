@@ -15,7 +15,7 @@ import { ParticipantJoinTeamForm } from '@/components/dashboard/participant-join
 import { ParticipantLogoutButton } from '@/components/dashboard/participant-session-button';
 import { VpnConfigDownloadButton } from '@/components/dashboard/vpn-config-download-button';
 import { Button } from '@/components/ui/button';
-import { RetryButton } from '@/components/ui/retry-button';
+import { RefreshButton } from '@/components/ui/retry-button';
 import { StatusBanner } from '@/components/ui/status-banner';
 import type { PlatformOverview } from '@/lib/dashboard-types';
 
@@ -100,7 +100,7 @@ export function ParticipantShell({
       }
       primaryHeaderAction={
         overview.sessionUnavailable ? (
-          <RetryButton />
+          <RefreshButton />
         ) : overview.authenticated ? null : (
           <Button asChild>
             <Link href="/login">Sign In</Link>
@@ -144,7 +144,7 @@ export function ParticipantShell({
           {/* A session outage already puts Try again in the header. */}
           {overview.source === "degraded" && !overview.sessionUnavailable ? (
             <div>
-              <RetryButton variant="outline" size="sm" />
+              <RefreshButton variant="outline" size="sm" />
             </div>
           ) : null}
           {needsTeamJoin ? <ParticipantJoinTeamForm /> : null}

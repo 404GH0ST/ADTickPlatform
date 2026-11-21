@@ -104,6 +104,7 @@ export async function loadDashboardData(
       servicesUnavailable,
       scoresUnavailable: results.scoresResult.status === "rejected",
       attacksUnavailable: results.attackPageResult.status === "rejected",
+      freezeUnavailable: results.freezeResult.status === "rejected",
     },
   };
 }

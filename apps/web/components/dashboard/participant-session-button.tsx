@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { clearFlagDraft } from '@/lib/flag-draft';
 
 export function ParticipantLogoutButton() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export function ParticipantLogoutButton() {
       await fetch('/api/platform/session/logout', {
         method: 'POST',
       });
+      clearFlagDraft();
       router.push('/');
       router.refresh();
     } finally {

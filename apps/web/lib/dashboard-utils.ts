@@ -58,6 +58,17 @@ export function isDefaultAttackFilters(
   );
 }
 
+/** True when the filters narrow the feed by team, service or tick. */
+export function hasActiveAttackFilters(filters: AttackFilters): boolean {
+  return [filters.attacker, filters.victim, filters.service, filters.tickFrom, filters.tickTo]
+    .some((value) => value.trim() !== "");
+}
+
+/** True when both describe the same view, wherever each is paged to. */
+export function isSameAttackView(left: AttackFilters, right: AttackFilters): boolean {
+  return isDefaultAttackFilters({ ...left, offset: right.offset }, right);
+}
+
 /**
  * Unique, sorted option labels for attack filter dropdowns.
  * Always includes the current filter value so deep-linked filters stay selectable.

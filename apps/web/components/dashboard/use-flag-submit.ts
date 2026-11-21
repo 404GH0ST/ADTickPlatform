@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,8 +11,18 @@ import {
   type RefCallback,
 } from "react";
 
-import { browserRequestErrorMessage, parseApiError } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  parseApiError,
+  SESSION_ENDED_MESSAGE,
+} from "@/lib/api-utils";
 import { keepEarlyInput } from "@/lib/early-input";
+import { readFlagDraft, writeFlagDraft } from "@/lib/flag-draft";
+
+// Longer than the server's own limit, so its clearer answer normally arrives first.
+const FLAG_REQUEST_TIMEOUT_MS = 20_000;
+const FLAGS_UNCONFIRMED =
+  "The platform didn't confirm these flags. They're still here. Submit again: any that already counted will show as duplicate.";
 
 export type FlagVerdictOutcome = "accepted" | "duplicate" | "rejected";
 
@@ -41,6 +52,8 @@ export type FlagSubmitState = {
   /** True when scoring is not accepting flags; disable the form. */
   closed: boolean;
   error: string | null;
+  /** The error is an ended session: offer a link to /login. The text is kept for after. */
+  sessionEnded: boolean;
   note: FlagSubmitNote | null;
   verdicts: FlagVerdict[];
   hasFeedback: boolean;
@@ -84,8 +97,10 @@ export function parseFlags(raw: string): string[] {
 
 export function useFlagSubmit({
   acceptingSubmissions,
+  draftOwner,
 }: {
   acceptingSubmissions?: boolean;
+  draftOwner?: string;
 }): FlagSubmitState {
   const inputNode = useRef<HTMLTextAreaElement>(null);
   const [rawFlags, setRawFlagsState] = useState("");
@@ -97,6 +112,16 @@ export function useFlagSubmit({
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<FlagSubmitNote | null>(null);
   const [verdicts, setVerdicts] = useState<FlagVerdict[]>([]);
+
+  useEffect(() => {
+    if (!draftOwner) return;
+    const draft = readFlagDraft(draftOwner);
+    if (draft) setRawFlagsState((current) => current || draft);
+  }, [draftOwner]);
+
+  useEffect(() => {
+    if (draftOwner) writeFlagDraft(draftOwner, rawFlags);
+  }, [draftOwner, rawFlags]);
 
   const closed = acceptingSubmissions === false;
   const flagCount = useMemo(() => parseFlags(rawFlags).length, [rawFlags]);
@@ -129,9 +154,14 @@ export function useFlagSubmit({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flags }),
+        signal: AbortSignal.timeout(FLAG_REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) {
-        throw new Error(await parseApiError(response, "/api/platform/submit"));
+        throw new Error(
+          response.status === 502 || response.status === 504
+            ? FLAGS_UNCONFIRMED
+            : await parseApiError(response, "/api/platform/submit"),
+        );
       }
       const payload = (await response.json()) as {
         results?: Omit<FlagVerdict, "outcome">[];
@@ -154,7 +184,8 @@ export function useFlagSubmit({
         window.dispatchEvent(new Event("platform:flag-accepted"));
       }
     } catch (submitError) {
-      setError(browserRequestErrorMessage(submitError, "Flag submit failed."));
+      const timedOut = submitError instanceof DOMException && submitError.name === "TimeoutError";
+      setError(timedOut ? FLAGS_UNCONFIRMED : browserRequestErrorMessage(submitError, "Flag submit failed."));
     } finally {
       setPending(false);
     }
@@ -192,6 +223,7 @@ export function useFlagSubmit({
     pending,
     closed,
     error,
+    sessionEnded: error === SESSION_ENDED_MESSAGE,
     note,
     verdicts,
     hasFeedback,

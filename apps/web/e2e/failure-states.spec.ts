@@ -144,6 +144,84 @@ for (const [themeId, registerLabel] of [["graphite", "Register"], ["neubrutalism
   });
 }
 
+test("an outage keeps an unsent flag and the last data on screen", async ({ context, page, request }) => {
+  await resetMockApi(request);
+  await request.post(`${mockApiBaseUrl}/api/v2/admin/game/match/start`);
+  await loginAsParticipant(context);
+  await page.goto("/services");
+
+  const flags = page.getByRole("textbox", { name: "Flags" });
+  await flags.fill("PLAYIT{typed_not_sent}");
+  await expect(page.getByText("1 flag ready")).toBeVisible();
+  await expect(page.getByTestId("service-card-svc-1")).toBeVisible();
+
+  await setSessionOutage(request, true);
+  await page.evaluate(() => window.dispatchEvent(new Event("platform:flag-accepted")));
+
+  await expect(page.getByText("You have not been signed out.")).toBeVisible();
+  await expect(page.getByTestId("stale-data-notice")).toBeVisible();
+  await expect(flags).toHaveValue("PLAYIT{typed_not_sent}");
+  await expect(page.getByTestId("service-card-svc-1")).toBeVisible();
+
+  await setSessionOutage(request, false);
+  await page.getByRole("button", { name: "Try again" }).focus();
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByTestId("stale-data-notice")).toHaveCount(0);
+  await expect(flags).toHaveValue("PLAYIT{typed_not_sent}");
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+});
+
+test("a live scoreboard is not called stale when only the first load failed", async ({ page, request }) => {
+  await resetMockApi(request, "degraded-participant");
+
+  await page.goto("/scoreboard");
+
+  await expect(page.getByRole("table")).toContainText("College Alpha");
+  await expect(page.getByTestId("stale-data-notice")).toHaveCount(0);
+});
+
+test("a failed attack filter says so and does not relabel the rows", async ({ page, request }) => {
+  const viewBadge = (label: string) => page.locator('[data-slot="badge"]').getByText(label, { exact: true });
+  await resetMockApi(request);
+  await page.goto("/attacks");
+  await expect(viewBadge("Live")).toBeVisible();
+
+  await page.route("**/api/platform/attacks?**", (route) =>
+    route.fulfill({ status: 503, contentType: "application/json", body: '{"detail":"attack store unavailable"}' }),
+  );
+  await page.locator("#attack-attacker").selectOption({ index: 2 });
+  await page.getByRole("button", { name: "Apply view" }).click();
+
+  await expect(page.getByTestId("attack-feed-error")).toContainText("attack store unavailable");
+  await expect(viewBadge("Filtered")).toHaveCount(0);
+  await expect(viewBadge("Live")).toBeVisible();
+  await expect(page.getByText(/^Selected view:/)).toBeVisible();
+
+  await page.unroute("**/api/platform/attacks?**");
+  await page.getByRole("button", { name: "Apply view" }).click();
+
+  await expect(page.getByTestId("attack-feed-error")).toHaveCount(0);
+  await expect(viewBadge("Filtered")).toBeVisible();
+  await expect(page.getByText(/^Showing attacker /)).toBeVisible();
+});
+
+test("an unsent flag survives a reload", async ({ context, page, request }) => {
+  await resetMockApi(request);
+  await request.post(`${mockApiBaseUrl}/api/v2/admin/game/match/start`);
+  await loginAsParticipant(context);
+  await page.goto("/services");
+
+  const flags = page.getByRole("textbox", { name: "Flags" });
+  await flags.fill("PLAYIT{before_reload}");
+  await expect(page.getByText("1 flag ready")).toBeVisible();
+
+  await page.reload();
+
+  await expect(flags).toHaveValue("PLAYIT{before_reload}");
+  await expect(page.getByText("1 flag ready")).toBeVisible();
+});
+
 test("a failed sign-in is exposed after its live region", async ({ page }) => {
   await page.goto("/login");
   await page.evaluate(() => {

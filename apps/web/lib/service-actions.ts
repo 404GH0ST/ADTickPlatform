@@ -74,6 +74,20 @@ export function cooldownMessage(action: ServiceAction, seconds: number): string 
   return `${SERVICE_ACTION_LABEL[action]} is on cooldown for this service. Wait ${pluralSeconds(seconds)} before trying again.`;
 }
 
+/** Shown when an action outlasts a normal wait, so a slow one doesn't look frozen. */
+export function slowActionMessage(pendingAction: string): string | null {
+  if (pendingAction.startsWith("restart:")) {
+    return "Restart is still running. The result will appear here when it finishes.";
+  }
+  if (pendingAction.startsWith("reset:")) {
+    return "Factory reset is still running. The result will appear here when it finishes.";
+  }
+  if (pendingAction.startsWith("ssh:")) {
+    return "Still requesting root access. The credential will appear here when it's ready.";
+  }
+  return null;
+}
+
 export function restartSuccessMessage(): string {
   return `Restart complete: the service process was restarted with your current patches kept. The checker re-verifies it next round. Restart is available again in ${pluralSeconds(SERVICE_ACTION_COOLDOWN_SECONDS.restart)}.`;
 }

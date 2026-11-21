@@ -27,9 +27,15 @@ import type {
   AdminWireGuardGatewayStatus,
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
-import { buildQueryString, parseApiError, processApiResponse } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  buildQueryString,
+  parseApiError,
+  processApiResponse,
+} from "@/lib/api-utils";
 import { writeTextToClipboard } from "@/lib/clipboard";
 import { focusNeighborWhenRemoved } from "@/lib/focus-after-removal";
+import { LiveStream } from "@/lib/live-stream";
 import {
   parseChallengeCategory,
   parseChallengeProtocol,
@@ -488,19 +494,19 @@ export function useOrganizerDashboard({
   }
 
   useEffect(() => {
-    const gameStatusSource = new EventSource(
+    const gameStatusSource = new LiveStream(
       "/api/admin/realtime/game/status/stream",
     );
-    const scoreboardSource = new EventSource(
+    const scoreboardSource = new LiveStream(
       "/api/admin/realtime/game/scoreboard/stream",
     );
-    const attacksSource = new EventSource(
+    const attacksSource = new LiveStream(
       "/api/admin/realtime/game/attacks/stream",
     );
-    const checkerRunsSource = new EventSource(
+    const checkerRunsSource = new LiveStream(
       "/api/admin/realtime/game/checker-runs/stream",
     );
-    const schedulerEventsSource = new EventSource(
+    const schedulerEventsSource = new LiveStream(
       "/api/admin/realtime/game/scheduler/events/stream",
     );
 
@@ -636,7 +642,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "team create failed",
+        browserRequestErrorMessage(error, "team create failed"),
       );
       return false;
     } finally {
@@ -688,7 +694,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "player create failed",
+        browserRequestErrorMessage(error, "player create failed"),
       );
       return false;
     } finally {
@@ -766,7 +772,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "operations status failed",
+          browserRequestErrorMessage(error, "operations status failed"),
         );
       }
     } finally {
@@ -798,9 +804,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error
-            ? error.message
-            : "operations metrics failed",
+          browserRequestErrorMessage(error, "operations metrics failed"),
         );
       }
     } finally {
@@ -833,7 +837,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "runtime health refresh failed",
+          browserRequestErrorMessage(error, "runtime health refresh failed"),
         );
       }
     } finally {
@@ -884,9 +888,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "runtime health report download failed",
+        browserRequestErrorMessage(error, "runtime health report download failed"),
       );
     } finally {
       setPendingAction(null);
@@ -945,9 +947,7 @@ export function useOrganizerDashboard({
       setActionNote(`Loaded WireGuard config for ${player.display_name}.`);
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "wireguard config fetch failed",
+        browserRequestErrorMessage(error, "wireguard config fetch failed"),
       );
     } finally {
       setPendingAction(null);
@@ -980,7 +980,7 @@ export function useOrganizerDashboard({
       setActionNote(successMessage);
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : `wireguard ${action} failed`,
+        browserRequestErrorMessage(error, `wireguard ${action} failed`),
       );
     } finally {
       setPendingAction(null);
@@ -1025,9 +1025,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "wireguard gateway reconcile failed",
+        browserRequestErrorMessage(error, "wireguard gateway reconcile failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1053,9 +1051,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "controller access reconcile failed",
+        browserRequestErrorMessage(error, "controller access reconcile failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1085,9 +1081,7 @@ export function useOrganizerDashboard({
       setActionNote("WireGuard gateway rules and interface torn down.");
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "wireguard gateway teardown failed",
+        browserRequestErrorMessage(error, "wireguard gateway teardown failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1117,9 +1111,7 @@ export function useOrganizerDashboard({
       setActionNote("Controller service access rules torn down.");
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "controller access teardown failed",
+        browserRequestErrorMessage(error, "controller access teardown failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1145,7 +1137,7 @@ export function useOrganizerDashboard({
       setActionNote(opts.successNote);
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : opts.errorLabel,
+        browserRequestErrorMessage(error, opts.errorLabel),
       );
     } finally {
       setPendingAction(null);
@@ -1198,7 +1190,7 @@ export function useOrganizerDashboard({
       opts.apply(data);
       setActionNote(opts.successNote);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : opts.errorLabel);
+      setActionError(browserRequestErrorMessage(error, opts.errorLabel));
     } finally {
       setPendingAction(null);
     }
@@ -1230,11 +1222,9 @@ export function useOrganizerDashboard({
       }
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : active
+        browserRequestErrorMessage(error, active
             ? "team reactivate failed"
-            : "team deactivate failed",
+            : "team deactivate failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1287,11 +1277,9 @@ export function useOrganizerDashboard({
       }
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : underMaintenance
+        browserRequestErrorMessage(error, underMaintenance
             ? "challenge maintenance failed"
-            : "challenge resume failed",
+            : "challenge resume failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1381,7 +1369,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "challenge create failed",
+        browserRequestErrorMessage(error, "challenge create failed"),
       );
       return false;
     } finally {
@@ -1433,9 +1421,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error
-            ? error.message
-            : "challenge validation failed",
+          browserRequestErrorMessage(error, "challenge validation failed"),
         );
       }
       throw error;
@@ -1554,7 +1540,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "challenge deploy failed",
+        browserRequestErrorMessage(error, "challenge deploy failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1582,7 +1568,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "deployment reconcile failed",
+        browserRequestErrorMessage(error, "deployment reconcile failed"),
       );
     } finally {
       setPendingAction(null);
@@ -1613,7 +1599,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "game-core status failed",
+          browserRequestErrorMessage(error, "game-core status failed"),
         );
       }
     } finally {
@@ -1672,13 +1658,8 @@ export function useOrganizerDashboard({
         `${restarting ? "Game restarted" : "Game started"}. Submissions are ${matchPayload?.accepting_submissions ? "open" : "closed"} and the scheduler is running at ${schedulerPayload?.interval_seconds ?? 0}s.`,
       );
     } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? matchStarted
-            ? `Match started, but scheduler start failed: ${error.message}`
-            : error.message
-          : "game start failed",
-      );
+      const reason = browserRequestErrorMessage(error, "game start failed");
+      setActionError(matchStarted ? `Match started, but scheduler start failed: ${reason}` : reason);
     } finally {
       suppressGameStatusRealtime(1_000);
       setPendingAction(null);
@@ -1713,7 +1694,7 @@ export function useOrganizerDashboard({
       setActionNote("Match stopped. Participant submissions are now closed.");
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "game match stop failed",
+        browserRequestErrorMessage(error, "game match stop failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1751,7 +1732,7 @@ export function useOrganizerDashboard({
       setActionNote("Match paused. Submissions and participant traffic are now blocked.");
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "game match pause failed",
+        browserRequestErrorMessage(error, "game match pause failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1797,7 +1778,7 @@ export function useOrganizerDashboard({
       setActionNote("Match resumed. Submissions and participant traffic are now unblocked.");
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "game match resume failed",
+        browserRequestErrorMessage(error, "game match resume failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1827,9 +1808,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "game-core scheduler start failed",
+        browserRequestErrorMessage(error, "game-core scheduler start failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1859,9 +1838,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "game-core scheduler stop failed",
+        browserRequestErrorMessage(error, "game-core scheduler stop failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1898,9 +1875,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "game match schedule update failed",
+        browserRequestErrorMessage(error, "game match schedule update failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1931,9 +1906,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "game-core scheduler update failed",
+        browserRequestErrorMessage(error, "game-core scheduler update failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -1970,7 +1943,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!opts.silent) {
         setActionError(
-          error instanceof Error ? error.message : opts.errorLabel,
+          browserRequestErrorMessage(error, opts.errorLabel),
         );
       }
     } finally {
@@ -2116,7 +2089,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "scoreboard fetch failed",
+          browserRequestErrorMessage(error, "scoreboard fetch failed"),
         );
       }
     } finally {
@@ -2151,7 +2124,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "score recompute failed",
+          browserRequestErrorMessage(error, "score recompute failed"),
         );
       }
     } finally {
@@ -2186,7 +2159,7 @@ export function useOrganizerDashboard({
     } catch (error) {
       if (!silent) {
         setActionError(
-          error instanceof Error ? error.message : "score audit failed",
+          browserRequestErrorMessage(error, "score audit failed"),
         );
       }
     } finally {
@@ -2233,9 +2206,7 @@ export function useOrganizerDashboard({
       );
     } catch (error) {
       setActionError(
-        error instanceof Error
-          ? error.message
-          : "game-core tick advance failed",
+        browserRequestErrorMessage(error, "game-core tick advance failed"),
       );
     } finally {
       suppressGameStatusRealtime(1_000);
@@ -2414,7 +2385,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "team update failed",
+        browserRequestErrorMessage(error, "team update failed"),
       );
       return false;
     } finally {
@@ -2445,7 +2416,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "player update failed",
+        browserRequestErrorMessage(error, "player update failed"),
       );
       return false;
     } finally {
@@ -2488,7 +2459,7 @@ export function useOrganizerDashboard({
       return true;
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "challenge update failed",
+        browserRequestErrorMessage(error, "challenge update failed"),
       );
       return false;
     } finally {

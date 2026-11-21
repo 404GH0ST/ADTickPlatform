@@ -7,6 +7,7 @@ import {
   parseRetryAfterSeconds,
   remainingCooldownSeconds,
   restartSuccessMessage,
+  slowActionMessage,
 } from "./service-actions";
 
 describe("service action cooldowns", () => {
@@ -52,4 +53,11 @@ describe("service action results", () => {
       "10-point defense penalty",
     );
   });
+});
+
+test("a slow action names what is still running", () => {
+  expect(slowActionMessage("restart:svc-1")).toContain("Restart is still running");
+  expect(slowActionMessage("reset:svc-1")).toContain("Factory reset is still running");
+  expect(slowActionMessage("ssh:svc-1")).toContain("root access");
+  expect(slowActionMessage("attacks:refresh")).toBeNull();
 });

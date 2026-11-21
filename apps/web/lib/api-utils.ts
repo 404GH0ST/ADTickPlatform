@@ -1,3 +1,8 @@
+import { parseRetryAfterSeconds } from "./service-actions";
+
+/** The session is gone, so the only way forward is signing in again. */
+export const SESSION_ENDED_MESSAGE = "Your session has ended. Sign in again to continue.";
+
 export type ProblemDetails = {
   type?: string;
   title: string;
@@ -63,6 +68,9 @@ export function upstreamErrorDetails(
 export function browserRequestErrorMessage(error: unknown, fallback: string) {
   if (error instanceof TypeError) {
     return "Can't reach the platform. Check your connection and try again.";
+  }
+  if (errorName(error) === "TimeoutError") {
+    return "The platform didn't respond in time. Try again in a moment.";
   }
   return error instanceof Error ? error.message : fallback;
 }
@@ -141,11 +149,29 @@ export async function processApiResponse<T>(
   return (await response.json()) as T;
 }
 
+function rateLimitMessage(response: Response) {
+  const seconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+  return seconds === null
+    ? "Too many requests. Try again in a moment."
+    : `Too many requests. Try again in ${seconds} ${seconds === 1 ? "second" : "seconds"}.`;
+}
+
+/** For a failure with no usable explanation, such as a proxy's HTML error page. */
+function statusErrorMessage(response: Response) {
+  if (response.status === 429) {
+    return rateLimitMessage(response);
+  }
+  if (response.status >= 500) {
+    return "The platform API is unavailable right now. Try again in a moment.";
+  }
+  return "The request couldn't be completed. Try again, or contact the organizers if it keeps happening.";
+}
+
 export async function parseApiError(
   response: Response,
-  path: string,
+  _path: string,
 ): Promise<string> {
-  const fallback = `API request to ${path} failed with status ${response.status}`;
+  const fallback = statusErrorMessage(response);
   const contentType = response.headers.get("content-type") ?? "";
   const isJsonLike =
     contentType.includes("application/json") || contentType.includes("+json");
@@ -165,7 +191,8 @@ export async function parseApiError(
   if ("detail" in payload && payload.detail) {
     return payload.detail;
   }
-  if ("title" in payload && payload.title) {
+  // A bare "Too Many Requests" title would drop the wait the server asked for.
+  if ("title" in payload && payload.title && response.status !== 429) {
     return payload.title;
   }
   return fallback;

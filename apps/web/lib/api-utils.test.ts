@@ -6,6 +6,7 @@ import {
   browserRequestErrorMessage,
   buildQueryString,
   firstForwardedAddress,
+  parseApiError,
   parseTeamBody,
   PlatformAPIError,
   processApiResponse,
@@ -60,6 +61,9 @@ describe("network failures", () => {
     );
     expect(browserRequestErrorMessage(new Error("invalid credentials"), "fallback")).toBe("invalid credentials");
     expect(browserRequestErrorMessage(null, "fallback")).toBe("fallback");
+    expect(browserRequestErrorMessage(new DOMException("timed out", "TimeoutError"), "fallback")).toBe(
+      "The platform didn't respond in time. Try again in a moment.",
+    );
   });
 });
 
@@ -135,9 +139,29 @@ test("team request parsing trims names and handles malformed JSON", async () => 
     .toEqual({ name: undefined, contactEmail: undefined });
 });
 
+test("errors without a usable explanation never show an internal path", async () => {
+  const html = (status: number) => new Response("<h1>Bad Gateway</h1>", { status, headers: { "Content-Type": "text/html" } });
+  expect(await parseApiError(html(502), "/api/v2/submit")).toBe(
+    "The platform API is unavailable right now. Try again in a moment.",
+  );
+  expect(await parseApiError(html(418), "/api/v2/submit")).toBe(
+    "The request couldn't be completed. Try again, or contact the organizers if it keeps happening.",
+  );
+});
+
+test("a rate limit keeps the wait the server asked for", async () => {
+  const limited = (headers: Record<string, string>, body: object = { title: "Too Many Requests" }) =>
+    Response.json(body, { status: 429, headers });
+  expect(await parseApiError(limited({ "Retry-After": "30" }), "/x")).toBe("Too many requests. Try again in 30 seconds.");
+  expect(await parseApiError(limited({ "Retry-After": "1" }), "/x")).toBe("Too many requests. Try again in 1 second.");
+  expect(await parseApiError(limited({}), "/x")).toBe("Too many requests. Try again in a moment.");
+  expect(await parseApiError(limited({ "Retry-After": "9" }, { title: "Cooldown active", detail: "Restart is on cooldown." }), "/x"))
+    .toBe("Restart is on cooldown.");
+});
+
 test("response handling preserves useful errors and permits empty successes", async () => {
   const path = "/api/v2/challenges";
-  const fallback = `API request to ${path} failed with status 503`;
+  const fallback = "The platform API is unavailable right now. Try again in a moment.";
   expect(await processApiResponse(new Response(null, { status: 204 }), path)).toBeUndefined();
   for (const [response, message] of [
     [Response.json({ detail: "Try again", title: "Unavailable" }, { status: 503, headers: {
