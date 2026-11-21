@@ -241,9 +241,13 @@ paths:
                     - id: 1
                       name: banking
                       has_source_download: true
+                      category: web
+                      protocol: http
                     - id: 2
                       name: chat
                       has_source_download: false
+                      category: pwn
+                      protocol: tcp
         '429':
           description: Challenge polling rate limited
           content:
@@ -982,6 +986,16 @@ components:
           minLength: 1
         has_source_download:
           type: boolean
+        category:
+          type: string
+          enum: ['', pwn, web, crypto]
+          description: Challenge category; empty when the organizer has not set one.
+        protocol:
+          type: string
+          enum: [tcp, http]
+          description: >-
+            How to connect to every team's instance of this challenge. `tcp` is a raw
+            socket (`nc host port`); `http` is a web service (`http://host:port/`).
     ServiceEndpointList:
       type: array
       minItems: 1

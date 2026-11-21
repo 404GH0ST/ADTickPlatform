@@ -24,6 +24,10 @@ type adminCreateChallengeRequest struct {
 	ServicePort        int    `json:"service_port,omitempty"`
 	ServiceSubnetOctet int    `json:"service_subnet_octet,omitempty"`
 	EgressEnabled      *bool  `json:"egress_enabled,omitempty"`
+	// Category is pwn, web or crypto; empty leaves the challenge uncategorized.
+	Category string `json:"category,omitempty"`
+	// Protocol is how participants connect: tcp (default) or http.
+	Protocol string `json:"protocol,omitempty"`
 }
 
 type adminUpdateTeamRequest struct {
@@ -46,6 +50,10 @@ type adminUpdateChallengeRequest struct {
 	CheckerImage     string `json:"checker_image"`
 	SourceBundlePath string `json:"source_bundle_path"`
 	EgressEnabled    *bool  `json:"egress_enabled,omitempty"`
+	// Category and Protocol are optional: nil (field omitted) keeps the stored
+	// value. An empty category clears it back to uncategorized.
+	Category *string `json:"category,omitempty"`
+	Protocol *string `json:"protocol,omitempty"`
 }
 
 type adminTeam struct {
@@ -169,6 +177,8 @@ type adminChallenge struct {
 	ServicePort        int    `json:"service_port"`
 	ServiceSubnetOctet int    `json:"service_subnet_octet"`
 	EgressEnabled      bool   `json:"egress_enabled"`
+	Category           string `json:"category"`
+	Protocol           string `json:"protocol"`
 	Published          bool   `json:"published"`
 	Maintenance        bool   `json:"maintenance"`
 	MaintenanceAt      string `json:"maintenance_at,omitempty"`

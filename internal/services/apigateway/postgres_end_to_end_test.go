@@ -213,10 +213,23 @@ func gatewayAdminLifecycle(t *testing.T, b e2eBackend) {
 		t.Fatalf("want 2 teams, got %v", teams)
 	}
 
-	challenge := c.expect(http.StatusOK, http.MethodPost, "/api/v2/admin/challenges", admin, adminCreateChallengeRequest{Name: "web", BaselineImage: "img/web:1", CheckerImage: "img/web-checker:1", ServicePort: 8080, ServiceSubnetOctet: 7})
+	challenge := c.expect(http.StatusOK, http.MethodPost, "/api/v2/admin/challenges", admin, adminCreateChallengeRequest{Name: "web", BaselineImage: "img/web:1", CheckerImage: "img/web-checker:1", ServicePort: 8080, ServiceSubnetOctet: 7, Category: "pwn"})
 	challengeID := idOf(t, challenge)
+	if challenge["category"] != "pwn" || challenge["protocol"] != "tcp" {
+		t.Fatalf("create must store the category and default to tcp, got %v/%v", challenge["category"], challenge["protocol"])
+	}
 	c.expect(http.StatusBadRequest, http.MethodPost, "/api/v2/admin/challenges", admin, adminCreateChallengeRequest{Name: "bad", BaselineImage: "img", ServicePort: 70000})
-	c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/challenges/%d", challengeID), admin, adminUpdateChallengeRequest{Name: "web", BaselineImage: "img/web:2", CheckerImage: "img/web-checker:2"})
+	c.expect(http.StatusBadRequest, http.MethodPost, "/api/v2/admin/challenges", admin, adminCreateChallengeRequest{Name: "bad-category", Category: "forensics"})
+	// Omitting category/protocol keeps them; sending them replaces them.
+	kept := c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/challenges/%d", challengeID), admin, adminUpdateChallengeRequest{Name: "web", BaselineImage: "img/web:2", CheckerImage: "img/web-checker:2"})
+	if kept["category"] != "pwn" || kept["protocol"] != "tcp" {
+		t.Fatalf("update without metadata must keep it, got %v/%v", kept["category"], kept["protocol"])
+	}
+	webCategory, httpProtocol := "web", "http"
+	updated := c.expect(http.StatusOK, http.MethodPut, fmt.Sprintf("/api/v2/admin/challenges/%d", challengeID), admin, adminUpdateChallengeRequest{Name: "web", BaselineImage: "img/web:2", CheckerImage: "img/web-checker:2", Category: &webCategory, Protocol: &httpProtocol})
+	if updated["category"] != "web" || updated["protocol"] != "http" {
+		t.Fatalf("update must store web/http, got %v/%v", updated["category"], updated["protocol"])
+	}
 	c.expect(http.StatusOK, http.MethodPost, fmt.Sprintf("/api/v2/admin/challenges/%d/deploy", challengeID), admin, nil)
 	if deployments := c.list(http.MethodGet, "/api/v2/admin/deployments", admin); len(deployments) == 0 {
 		t.Fatal("deploy must enqueue deployment jobs")
@@ -369,6 +382,12 @@ func gatewayParticipantLifecycle(t *testing.T, b e2eBackend) {
 	b.startMatch()
 	if items := c.list(http.MethodGet, "/api/v2/challenges", ""); !containsID(items, "id", challengeID) {
 		t.Fatalf("want the published challenge once running, got %v", items)
+	}
+	for _, item := range c.list(http.MethodGet, "/api/v2/challenges", "") {
+		// Created without metadata: uncategorized, reached over raw TCP.
+		if fmt.Sprint(item["id"]) == fmt.Sprint(challengeID) && (item["category"] != "" || item["protocol"] != "tcp") {
+			t.Fatalf("public catalog must carry the default category and protocol, got %v", item)
+		}
 	}
 	c.expect(http.StatusOK, http.MethodGet, "/api/v2/services", formerCaptain, nil)
 	services := c.list(http.MethodGet, "/api/v2/team/services", formerCaptain)

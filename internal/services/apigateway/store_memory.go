@@ -395,6 +395,8 @@ func (s *memoryStore) ListChallenges(_ context.Context) ([]challenge, error) {
 				Name:              item.Name,
 				HasSourceDownload: hasSource,
 				Maintenance:       unavailable,
+				Category:          storedChallengeCategory(item.Category),
+				Protocol:          storedChallengeProtocol(item.Protocol),
 			})
 		}
 	}
@@ -1275,6 +1277,8 @@ func (s *memoryStore) ListAdminChallenges(_ context.Context) ([]adminChallenge, 
 	totalTeams := len(s.teams)
 	for _, challenge := range s.challenges {
 		clone := *challenge
+		clone.Category = storedChallengeCategory(clone.Category)
+		clone.Protocol = storedChallengeProtocol(clone.Protocol)
 		clone.TotalTeams = totalTeams
 		clone.DeployedTeams = s.deployedTeamsForChallengeLocked(challenge.ID)
 		clone.ReadyTeams = s.readyTeamsForChallengeLocked(challenge.ID)
@@ -1344,6 +1348,8 @@ func (s *memoryStore) CreateAdminChallenge(_ context.Context, input adminCreateC
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
+		Category:           storedChallengeCategory(input.Category),
+		Protocol:           storedChallengeProtocol(input.Protocol),
 		Published:          false,
 		TotalTeams:         len(s.teams),
 		RuntimeStatus:      "draft",
@@ -2191,6 +2197,14 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	if input.EgressEnabled != nil {
 		challenge.EgressEnabled = *input.EgressEnabled
 	}
+	if input.Category != nil {
+		challenge.Category = storedChallengeCategory(*input.Category)
+	}
+	if input.Protocol != nil {
+		challenge.Protocol = storedChallengeProtocol(*input.Protocol)
+	}
+	challenge.Category = storedChallengeCategory(challenge.Category)
+	challenge.Protocol = storedChallengeProtocol(challenge.Protocol)
 	challenge.LastValidation = nil
 	s.challenges[challengeID] = challenge
 	return *challenge, nil

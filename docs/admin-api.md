@@ -174,12 +174,20 @@ Request body:
   "checker_image": "registry.local/proxy-checker:latest",
   "service_port": 10007,
   "service_subnet_octet": 7,
-  "egress_enabled": true
+  "egress_enabled": true,
+  "category": "web",
+  "protocol": "http"
 }
 ```
 
 Behavior:
 
+- `category` is `pwn`, `web` or `crypto`. Participants see it, with a matching icon,
+  on their service cards. Omit it (or send `""`) to leave the challenge uncategorized.
+- `protocol` is how participants connect to every team's instance: `tcp` (raw socket,
+  shown as `nc host port`) or `http` (shown as an openable `http://host:port/` link).
+  It is display metadata only and does not change deployment, checking or networking.
+  Any other value for either field is rejected with `400`.
 - `service_port` controls the target port that both participants and checkers use
 - `service_subnet_octet` controls the `10.80.x.y` subnet assigned to that challenge
 - `egress_enabled` (default `true`) controls whether the per-team service container
@@ -192,6 +200,14 @@ Behavior:
   - `service_port = 10000 + challenge_id`
   - `service_subnet_octet = challenge_id`
   - `egress_enabled = true`
+  - `category = ""` (uncategorized)
+  - `protocol = "tcp"`
+
+### PUT `/api/v2/admin/challenges/{challenge_id}`
+
+Update a challenge's name, images, source path, egress, category and protocol.
+`category` and `protocol` are optional here: omit them to keep the stored values,
+send `"category": ""` to clear the category.
 
 ### DELETE `/api/v2/admin/challenges/{challenge_id}`
 

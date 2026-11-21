@@ -16,6 +16,10 @@ type challenge struct {
 	Name              string `json:"name"`
 	HasSourceDownload bool   `json:"has_source_download"`
 	Maintenance       bool   `json:"maintenance"`
+	// Category is pwn, web, crypto, or empty when uncategorized.
+	Category string `json:"category"`
+	// Protocol is how to connect to every team's instance: tcp or http.
+	Protocol string `json:"protocol"`
 }
 
 type authenticateResponse struct {

@@ -563,6 +563,10 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, http.StatusBadRequest, "Invalid source path", "challenge source path is invalid.")
 		return
 	}
+	if detail, ok := validateChallengeMetadata(&req.Category, &req.Protocol); !ok {
+		writeProblem(w, http.StatusBadRequest, "Invalid challenge metadata", detail)
+		return
+	}
 	challenge, err := s.store.CreateAdminChallenge(r.Context(), req, s.now())
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -574,6 +578,8 @@ func (s *Server) handleAdminCreateChallenge(w http.ResponseWriter, r *http.Reque
 		"checker_image":        challenge.CheckerImage,
 		"service_port":         challenge.ServicePort,
 		"service_subnet_octet": challenge.ServiceSubnetOctet,
+		"category":             challenge.Category,
+		"protocol":             challenge.Protocol,
 	})
 	writeData(w, http.StatusOK, challenge)
 }
@@ -728,6 +734,10 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, http.StatusBadRequest, "Invalid source path", "challenge source path is invalid.")
 		return
 	}
+	if detail, ok := validateChallengeMetadata(req.Category, req.Protocol); !ok {
+		writeProblem(w, http.StatusBadRequest, "Invalid challenge metadata", detail)
+		return
+	}
 	challenge, err := s.store.UpdateAdminChallenge(r.Context(), challengeID, req)
 	if err != nil {
 		writeDomainFailure(w, err)
@@ -738,6 +748,8 @@ func (s *Server) handleAdminUpdateChallenge(w http.ResponseWriter, r *http.Reque
 		"name":           challenge.Name,
 		"baseline_image": challenge.BaselineImage,
 		"checker_image":  challenge.CheckerImage,
+		"category":       challenge.Category,
+		"protocol":       challenge.Protocol,
 	})
 	writeData(w, http.StatusOK, challenge)
 }

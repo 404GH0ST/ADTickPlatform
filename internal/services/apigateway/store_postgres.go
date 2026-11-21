@@ -348,7 +348,8 @@ func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, COALESCE(source_bundle_path, '') <> '',
-		       (maintenance OR (play_from_tick IS NOT NULL AND play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS unavailable
+		       (maintenance OR (play_from_tick IS NOT NULL AND play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS unavailable,
+		       category, protocol
 		FROM challenges
 		WHERE published = TRUE
 		ORDER BY id
@@ -361,7 +362,7 @@ func (s *postgresStore) ListChallenges(ctx context.Context) ([]challenge, error)
 	result := make([]challenge, 0)
 	for rows.Next() {
 		var item challenge
-		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload, &item.Maintenance); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.HasSourceDownload, &item.Maintenance, &item.Category, &item.Protocol); err != nil {
 			return nil, err
 		}
 		if paused {
@@ -1890,6 +1891,8 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       COALESCE(NULLIF(c.service_port, 0), 10000 + c.id),
 		       COALESCE(NULLIF(c.service_subnet_octet, 0), c.id),
 		       c.egress_enabled,
+		       c.category,
+		       c.protocol,
 		       c.published,
 		       c.maintenance,
 		       c.maintenance_at,
@@ -1907,7 +1910,7 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 		       (SELECT COUNT(*) FROM teams) AS total_teams
 		FROM challenges c
 		LEFT JOIN service_instances si ON si.challenge_id = c.id
-		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
+		GROUP BY c.id, c.name, c.baseline_image, c.checker_image, c.source_bundle_path, c.service_port, c.service_subnet_octet, c.egress_enabled, c.category, c.protocol, c.published, c.maintenance, c.maintenance_at, c.play_from_tick, c.created_at, c.last_validation_status, c.last_validation_baseline_ssh_contract_ok, c.last_validation_checker_contract_ok, c.last_validation_service_state_contract_ok, c.last_validation_checked_at, c.last_validation_message
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1936,6 +1939,8 @@ func (s *postgresStore) ListAdminChallenges(ctx context.Context) ([]adminChallen
 			&challenge.ServicePort,
 			&challenge.ServiceSubnetOctet,
 			&challenge.EgressEnabled,
+			&challenge.Category,
+			&challenge.Protocol,
 			&challenge.Published,
 			&challenge.Maintenance,
 			&maintenanceAt,
@@ -2033,10 +2038,12 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 	if input.EgressEnabled != nil {
 		egressEnabled = *input.EgressEnabled
 	}
+	category := storedChallengeCategory(input.Category)
+	protocol := storedChallengeProtocol(input.Protocol)
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, service_port, service_subnet_octet, egress_enabled, published, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE, $9)
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, servicePort, serviceSubnetOctet, egressEnabled, now.UTC()); err != nil {
+		INSERT INTO challenges (id, name, baseline_image, checker_image, source_bundle_path, service_port, service_subnet_octet, egress_enabled, category, protocol, published, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, servicePort, serviceSubnetOctet, egressEnabled, category, protocol, now.UTC()); err != nil {
 		return adminChallenge{}, err
 	}
 	totalTeams, err := s.countTeams(ctx)
@@ -2052,6 +2059,8 @@ func (s *postgresStore) CreateAdminChallenge(ctx context.Context, input adminCre
 		ServicePort:        servicePort,
 		ServiceSubnetOctet: serviceSubnetOctet,
 		EgressEnabled:      egressEnabled,
+		Category:           category,
+		Protocol:           protocol,
 		Published:          false,
 		DeployedTeams:      0,
 		TotalTeams:         totalTeams,
@@ -2460,6 +2469,13 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if duplicate {
 		return adminChallenge{}, ErrDuplicateResource
 	}
+	var category, protocol sql.NullString
+	if input.Category != nil {
+		category = sql.NullString{String: storedChallengeCategory(*input.Category), Valid: true}
+	}
+	if input.Protocol != nil {
+		protocol = sql.NullString{String: storedChallengeProtocol(*input.Protocol), Valid: true}
+	}
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE challenges
 		SET name = $2,
@@ -2467,6 +2483,8 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    checker_image = $4,
 		    source_bundle_path = $5,
 		    egress_enabled = COALESCE($6, egress_enabled),
+		    category = COALESCE($7, category),
+		    protocol = COALESCE($8, protocol),
 		    last_validation_status = NULL,
 		    last_validation_baseline_ssh_contract_ok = NULL,
 		    last_validation_checker_contract_ok = NULL,
@@ -2474,7 +2492,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    last_validation_checked_at = NULL,
 		    last_validation_message = NULL
 		WHERE id = $1
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, input.EgressEnabled); err != nil {
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, input.EgressEnabled, category, protocol); err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)
