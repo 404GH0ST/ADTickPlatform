@@ -2,7 +2,10 @@ import { cache } from "react";
 import { cookies, headers } from "next/headers";
 
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
-import { validateParticipantSessionWithAPI } from "@/lib/session-validation";
+import {
+  type ParticipantSessionValidation,
+  validateParticipantSessionWithAPI,
+} from "@/lib/session-validation";
 import {
   decodeJWTClaims,
   type ParticipantSessionClaims,
@@ -18,6 +21,10 @@ type Challenge = {
   name: string;
   has_source_download: boolean;
   maintenance?: boolean;
+  /** pwn | web | crypto, or "" when uncategorized. Older gateways omit it. */
+  category?: string;
+  /** tcp | http. Older gateways omit it (treat as tcp). */
+  protocol?: string;
 };
 
 type ScoreRow = {
@@ -168,10 +175,17 @@ type ParticipantSession = {
   email?: string;
   role?: string;
   source: "cookie" | "env" | "none";
-  reason?: "deactivated";
+  /** Why there is no session. "unavailable" still grants no access. */
+  reason?: "deactivated" | "unavailable";
 };
 
 type AuthenticatedSessionSource = Exclude<ParticipantSession["source"], "none">;
+
+// Pages wait on reads, so a silent gateway must not hold them open. Actions
+// such as restart and factory reset stay unbounded: they can legitimately run
+// long, and abandoning one would leave its outcome unknown.
+const READ_TIMEOUT_MS = 5_000;
+const SIGN_IN_TIMEOUT_MS = 15_000;
 
 function apiBaseUrl() {
   return trimBaseUrl(
@@ -243,17 +257,25 @@ async function cookieParticipantToken(): Promise<string | undefined> {
   return cookieStore.get(participantSessionCookieName)?.value?.trim();
 }
 
+function sessionFromValidation(
+  token: string,
+  source: AuthenticatedSessionSource,
+  validated: ParticipantSessionValidation,
+): ParticipantSession {
+  if (validated === "deactivated" || validated === "unavailable") {
+    return { authenticated: false, source: "none", reason: validated };
+  }
+  return validated
+    ? authenticatedSession(token, source, validated)
+    : { authenticated: false, source: "none" };
+}
+
 export const getParticipantSession = cache(
   async (): Promise<ParticipantSession> => {
     const directToken = process.env.AD_PLATFORM_TEAM_JWT?.trim();
     if (directToken) {
       const validated = await validateParticipantSessionWithAPI(directToken);
-      if (validated === "deactivated") {
-        return { authenticated: false, source: "none", reason: "deactivated" };
-      }
-      return validated
-        ? authenticatedSession(directToken, "env", validated)
-        : { authenticated: false, source: "none" };
+      return sessionFromValidation(directToken, "env", validated);
     }
 
     const cookieToken = await cookieParticipantToken();
@@ -267,17 +289,18 @@ export const getParticipantSession = cache(
       return { authenticated: false, source: "none" };
     }
     const validated = await validateParticipantSessionWithAPI(cookieToken);
-    if (validated === "deactivated") {
-      return { authenticated: false, source: "none", reason: "deactivated" };
-    }
-    return validated
-      ? authenticatedSession(cookieToken, "cookie", validated)
-      : { authenticated: false, source: "none" };
+    return sessionFromValidation(cookieToken, "cookie", validated);
   },
 );
 
 const getParticipantToken = cache(async () => {
   const session = await getParticipantSession();
+  if (session.reason === "unavailable") {
+    throw new PlatformAPIError(
+      "The platform API can't be reached, so this action couldn't be checked. Try again in a moment.",
+      503,
+    );
+  }
   if (!session.authenticated || !session.token) {
     throw new Error("participant session is not authenticated.");
   }
@@ -298,6 +321,7 @@ export async function authenticateParticipant(email: string, password: string) {
     }),
     body: JSON.stringify({ email, password }),
     cache: "no-store",
+    signal: AbortSignal.timeout(SIGN_IN_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -327,6 +351,7 @@ export async function registerParticipant(input: {
       password: input.password,
     }),
     cache: "no-store",
+    signal: AbortSignal.timeout(SIGN_IN_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -439,9 +464,11 @@ async function participantFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const token = await getParticipantToken();
+  const isRead = (init?.method ?? "GET").toUpperCase() === "GET";
   return authenticatedFetch<T>(apiBaseUrl(), path, token, {
     ...init,
     headers: await platformRequestHeaders(init?.headers),
+    signal: init?.signal ?? (isRead ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined),
   });
 }
 
@@ -470,6 +497,7 @@ export async function participantFetchResponse(
 async function publicFetch<T>(path: string): Promise<T> {
   return authenticatedFetch<T>(apiBaseUrl(), path, null, {
     headers: await platformRequestHeaders(),
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
   });
 }
 

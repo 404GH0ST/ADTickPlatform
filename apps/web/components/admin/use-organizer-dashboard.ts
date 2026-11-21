@@ -28,6 +28,14 @@ import type {
   AdminWireGuardPeer,
 } from "@/lib/admin-dashboard-types";
 import { buildQueryString, parseApiError, processApiResponse } from "@/lib/api-utils";
+import { writeTextToClipboard } from "@/lib/clipboard";
+import { focusNeighborWhenRemoved } from "@/lib/focus-after-removal";
+import {
+  parseChallengeCategory,
+  parseChallengeProtocol,
+  type ChallengeCategory,
+  type ChallengeProtocol,
+} from "@/lib/challenge-metadata";
 
 import { useAttackHighlights } from "@/components/hooks/use-attack-highlights";
 import { useAttackSfx } from "@/components/hooks/use-attack-sfx";
@@ -83,34 +91,6 @@ const defaultSchedulerEventFilters = {
   state: "",
 };
 
-async function writeTextToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Fall back to document copy for browsers or harnesses without clipboard permission.
-    }
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-
-  if (!copied) {
-    throw new Error("clipboard write failed");
-  }
-}
-
 type TeamDraft = {
   contactEmail: string;
   institution: string;
@@ -133,6 +113,9 @@ type ChallengeDraft = {
   servicePort: string;
   serviceSubnetOctet: string;
   egressEnabled: boolean;
+  /** "" until the organizer picks one; legacy challenges stay "" on edit. */
+  category: ChallengeCategory | "";
+  protocol: ChallengeProtocol;
 };
 
 export type DeleteTarget = {
@@ -356,6 +339,7 @@ export function useOrganizerDashboard({
     useState<AdminServiceMetricSnapshot | null>(serviceMetrics ?? null);
   const [wireGuardDialogOpen, setWireGuardDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const deleteOpener = useRef<Element | null>(null);
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formEntity, setFormEntity] = useState<FormEntity>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -384,6 +368,8 @@ export function useOrganizerDashboard({
     servicePort: "",
     serviceSubnetOctet: "",
     egressEnabled: true,
+    category: "",
+    protocol: "tcp",
   });
   const [checkerRunFilters, setCheckerRunFilters] = useState<CheckerRunFilters>(
     defaultCheckerRunFilters,
@@ -1363,6 +1349,8 @@ export function useOrganizerDashboard({
               ? undefined
               : Number(challengeDraft.serviceSubnetOctet),
           egress_enabled: challengeDraft.egressEnabled,
+          category: challengeDraft.category,
+          protocol: challengeDraft.protocol,
         }),
       });
       const payload = await processApiResponse<AdminChallenge>(
@@ -1384,6 +1372,8 @@ export function useOrganizerDashboard({
         servicePort: "",
         serviceSubnetOctet: "",
         egressEnabled: true,
+        category: "",
+        protocol: "tcp",
       });
       setActionNote(
         `Created draft challenge ${payload.name}. Deploy it to replicate one service per team.`,
@@ -1645,6 +1635,7 @@ export function useOrganizerDashboard({
   }
 
   async function startGameMatch(): Promise<void> {
+    const restarting = gameState.match?.state === "finished";
     suppressGameStatusRealtime();
     setPendingAction("game:match:start");
     setActionError(null);
@@ -1678,7 +1669,7 @@ export function useOrganizerDashboard({
       }));
       await refreshSchedulerEvents(true);
       setActionNote(
-        `Game started. Submissions are ${matchPayload?.accepting_submissions ? "open" : "closed"} and the scheduler is running at ${schedulerPayload?.interval_seconds ?? 0}s.`,
+        `${restarting ? "Game restarted" : "Game started"}. Submissions are ${matchPayload?.accepting_submissions ? "open" : "closed"} and the scheduler is running at ${schedulerPayload?.interval_seconds ?? 0}s.`,
       );
     } catch (error) {
       setActionError(
@@ -2257,6 +2248,7 @@ export function useOrganizerDashboard({
   }
 
   function selectDeleteTarget(target: DeleteTarget): void {
+    deleteOpener.current = document.activeElement;
     setDeleteTarget(target);
   }
 
@@ -2271,36 +2263,42 @@ export function useOrganizerDashboard({
 
     const target = deleteTarget;
     setDeleteTarget(null);
+    const stopWatchingRow = focusNeighborWhenRemoved(deleteOpener.current);
 
-    switch (target.kind) {
-      case "team": {
-        const team = teamRows.find((t) => t.id === target.id);
-        if (team) {
-          await deleteTeam(team);
+    try {
+      switch (target.kind) {
+        case "team": {
+          const team = teamRows.find((t) => t.id === target.id);
+          if (team) {
+            await deleteTeam(team);
+          }
+          break;
         }
-        break;
-      }
-      case "player": {
-        const player = playerRows.find((p) => p.id === target.id);
-        if (player) {
-          await deletePlayer(player);
+        case "player": {
+          const player = playerRows.find((p) => p.id === target.id);
+          if (player) {
+            await deletePlayer(player);
+          }
+          break;
         }
-        break;
-      }
-      case "challenge": {
-        const challenge = challengeRows.find((c) => c.id === target.id);
-        if (challenge) {
-          await deleteChallenge(challenge);
+        case "challenge": {
+          const challenge = challengeRows.find((c) => c.id === target.id);
+          if (challenge) {
+            await deleteChallenge(challenge);
+          }
+          break;
         }
-        break;
-      }
-      case "deployment": {
-        const deployment = deploymentRows.find((d) => d.id === target.id);
-        if (deployment) {
-          await deleteDeployment(deployment);
+        case "deployment": {
+          const deployment = deploymentRows.find((d) => d.id === target.id);
+          if (deployment) {
+            await deleteDeployment(deployment);
+          }
+          break;
         }
-        break;
       }
+    } finally {
+      // The list can refresh just after the request settles.
+      window.setTimeout(stopWatchingRow, 500);
     }
   }
 
@@ -2334,6 +2332,8 @@ export function useOrganizerDashboard({
         servicePort: "",
         serviceSubnetOctet: "",
         egressEnabled: true,
+        category: "",
+        protocol: "tcp",
       });
     }
   }
@@ -2378,6 +2378,8 @@ export function useOrganizerDashboard({
           servicePort: String(challenge.service_port),
           serviceSubnetOctet: String(challenge.service_subnet_octet),
           egressEnabled: challenge.egress_enabled,
+          category: parseChallengeCategory(challenge.category),
+          protocol: parseChallengeProtocol(challenge.protocol),
         });
       }
     }
@@ -2466,6 +2468,8 @@ export function useOrganizerDashboard({
           checker_image: challengeDraft.checkerImage,
           source_bundle_path: challengeDraft.sourceBundlePath,
           egress_enabled: challengeDraft.egressEnabled,
+          category: challengeDraft.category,
+          protocol: challengeDraft.protocol,
         }),
       });
       const payload = await processApiResponse<AdminChallenge>(

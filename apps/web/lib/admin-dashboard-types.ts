@@ -99,6 +99,10 @@ export type AdminChallenge = {
   service_port: number;
   service_subnet_octet: number;
   egress_enabled: boolean;
+  /** pwn | web | crypto, or "" when uncategorized. Older gateways omit it. */
+  category?: string;
+  /** tcp | http. Older gateways omit it (treat as tcp). */
+  protocol?: string;
   published: boolean;
   maintenance: boolean;
   maintenance_at?: string;

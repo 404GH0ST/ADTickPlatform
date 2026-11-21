@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import type { ReactElement, ReactNode, RefObject } from "react";
+import type { FocusEvent, ReactElement, ReactNode, RefObject } from "react";
 import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   Ban,
@@ -85,7 +85,19 @@ import {
 } from "@/components/ui/table";
 import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
 import { cn } from "@/lib/utils";
-import { formatIndonesianDate } from "@/lib/date-format";
+import { formatIndonesianDate, formatTimestampsInText } from "@/lib/date-format";
+import {
+  CHALLENGE_CATEGORIES,
+  CHALLENGE_CATEGORY_LABELS,
+  CHALLENGE_PROTOCOL_LABELS,
+  CHALLENGE_PROTOCOLS,
+  challengeCategoryLabel,
+  describeConnection,
+  parseChallengeCategory,
+  parseChallengeProtocol,
+  type ChallengeCategory,
+  type ChallengeProtocol,
+} from "@/lib/challenge-metadata";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import {
   computeCategoryLeaders,
@@ -115,6 +127,8 @@ type ChallengeDraft = {
   servicePort: string;
   serviceSubnetOctet: string;
   egressEnabled: boolean;
+  category: ChallengeCategory | "";
+  protocol: ChallengeProtocol;
 };
 
 type TeamsTabProps = {
@@ -417,12 +431,15 @@ function breakAtSlashes(value: string): ReactNode {
 function CardActionRow({
   children,
   className,
+  well = false,
 }: {
   children: ReactNode;
   className?: string;
+  /** Mark the row as an inner zone of its card (themes restyle data-slot="well"). */
+  well?: boolean;
 }): ReactElement {
   return (
-    <div className={cn("flex flex-wrap items-center gap-2 pt-1", className)}>
+    <div data-slot={well ? "well" : undefined} className={cn("flex flex-wrap items-center gap-2 pt-1", className)}>
       {children}
     </div>
   );
@@ -480,6 +497,7 @@ export function TeamsTab({
           title={`${activeAction} team ${team.name}`}
           aria-label={`${activeAction} team ${team.name}`}
           disabled={pendingAction !== null}
+          holdFocus
           onClick={() => run(() => onSetTeamActiveState(team, !team.active))}
         >
           {team.active ? <PowerOff className="size-4" aria-hidden /> : <Power className="size-4" aria-hidden />}
@@ -492,6 +510,7 @@ export function TeamsTab({
           title={`Edit team ${team.name}`}
           aria-label={`Edit team ${team.name}`}
           disabled={pendingAction !== null}
+          holdFocus
           onClick={() => run(() => onOpenEditDialog(team.id))}
         >
           <Pencil className="size-4" aria-hidden />
@@ -505,6 +524,7 @@ export function TeamsTab({
           title={`Delete team ${team.name}`}
           aria-label={`Delete team ${team.name}`}
           disabled={pendingAction !== null}
+          holdFocus
           onClick={() => run(() => onSelectDeleteTarget({
             kind: "team",
             id: team.id,
@@ -527,7 +547,7 @@ export function TeamsTab({
       createLabel="Create Team"
       onCreate={onOpenCreateDialog}
     >
-      <Table>
+      <Table scrollLabel="Teams">
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
@@ -601,6 +621,7 @@ export function TeamsTab({
                       popoverTarget={popoverId}
                       aria-label={`Actions for ${team.name}`}
                       disabled={pendingAction !== null}
+                      holdFocus
                     >
                       <Ellipsis className="size-4" aria-hidden />
                     </Button>
@@ -1014,6 +1035,7 @@ function RuntimeActionButton({
   return (
     <Button
       disabled={pendingAction !== null}
+      holdFocus
       variant={variant}
       className={className}
       data-testid={testID}
@@ -1076,7 +1098,7 @@ function PlayerRegistryCard({
       createLabel="Create Player"
       onCreate={onOpenCreateDialog}
     >
-      <AdminTable>
+      <AdminTable label="Players">
           <AdminTableHeader columns={[
             { label: "ID", className: "w-[60px]" },
             { label: "Name" },
@@ -1146,6 +1168,7 @@ function PlayerRegistryCard({
                         <Button
                           key="config"
                           disabled={pendingAction !== null || !hasWireGuardPeer}
+                          holdFocus={pendingAction !== null}
                           size="sm"
                           variant="outline"
                           data-testid={`inspect-wireguard-${player.id}`}
@@ -1161,6 +1184,7 @@ function PlayerRegistryCard({
                         <Fragment key="peer">
                           <Button
                             disabled={pendingAction !== null || !hasWireGuardPeer}
+                            holdFocus={pendingAction !== null}
                             size="icon"
                             variant="ghost"
                             data-testid={`rotate-wireguard-${player.id}`}
@@ -1180,6 +1204,7 @@ function PlayerRegistryCard({
                               !hasWireGuardPeer ||
                               player.wireguard_status === "revoked"
                             }
+                            holdFocus
                             size="icon"
                             variant="ghost"
                             className="button-danger-subtle"
@@ -1198,6 +1223,7 @@ function PlayerRegistryCard({
                         <Fragment key="account">
                           <Button
                             disabled={pendingAction !== null}
+                            holdFocus
                             size="icon"
                             variant="ghost"
                             data-testid={`edit-player-${player.id}`}
@@ -1209,6 +1235,7 @@ function PlayerRegistryCard({
                           </Button>
                           <Button
                             disabled={pendingAction !== null}
+                            holdFocus
                             size="icon"
                             variant="ghost"
                             className={player.active ? "button-danger-subtle" : undefined}
@@ -1225,6 +1252,7 @@ function PlayerRegistryCard({
                           </Button>
                           <Button
                             disabled={pendingAction !== null}
+                            holdFocus
                             size="icon"
                             variant="ghost"
                             className="button-danger-subtle"
@@ -1286,7 +1314,7 @@ function ChallengeCatalogCard({
       createLabel="Create Challenge"
       onCreate={onOpenCreateDialog}
     >
-      <AdminTable>
+      <AdminTable label="Challenges">
           <AdminTableHeader columns={[
             { label: "ID", className: "w-[56px]" },
             { label: "Challenge" },
@@ -1350,6 +1378,16 @@ function ChallengeCatalogRow({
       <TableCell>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold leading-6">{challenge.name}</span>
+          <Badge variant="outline" data-testid={`challenge-category-badge-${challenge.id}`}>
+            {challengeCategoryLabel(parseChallengeCategory(challenge.category))}
+          </Badge>
+          <Badge
+            variant="outline"
+            className="font-mono"
+            data-testid={`challenge-protocol-badge-${challenge.id}`}
+          >
+            {CHALLENGE_PROTOCOL_LABELS[parseChallengeProtocol(challenge.protocol)]}
+          </Badge>
           {challenge.maintenance ? (
             <Badge
               className="tone-warning"
@@ -1445,6 +1483,7 @@ function ChallengeCatalogRow({
             <Fragment key="runtime">
               <Button
                 disabled={pendingAction !== null}
+                holdFocus
                 size="sm"
                 variant={challenge.published ? "outline" : "default"}
                 data-testid={`deploy-challenge-${challenge.id}`}
@@ -1459,6 +1498,7 @@ function ChallengeCatalogRow({
               </Button>
               <Button
                 disabled={pendingAction !== null || !challenge.published}
+                holdFocus={pendingAction !== null}
                 size="sm"
                 variant="outline"
                 className={challenge.maintenance ? undefined : "button-danger-subtle"}
@@ -1486,6 +1526,7 @@ function ChallengeCatalogRow({
             <Fragment key="manage">
               <Button
                 disabled={pendingAction !== null}
+                holdFocus
                 size="icon"
                 variant="ghost"
                 data-testid={`validate-challenge-${challenge.id}`}
@@ -1501,6 +1542,7 @@ function ChallengeCatalogRow({
               </Button>
               <Button
                 disabled={pendingAction !== null}
+                holdFocus
                 size="icon"
                 variant="ghost"
                 data-testid={`edit-challenge-${challenge.id}`}
@@ -1512,6 +1554,7 @@ function ChallengeCatalogRow({
               </Button>
               <Button
                 disabled={pendingAction !== null}
+                holdFocus
                 size="icon"
                 variant="ghost"
                 className="button-danger-subtle"
@@ -1559,7 +1602,7 @@ export function DeploymentsTab({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table scrollLabel="Deployment jobs">
             <TableHeader>
               <TableRow>
                 <TableHead>Job</TableHead>
@@ -1620,6 +1663,7 @@ export function DeploymentsTab({
                           className="button-danger-subtle"
                           data-testid={`delete-deployment-${deployment.id}`}
                           disabled={pendingAction !== null}
+                          holdFocus
                           title="Delete deployment job record only"
                           onClick={() =>
                             onSelectDeleteTarget({
@@ -1966,12 +2010,12 @@ function CategoryLeaderRow({
   return (
     <li className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0">
       <div className="flex min-w-0 items-baseline gap-3">
-        <span className="w-6 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+        <span data-slot="leader-rank" className="w-6 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
           #{leader.rank}
         </span>
         <span className="min-w-0 wrap-anywhere font-medium text-foreground">{leader.team}</span>
       </div>
-      <span className="shrink-0 font-mono text-sm tabular-nums text-foreground">
+      <span data-slot="leader-score" className="shrink-0 font-mono text-sm tabular-nums text-foreground">
         {scoreFormatter(leader.score)}
       </span>
     </li>
@@ -2257,6 +2301,7 @@ export function ScoreboardFreezeControl(): ReactElement {
             <Button
               type="button"
               disabled={busy}
+              holdFocus
               data-testid="scoreboard-freeze-apply"
               onClick={() => void applyFreeze()}
             >
@@ -2267,6 +2312,7 @@ export function ScoreboardFreezeControl(): ReactElement {
               variant="ghost"
               className="button-danger-subtle"
               disabled={busy || !status?.configured}
+              holdFocus={busy}
               data-testid="scoreboard-freeze-clear"
               onClick={() => void clearFreeze()}
             >
@@ -2421,10 +2467,25 @@ function MatchLifecycleCard({
   onStopMatch: () => void;
 }): ReactElement {
   const state = matchState?.state;
-  const canStart = state !== "running" && state !== "paused" && state !== "finished";
+  // A finished match can be started again; it carries on from its ticks and scores.
+  const canStart = state !== "running" && state !== "paused";
+  const restarting = state === "finished";
   const canPause = state === "running";
   const canResume = state === "paused";
   const canStop = state === "running" || state === "paused";
+  const refreshKey = useRef<HTMLButtonElement>(null);
+  const matchKeyPressed = useRef(false);
+  // A match key is replaced when the state changes. Land on Refresh rather than
+  // its replacement, so a repeated Enter cannot pause a match it just started.
+  useEffect(() => {
+    if (pendingAction !== null || !matchKeyPressed.current) return;
+    matchKeyPressed.current = false;
+    if (document.activeElement === document.body) refreshKey.current?.focus();
+  }, [pendingAction, state]);
+  function pressMatchKey(action: () => void) {
+    matchKeyPressed.current = true;
+    action();
+  }
 
   return (
     <Card data-testid="match-card">
@@ -2467,31 +2528,34 @@ function MatchLifecycleCard({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center gap-2">
             {canStart ? (
-              <Button disabled={pendingAction !== null} data-testid="start-match" onClick={onStartMatch}>
+              <Button disabled={pendingAction !== null} holdFocus data-testid="start-match" onClick={() => pressMatchKey(onStartMatch)}>
                 {pendingAction === "game:match:start" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
-                Start game
+                {restarting ? "Start again" : "Start game"}
               </Button>
             ) : null}
             {canPause ? (
               <Button
                 disabled={pendingAction !== null}
+                holdFocus
                 data-testid="pause-match"
                 className="button-attention"
-                onClick={onPauseMatch}
+                onClick={() => pressMatchKey(onPauseMatch)}
               >
                 {pendingAction === "game:match:pause" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
                 Pause game
               </Button>
             ) : null}
             {canResume ? (
-              <Button disabled={pendingAction !== null} data-testid="resume-match" onClick={onResumeMatch}>
+              <Button disabled={pendingAction !== null} holdFocus data-testid="resume-match" onClick={() => pressMatchKey(onResumeMatch)}>
                 {pendingAction === "game:match:resume" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 Resume game
               </Button>
             ) : null}
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             variant="ghost"
+            ref={refreshKey}
             data-testid="refresh-game-status"
             onClick={onRefreshGameStatus}
           >
@@ -2503,12 +2567,17 @@ function MatchLifecycleCard({
             Refresh status
           </Button>
           </div>
+          {restarting ? (
+            <p className="text-sm text-muted-foreground">
+              Starting again reopens submissions and continues from the current tick and scores. A scheduled end that has already passed is cleared.
+            </p>
+          ) : null}
           {canStop ? (
             <details data-slot="well" data-tone="danger" className="rounded-sm border border-danger/30 bg-danger/5 p-3">
               <summary className="cursor-pointer text-sm font-medium text-foreground">End match</summary>
               <div className="mt-3 grid justify-items-start gap-3">
                 <p className="text-sm text-muted-foreground">Stopping closes participant submissions and ends the active match. Verify the current tick before continuing.</p>
-                <Button className="button-danger-solid" disabled={pendingAction !== null} data-testid="stop-match" onClick={onStopMatch}>
+                <Button className="button-danger-solid" disabled={pendingAction !== null} holdFocus data-testid="stop-match" onClick={() => pressMatchKey(onStopMatch)}>
                   {pendingAction === "game:match:stop" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
                   Stop match
                 </Button>
@@ -2660,6 +2729,7 @@ function MatchScheduleCard({
               disabled={
                 pendingAction !== null || !scheduleChanged || scheduleRangeInvalid
               }
+              holdFocus
               variant="outline"
               onClick={() =>
                 onUpdateMatchSchedule({
@@ -2680,6 +2750,7 @@ function MatchScheduleCard({
                 pendingAction !== null ||
                 (draftScheduledStart === "" && draftScheduledEnd === "")
               }
+              holdFocus
               variant="ghost"
               onClick={() => {
                 setDraftScheduledStart("");
@@ -2764,6 +2835,7 @@ function QuickActionsCard({
           <CardActionRow>
             <Button
               disabled={pendingAction !== null}
+              holdFocus
               variant="outline"
               data-testid="audit-scores"
               onClick={onAuditScores}
@@ -2778,6 +2850,7 @@ function QuickActionsCard({
             <CardActionRow className="mt-3">
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             data-testid="advance-tick"
             onClick={onAdvanceTick}
           >
@@ -2790,6 +2863,7 @@ function QuickActionsCard({
           </Button>
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             variant="outline"
             data-testid="recompute-scores"
             onClick={onRecomputeScores}
@@ -2965,6 +3039,7 @@ function RuntimeHealthCard({
               variant="outline"
               data-testid="refresh-runtime-alerts"
               disabled={pendingAction !== null}
+              holdFocus
               onClick={onRefreshOperationsStatus}
             >
               {pendingAction === "operations:status" ? (
@@ -2979,6 +3054,7 @@ function RuntimeHealthCard({
               variant="outline"
               data-testid="refresh-runtime-deployments"
               disabled={pendingAction !== null}
+              holdFocus
               onClick={onRefreshDeploymentRows}
             >
               {pendingAction === "deployments:list" ? (
@@ -3109,6 +3185,7 @@ function EvidenceActions({
         variant="outline"
         data-testid="copy-runtime-health-summary"
         disabled={pendingAction !== null}
+        holdFocus
         onClick={onCopyRuntimeHealthSummary}
       >
         {pendingAction === "runtime:summary" ? (
@@ -3123,6 +3200,7 @@ function EvidenceActions({
         variant="outline"
         data-testid="download-runtime-health-report"
         disabled={pendingAction !== null}
+        holdFocus
         onClick={onDownloadRuntimeHealthReport}
       >
         {pendingAction === "runtime:report" ? (
@@ -3328,6 +3406,7 @@ function OperationsAlertsCard({
         </div>
         <Button
           disabled={pendingAction !== null}
+          holdFocus
           size="sm"
           variant="outline"
           onClick={onRefresh}
@@ -3380,7 +3459,7 @@ function OperationsAlertsCard({
                   </p>
                   {alert.detail ? (
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {alert.detail}
+                      {formatTimestampsInText(alert.detail)}
                     </p>
                   ) : null}
                 </div>
@@ -3420,6 +3499,7 @@ function OperationsMetricsCard({
         </div>
         <Button
           disabled={pendingAction !== null}
+          holdFocus
           size="sm"
           variant="outline"
           onClick={onRefresh}
@@ -3917,6 +3997,7 @@ function SchedulerCard({
           </div>
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             size="sm"
             variant="outline"
             onClick={onRefresh}
@@ -4070,7 +4151,7 @@ function SchedulerIntervalControl({
         Interval
       </label>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <div className="flex h-8 items-center rounded-sm border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
+        <div data-slot="input-group" className="flex h-8 items-center rounded-sm border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-within:ring-1 focus-within:ring-ring">
           <input
             id="scheduler-interval"
             type="number"
@@ -4095,6 +4176,7 @@ function SchedulerIntervalControl({
           variant={intervalChanged ? "default" : "outline"}
           className="h-8 px-2 text-xs"
           disabled={updateDisabled}
+          holdFocus
           onClick={() => onUpdateScheduler(parsedInterval)}
         >
           {pendingAction === "game:scheduler:update" ? (
@@ -4120,9 +4202,10 @@ function SchedulerActionRow({
   onStopScheduler: () => void;
 }): ReactElement {
   return (
-    <CardActionRow className="rounded-sm border border-border/70 bg-muted/10 p-3 pt-3">
+    <CardActionRow well className="rounded-sm border border-border/70 bg-muted/10 p-3 pt-3">
       <Button
         disabled={pendingAction !== null || schedulerState === "running"}
+        holdFocus
         variant="outline"
         onClick={onStartScheduler}
       >
@@ -4135,6 +4218,7 @@ function SchedulerActionRow({
       </Button>
       <Button
         disabled={pendingAction !== null || schedulerState !== "running"}
+        holdFocus
         variant="outline"
         onClick={onStopScheduler}
       >
@@ -4472,7 +4556,7 @@ function ScoreboardSnapshotCard({
           />
         </InfoPanel>
         <CardActionRow>
-          <Button disabled={pendingAction !== null} variant="outline" onClick={onRefresh}>
+          <Button disabled={pendingAction !== null} holdFocus variant="outline" onClick={onRefresh}>
             {pendingAction === "game:scoreboard" ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
             ) : (
@@ -4550,6 +4634,7 @@ export function GameAttacksCard({
           </div>
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             size="sm"
             variant="outline"
             onClick={onRefresh}
@@ -4715,6 +4800,7 @@ export function ScoringAuditCard({
           </div>
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             size="sm"
             variant="outline"
             onClick={onAudit}
@@ -4767,7 +4853,7 @@ export function ScoringAuditCard({
         </div>
         {mismatches.length > 0 ? (
           <div data-slot="table-container" className="overflow-hidden rounded-sm border border-border">
-            <table className="w-full text-sm">
+            <table aria-label="Scoring mismatches" className="w-full text-sm">
               <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left">Team</th>
@@ -4839,6 +4925,7 @@ function GameScoreboardCard({
           {toolbar}
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             size="sm"
             variant="outline"
             onClick={onRefresh}
@@ -4908,6 +4995,7 @@ function CheckerRunsCard({
           </div>
           <Button
             disabled={pendingAction !== null}
+            holdFocus
             size="sm"
             variant="outline"
             onClick={onRefresh}
@@ -5061,7 +5149,7 @@ function CheckerRunsCard({
               onReset={onResetFilters}
               resetLabel="Reset Run Filters"
             />
-            <Table>
+            <Table scrollLabel="Checker runs">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[100px]">Tick</TableHead>
@@ -5227,7 +5315,7 @@ function WireGuardDialog({
                 valueClassName="font-mono"
               />
             </InfoPanel>
-            <pre className="max-h-[22rem] overflow-auto rounded-sm border border-border/70 bg-card p-4 text-xs leading-6 text-foreground">
+            <pre data-slot="well" className="max-h-[22rem] overflow-auto rounded-sm border border-border/70 bg-card p-4 text-xs leading-6 text-foreground">
               {peer.config}
             </pre>
           </div>
@@ -5302,15 +5390,18 @@ function Field({
   htmlFor,
   children,
   className,
+  required = false,
 }: {
   label: string;
   htmlFor: string;
   children: ReactNode;
   className?: string;
+  /** Adds the visual mark; the input itself carries aria-required. */
+  required?: boolean;
 }): ReactElement {
   return (
     <div className={cn("min-w-0 space-y-2", className)}>
-      <Label htmlFor={htmlFor}>{label}</Label>
+      <Label htmlFor={htmlFor} className={required ? "field-required" : undefined}>{label}</Label>
       {children}
     </div>
   );
@@ -5421,8 +5512,61 @@ function formatServiceStateLabel(status: string | undefined): string {
   }
 }
 
+type DraftProblem<Field extends string> = { field: Field; message: string };
+
+function collectDraftProblems<Field extends string>() {
+  const fieldErrors: Partial<Record<Field, string>> = {};
+  const problems: DraftProblem<Field>[] = [];
+  /** `inline` sits under the input; `summary` reads on its own in a list. */
+  function fail(field: Field, inline: string, summary: string) {
+    fieldErrors[field] = inline;
+    problems.push({ field, message: summary });
+  }
+  return { fieldErrors, problems, fail };
+}
+
+/** Only the fields the organizer has left: a new form opens without errors. */
+function shownFieldErrors<Field extends string>(
+  fieldErrors: Partial<Record<Field, string>>,
+  inputIds: Record<Field, string>,
+  touchedInputs: ReadonlySet<string>,
+  showAll: boolean,
+): Partial<Record<Field, string>> {
+  if (showAll) return fieldErrors;
+  const shown: Partial<Record<Field, string>> = {};
+  for (const field of Object.keys(fieldErrors) as Field[]) {
+    if (touchedInputs.has(inputIds[field])) shown[field] = fieldErrors[field];
+  }
+  return shown;
+}
+
+function problemsNotShown<Field extends string>(
+  problems: DraftProblem<Field>[],
+  shown: Partial<Record<Field, string>>,
+): string[] {
+  return problems.filter((problem) => !shown[problem.field]).map((problem) => problem.message);
+}
+
+/**
+ * What the dialog's live region says about the input just left. It uses the
+ * summary wording because that names the field, which the inline error does not.
+ */
+function problemForInput<Field extends string>(
+  problems: DraftProblem<Field>[],
+  shown: Partial<Record<Field, string>>,
+  inputIds: Record<Field, string>,
+  inputId: string | null,
+): string | undefined {
+  const field = (Object.keys(inputIds) as Field[]).find((key) => inputIds[key] === inputId);
+  if (!field || !shown[field]) return undefined;
+  return problems.filter((problem) => problem.field === field).at(-1)?.message;
+}
+
+const NO_TOUCHED_INPUTS: ReadonlySet<string> = new Set();
+
 type ChallengeDraftField =
   | "name"
+  | "category"
   | "baselineImage"
   | "checkerImage"
   | "sourceBundlePath"
@@ -5434,14 +5578,16 @@ type ChallengeDraftValidation = {
   effectiveServicePort: number;
   effectiveServiceSubnetOctet: number;
   endpointExample: string;
-  errors: string[];
+  /** What participants will see for endpointExample: a URL or an nc command. */
+  connectionExample: string;
+  problems: DraftProblem<ChallengeDraftField>[];
   fieldErrors: Partial<Record<ChallengeDraftField, string>>;
 };
 
 type TeamDraftField = "name" | "contactEmail" | "institution";
 
 type TeamDraftValidation = {
-  errors: string[];
+  problems: DraftProblem<TeamDraftField>[];
   fieldErrors: Partial<Record<TeamDraftField, string>>;
 };
 
@@ -5453,8 +5599,32 @@ type PlayerDraftField =
   | "role";
 
 type PlayerDraftValidation = {
-  errors: string[];
+  problems: DraftProblem<PlayerDraftField>[];
   fieldErrors: Partial<Record<PlayerDraftField, string>>;
+};
+
+const TEAM_FIELD_INPUTS: Record<TeamDraftField, string> = {
+  name: "form-team-name",
+  contactEmail: "form-team-contact",
+  institution: "form-team-institution",
+};
+
+const PLAYER_FIELD_INPUTS: Record<PlayerDraftField, string> = {
+  teamId: "form-player-team",
+  displayName: "form-player-name",
+  email: "form-player-email",
+  password: "form-player-password",
+  role: "form-player-role",
+};
+
+const CHALLENGE_FIELD_INPUTS: Record<ChallengeDraftField, string> = {
+  name: "form-challenge-name",
+  category: "form-challenge-category",
+  baselineImage: "form-challenge-baseline",
+  checkerImage: "form-challenge-checker",
+  sourceBundlePath: "form-challenge-source-bundle",
+  servicePort: "form-challenge-port",
+  serviceSubnetOctet: "form-challenge-octet",
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -5462,73 +5632,68 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TEAM_INSTITUTION_MAX_LENGTH = 120;
 
 function validateTeamDraft(teamDraft: TeamDraft): TeamDraftValidation {
-  const fieldErrors: Partial<Record<TeamDraftField, string>> = {};
-  const errors: string[] = [];
+  const { fieldErrors, problems, fail } = collectDraftProblems<TeamDraftField>();
 
   if (teamDraft.name.trim() === "") {
-    fieldErrors.name = "Enter a team name.";
-    errors.push("Team name is required.");
+    fail("name", "Enter a team name.", "Team name is required.");
   }
 
   const email = teamDraft.contactEmail.trim();
   if (email === "") {
-    fieldErrors.contactEmail = "Enter a contact email.";
-    errors.push("Contact email is required.");
+    fail("contactEmail", "Enter a contact email.", "Contact email is required.");
   } else if (!emailPattern.test(email)) {
-    fieldErrors.contactEmail = "Enter a valid email address.";
-    errors.push("Contact email must be a valid email address.");
+    fail(
+      "contactEmail",
+      "Enter a valid email address.",
+      "Contact email must be a valid email address.",
+    );
   }
 
   if (teamDraft.institution.trim().length > TEAM_INSTITUTION_MAX_LENGTH) {
-    fieldErrors.institution = `Keep it to ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`;
-    errors.push(`Institution must be ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`);
+    fail(
+      "institution",
+      `Keep it to ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`,
+      `Institution must be ${TEAM_INSTITUTION_MAX_LENGTH} characters or fewer.`,
+    );
   }
 
-  return { errors, fieldErrors };
+  return { problems, fieldErrors };
 }
 
 function validatePlayerDraft(
   playerDraft: PlayerDraft,
   formMode: FormMode,
 ): PlayerDraftValidation {
-  const fieldErrors: Partial<Record<PlayerDraftField, string>> = {};
-  const errors: string[] = [];
+  const { fieldErrors, problems, fail } = collectDraftProblems<PlayerDraftField>();
 
   if (formMode === "create" && playerDraft.teamId <= 0) {
-    fieldErrors.teamId = "Select a team.";
-    errors.push("Team selection is required.");
+    fail("teamId", "Select a team.", "Team selection is required.");
   }
 
   if (playerDraft.displayName.trim() === "") {
-    fieldErrors.displayName = "Enter a display name.";
-    errors.push("Display name is required.");
+    fail("displayName", "Enter a display name.", "Display name is required.");
   }
 
   const email = playerDraft.email.trim();
   if (email === "") {
-    fieldErrors.email = "Enter an email address.";
-    errors.push("Email is required.");
+    fail("email", "Enter an email address.", "Email is required.");
   } else if (!emailPattern.test(email)) {
-    fieldErrors.email = "Enter a valid email address.";
-    errors.push("Email must be a valid email address.");
+    fail("email", "Enter a valid email address.", "Email must be a valid email address.");
   }
 
   if (formMode === "create") {
     if (playerDraft.password.trim() === "") {
-      fieldErrors.password = "Enter a password.";
-      errors.push("Password is required.");
+      fail("password", "Enter a password.", "Password is required.");
     } else if (playerDraft.password.length < 8) {
-      fieldErrors.password = "Use at least 8 characters.";
-      errors.push("Password must be at least 8 characters.");
+      fail("password", "Use at least 8 characters.", "Password must be at least 8 characters.");
     }
   }
 
   if (playerDraft.role !== "member" && playerDraft.role !== "captain") {
-    fieldErrors.role = "Select a valid role.";
-    errors.push("Role must be member or captain.");
+    fail("role", "Select a valid role.", "Role must be member or captain.");
   }
 
-  return { errors, fieldErrors };
+  return { problems, fieldErrors };
 }
 
 function parseOptionalInteger(raw: string): number | null {
@@ -5556,8 +5721,7 @@ function validateChallengeDraft(
   editingID: number | null,
   teamRows: AdminTeam[],
 ): ChallengeDraftValidation {
-  const fieldErrors: Partial<Record<ChallengeDraftField, string>> = {};
-  const errors: string[] = [];
+  const { fieldErrors, problems, fail } = collectDraftProblems<ChallengeDraftField>();
 
   const effectiveChallengeID =
     formMode === "edit" && editingID !== null
@@ -5565,16 +5729,18 @@ function validateChallengeDraft(
       : nextChallengeID(challengeRows);
 
   if (challengeDraft.name.trim() === "") {
-    fieldErrors.name = "Enter a challenge name.";
-    errors.push("Challenge name is required.");
+    fail("name", "Enter a challenge name.", "Challenge name is required.");
+  }
+  // New challenges need a category; ones created before categories existed
+  // may stay uncategorized when edited.
+  if (formMode === "create" && challengeDraft.category === "") {
+    fail("category", "Choose a category.", "Category is required.");
   }
   if (challengeDraft.baselineImage.trim() === "") {
-    fieldErrors.baselineImage = "Enter the baseline runtime image.";
-    errors.push("Baseline image is required.");
+    fail("baselineImage", "Enter the baseline runtime image.", "Baseline image is required.");
   }
   if (challengeDraft.checkerImage.trim() === "") {
-    fieldErrors.checkerImage = "Enter the checker image.";
-    errors.push("Checker image is required.");
+    fail("checkerImage", "Enter the checker image.", "Checker image is required.");
   }
 
   const trimmedSourceBundlePath = challengeDraft.sourceBundlePath.trim();
@@ -5585,9 +5751,11 @@ function validateChallengeDraft(
       trimmedSourceBundlePath === ".." ||
       trimmedSourceBundlePath.split("/").some((segment) => segment === ".."))
   ) {
-    fieldErrors.sourceBundlePath =
-      "Use a relative path inside AD_CHALLENGE_SOURCE_ROOT.";
-    errors.push("Source bundle path must stay inside AD_CHALLENGE_SOURCE_ROOT.");
+    fail(
+      "sourceBundlePath",
+      "Use a relative path inside AD_CHALLENGE_SOURCE_ROOT.",
+      "Source bundle path must stay inside AD_CHALLENGE_SOURCE_ROOT.",
+    );
   }
 
   const parsedServicePort = parseOptionalInteger(challengeDraft.servicePort);
@@ -5611,8 +5779,11 @@ function validateChallengeDraft(
         parsedServicePort <= 0 ||
         parsedServicePort > 65535)
     ) {
-      fieldErrors.servicePort = "Enter a port between 1 and 65535.";
-      errors.push("Service port must be between 1 and 65535.");
+      fail(
+        "servicePort",
+        "Enter a port between 1 and 65535.",
+        "Service port must be between 1 and 65535.",
+      );
     }
     if (
       parsedServiceSubnetOctet !== null &&
@@ -5620,8 +5791,11 @@ function validateChallengeDraft(
         parsedServiceSubnetOctet <= 0 ||
         parsedServiceSubnetOctet > 254)
     ) {
-      fieldErrors.serviceSubnetOctet = "Enter an octet between 1 and 254.";
-      errors.push("Subnet octet must be between 1 and 254.");
+      fail(
+        "serviceSubnetOctet",
+        "Enter an octet between 1 and 254.",
+        "Subnet octet must be between 1 and 254.",
+      );
     }
 
     if (
@@ -5635,8 +5809,9 @@ function validateChallengeDraft(
           challenge.service_subnet_octet === effectiveServiceSubnetOctet,
       );
       if (conflictingChallenge) {
-        fieldErrors.serviceSubnetOctet = `Already assigned to ${conflictingChallenge.name}.`;
-        errors.push(
+        fail(
+          "serviceSubnetOctet",
+          `Already assigned to ${conflictingChallenge.name}.`,
           `Subnet octet ${effectiveServiceSubnetOctet} is already assigned to ${conflictingChallenge.name}.`,
         );
       }
@@ -5651,9 +5826,25 @@ function validateChallengeDraft(
     effectiveServicePort,
     effectiveServiceSubnetOctet,
     endpointExample,
-    errors,
+    connectionExample:
+      describeConnection(endpointExample, challengeDraft.protocol)?.display ?? endpointExample,
+    problems,
     fieldErrors,
   };
+}
+
+/** Why Create is still disabled, for fields the organizer has not reached yet. */
+function StillNeeded({ messages }: { messages: string[] }): ReactElement {
+  return (
+    <div data-testid="form-still-needed" className="space-y-1 text-xs leading-5">
+      <p className="font-semibold">Before you can create</p>
+      <ul className="space-y-1">
+        {messages.map((message) => (
+          <li key={message}>{message}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function EntityFormDialog({
@@ -5690,6 +5881,24 @@ export function EntityFormDialog({
   onSubmit: () => void;
 }): ReactElement {
   const isOpen = formMode !== null && formEntity !== null;
+  const formKey = `${formMode}:${formEntity}:${editingID}`;
+  const [touchedFormKey, setTouchedFormKey] = useState(formKey);
+  const [touchedInputs, setTouchedInputs] = useState(NO_TOUCHED_INPUTS);
+  const [lastLeftInput, setLastLeftInput] = useState<string | null>(null);
+  if (formKey !== touchedFormKey) {
+    setTouchedFormKey(formKey);
+    setTouchedInputs(NO_TOUCHED_INPUTS);
+    setLastLeftInput(null);
+  }
+  // A saved record that is invalid should say so as soon as it is opened.
+  const showAllErrors = formMode === "edit";
+  function markInputTouched(event: FocusEvent<HTMLDivElement>) {
+    const { id } = event.target;
+    // Switching windows blurs the input too, but the organizer has not left it.
+    if (!id || !document.hasFocus()) return;
+    setLastLeftInput(id);
+    if (!touchedInputs.has(id)) setTouchedInputs(new Set(touchedInputs).add(id));
+  }
   const title =
     formMode === "edit"
       ? `Edit ${formEntity ?? "item"}`
@@ -5713,24 +5922,35 @@ export function EntityFormDialog({
           teamRows,
         )
       : null;
-  const teamFormInvalid = teamValidation !== null && teamValidation.errors.length > 0;
+  const teamFormInvalid = teamValidation !== null && teamValidation.problems.length > 0;
   const playerFormInvalid =
-    playerValidation !== null && playerValidation.errors.length > 0;
+    playerValidation !== null && playerValidation.problems.length > 0;
   const challengeFormInvalid =
-    challengeValidation !== null && challengeValidation.errors.length > 0;
+    challengeValidation !== null && challengeValidation.problems.length > 0;
   const formInvalid = teamFormInvalid || playerFormInvalid || challengeFormInvalid;
 
   let body: ReactNode = null;
+  let stillNeeded: string[] = [];
+  let announcedError: string | undefined;
 
   if (formEntity === "team") {
-    const fieldErrors = teamValidation?.fieldErrors ?? {};
+    const fieldErrors = shownFieldErrors<TeamDraftField>(
+      teamValidation?.fieldErrors ?? {},
+      TEAM_FIELD_INPUTS,
+      touchedInputs,
+      showAllErrors,
+    );
+    stillNeeded = problemsNotShown(teamValidation?.problems ?? [], fieldErrors);
+    announcedError = problemForInput(teamValidation?.problems ?? [], fieldErrors, TEAM_FIELD_INPUTS, lastLeftInput);
     body = (
       <div className="space-y-4">
-        <Field label="Team name" htmlFor="form-team-name">
+        <Field label="Team name" htmlFor="form-team-name" required>
           <div className="space-y-2">
             <Input
               id="form-team-name"
+              aria-required
               aria-invalid={fieldErrors.name ? true : undefined}
+              aria-describedby={fieldErrors.name ? "form-team-name-error" : undefined}
               className={
                 fieldErrors.name
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5742,18 +5962,20 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.name ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-team-name-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.name}
               </p>
             ) : null}
           </div>
         </Field>
-        <Field label="Contact email" htmlFor="form-team-contact">
+        <Field label="Contact email" htmlFor="form-team-contact" required>
           <div className="space-y-2">
             <Input
               id="form-team-contact"
+              aria-required
               type="email"
               aria-invalid={fieldErrors.contactEmail ? true : undefined}
+              aria-describedby={fieldErrors.contactEmail ? "form-team-contact-error" : undefined}
               className={
                 fieldErrors.contactEmail
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5768,7 +5990,7 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.contactEmail ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-team-contact-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.contactEmail}
               </p>
             ) : null}
@@ -5779,7 +6001,7 @@ export function EntityFormDialog({
             <Input
               id="form-team-institution"
               aria-invalid={fieldErrors.institution ? true : undefined}
-              aria-describedby="form-team-institution-hint"
+              aria-describedby={fieldErrors.institution ? "form-team-institution-error" : "form-team-institution-hint"}
               className={
                 fieldErrors.institution
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5795,7 +6017,7 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.institution ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-team-institution-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.institution}
               </p>
             ) : (
@@ -5812,15 +6034,24 @@ export function EntityFormDialog({
       </div>
     );
   } else if (formEntity === "player") {
-    const fieldErrors = playerValidation?.fieldErrors ?? {};
+    const fieldErrors = shownFieldErrors<PlayerDraftField>(
+      playerValidation?.fieldErrors ?? {},
+      PLAYER_FIELD_INPUTS,
+      touchedInputs,
+      showAllErrors,
+    );
+    stillNeeded = problemsNotShown(playerValidation?.problems ?? [], fieldErrors);
+    announcedError = problemForInput(playerValidation?.problems ?? [], fieldErrors, PLAYER_FIELD_INPUTS, lastLeftInput);
     body = (
       <div className="space-y-4">
         {formMode === "create" && (
-          <Field label="Team" htmlFor="form-player-team">
+          <Field label="Team" htmlFor="form-player-team" required>
             <div className="space-y-2">
               <select
                 id="form-player-team"
+                aria-required
                 aria-invalid={fieldErrors.teamId ? true : undefined}
+                aria-describedby={fieldErrors.teamId ? "form-player-team-error" : undefined}
                 className={cn(
                   selectClassName,
                   fieldErrors.teamId
@@ -5845,18 +6076,20 @@ export function EntityFormDialog({
                 ))}
               </select>
               {fieldErrors.teamId ? (
-                <p className="text-xs leading-5 text-destructive">
+                <p id="form-player-team-error" className="text-xs leading-5 text-destructive">
                   {fieldErrors.teamId}
                 </p>
               ) : null}
             </div>
           </Field>
         )}
-        <Field label="Display name" htmlFor="form-player-name">
+        <Field label="Display name" htmlFor="form-player-name" required>
           <div className="space-y-2">
             <Input
               id="form-player-name"
+              aria-required
               aria-invalid={fieldErrors.displayName ? true : undefined}
+              aria-describedby={fieldErrors.displayName ? "form-player-name-error" : undefined}
               className={
                 fieldErrors.displayName
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5871,18 +6104,20 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.displayName ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-player-name-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.displayName}
               </p>
             ) : null}
           </div>
         </Field>
-        <Field label="Email" htmlFor="form-player-email">
+        <Field label="Email" htmlFor="form-player-email" required>
           <div className="space-y-2">
             <Input
               id="form-player-email"
+              aria-required
               type="email"
               aria-invalid={fieldErrors.email ? true : undefined}
+              aria-describedby={fieldErrors.email ? "form-player-email-error" : undefined}
               className={
                 fieldErrors.email
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5897,19 +6132,21 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.email ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-player-email-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.email}
               </p>
             ) : null}
           </div>
         </Field>
         {formMode === "create" && (
-          <Field label="Password" htmlFor="form-player-password">
+          <Field label="Password" htmlFor="form-player-password" required>
             <div className="space-y-2">
               <Input
                 id="form-player-password"
+                aria-required
                 type="password"
                 aria-invalid={fieldErrors.password ? true : undefined}
+                aria-describedby={fieldErrors.password ? "form-player-password-error" : undefined}
                 className={
                   fieldErrors.password
                     ? "border-destructive focus-visible:ring-destructive/20"
@@ -5924,7 +6161,7 @@ export function EntityFormDialog({
                 }
               />
               {fieldErrors.password ? (
-                <p className="text-xs leading-5 text-destructive">
+                <p id="form-player-password-error" className="text-xs leading-5 text-destructive">
                   {fieldErrors.password}
                 </p>
               ) : null}
@@ -5936,6 +6173,7 @@ export function EntityFormDialog({
             <select
               id="form-player-role"
               aria-invalid={fieldErrors.role ? true : undefined}
+              aria-describedby={fieldErrors.role ? "form-player-role-error" : undefined}
               className={cn(
                 selectClassName,
                 fieldErrors.role
@@ -5951,7 +6189,7 @@ export function EntityFormDialog({
               <option value="captain">captain</option>
             </select>
             {fieldErrors.role ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-player-role-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.role}
               </p>
             ) : null}
@@ -5960,15 +6198,24 @@ export function EntityFormDialog({
       </div>
     );
   } else if (formEntity === "challenge") {
-    const fieldErrors = challengeValidation?.fieldErrors ?? {};
+    const fieldErrors = shownFieldErrors<ChallengeDraftField>(
+      challengeValidation?.fieldErrors ?? {},
+      CHALLENGE_FIELD_INPUTS,
+      touchedInputs,
+      showAllErrors,
+    );
+    stillNeeded = problemsNotShown(challengeValidation?.problems ?? [], fieldErrors);
+    announcedError = problemForInput(challengeValidation?.problems ?? [], fieldErrors, CHALLENGE_FIELD_INPUTS, lastLeftInput);
     const sourceBundlePath = challengeDraft.sourceBundlePath.trim();
     body = (
       <div className="space-y-4">
-        <Field label="Challenge name" htmlFor="form-challenge-name">
+        <Field label="Challenge name" htmlFor="form-challenge-name" required>
           <div className="space-y-2">
             <Input
               id="form-challenge-name"
+              aria-required
               aria-invalid={fieldErrors.name ? true : undefined}
+              aria-describedby={fieldErrors.name ? "form-challenge-name-error" : undefined}
               className={
                 fieldErrors.name
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -5983,17 +6230,99 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.name ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-challenge-name-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.name}
               </p>
             ) : null}
           </div>
         </Field>
-        <Field label="Baseline image" htmlFor="form-challenge-baseline">
+        <Field label="Category" htmlFor="form-challenge-category" required={formMode === "create"}>
+          <div className="space-y-2">
+            <select
+              id="form-challenge-category"
+              aria-required={formMode === "create"}
+              data-testid="form-challenge-category"
+              aria-invalid={fieldErrors.category ? true : undefined}
+              aria-describedby={fieldErrors.category ? "form-challenge-category-error" : undefined}
+              className={cn(
+                selectClassName,
+                fieldErrors.category && "border-destructive focus-visible:ring-destructive/20",
+              )}
+              value={challengeDraft.category}
+              onChange={(event) =>
+                onChallengeDraftChange({
+                  ...challengeDraft,
+                  category: parseChallengeCategory(event.target.value),
+                })
+              }
+            >
+              <option value="" disabled={formMode === "create"}>
+                {formMode === "create" ? "Choose a category" : "Uncategorized"}
+              </option>
+              {CHALLENGE_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {CHALLENGE_CATEGORY_LABELS[category]}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Shown with its icon on every team&apos;s service card.
+            </p>
+            {fieldErrors.category ? (
+              <p id="form-challenge-category-error" className="text-xs leading-5 text-destructive">
+                {fieldErrors.category}
+              </p>
+            ) : null}
+          </div>
+        </Field>
+        <fieldset className="min-w-0 space-y-2" data-testid="form-challenge-protocol">
+          <legend className="text-sm font-medium leading-none">Connection</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {CHALLENGE_PROTOCOLS.map((protocol) => (
+              <label
+                key={protocol}
+                data-slot="choice"
+                className="flex min-w-0 cursor-pointer items-start gap-3 rounded-sm border border-border p-3 text-sm leading-5 has-[:checked]:border-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+              >
+                <input
+                  type="radio"
+                  name="form-challenge-protocol"
+                  value={protocol}
+                  checked={challengeDraft.protocol === protocol}
+                  onChange={() =>
+                    onChallengeDraftChange({
+                      ...challengeDraft,
+                      protocol: parseChallengeProtocol(protocol),
+                    })
+                  }
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-current focus-visible:outline-none"
+                />
+                <span className="min-w-0">
+                  <span className="block font-semibold">{CHALLENGE_PROTOCOL_LABELS[protocol]}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {protocol === "http"
+                      ? "A web service. Participants get an openable URL."
+                      : "A raw socket. Participants get an nc command."}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground wrap-anywhere">
+            Participants will see{" "}
+            <code data-testid="form-challenge-connection-example">
+              {challengeValidation?.connectionExample ?? ""}
+            </code>
+            .
+          </p>
+        </fieldset>
+        <Field label="Baseline image" htmlFor="form-challenge-baseline" required>
           <div className="space-y-2">
             <Input
               id="form-challenge-baseline"
+              aria-required
               aria-invalid={fieldErrors.baselineImage ? true : undefined}
+              aria-describedby={fieldErrors.baselineImage ? "form-challenge-baseline-error" : undefined}
               className={
                 fieldErrors.baselineImage
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -6008,17 +6337,19 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.baselineImage ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-challenge-baseline-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.baselineImage}
               </p>
             ) : null}
           </div>
         </Field>
-        <Field label="Checker image" htmlFor="form-challenge-checker">
+        <Field label="Checker image" htmlFor="form-challenge-checker" required>
           <div className="space-y-2">
             <Input
               id="form-challenge-checker"
+              aria-required
               aria-invalid={fieldErrors.checkerImage ? true : undefined}
+              aria-describedby={fieldErrors.checkerImage ? "form-challenge-checker-error" : undefined}
               className={
                 fieldErrors.checkerImage
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -6033,7 +6364,7 @@ export function EntityFormDialog({
               }
             />
             {fieldErrors.checkerImage ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-challenge-checker-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.checkerImage}
               </p>
             ) : null}
@@ -6044,6 +6375,7 @@ export function EntityFormDialog({
             <Input
               id="form-challenge-source-bundle"
               aria-invalid={fieldErrors.sourceBundlePath ? true : undefined}
+              aria-describedby={fieldErrors.sourceBundlePath ? "form-challenge-source-bundle-error" : undefined}
               className={
                 fieldErrors.sourceBundlePath
                   ? "border-destructive focus-visible:ring-destructive/20"
@@ -6064,7 +6396,7 @@ export function EntityFormDialog({
               runtime.
             </p>
             {fieldErrors.sourceBundlePath ? (
-              <p className="text-xs leading-5 text-destructive">
+              <p id="form-challenge-source-bundle-error" className="text-xs leading-5 text-destructive">
                 {fieldErrors.sourceBundlePath}
               </p>
             ) : null}
@@ -6083,6 +6415,7 @@ export function EntityFormDialog({
                     challengeValidation?.effectiveServicePort ?? 10001,
                   )}
                   aria-invalid={fieldErrors.servicePort ? true : undefined}
+                  aria-describedby={fieldErrors.servicePort ? "form-challenge-port-error" : undefined}
                   className={
                     fieldErrors.servicePort
                       ? "border-destructive focus-visible:ring-destructive/20"
@@ -6101,7 +6434,7 @@ export function EntityFormDialog({
                   <code>{challengeValidation?.effectiveServicePort ?? 10001}</code>.
                 </p>
                 {fieldErrors.servicePort ? (
-                  <p className="text-xs leading-5 text-destructive">
+                  <p id="form-challenge-port-error" className="text-xs leading-5 text-destructive">
                     {fieldErrors.servicePort}
                   </p>
                 ) : null}
@@ -6118,6 +6451,7 @@ export function EntityFormDialog({
                     challengeValidation?.effectiveServiceSubnetOctet ?? 1,
                   )}
                   aria-invalid={fieldErrors.serviceSubnetOctet ? true : undefined}
+                  aria-describedby={fieldErrors.serviceSubnetOctet ? "form-challenge-octet-error" : undefined}
                   className={
                     fieldErrors.serviceSubnetOctet
                       ? "border-destructive focus-visible:ring-destructive/20"
@@ -6139,7 +6473,7 @@ export function EntityFormDialog({
                   .
                 </p>
                 {fieldErrors.serviceSubnetOctet ? (
-                  <p className="text-xs leading-5 text-destructive">
+                  <p id="form-challenge-octet-error" className="text-xs leading-5 text-destructive">
                     {fieldErrors.serviceSubnetOctet}
                   </p>
                 ) : null}
@@ -6176,7 +6510,7 @@ export function EntityFormDialog({
           </label>
         </Field>
         {challengeValidation ? (
-          <InfoPanel tone={challengeFormInvalid ? "warning" : "surface"}>
+          <InfoPanel tone={Object.keys(fieldErrors).length > 0 ? "warning" : "surface"}>
             <InfoLine
               label="Challenge ID"
               value={`#${challengeValidation.effectiveChallengeID}`}
@@ -6201,13 +6535,9 @@ export function EntityFormDialog({
                   : sourceBundlePath
               }
             />
-            {challengeFormInvalid ? (
-              <ul className="space-y-1 text-xs leading-5 text-destructive">
-                {challengeValidation.errors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            ) : (
+            {stillNeeded.length > 0 ? (
+              <StillNeeded messages={stillNeeded} />
+            ) : challengeFormInvalid ? null : (
               <p className="text-xs leading-5 text-muted-foreground">
                 This challenge will create one service runtime per team after deployment.
               </p>
@@ -6227,17 +6557,28 @@ export function EntityFormDialog({
       description={
         formMode === "edit"
           ? `Update the fields below and click Update to save changes.`
-          : `Fill in the fields below and click Create to add a new ${formEntity ?? "item"}.`
+          : `Fill in the fields below and click Create to add a new ${formEntity ?? "item"}. Fields marked * are required.`
       }
-      body={body}
+      body={
+        <div onBlur={markInputTouched}>
+          <p role="status" className="sr-only">{announcedError}</p>
+          {body}
+          {formEntity !== "challenge" && stillNeeded.length > 0 ? (
+            <InfoPanel tone="surface" className="mt-4">
+              <StillNeeded messages={stillNeeded} />
+            </InfoPanel>
+          ) : null}
+        </div>
+      }
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting} holdFocus>
             Cancel
           </Button>
           <Button
             onClick={onSubmit}
             disabled={isSubmitting || formInvalid}
+            holdFocus={isSubmitting}
           >
             {isSubmitting ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -6324,13 +6665,14 @@ function DeleteConfirmDialog({
       }
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+          <Button variant="outline" onClick={onClose} disabled={isDeleting} holdFocus>
             Cancel
           </Button>
           <Button
             className="button-danger-solid"
             onClick={onConfirm}
             disabled={isDeleting}
+            holdFocus
           >
             {isDeleting ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />

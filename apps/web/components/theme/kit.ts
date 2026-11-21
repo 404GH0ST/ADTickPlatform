@@ -106,6 +106,14 @@ export type { ServiceLockReason, ServiceViewModel } from "@/lib/service-view-mod
 export { cooldownMessage } from "@/lib/service-actions";
 export type { ServiceActionFeedback, ServiceNotice } from "@/lib/service-actions";
 export { formatSLAState, ServiceSLADetail } from "@/components/dashboard/service-sla-detail";
+export {
+  CHALLENGE_CATEGORIES,
+  CHALLENGE_CATEGORY_LABELS,
+  CHALLENGE_PROTOCOL_LABELS,
+  challengeCategoryLabel,
+  describeConnection,
+} from "@/lib/challenge-metadata";
+export type { ChallengeCategory, ChallengeProtocol, ServiceConnection } from "@/lib/challenge-metadata";
 export { IssuedRootCredentialBlock } from "@/components/dashboard/ssh-credential-block";
 export { buildAttackFilterOptions } from "@/lib/dashboard-utils";
 export { cn } from "@/lib/utils";
@@ -121,6 +129,9 @@ export { LiveModeBadge, PagedFilterActions, SliceCountBadge } from "@/components
 // UI primitives
 export { AppearanceControls } from "@/components/ui/appearance-controls";
 export { AppDialog } from "@/components/ui/app-dialog";
+export { ChallengeCategoryIcon } from "@/components/ui/challenge-category-icon";
+export { copyButtonLabel, ServiceConnectionLine, useCopyFeedback } from "@/components/ui/service-connection";
+export type { CopyStatus } from "@/components/ui/service-connection";
 export { Badge } from "@/components/ui/badge";
 export { Button } from "@/components/ui/button";
 export { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,6 +140,11 @@ export { Input } from "@/components/ui/input";
 export { Label } from "@/components/ui/label";
 export { ScrollableRegion } from "@/components/ui/scrollable-region";
 export { StatusBanner } from "@/components/ui/status-banner";
+export {
+  ATTACKS_UNAVAILABLE,
+  DataUnavailable,
+  SCORES_UNAVAILABLE,
+} from "@/components/ui/data-unavailable";
 export { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 export { WorkspaceFrame } from "@/components/ui/workspace-frame";
 

@@ -1,4 +1,5 @@
 import type { ServiceRow } from "@/lib/dashboard-types";
+import { challengeCategoryLabel, describeConnection, type ServiceConnection } from "@/lib/challenge-metadata";
 import type { ServiceActionFeedback } from "@/lib/service-actions";
 
 /*
@@ -107,6 +108,10 @@ export type ServiceViewModel = {
   reset: ServiceActionState & { cooldownSeconds: number };
   /** Download link for the challenge source, or null when unavailable. */
   sourceHref: string | null;
+  /** Category label ("Pwn", "Web exploitation", "Crypto", "Uncategorized"). */
+  categoryLabel: string;
+  /** How to connect (an nc command or a URL), or null when the endpoint is not host:port. */
+  connection: ServiceConnection | null;
 };
 
 export function describeService(
@@ -153,5 +158,7 @@ export function describeService(
       service.hasSourceDownload && !service.maintenance
         ? `/api/platform/challenges/${service.challengeId}/source`
         : null,
+    categoryLabel: challengeCategoryLabel(service.category),
+    connection: describeConnection(service.endpoint, service.protocol),
   };
 }

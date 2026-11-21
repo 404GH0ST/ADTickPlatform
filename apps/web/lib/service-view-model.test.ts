@@ -15,6 +15,8 @@ function service(overrides: Partial<ServiceRow> = {}): ServiceRow {
     status: "stable",
     checker: "passing",
     hasSourceDownload: true,
+    category: "web",
+    protocol: "http",
     unlocked: true,
     sshHint: "",
     lastEvent: "",

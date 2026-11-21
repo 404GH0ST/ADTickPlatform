@@ -101,9 +101,15 @@ test("organizer can create, edit, and delete a challenge", async ({
   await createDialog
     .getByLabel("Checker image")
     .fill("adplatform/sample-ftp-checker:latest");
+  // A new challenge needs a category before it can be created.
+  await expect(createDialog.getByTestId("form-still-needed")).toContainText("Category is required.");
+  await expect(createDialog.getByText("Choose a category.", { exact: true })).toHaveCount(0);
+  await expect(createButton).toBeDisabled();
+  await createDialog.getByLabel("Category").selectOption("crypto");
   await expect(createButton).toBeEnabled();
 
   await createDialog.getByLabel("Source bundle path").fill("/bad");
+  await createDialog.getByLabel("Source bundle path").blur();
   await expect(
     createDialog.getByText("Use a relative path inside AD_CHALLENGE_SOURCE_ROOT."),
   ).toBeVisible();
@@ -115,6 +121,7 @@ test("organizer can create, edit, and delete a challenge", async ({
   await createDialog.getByLabel("Service port").fill("30060");
   await expect(createDialog.getByText("Example team endpoint: 10.80.2.11:30060")).toBeVisible();
   await createDialog.getByLabel("Subnet octet").fill("50");
+  await createDialog.getByLabel("Subnet octet").blur();
   await expect(
     createDialog.getByText("Already assigned to college-http.", {
       exact: true,
@@ -143,6 +150,8 @@ test("organizer can create, edit, and delete a challenge", async ({
   await expect(challengeRow).toContainText("draft");
   await expect(challengeRow).toContainText("10.80.60.0/24");
   await expect(challengeRow).toContainText("port 30060");
+  await expect(page.getByTestId("challenge-category-badge-2")).toHaveText("Crypto");
+  await expect(page.getByTestId("challenge-protocol-badge-2")).toHaveText("TCP");
 
   await page.getByTestId("edit-challenge-2").click();
   const challengeDialog = page.getByRole("dialog", { name: "Edit challenge" });

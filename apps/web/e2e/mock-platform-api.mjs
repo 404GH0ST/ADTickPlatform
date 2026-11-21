@@ -280,6 +280,8 @@ const adminChallenges = [
     service_port: 30050,
     service_subnet_octet: 50,
     egress_enabled: true,
+    category: "web",
+    protocol: "http",
     published: true,
     maintenance: false,
     deployed_teams: 3,
@@ -1565,6 +1567,13 @@ async function handleSystemRoutes({ req, res, url, method }) {
     return writeSuccess(res, { deleted: true });
   }
 
+  // Simulates the gateway failing session checks. /__reset clears it.
+  if (method === "POST" && url.pathname === "/__session-outage") {
+    const body = await readJsonBody(req);
+    state.sessionOutage = Boolean(body?.enabled);
+    return writeSuccess(res, { sessionOutage: state.sessionOutage });
+  }
+
   if (shouldFailRoute(method, url.pathname)) {
     return writeFailure(res, 503, `mock degraded route: ${url.pathname}`);
   }
@@ -1574,6 +1583,9 @@ async function handleSystemRoutes({ req, res, url, method }) {
 
 async function handleAuthenticationRoutes({ req, res, url, method }) {
   if (method === "GET" && url.pathname === "/api/v2/session") {
+    if (state.sessionOutage) {
+      return writeFailure(res, 503, "mock session outage.");
+    }
     const auth = req.headers.authorization || "";
     const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
     const claims = decodeParticipantToken(token);
@@ -1776,7 +1788,13 @@ async function handleParticipantRoutes(ctx) {
   const { res, url, method } = ctx;
 
   const handled = writeGetRoute(res, method, url.pathname, {
-    "/api/v2/challenges": () => challenges,
+    // Category and protocol follow the organizer's challenge record, so a test
+    // can switch them through the admin API and see the participant card follow.
+    "/api/v2/challenges": () =>
+      challenges.map((challenge) => {
+        const record = state.challenges.find((item) => item.id === challenge.id);
+        return { ...challenge, category: record?.category ?? "", protocol: record?.protocol ?? "tcp" };
+      }),
     "/api/v2/scoreboard": () => state.scoreboard,
     "/api/v2/scoreboard/freeze": () => scoreboardFreezeStatus(),
     "/api/v2/game/status": () => state.gameStatus,
@@ -2273,11 +2291,29 @@ function handleChallengeMaintenance(res, challengeID, underMaintenance) {
   return writeSuccess(res, challenge);
 }
 
+const MOCK_CHALLENGE_CATEGORIES = ["", "pwn", "web", "crypto"];
+const MOCK_CHALLENGE_PROTOCOLS = ["tcp", "http"];
+
+// Mirrors the gateway: unknown category or protocol is a 400 with the reason.
+function challengeMetadataProblem(body) {
+  if (body?.category !== undefined && !MOCK_CHALLENGE_CATEGORIES.includes(String(body.category).trim().toLowerCase())) {
+    return "category must be one of pwn, web or crypto.";
+  }
+  if (body?.protocol !== undefined && !["", ...MOCK_CHALLENGE_PROTOCOLS].includes(String(body.protocol).trim().toLowerCase())) {
+    return "protocol must be tcp or http.";
+  }
+  return null;
+}
+
 async function handleCreateChallenge(req, res) {
   const body = await readJsonBody(req);
   const name = body?.name?.trim();
   if (!name) {
     return writeFailure(res, 400, "challenge request is invalid.");
+  }
+  const metadataProblem = challengeMetadataProblem(body);
+  if (metadataProblem) {
+    return writeFailure(res, 400, metadataProblem);
   }
 
   const challenge = {
@@ -2290,6 +2326,8 @@ async function handleCreateChallenge(req, res) {
     service_subnet_octet: Number(body?.service_subnet_octet) || 51,
     egress_enabled:
       body?.egress_enabled === undefined ? true : Boolean(body.egress_enabled),
+    category: String(body?.category ?? "").trim().toLowerCase(),
+    protocol: String(body?.protocol ?? "").trim().toLowerCase() || "tcp",
     published: false,
     maintenance: false,
     deployed_teams: 0,
@@ -2315,8 +2353,21 @@ async function handleUpdateChallenge(req, res, challengeID) {
   if (!name) {
     return writeFailure(res, 400, "challenge update request is invalid.");
   }
+  const metadataProblem = challengeMetadataProblem(body);
+  if (metadataProblem) {
+    return writeFailure(res, 400, metadataProblem);
+  }
 
   challenge.name = name;
+  if (body?.category !== undefined) {
+    challenge.category = String(body.category).trim().toLowerCase();
+  }
+  if (body?.protocol !== undefined) {
+    challenge.protocol = String(body.protocol).trim().toLowerCase() || "tcp";
+  }
+  if (body?.egress_enabled !== undefined) {
+    challenge.egress_enabled = Boolean(body.egress_enabled);
+  }
   challenge.baseline_image = body?.baseline_image?.trim() || "";
   challenge.checker_image = body?.checker_image?.trim() || "";
   challenge.source_bundle_path = body?.source_bundle_path?.trim() || "";

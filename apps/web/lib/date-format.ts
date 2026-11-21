@@ -28,3 +28,10 @@ export function formatIndonesianDate(
     return isoString;
   }
 }
+
+const ISO_TIMESTAMP = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
+
+/** Rewrites ISO timestamps inside a server-written message to the app's WIB format. */
+export function formatTimestampsInText(text: string): string {
+  return text.replace(ISO_TIMESTAMP, (timestamp) => formatIndonesianDate(timestamp));
+}

@@ -4,6 +4,7 @@ import type {
   ScoreRow,
   ServiceRow,
 } from "@/lib/dashboard-types";
+import { parseChallengeCategory, parseChallengeProtocol } from "@/lib/challenge-metadata";
 import {
   type GameStatus,
   type PublicScoreboardFreeze,
@@ -85,13 +86,25 @@ export async function loadDashboardData(
   const results = await fetchDashboardResults(hasTeam, options);
   const data = readDashboardResults(results, options);
   const services = buildServiceRows(data, ownID);
-  const source = dashboardSource(results);
+  const sessionUnavailable = session.reason === "unavailable";
+  const source = sessionUnavailable ? "degraded" : dashboardSource(results);
+  const servicesUnavailable =
+    sessionUnavailable ||
+    (hasTeam &&
+      results.serviceMapResult.status === "rejected" &&
+      results.serviceStatesResult.status === "rejected");
 
   return {
     scores: data.scores,
     attackPage: data.attackPage,
     services,
-    platform: buildPlatformOverview(session, data, services, ownID, source),
+    platform: {
+      ...buildPlatformOverview(session, data, services, ownID, source),
+      sessionUnavailable,
+      servicesUnavailable,
+      scoresUnavailable: results.scoresResult.status === "rejected",
+      attacksUnavailable: results.attackPageResult.status === "rejected",
+    },
   };
 }
 
@@ -151,6 +164,15 @@ function readDashboardResults(
   };
 }
 
+type ChallengeMeta = {
+  id: number;
+  name: string;
+  has_source_download: boolean;
+  maintenance?: boolean;
+  category?: string;
+  protocol?: string;
+};
+
 function buildServiceRows(data: DashboardLiveData, ownID: string): ServiceRow[] {
   const challengeByID = new Map(
     data.challenges.map((challenge) => [String(challenge.id), challenge] as const),
@@ -173,7 +195,7 @@ function serviceStateToRow(
   state: TeamServiceState,
   challengeByID: Map<
     string,
-    { id: number; name: string; has_source_download: boolean; maintenance?: boolean }
+    ChallengeMeta
   >,
 ): ServiceRow {
   const port = Number(state.endpoint.split(":").at(-1) ?? 0);
@@ -191,6 +213,8 @@ function serviceStateToRow(
     status: state.status,
     checker: state.checker,
     hasSourceDownload: challenge?.has_source_download ?? false,
+    category: parseChallengeCategory(challenge?.category),
+    protocol: parseChallengeProtocol(challenge?.protocol),
     unlocked: state.unlocked,
     sshHint: state.ssh_hint,
     lastEvent: state.last_event,
@@ -210,7 +234,7 @@ function fallbackServiceRows(
   ownID: string,
   challengeByID: Map<
     string,
-    { id: number; name: string; has_source_download: boolean; maintenance?: boolean }
+    ChallengeMeta
   >,
 ): ServiceRow[] {
   const challenge = challengeByID.get(challengeID);
@@ -224,6 +248,8 @@ function fallbackServiceRows(
     status: "warming",
     checker: "warning",
     hasSourceDownload: challenge?.has_source_download ?? false,
+    category: parseChallengeCategory(challenge?.category),
+    protocol: parseChallengeProtocol(challenge?.protocol),
     unlocked: false,
     sshHint: "service state endpoint unavailable",
     lastEvent: "service state endpoint unavailable",
@@ -283,6 +309,9 @@ function dashboardMessage(
   session: Awaited<ReturnType<typeof getParticipantSession>>,
   source: PlatformOverview["source"],
 ): string | undefined {
+  if (session.reason === "unavailable") {
+    return "The platform API can't be reached, so your session and team data couldn't be checked. You have not been signed out. Try again in a moment.";
+  }
   const messageParts: string[] = [];
   if (session.reason === "deactivated") {
     messageParts.push(

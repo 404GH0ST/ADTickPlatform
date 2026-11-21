@@ -63,6 +63,10 @@ export type CreateChallengeInput = {
   service_port?: number;
   service_subnet_octet?: number;
   egress_enabled?: boolean;
+  /** pwn | web | crypto; omit or "" for uncategorized. */
+  category?: string;
+  /** tcp (default) | http. */
+  protocol?: string;
 };
 
 export type UpdateTeamInput = {
@@ -84,6 +88,10 @@ export type UpdateChallengeInput = {
   checker_image: string;
   source_bundle_path?: string;
   egress_enabled?: boolean;
+  /** Omit to keep the stored category; "" clears it. */
+  category?: string;
+  /** Omit to keep the stored protocol. */
+  protocol?: string;
 };
 
 export type UpdateGameMatchScheduleInput = {

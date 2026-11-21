@@ -1,14 +1,18 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Download, KeyRound, LoaderCircle, Lock, RotateCcw, TriangleAlert } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, KeyRound, LoaderCircle, Lock, RotateCcw, TriangleAlert } from "lucide-react";
 
 import {
   Button,
+  ChallengeCategoryIcon,
   cn,
+  copyButtonLabel,
   describeService,
   formatSLAState,
   StatusBanner,
+  useCopyFeedback,
+  type ServiceConnection,
   type ServiceRow,
   type ServicesViewProps,
 } from "@/components/theme/kit";
@@ -29,6 +33,65 @@ function Fact({ label, value, tone }: { label: string; value: ReactNode; tone?: 
       <dd className={cn("text-sm font-semibold", tone === "good" && "text-positive", tone === "bad" && "text-negative")}>
         {value}
       </dd>
+    </div>
+  );
+}
+
+/**
+ * How to connect, as a zone at the top of the card: a neutral protocol sticker
+ * (protocol is not a status, so it takes no status hue), then the URL (HTTP,
+ * openable) or nc command (TCP), and a copy key.
+ */
+function NbConnection({ connection, endpoint, serviceId }: { connection: ServiceConnection | null; endpoint: string; serviceId: string }) {
+  const { status, copy } = useCopyFeedback();
+  if (!connection) {
+    return (
+      <p data-testid={`service-connection-${serviceId}`} className="font-mono text-sm font-medium wrap-anywhere">
+        {endpoint}
+      </p>
+    );
+  }
+  return (
+    <div
+      data-slot="well"
+      data-protocol={connection.protocol}
+      data-testid={`service-connection-${serviceId}`}
+      className="nb-connection flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5"
+    >
+      <span className="nb-sticker nb-stat font-mono tracking-wider" title={`Connect over ${connection.label}`}>
+        {connection.label}
+      </span>
+      {connection.href ? (
+        <a
+          href={connection.href}
+          target="_blank"
+          rel="noreferrer"
+          className="nb-connection-target inline-flex min-w-0 flex-[0_1_auto] items-center gap-1.5 font-mono text-sm font-semibold wrap-anywhere"
+        >
+          <span className="min-w-0">{connection.display}</span>
+          <ExternalLink className="size-3.5 shrink-0" strokeWidth={2.4} aria-hidden />
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+      ) : (
+        <span className="nb-connection-target min-w-0 flex-[0_1_auto] font-mono text-sm font-semibold break-words">
+          {connection.display}
+        </span>
+      )}
+      <Button type="button" variant="outline" size="sm" className="ms-auto" onClick={() => void copy(connection.copyText)}>
+        {status === "copied" ? (
+          <Check className="size-4" strokeWidth={2.4} aria-hidden />
+        ) : (
+          <Copy className="size-4" strokeWidth={2.4} aria-hidden />
+        )}
+        {copyButtonLabel(connection, status)}
+      </Button>
+      <span className="sr-only" aria-live="polite">
+        {status === "copied"
+          ? `${connection.protocol === "http" ? "URL" : "Command"} copied`
+          : status === "failed"
+            ? "Copy failed"
+            : ""}
+      </span>
     </div>
   );
 }
@@ -60,8 +123,9 @@ export function NbServices({
         <h2 className="wrap-anywhere text-2xl font-extrabold">Your services</h2>
         {rows.length === 0 ? (
           <p className="nb-panel p-6 text-sm text-muted-foreground">
-            No services are assigned to your team yet. This page refreshes on its own once an organizer deploys a
-            challenge.
+            {overview.servicesUnavailable
+              ? "Your services can't be loaded right now. This doesn't mean they were removed. They'll return once the platform API responds."
+              : "No services are assigned to your team yet. This page refreshes on its own once an organizer deploys a challenge."}
           </p>
         ) : (
           <ul className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -84,9 +148,16 @@ export function NbServices({
                       statusFill(service, Boolean(view.lock)),
                     )}
                   >
-                    <div className="grid min-w-0 gap-0.5">
-                      <h3 className="wrap-anywhere text-2xl font-extrabold leading-tight">{service.name}</h3>
-                      <p className="wrap-anywhere font-mono text-sm font-medium">{service.endpoint}</p>
+                    <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-3 @max-[18rem]:flex-col @max-[18rem]:items-start">
+                      <span className="nb-icon-key grid size-11 shrink-0 place-items-center rounded-[var(--nb-radius-sm)]">
+                        <ChallengeCategoryIcon category={service.category} className="size-6" strokeWidth={2.2} />
+                      </span>
+                      <div className="grid min-w-0 gap-0.5">
+                        <p className="nb-category" data-testid={`service-category-${service.id}`}>
+                          {view.categoryLabel}
+                        </p>
+                        <h3 className="wrap-anywhere text-2xl font-extrabold leading-tight">{service.name}</h3>
+                      </div>
                     </div>
                     <span className={cn("nb-sticker nb-status-chip", statusFill(service, Boolean(view.lock)))}>
                       {view.lock ? <Lock className="size-3.5" strokeWidth={2.6} aria-hidden /> : null}
@@ -95,10 +166,11 @@ export function NbServices({
                   </div>
 
                   <div className="grid min-w-0 flex-1 gap-4 px-5 py-4 @max-[12rem]:px-2">
+                    <NbConnection connection={view.connection} endpoint={service.endpoint} serviceId={service.id} />
                     <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-x-6 gap-y-3 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]">
                       <Fact
                         label="Checker"
-                        value={service.checker}
+                        value={service.checker === "passing" ? "passing" : "warning (failing)"}
                         tone={service.checker === "passing" ? "good" : "bad"}
                       />
                       <Fact
@@ -135,6 +207,7 @@ export function NbServices({
                   <div className="flex flex-wrap gap-2.5 border-t-2 border-dashed border-border px-5 py-4 @max-[12rem]:px-2 @max-[12rem]:[&>[data-slot=button]]:px-2">
                     <Button
                       disabled={view.ssh.disabled}
+                      holdFocus={view.ssh.pending}
                       className={cn(!service.unlocked && view.ssh.disabled && "nb-key-locked")}
                       onClick={() => onSelectPrimaryAction(service)}
                     >
@@ -147,7 +220,7 @@ export function NbServices({
                       )}
                       {view.ssh.label}
                     </Button>
-                    <Button variant="secondary" disabled={view.restart.disabled} onClick={() => onRestart(service)}>
+                    <Button variant="secondary" disabled={view.restart.disabled} holdFocus={view.restart.pending} onClick={() => onRestart(service)}>
                       {view.restart.pending ? (
                         <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
                       ) : (
@@ -159,6 +232,7 @@ export function NbServices({
                       variant="outline"
                       className="button-danger-subtle"
                       disabled={view.reset.disabled}
+                      holdFocus={view.reset.pending}
                       onClick={() => onSelectReset(service)}
                     >
                       {view.reset.pending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden /> : null}

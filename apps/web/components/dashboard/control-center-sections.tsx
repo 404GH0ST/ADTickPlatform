@@ -37,6 +37,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AppDialog } from "@/components/ui/app-dialog";
+import { ChallengeCategoryIcon } from "@/components/ui/challenge-category-icon";
+import { ServiceConnectionLine } from "@/components/ui/service-connection";
+import {
+  ATTACKS_UNAVAILABLE,
+  DataUnavailable,
+  SCORES_UNAVAILABLE,
+} from "@/components/ui/data-unavailable";
 import { EmptyStateText } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,6 +80,8 @@ export type ScoreboardPanelProps = {
   frozen?: boolean;
   freezeAt?: string;
   unfreezeAt?: string;
+  /** The scores request failed and nothing has arrived since. */
+  unavailable?: boolean;
 };
 
 export type ServicesPanelProps = {
@@ -90,6 +99,8 @@ export type AttacksPanelProps = {
   highlightedAttackIDs: string[];
   attackPage: AttackFeedPage;
   attackLiveMode: boolean;
+  /** The attack feed request failed and nothing has arrived since. */
+  unavailable?: boolean;
   pendingAction: string | null;
   currentTeamName?: string;
   serviceOptions?: string[];
@@ -138,6 +149,7 @@ export function ScoreboardPanel({
   currentTeamName,
   frozen,
   freezeAt,
+  unavailable,
 }: ScoreboardPanelProps): ReactElement {
   return (
     <Card data-testid="participant-scoreboard-card">
@@ -158,11 +170,15 @@ export function ScoreboardPanel({
             {freezeAt ? ` Snapshot as of ${formatFreezeTimestamp(freezeAt)}.` : ""}
           </div>
         )}
-        <ScoreboardTable
-          scoreRows={scoreRows}
-          emptyMessage="No score rows are available yet."
-          currentTeamName={currentTeamName}
-        />
+        {unavailable ? (
+          <DataUnavailable {...SCORES_UNAVAILABLE} />
+        ) : (
+          <ScoreboardTable
+            scoreRows={scoreRows}
+            emptyMessage="No score rows are available yet."
+            currentTeamName={currentTeamName}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -260,9 +276,14 @@ export function useMatchClock(overview: PlatformOverview): MatchClock {
     matchState === "finished" ||
     matchState === "not_started" ||
     !matchState;
-  const stateLabel = formatMatchStateLabel(overview.matchState);
+  // No state because the request failed is different from a match that is idle.
+  const stateUnknown = !matchState && overview.source === "degraded";
+  const stateLabel = stateUnknown ? "Unavailable" : formatMatchStateLabel(overview.matchState);
 
   const countdown = (() => {
+    if (stateUnknown) {
+      return { primary: "—", secondary: "Match status unavailable" };
+    }
     if (isPaused) {
       return { primary: "Suspended", secondary: "Match paused" };
     }
@@ -418,7 +439,13 @@ export function ServicesPanel({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <EmptyStateText message="No services are assigned to this team yet. This page refreshes automatically after an organizer deploys a challenge; contact an organizer if the match has already started." />
+            <EmptyStateText
+              message={
+                overview.servicesUnavailable
+                  ? "Your services can't be loaded right now. This doesn't mean they were removed. They'll return once the platform API responds."
+                  : "No services are assigned to this team yet. This page refreshes automatically after an organizer deploys a challenge; contact an organizer if the match has already started."
+              }
+            />
           </CardContent>
         </Card>
       ) : (
@@ -446,6 +473,7 @@ export function AttacksPanel({
   highlightedAttackIDs,
   attackPage,
   attackLiveMode,
+  unavailable,
   pendingAction,
   currentTeamName,
   serviceOptions = [],
@@ -493,6 +521,20 @@ export function AttacksPanel({
   useEffect(() => {
     setVisibleRows(attackRows);
   }, [attackRows]);
+
+  // Filters and the globe have nothing to act on until the feed loads.
+  if (unavailable) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle as="h2">Accepted attacks</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DataUnavailable {...ATTACKS_UNAVAILABLE} />
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -792,13 +834,24 @@ function ServiceCard({
   onSelectPrimaryAction: (service: ServiceRow) => void;
   onSelectReset: (service: ServiceRow) => void;
 }): ReactElement {
+  const view = describeService(service, { feedback, pendingAction, matchState });
   return (
     <Card data-testid={`service-card-${service.id}`}>
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle>{service.name}</CardTitle>
-            <CardDescription>{service.endpoint}</CardDescription>
+          <div className="flex min-w-0 flex-[1_1_12rem] items-start gap-3">
+            <span
+              data-slot="category-icon"
+              className="grid size-10 shrink-0 place-items-center rounded-sm border border-border bg-muted/40 text-foreground"
+            >
+              <ChallengeCategoryIcon category={service.category} className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <CardTitle className="wrap-anywhere">{service.name}</CardTitle>
+              <CardDescription data-testid={`service-category-${service.id}`}>
+                {view.categoryLabel}
+              </CardDescription>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             {service.maintenance ? (
@@ -821,6 +874,11 @@ function ServiceCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <ServiceConnectionLine
+          connection={view.connection}
+          endpoint={service.endpoint}
+          testId={`service-connection-${service.id}`}
+        />
         <ServiceDetails feedback={feedback} service={service} />
         <ServiceActionBar
           feedback={feedback}
@@ -912,6 +970,7 @@ function ServiceActionBar({
       <div className="flex flex-wrap gap-3">
         <Button
           disabled={view.ssh.disabled}
+          holdFocus={view.ssh.pending}
           onClick={() => onSelectPrimaryAction(service)}
         >
           {view.ssh.pending ? (
@@ -921,6 +980,7 @@ function ServiceActionBar({
         </Button>
         <Button
           disabled={view.restart.disabled}
+          holdFocus={view.restart.pending}
           onClick={() => onRestart(service)}
           variant="secondary"
         >
@@ -944,6 +1004,7 @@ function ServiceActionBar({
         ) : null}
         <Button
           disabled={view.reset.disabled}
+          holdFocus={view.reset.pending}
           onClick={() => onSelectReset(service)}
           variant="outline"
         >

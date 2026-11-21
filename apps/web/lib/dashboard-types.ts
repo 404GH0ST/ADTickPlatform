@@ -1,3 +1,5 @@
+import type { ChallengeCategory, ChallengeProtocol } from "@/lib/challenge-metadata";
+
 export type ScoreServiceRow = {
   challenge_id: number;
   service: string;
@@ -29,6 +31,10 @@ export type ServiceRow = {
   status: 'stable' | 'warming' | 'degraded';
   checker: 'passing' | 'warning';
   hasSourceDownload: boolean;
+  /** pwn | web | crypto, or "" when the organizer has not set one. */
+  category: ChallengeCategory | "";
+  /** How to connect: tcp (an nc command) or http (a URL). */
+  protocol: ChallengeProtocol;
   unlocked: boolean;
   sshHint: string;
   lastEvent: string;
@@ -68,6 +74,14 @@ export type PlatformOverview = {
   source: 'live' | 'degraded';
   message?: string;
   authenticated: boolean;
+  /** The API couldn't confirm the session; the person may still be signed in. */
+  sessionUnavailable?: boolean;
+  /** Service data failed to load, so an empty list says nothing about the team. */
+  servicesUnavailable?: boolean;
+  /** The scoreboard request failed, so an empty board says nothing about the match. */
+  scoresUnavailable?: boolean;
+  /** The attack feed request failed, so an empty feed says nothing about the match. */
+  attacksUnavailable?: boolean;
   teamID?: number;
   playerID?: number;
   teamName?: string;
