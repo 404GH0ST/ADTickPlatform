@@ -58,7 +58,7 @@ export function DefaultTrustedStateView({
     <Card data-testid="trusted-state-panel">
       <CardHeader>
         <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-primary" />
+          <ShieldCheck className="h-4 w-4 text-primary-ink" />
           <CardTitle as="h2" className="text-base">Trusted runtime state</CardTitle>
         </div>
         <CardDescription>
@@ -124,6 +124,7 @@ export function DefaultTrustedStateView({
             data-testid="run-trusted-reconcile"
             onClick={onReconcile}
             disabled={pending}
+            holdFocus
           >
             {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Reconcile
@@ -134,6 +135,7 @@ export function DefaultTrustedStateView({
             data-testid="refresh-trusted-status"
             onClick={onRefresh}
             disabled={pending}
+            holdFocus
           >
             Refresh
           </Button>

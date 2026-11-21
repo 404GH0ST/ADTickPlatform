@@ -4,7 +4,13 @@ import { Crown, Snowflake } from "lucide-react";
 
 import { NbStandings } from "./nb-standings";
 
-import { cn, type ScoreRow, type ScoreboardViewProps } from "@/components/theme/kit";
+import {
+  cn,
+  DataUnavailable,
+  SCORES_UNAVAILABLE,
+  type ScoreRow,
+  type ScoreboardViewProps,
+} from "@/components/theme/kit";
 
 function format(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
@@ -53,7 +59,7 @@ function PodiumBlock({ row, fill, height, mine }: { row: ScoreRow; fill: string;
 }
 
 /** Podium for the top three, then every team as a row with a score bar. */
-export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt }: ScoreboardViewProps) {
+export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt, unavailable }: ScoreboardViewProps) {
   const podium = PODIUM.map((slot) => ({ slot, row: scoreRows.find((row) => row.rank === slot.place) })).filter(
     (entry): entry is { slot: (typeof PODIUM)[number]; row: ScoreRow } => entry.row !== undefined,
   );
@@ -74,7 +80,9 @@ export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt }: S
         </p>
       ) : null}
 
-      {scoreRows.length === 0 ? (
+      {unavailable ? (
+        <DataUnavailable {...SCORES_UNAVAILABLE} />
+      ) : scoreRows.length === 0 ? (
         <p className="nb-panel p-6 text-sm text-muted-foreground">
           No scores yet. The board fills in after the first scored tick.
         </p>

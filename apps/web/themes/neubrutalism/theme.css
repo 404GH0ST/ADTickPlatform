@@ -1,3 +1,7 @@
+/* Error responses can load this sheet before Tailwind's. Naming the order here
+ * keeps Tailwind's reset from overriding component styles when that happens. */
+@layer properties, theme, base, components, utilities;
+
 /* Neubrutalism: white grid paper, black outlines, hard offset shadows, and
  * three loud fills (electric blue chrome, sunshine yellow headers, aqua
  * panels).
@@ -74,6 +78,10 @@
   --popover-foreground: var(--nb-ink);
   --primary: var(--nb-yellow);
   --primary-foreground: var(--nb-ink);
+  /* Yellow is a fill, never a text colour: primary-tinted icons and text
+     (text-primary-ink) use the info blue, one step deeper than the chrome
+     blue so it clears 4.5:1 on the zebra and hover washes too. */
+  --primary-ink: var(--signal-info);
   --secondary: var(--nb-blue);
   --secondary-foreground: var(--nb-on-blue);
   --muted: oklch(0.955 0.004 265);
@@ -184,6 +192,7 @@
   --popover-foreground: var(--nb-chalk);
   --primary: var(--nb-yellow);
   --primary-foreground: var(--nb-ink);
+  --primary-ink: var(--nb-yellow);
   --muted: oklch(0.27 0.014 265);
   /* 0.83 keeps meta text ≥4.5:1 on the 34% lilac "you" row wash too. */
   --muted-foreground: oklch(0.83 0.01 265);
@@ -268,6 +277,11 @@
   outline-offset: 2px;
 }
 
+/* A heading that receives focus from script is a reading position, not a control. */
+:root[data-scheme="neubrutalism"] [data-focus-target]:focus-visible {
+  outline: none;
+}
+
 /* The light ring is blue, which vanishes on the blue rail: ring rail keys in
    yellow there (8:1 against the rail). */
 :root[data-scheme="neubrutalism"] .nb-rail :focus-visible {
@@ -332,11 +346,11 @@
   box-shadow: none;
 }
 
-/* Stock bordered boxes (rounded-sm/rounded utilities): one ink line, flat,
-   so a card reads as one object instead of hairline boxes inside a bold
-   frame. Wells (data-slot="well") always get it, whatever their utilities. */
-:root[data-scheme="neubrutalism"]
-  :is(.rounded-sm, .rounded, .rounded-md).border:not([data-slot], [class*="tone-"], input, textarea, select, button),
+/* Wells (data-slot="well": stat boxes, list rows, disclosures, the globe
+   frame) get one ink line, flat, so a card reads as one object instead of
+   hairline boxes inside a bold frame. Stock views opt in with the slot; the
+   theme never matches their Tailwind classes, so a class refactor there
+   cannot change this theme. */
 :root[data-scheme="neubrutalism"] [data-slot="well"] {
   border-width: 2px;
   border-color: var(--border);
@@ -351,26 +365,26 @@
    mark wells with data-slot="well" (and data-tone), so the theme never has
    to guess a well from its utility classes. */
 :root[data-scheme="neubrutalism"]
-  :is([data-slot="card"], .nb-panel)
+  :is([data-slot="card"], [data-slot="panel"], [data-slot="dialog-content"], .nb-panel)
   :is([data-slot="well"], [data-slot="info-panel"][data-tone]:not([data-tone="warning"])) {
   border-color: transparent;
   background-color: var(--nb-zebra);
 }
 
 :root[data-scheme="neubrutalism"]
-  :is([data-slot="card"], .nb-panel)
+  :is([data-slot="card"], [data-slot="panel"], [data-slot="dialog-content"], .nb-panel)
   :is([data-slot="well"], [data-slot="info-panel"][data-tone]:not([data-tone="warning"]))
   :is([data-slot="well"], [data-slot="info-panel"][data-tone]:not([data-tone="warning"])) {
   background-color: var(--card);
 }
 
-:root[data-scheme="neubrutalism"] :is([data-slot="card"], .nb-panel) [data-slot="well"][data-tone="danger"] {
+:root[data-scheme="neubrutalism"] :is([data-slot="card"], [data-slot="panel"], [data-slot="dialog-content"], .nb-panel) [data-slot="well"][data-tone="danger"] {
   background-color: color-mix(in oklab, var(--nb-pink) 20%, var(--card));
 }
 
 /* A table inside a card is already boxed by the card: no second frame. The
    header rule and zebra rows carry its structure. */
-:root[data-scheme="neubrutalism"] :is([data-slot="card"], .nb-panel) [data-slot="table-container"] {
+:root[data-scheme="neubrutalism"] :is([data-slot="card"], [data-slot="panel"], [data-slot="dialog-content"], .nb-panel) [data-slot="table-container"] {
   border-color: transparent;
 }
 
@@ -454,11 +468,6 @@
 :root[data-scheme="neubrutalism"] [data-slot="button"]:active:not(:disabled) {
   transform: translate(4px, 4px);
   box-shadow: 0 0 0 var(--nb-shadow);
-}
-
-:root[data-scheme="neubrutalism"] [data-slot="button"]:disabled {
-  box-shadow: none;
-  opacity: 0.55;
 }
 
 @media (width < 28rem) {
@@ -559,14 +568,6 @@
   border-color: var(--border);
 }
 
-/* Disabled destructive keys drop the wash and go dashed: plainly off. */
-:root[data-scheme="neubrutalism"] [data-slot="button"].button-danger-subtle:disabled {
-  border-style: dashed;
-  border-color: var(--muted-foreground);
-  background: transparent;
-  color: var(--muted-foreground);
-}
-
 :root[data-scheme="neubrutalism"] [data-slot="button"].button-danger-subtle:is(:hover, :focus-visible):not(:disabled) {
   border-color: var(--nb-ink);
   background: var(--nb-pink);
@@ -596,6 +597,22 @@
   background: color-mix(in oklab, var(--nb-pink) 88%, var(--nb-paper));
 }
 
+/* Disabled keys, whatever their variant: no fill, a dashed grey outline and
+   grey type, flat. Fading the fill instead turned the night primary key a
+   muddy olive that read as a third colour. The second selector outranks the
+   dark variant rules (primary, Pause, pressed toggles). */
+:root[data-scheme="neubrutalism"] [data-slot="button"]:is(:disabled, [aria-disabled="true"]),
+:root[data-scheme="neubrutalism"][data-theme] [data-slot="button"][data-variant]:is(:disabled, [aria-disabled="true"]) {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+  background: transparent;
+  color: var(--muted-foreground);
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
+  translate: none;
+}
+
 /* A pressed toggle key (attack map view, any stock aria-pressed button) is a
    selection, not an action: ink by day, cream by night, whatever variant the
    stock view gives it, so a chosen option never looks like a yellow "press
@@ -610,6 +627,7 @@
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="input"],
+:root[data-scheme="neubrutalism"] [data-slot="input-group"],
 :root[data-scheme="neubrutalism"] textarea,
 :root[data-scheme="neubrutalism"] select {
   border: var(--nb-line) solid var(--input);
@@ -620,11 +638,17 @@
 }
 
 :root[data-scheme="neubrutalism"] [data-slot="input"]:focus-visible,
+:root[data-scheme="neubrutalism"] [data-slot="input-group"]:has(:focus-visible),
 :root[data-scheme="neubrutalism"] textarea:focus-visible,
 :root[data-scheme="neubrutalism"] select:focus-visible {
   outline: none;
   border-color: var(--border);
   box-shadow: 4px 4px 0 var(--ring);
+}
+
+/* The group shows focus for the bare input inside it. */
+:root[data-scheme="neubrutalism"] [data-slot="input-group"] input:focus-visible {
+  outline: none;
 }
 
 :root[data-scheme="neubrutalism"] {
@@ -755,7 +779,8 @@
     padding-right: 0.75rem !important;
   }
 
-  :root[data-scheme="neubrutalism"] :is([data-slot="input"], textarea, select, [data-slot="button"] ~ select):focus-visible {
+  :root[data-scheme="neubrutalism"] :is([data-slot="input"], textarea, select, [data-slot="button"] ~ select):focus-visible,
+  :root[data-scheme="neubrutalism"] [data-slot="input-group"]:has(:focus-visible) {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
@@ -881,6 +906,45 @@
   font-weight: 650;
 }
 
+/* Option cards (a radio inside a label, e.g. a challenge's connection): one
+   ink line at rest, and the chosen card is a selection key, ink by day and
+   cream by night, like the theme picker. */
+:root[data-scheme="neubrutalism"] [data-slot="choice"] {
+  border: 2px solid var(--border);
+  border-radius: var(--nb-radius-sm);
+  background: var(--card);
+  transition: background-color 140ms ease-out;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="choice"]:hover:not(:has(:checked)) {
+  background: var(--nb-hover-wash);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="choice"]:has(:checked) {
+  border-color: var(--nb-selected-fill);
+  background: var(--nb-selected-fill);
+  color: var(--nb-selected-text);
+  box-shadow: 3px 3px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="choice"]:has(:checked) * {
+  color: inherit;
+}
+
+:root[data-scheme="neubrutalism"] [data-slot="choice"]:has(:focus-visible) {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :root[data-scheme="neubrutalism"] [data-slot="choice"]:has(:checked) {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+
 /* Touch: a plain disclosure row ("End match", "Advanced filters") is one
    20px text line, so it gets a 44px tap row. The negative margin keeps the
    text where it was; keys that set their own height are left alone. */
@@ -968,6 +1032,31 @@
     text-transform: uppercase;
     color: color-mix(in oklab, currentColor 78%, transparent);
     overflow-wrap: anywhere;
+  }
+
+  /* Challenge category over a service name: the same tracked capitals, so it
+     reads on every status header fill (aqua, yellow, pink, lilac) and on the
+     night wash without taking a hue of its own. */
+  :root[data-scheme="neubrutalism"] .nb-category {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, currentColor 82%, transparent);
+    overflow-wrap: anywhere;
+  }
+
+  /* The URL or nc command: ink type with a thick underline on hover and focus,
+     like a printed address. */
+  :root[data-scheme="neubrutalism"] .nb-connection-target {
+    color: var(--foreground);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+  }
+
+  :root[data-scheme="neubrutalism"] a.nb-connection-target:is(:hover, :focus-visible) {
+    text-decoration-line: underline;
   }
 
   /* On a podium block it becomes a paper tag: ink outline, white wash. */
@@ -1255,9 +1344,27 @@
       --nb-rail-width: var(--nb-rail-collapsed-width);
     }
 
+    /* The sticky rail gets its own compositor layer, so a nav hover or a
+       collapse frame re-rasterizes the rail, not the page beside it
+       (measured: collapse raster about a third of the old filter's). */
     :root[data-scheme="neubrutalism"] .nb-rail-column {
       z-index: 1;
-      filter: drop-shadow(6px 6px 0 var(--nb-shadow));
+      will-change: transform;
+    }
+
+    /* The rail's hard shadow: a flat slab behind it, trimmed with the same
+       clip as the outline. It replaces a drop-shadow filter, which made the
+       rail re-rasterize its shadow on every hover and collapse frame. */
+    :root[data-scheme="neubrutalism"] .nb-rail-column::before {
+      position: absolute;
+      content: "";
+      inset-block: var(--nb-rail-inset);
+      inset-inline-start: var(--nb-rail-inset);
+      inline-size: var(--nb-rail-expanded-width);
+      translate: 6px 6px;
+      background: var(--nb-shadow);
+      clip-path: inset(0 var(--nb-rail-trim) 0 0 round var(--nb-radius));
+      pointer-events: none;
     }
 
     /* Animate the outline and its inset fill together. The grid and its
@@ -1314,20 +1421,17 @@
     }
 
     @media (prefers-reduced-motion: no-preference) {
-      :root[data-scheme="neubrutalism"] .nb-rail-motion,
-      :root[data-scheme="neubrutalism"] .nb-rail-motion::before {
+      :root[data-scheme="neubrutalism"] :is(.nb-rail-motion, .nb-rail-motion::before, .nb-rail-column::before) {
         transition: clip-path 220ms var(--nb-snap);
       }
 
-      :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-rail-motion,
-      :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-rail-motion::before {
+      :root[data-scheme="neubrutalism"][data-rail="collapsed"] :is(.nb-rail-motion, .nb-rail-motion::before, .nb-rail-column::before) {
         transition-duration: 180ms;
       }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      :root[data-scheme="neubrutalism"] .nb-rail-motion,
-      :root[data-scheme="neubrutalism"] .nb-rail-motion::before {
+      :root[data-scheme="neubrutalism"] :is(.nb-rail-motion, .nb-rail-motion::before, .nb-rail-column::before) {
         transition-property: none;
       }
     }
@@ -1354,17 +1458,6 @@
 
 }
 
-/* Yellow is a fill, never a text colour: primary-tinted icons and text use
-   the info blue, one step deeper than the chrome blue so it clears 4.5:1 on
-   the zebra and hover washes too, not only on white. */
-:root[data-scheme="neubrutalism"] .text-primary {
-  color: var(--signal-info);
-}
-
-:root[data-scheme="neubrutalism"][data-theme="dark"] .text-primary {
-  color: var(--nb-yellow);
-}
-
 /* In-page section headings sit between card groups: same face as card titles, one step up. */
 :root[data-scheme="neubrutalism"] [data-slot="section-heading"] {
   font-family: var(--nb-display);
@@ -1373,12 +1466,16 @@
   letter-spacing: -0.01em;
 }
 
-/* Page rhythm: one gap between every card in a page, matching the themed views. */
+/* Page rhythm: one gap between every card in a page, matching the themed
+   views. Keyed on structure (the stock page wrapper is the slot-less child
+   of the shell content, and stacks are whatever directly holds cards), never
+   on Tailwind classes. Unlayered, so it already outranks the stock gap-*
+   utilities without !important. */
 :root[data-scheme="neubrutalism"] .nb-content,
-:root[data-scheme="neubrutalism"] .nb-content > .grid,
-:root[data-scheme="neubrutalism"] .nb-content > .grid > :has(> [data-slot="card"]),
-:root[data-scheme="neubrutalism"] .nb-content > .grid > section:has(> * > [data-slot="card"]) > :has(> [data-slot="card"]) {
-  gap: 1.5rem !important;
+:root[data-scheme="neubrutalism"] .nb-content > :not([data-slot]),
+:root[data-scheme="neubrutalism"] .nb-content > :not([data-slot]) > :has(> [data-slot="card"]),
+:root[data-scheme="neubrutalism"] .nb-content > :not([data-slot]) > section:has(> * > [data-slot="card"]) > :has(> [data-slot="card"]) {
+  gap: 1.5rem;
 }
 
 /* Key/value lists (InfoPanel/InfoLine): label left, value right, ruled rows. */
@@ -1462,7 +1559,12 @@
   color: inherit;
 }
 
-:root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] .border {
+:root[data-scheme="neubrutalism"] [data-theme-option] [data-slot="swatch"] {
+  border: 2px solid var(--border);
+  border-radius: 5px;
+}
+
+:root[data-scheme="neubrutalism"] [data-theme-option][aria-checked="true"] :is([data-slot="swatch"], [data-slot="badge"]) {
   border-color: currentColor;
 }
 
@@ -1489,6 +1591,16 @@
   box-shadow: 4px 4px 0 var(--nb-shadow);
 }
 
+/* Each cell spans two rows of the strip's grid and inherits them, so every
+   label sits in one row and every value in the next: a label that wraps
+   moves the whole row of values down together, not just its own. */
+:root[data-scheme="neubrutalism"] [data-slot="summary-strip"] dl > div {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  row-gap: 0;
+}
+
 :root[data-scheme="neubrutalism"] [data-slot="summary-strip"] dt {
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1500,6 +1612,10 @@
 }
 
 /* Stock login page: one bold frame, not a card inside a frame. */
+:root[data-scheme="neubrutalism"] .workspace-frame-auth {
+  --auth-tallest: 40rem; /* The larger title and keys make the register form taller. */
+}
+
 :root[data-scheme="neubrutalism"] .workspace-frame [data-slot="card"] {
   border: 0;
   border-radius: 0;
@@ -1521,8 +1637,8 @@
 /* ---------- Attack map: flat printed globe ---------- */
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] {
   --nb-map-dot: color-mix(in oklab, var(--nb-ink) 16%, transparent);
-  border: var(--nb-line) solid var(--nb-ink);
-  border-radius: var(--nb-radius);
+  /* The frame comes from data-slot="well": inside the attack-flow zone the
+     sheet itself is the edge, so the card outline stays the only box. */
   /* A halftone print sheet behind the globe, so it sits on paper, not void. */
   background:
     radial-gradient(var(--nb-map-dot) 1.1px, transparent 1.6px) 0 0 / 14px 14px,
@@ -1531,7 +1647,14 @@
 
 :root[data-scheme="neubrutalism"][data-theme="dark"] [data-testid="cyber-attack-map"] {
   --nb-map-dot: color-mix(in oklab, var(--nb-chalk) 11%, transparent);
-  border-color: var(--nb-chalk);
+}
+
+/* Inside a card the globe is a zone of the attack-flow panel: no frame of its
+   own. The stock map paints its border colour inline, hence !important.
+   Maximized, it sits in a dialog on the same white as its sheet, so it keeps
+   that inline frame there (dialogs are deliberately not in this list). */
+:root[data-scheme="neubrutalism"] :is([data-slot="card"], [data-slot="panel"], .nb-panel) [data-testid="cyber-attack-map"][data-slot="well"] {
+  border-color: transparent !important;
 }
 
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="globe-halo"],
@@ -1718,6 +1841,21 @@
   font-size: 0.75rem;
   font-weight: 800;
   line-height: 1.25;
+}
+
+/* Compact globe controls open as a panel over the map, styled like the
+   header menus. */
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-popover"] {
+  border: var(--nb-line) solid var(--border);
+  border-radius: var(--nb-radius);
+  background: var(--popover);
+  box-shadow: 6px 6px 0 var(--nb-shadow);
+}
+
+:root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="map-control"]:disabled {
+  border-style: dashed !important;
+  border-color: var(--muted-foreground) !important;
+  color: var(--muted-foreground) !important;
 }
 
 /* Dark: chalk keys on slate, like the rail. */
@@ -1978,7 +2116,24 @@
   border: 3px solid var(--nb-ink) !important;
   border-radius: 18px;
   background-color: var(--nb-cream) !important;
-  box-shadow: 9px 9px 0 var(--nb-shadow);
+}
+
+/* The panel's hard shadow is a static slab on the banner, the panel's only
+   child box (same centred width, same height). The panel then lifts, slams
+   and leaves with transform alone, so the hold never repaints a shadow; the
+   slab stays planted, which is what makes the bob read as a lift. */
+:root[data-scheme="neubrutalism"] [data-first-blood-banner]::before {
+  position: absolute;
+  content: "";
+  z-index: -1;
+  inset-block: 0;
+  inset-inline: 0;
+  max-inline-size: 46rem;
+  margin-inline: auto;
+  border-radius: 18px;
+  background: var(--nb-shadow);
+  translate: 9px 9px;
+  pointer-events: none;
 }
 
 :root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] h3 {
@@ -2029,6 +2184,10 @@
     nb-first-blood-bob 1800ms ease-in-out 900ms infinite;
 }
 
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-reduced-motion="false"]::before {
+  animation: nb-first-blood-shadow-in 460ms ease-out both;
+}
+
 :root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-reduced-motion="false"] [data-first-blood-banner-panel] h3 {
   animation: nb-first-blood-stamp 420ms cubic-bezier(0.2, 1.6, 0.4, 1) 160ms both;
 }
@@ -2037,19 +2196,27 @@
   animation-name: nb-first-blood-rise;
 }
 
-:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-banner-phase="exit"][data-reduced-motion="false"] [data-first-blood-banner-panel] {
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-banner-phase="exit"][data-reduced-motion="false"] [data-first-blood-banner-panel],
+:root[data-scheme="neubrutalism"] [data-testid="first-blood-banner"][data-banner-phase="exit"][data-reduced-motion="false"]::before {
   animation: nb-first-blood-exit 360ms cubic-bezier(0.6, -0.4, 0.8, 0.4) both;
 }
 
 @keyframes nb-first-blood-slam {
-  0% { opacity: 0; transform: translate(-24px, -40px) rotate(-6deg) scale(1.18); box-shadow: 0 0 0 var(--nb-shadow); }
-  60% { opacity: 1; transform: translate(4px, 4px) rotate(1deg) scale(0.98); box-shadow: 2px 2px 0 var(--nb-shadow); }
-  100% { opacity: 1; transform: none; box-shadow: 9px 9px 0 var(--nb-shadow); }
+  0% { opacity: 0; transform: translate(-24px, -40px) rotate(-6deg) scale(1.18); }
+  60% { opacity: 1; transform: translate(4px, 4px) rotate(1deg) scale(0.98); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* The slab grows out from under the landing panel: 0 -> 2px -> 9px. */
+@keyframes nb-first-blood-shadow-in {
+  0% { opacity: 0; translate: 0 0; }
+  60% { opacity: 1; translate: 2px 2px; }
+  100% { opacity: 1; translate: 9px 9px; }
 }
 
 @keyframes nb-first-blood-bob {
-  0%, 100% { transform: none; box-shadow: 9px 9px 0 var(--nb-shadow); }
-  50% { transform: translate(-2px, -2px); box-shadow: 11px 11px 0 var(--nb-shadow); }
+  0%, 100% { transform: none; }
+  50% { transform: translate(-2px, -2px); }
 }
 
 @keyframes nb-first-blood-stamp {
@@ -2088,6 +2255,10 @@
     position: relative;
     inset: auto;
     translate: none;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner]::before {
+    content: none;
   }
 
   :root[data-scheme="neubrutalism"] [data-first-blood-layer] [data-first-blood-banner-panel] {
@@ -2360,7 +2531,7 @@
 }
 
 /* Award candidates: same number face as the standings, not mono. */
-:root[data-scheme="neubrutalism"] [data-testid="scoreboard-category-leaders-panel"] .font-mono {
+:root[data-scheme="neubrutalism"] :is([data-slot="leader-rank"], [data-slot="leader-score"]) {
   font-family: var(--nb-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;

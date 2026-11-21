@@ -17,6 +17,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-ink: var(--primary-ink);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -229,6 +230,24 @@
     .workspace-canvas {
       --workspace-pad: 1.25rem;
     }
+  }
+
+  /*
+   * Sign-in page: place the frame where the tallest form (register) would be
+   * centred and anchor it there. Switching forms then only moves the bottom
+   * edge, so the mode switch stays under the pointer.
+   */
+  /* Required-field mark. The empty alt text keeps it out of the accessible
+     name; the input carries aria-required. */
+  .field-required::after {
+    content: "*";
+    content: "*" / "";
+    color: var(--muted-foreground);
+  }
+
+  .workspace-frame-auth {
+    --auth-tallest: 37rem;
+    margin-top: max(0px, calc((100dvh - 2 * var(--workspace-pad) - var(--auth-tallest)) / 2));
   }
 
   .workspace-frame {

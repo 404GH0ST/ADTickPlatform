@@ -150,6 +150,8 @@ type DragState = {
   startLon: number;
   x: number;
   y: number;
+  /** The pointer has left the tap slop, so this gesture is a drag. */
+  moved: boolean;
 };
 
 const MAP_WIDTH = 1000;
@@ -180,6 +182,10 @@ const FEATURED_ATTACK_STEP_MS = 6_400;
 const FRESH_ATTACK_FLY_MS = 1_500;
 const FRESH_FRAME_DEBOUNCE_MS = 350;
 const DRAG_INTERRUPT_PX = 6;
+const TOUCH_TAP_SLOP_PX = 8;
+const TOUCH_ASSIST_RADIUS_PX = 16;
+const TOUCH_ASSIST_RING_STEP_PX = 2;
+const TOUCH_ASSIST_PROBES = 24;
 // Below this depth an endpoint is too close to the rim (or behind it) to share
 // one first-blood shot with the other team; the camera travels instead.
 const FIRST_BLOOD_SPLIT_DEPTH = 0.12;
@@ -1091,6 +1097,7 @@ export function CyberAttackMap({
       startLon: rotation.lon,
       x: event.clientX,
       y: event.clientY,
+      moved: false,
     };
   }
 
@@ -1098,6 +1105,9 @@ export function CyberAttackMap({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
+    }
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= TOUCH_TAP_SLOP_PX) {
+      drag.moved = true;
     }
     if (sequenceBusyRef.current) {
       if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < DRAG_INTERRUPT_PX) return;
@@ -1112,9 +1122,26 @@ export function CyberAttackMap({
   }
 
   function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      endDrag();
-      markUserActivity();
+    const drag = dragRef.current;
+    if (drag?.pointerId !== event.pointerId) {
+      return;
+    }
+    // The browser took this touch for a page scroll: undo any rotation it began.
+    if (event.type === 'pointercancel' && event.pointerType === 'touch') {
+      const startRotation = { lat: drag.startLat, lon: drag.startLon };
+      rotationRef.current = startRotation;
+      setRotation(startRotation);
+    }
+    const missedTap =
+      event.type === 'pointerup' &&
+      event.pointerType === 'touch' &&
+      !drag.moved &&
+      !sequenceBusyRef.current;
+    endDrag();
+    markUserActivity();
+    if (missedTap) {
+      findNearbyMapTarget(event.currentTarget, event.clientX, event.clientY)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     }
   }
 
@@ -1315,6 +1342,7 @@ export function CyberAttackMap({
       aria-describedby={`${mapId}-instructions`}
       aria-label="Interactive attack globe"
       role="region"
+      data-slot="well"
       className={cn(
         'flex min-w-0 flex-col rounded-sm border',
         expanded && 'shrink-0 @[60rem]/expanded-map:min-h-0',
@@ -1340,7 +1368,7 @@ export function CyberAttackMap({
             <span className="min-w-0 wrap-anywhere">Globe controls</span>
             <ChevronDown className="size-4 shrink-0 group-open:rotate-180" aria-hidden />
           </summary>
-          <div className="pointer-events-auto absolute inset-x-0 top-full mt-1 grid max-h-[min(50dvh,24rem)] gap-3 overflow-y-auto overscroll-contain rounded-sm border border-border bg-popover p-3 text-popover-foreground shadow-lg">
+          <div data-fx="map-popover" className="pointer-events-auto absolute inset-x-0 top-full mt-1 grid max-h-[min(50dvh,24rem)] gap-3 overflow-y-auto overscroll-contain rounded-sm border border-border bg-popover p-3 text-popover-foreground shadow-lg">
             {compactActions}
             {globeControls}
             {legend}
@@ -1374,7 +1402,7 @@ export function CyberAttackMap({
         <div
           ref={canvasRef}
           data-fx="map-canvas"
-          className={cn('relative aspect-[2/1] w-full touch-none overflow-hidden rounded-b-[inherit]', className)}
+          className={cn('relative aspect-[2/1] w-full overflow-hidden rounded-b-[inherit]', expanded ? 'touch-none' : 'touch-pan-y', className)}
           style={{ cursor: dragging ? 'grabbing' : 'grab' }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -2795,6 +2823,28 @@ function isInteractivePointerTarget(target: EventTarget | null): boolean {
       'a,button,input,select,textarea,[data-attack-arc-hit],[data-attack-team-hit]',
     ) !== null
   );
+}
+
+/**
+ * The target a fingertip just missed. Routes and pins are only a few pixels
+ * wide on a phone, but growing their hit shapes would cover the globe and block
+ * dragging it, so a tap on empty globe looks outward for what it meant instead.
+ * Hit testing keeps clipped routes out; a pin wins over a closer route because
+ * routes run right up to their pins.
+ */
+function findNearbyMapTarget(canvas: HTMLElement, x: number, y: number): Element | null {
+  let nearestRoute: Element | null = null;
+  for (let radius = TOUCH_ASSIST_RING_STEP_PX; radius <= TOUCH_ASSIST_RADIUS_PX; radius += TOUCH_ASSIST_RING_STEP_PX) {
+    for (let probe = 0; probe < TOUCH_ASSIST_PROBES; probe += 1) {
+      const angle = (probe / TOUCH_ASSIST_PROBES) * Math.PI * 2;
+      const hit = document.elementFromPoint(x + radius * Math.cos(angle), y + radius * Math.sin(angle));
+      if (!hit || !canvas.contains(hit)) continue;
+      const target = hit.closest('[data-attack-team-hit],[data-attack-arc-hit]');
+      if (target?.hasAttribute('data-attack-team-hit')) return target;
+      nearestRoute ??= target;
+    }
+  }
+  return nearestRoute;
 }
 
 function shouldShowTeamLabel(

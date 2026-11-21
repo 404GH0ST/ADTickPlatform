@@ -12,6 +12,9 @@
   --popover-foreground: oklch(0.2 0.01 260);
   --primary: oklch(0.24 0.012 260);
   --primary-foreground: oklch(0.985 0.002 260);
+  /* The primary hue at text contrast (icons, current-team names). Themes whose
+     --primary is a fill colour (e.g. a yellow) override it. */
+  --primary-ink: var(--primary);
   --secondary: oklch(0.95 0.004 260);
   --secondary-foreground: oklch(0.28 0.01 260);
   --muted: oklch(0.95 0.004 260);

@@ -152,7 +152,7 @@ export function OrganizerAuditView({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="overflow-x-auto">
-            <Table>
+            <Table scrollLabel="Audit log">
               <TableHeader>
                 <TableRow>
                   <TableHead>When</TableHead>

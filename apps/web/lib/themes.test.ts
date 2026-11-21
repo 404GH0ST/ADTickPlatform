@@ -48,6 +48,17 @@ describe("theme registry", () => {
       const foreign = [...css.matchAll(/data-scheme="([^"]+)"/g)].map((match) => match[1]);
       expect(foreign.filter((id) => id !== theme.id)).toEqual([]);
     });
+
+    // Error responses can load a theme's sheet first, and the first sheet to
+    // name a layer fixes its order. Tailwind's reset must stay below components.
+    test(`${theme.id}: theme.css pins the cascade layer order before using a layer`, () => {
+      const css = readFileSync(join(themesDir, theme.id, "theme.css"), "utf8");
+      const firstBlock = css.search(/@layer\s+[\w-]+\s*\{/);
+      if (firstBlock === -1) return;
+      const order = css.indexOf("@layer properties, theme, base, components, utilities;");
+      expect(order).toBeGreaterThanOrEqual(0);
+      expect(order).toBeLessThan(firstBlock);
+    });
   }
 
   // The root layout (a server component) imports the registry, so theme view

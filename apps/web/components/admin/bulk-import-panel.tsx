@@ -77,7 +77,7 @@ export function BulkImportPanel(): ReactElement {
     <Card data-testid="bulk-import-panel">
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Upload className="h-4 w-4 text-primary" />
+          <Upload className="h-4 w-4 text-primary-ink" />
           <CardTitle as="h2" className="text-base">Bulk team import</CardTitle>
         </div>
         <CardDescription id={csvDescription} className="wrap-anywhere">
@@ -102,14 +102,14 @@ export function BulkImportPanel(): ReactElement {
           {error ? <StatusBanner message={error} variant="error" /> : null}
           {note ? <StatusBanner message={note} variant="success" /> : null}
           {details.length > 0 ? (
-            <ul className="rounded-sm border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <ul data-slot="well" className="rounded-sm border bg-muted/20 p-3 text-xs text-muted-foreground">
               {details.map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
           ) : null}
           <div>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending} holdFocus>
               {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
               Import teams
             </Button>

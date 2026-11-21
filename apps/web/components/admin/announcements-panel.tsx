@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
+import { formatIndonesianDate } from "@/lib/date-format";
 
 /** Organizer match announcements. Logic in useAnnouncements; themeable via OrganizerAnnouncements. */
 export function AnnouncementsPanel(): ReactElement {
@@ -35,7 +36,7 @@ export function DefaultAnnouncementsView({
     <Card data-testid="announcements-panel">
       <CardHeader>
         <div className="flex items-start gap-2">
-          <Megaphone className="mt-1 h-4 w-4 shrink-0 text-primary" />
+          <Megaphone className="mt-1 h-4 w-4 shrink-0 text-primary-ink" />
           <CardTitle className="min-w-0 wrap-anywhere text-base">Match announcements</CardTitle>
         </div>
         <CardDescription>
@@ -56,7 +57,7 @@ export function DefaultAnnouncementsView({
             placeholder="Warmup starts in 10 minutes. WireGuard must be up."
             maxLength={maxLength}
           />
-          <Button type="submit" className="shrink-0" disabled={pending || body.trim() === ""}>
+          <Button type="submit" className="shrink-0" disabled={pending || body.trim() === ""} holdFocus>
             {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Publish
           </Button>
@@ -67,17 +68,21 @@ export function DefaultAnnouncementsView({
           {items.map((item) => (
             <li
               key={item.id}
+              data-slot="well"
               className="flex flex-wrap items-start justify-between gap-3 rounded-sm border px-3 py-2 text-sm"
             >
               <div className="min-w-0 wrap-anywhere">
                 <p>{item.body}</p>
-                <p className="text-xs text-muted-foreground">{item.created_at}</p>
+                <time dateTime={item.created_at} className="block text-xs text-muted-foreground">
+                  {formatIndonesianDate(item.created_at)}
+                </time>
               </div>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 disabled={pending}
+                holdFocus
                 onClick={() => onDelete(item.id)}
               >
                 Delete

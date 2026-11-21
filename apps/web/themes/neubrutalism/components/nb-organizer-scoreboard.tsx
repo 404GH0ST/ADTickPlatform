@@ -55,7 +55,7 @@ export function NbOrganizerScoreboard({
               value={teamFilter}
               onChange={(event) => setTeamFilter(event.target.value)}
             />
-            <Button disabled={pendingAction !== null} size="sm" variant="outline" onClick={onRefresh}>
+            <Button disabled={pendingAction !== null} holdFocus size="sm" variant="outline" onClick={onRefresh}>
               {pendingAction === "game:scoreboard" ? (
                 <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
               ) : (

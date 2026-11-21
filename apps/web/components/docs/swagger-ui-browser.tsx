@@ -87,7 +87,7 @@ export function SwaggerUIBrowser({ specURL }: Props) {
         <p role="status" className="text-sm text-muted-foreground">Loading API explorer…</p>
       )}
       {error && (
-        <p role="alert" className="rounded-sm border px-4 py-3 text-sm text-muted-foreground">
+        <p role="alert" data-slot="well" className="rounded-sm border px-4 py-3 text-sm text-muted-foreground">
           {error} Use the raw YAML link above.
         </p>
       )}
@@ -109,7 +109,7 @@ export function SwaggerUIBrowser({ specURL }: Props) {
             onReady={() => setScriptReady(true)}
             onError={showAssetError}
           />
-          <div className={initialized ? 'rounded-sm border bg-card p-4' : undefined}>
+          <div data-slot={initialized ? 'well' : undefined} className={initialized ? 'rounded-sm border bg-card p-4' : undefined}>
             <div
               ref={explorer}
               role="region"

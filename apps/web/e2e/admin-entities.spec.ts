@@ -13,6 +13,7 @@ test("organizer can create a team, create a player for it, and delete that playe
   await expect(teamDialog.getByRole("button", { name: "Create" })).toBeDisabled();
   await teamDialog.getByLabel("Team name").fill("College Delta");
   await teamDialog.getByLabel("Contact email").fill("invalid");
+  await teamDialog.getByLabel("Contact email").blur();
   await expect(
     teamDialog.getByText("Enter a valid email address."),
   ).toBeVisible();

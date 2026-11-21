@@ -108,7 +108,7 @@ export function ThemeSettingsCard() {
                   checked && "border-foreground/60 bg-muted",
                 )}
               >
-                <span aria-hidden className="relative flex h-8 w-10 shrink-0 overflow-hidden rounded-sm border border-border">
+                <span aria-hidden data-slot="swatch" className="relative flex h-8 w-10 shrink-0 overflow-hidden rounded-sm border border-border">
                   <span className="h-full w-1/2" style={{ background: theme.swatch.light }} />
                   <span className="h-full w-1/2" style={{ background: theme.swatch.dark }} />
                   <span className="absolute bottom-0 right-0 size-3" style={{ background: theme.swatch.accent }} />
@@ -117,7 +117,7 @@ export function ThemeSettingsCard() {
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-foreground">
                     <span className="min-w-0 wrap-anywhere">{theme.label}</span>
                     {checked ? (
-                      <span className="rounded-sm border border-border px-1.5 text-[11px] font-medium leading-5">Active</span>
+                      <span data-slot="badge" className="rounded-sm border border-border px-1.5 text-[11px] font-medium leading-5">Active</span>
                     ) : null}
                     {saving ? <span className="text-xs text-muted-foreground">Applying…</span> : null}
                   </span>

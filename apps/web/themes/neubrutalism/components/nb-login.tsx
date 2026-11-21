@@ -19,6 +19,7 @@ export function NbLogin({
   setEmail,
   password,
   setPassword,
+  fieldRefs,
   pending,
   error,
   minPasswordLength,
@@ -55,6 +56,7 @@ export function NbLogin({
             Display name
           </Label>
           <Input
+            ref={fieldRefs.displayName}
             id="participant-display-name"
             autoComplete="name"
             value={displayName}
@@ -68,6 +70,7 @@ export function NbLogin({
           Email
         </Label>
         <Input
+          ref={fieldRefs.email}
           id="participant-email"
           type="email"
           autoComplete="username"
@@ -81,6 +84,7 @@ export function NbLogin({
           Password
         </Label>
         <Input
+          ref={fieldRefs.password}
           id="participant-password"
           type="password"
           autoComplete={register ? "new-password" : "current-password"}
@@ -95,7 +99,7 @@ export function NbLogin({
         ) : null}
       </div>
       {error ? <StatusBanner message={error} variant="error" /> : null}
-      <Button type="submit" size="lg" className="mt-1 h-12 w-full text-base" disabled={pending}>
+      <Button type="submit" size="lg" className="mt-1 h-12 w-full text-base" disabled={pending} holdFocus>
         {pending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden /> : null}
         {pending ? (register ? "Registering…" : "Signing in…") : register ? "Register" : "Sign In"}
       </Button>

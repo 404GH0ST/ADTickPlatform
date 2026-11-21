@@ -438,7 +438,7 @@ export function ScoreboardTable({
                     className={cn(
                       "sticky left-[5.5rem] z-20 min-w-[11rem] overflow-hidden border-r border-border/70 px-2 py-3 font-semibold",
                       stickyCellClassName,
-                      isCurrentTeam && "text-primary",
+                      isCurrentTeam && "text-primary-ink",
                     )}
                   >
                     <div className="block truncate text-sm" title={score.team}>
@@ -587,7 +587,7 @@ function MobileScoreboardCards({
                 <div className="mb-1.5 flex items-center">
                   <RankBadge rank={score.rank} />
                 </div>
-                <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary")}>
+                <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary-ink")}>
                   {score.team}
                 </p>
                 {score.institution ? (

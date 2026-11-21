@@ -17,11 +17,12 @@ const STYLE: Record<OverviewLink["id"], { icon: LucideIcon; layout: string }> = 
  * block borrows a status colour. Services leads because it is where play
  * happens.
  */
-export function NbOverview({ links, teamName, scoreCount, serviceCount, attackCount }: OverviewViewProps) {
+export function NbOverview({ links, teamName, scoreCount, serviceCount, attackCount, unavailable }: OverviewViewProps) {
+  // A failed count has no number: the link's meta line says it is unavailable.
   const counts: Partial<Record<OverviewLink["id"], number>> = {
-    services: serviceCount,
-    scoreboard: scoreCount,
-    attacks: attackCount,
+    services: unavailable?.services ? undefined : serviceCount,
+    scoreboard: unavailable?.scores ? undefined : scoreCount,
+    attacks: unavailable?.attacks ? undefined : attackCount,
   };
   const order: OverviewLink["id"][] = ["services", "scoreboard", "attacks", "docs"];
   const sorted = [...links].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));

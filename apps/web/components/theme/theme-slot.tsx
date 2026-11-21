@@ -1,8 +1,9 @@
 "use client";
 
-import { Component, Suspense, type ComponentType, type ReactNode } from "react";
+import { Component, type ComponentType, type ReactNode } from "react";
 
 import { useActiveTheme } from "@/components/theme/active-theme-provider";
+import { HydrationSuspense } from "@/components/ui/hydration-suspense";
 import type { ThemeSlotName, ThemeSlotProps } from "@/lib/theme-contract";
 import { GENERATED_THEME_VIEWS } from "@/themes/views.generated";
 
@@ -60,9 +61,9 @@ export function ThemeSlot<K extends ThemeSlotName>({
   // a stock fallback would flash the stock layout before the themed one.
   return (
     <SlotErrorBoundary key={theme.id} slot={name} themeId={theme.id} fallback={<Fallback {...p} />}>
-      <Suspense fallback={null}>
+      <HydrationSuspense fallback={null}>
         <Override {...p} />
-      </Suspense>
+      </HydrationSuspense>
     </SlotErrorBoundary>
   );
 }

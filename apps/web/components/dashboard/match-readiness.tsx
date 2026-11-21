@@ -156,6 +156,7 @@ export function MatchReadinessPanel({
   return (
     <section
       id="match-readiness-panel"
+      data-slot="panel"
       data-testid="onboarding-checklist"
       className="surface-workroom rounded-sm border border-border bg-card p-3"
     >
@@ -171,6 +172,7 @@ export function MatchReadinessPanel({
         {items.map((item) => (
           <li
             key={item.id}
+            data-slot="well"
             className="flex items-start gap-2 rounded-sm border border-border/60 px-3 py-2 text-sm"
           >
             {item.done ? (

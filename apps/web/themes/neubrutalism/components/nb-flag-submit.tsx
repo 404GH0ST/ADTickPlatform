@@ -59,17 +59,17 @@ export function NbFlagSubmit({
               aria-describedby={error ? `${hintId} ${errorId}` : hintId}
               className="min-h-14 min-w-0 flex-1 resize-y px-3 py-2.5 font-mono text-sm disabled:opacity-60"
             />
-            <Button type="submit" size="lg" disabled={pending || closed} className="h-auto min-h-12 px-3 text-base sm:px-6">
+            <Button type="submit" size="lg" disabled={pending || closed} holdFocus={pending} className="h-auto min-h-12 px-3 text-base sm:px-6">
               {pending ? <LoaderCircle className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : null}
               {pending ? "Submitting…" : "Submit"}
             </Button>
           </div>
           <p id={hintId} className="text-xs font-medium text-muted-foreground">{hint}</p>
           <div aria-live="polite" className="grid gap-2">
-            {error ? <div id={errorId}><StatusBanner message={error} variant="error" /></div> : null}
+            {error ? <div id={errorId}><StatusBanner message={error} variant="error" announce="inherit" /></div> : null}
             {note ? (
               <div data-testid="flag-submit-summary" data-variant={note.variant}>
-                <StatusBanner message={note.message} variant={note.variant} />
+                <StatusBanner message={note.message} variant={note.variant} announce="inherit" />
               </div>
             ) : null}
             {verdicts.length > 0 ? (

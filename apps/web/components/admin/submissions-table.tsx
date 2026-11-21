@@ -226,6 +226,7 @@ export function SubmissionsTable({
             <Button
               variant="outline"
               disabled={pending}
+              holdFocus
               onClick={() => setSelected(null)}
             >
               Cancel
@@ -233,6 +234,7 @@ export function SubmissionsTable({
             <Button
               className="button-danger-solid"
               disabled={pending}
+              holdFocus
               onClick={() => {
                 void removeSubmission();
               }}

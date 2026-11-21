@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactElement, ReactNode } from 'react';
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Check,
   ChevronLeft,
@@ -20,6 +20,7 @@ import {
   useAttackSfxPreferences,
   useAttackSfxPreview,
 } from '@/components/hooks/use-attack-sfx';
+import { HydrationSuspense } from '@/components/ui/hydration-suspense';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -582,7 +583,7 @@ export function AttackMapPanel({
             : 'grid grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1.18fr)_17rem] xl:grid-rows-none',
         )}
       >
-        <Suspense
+        <HydrationSuspense
           fallback={
             <div data-slot="well"
               role="status"
@@ -620,7 +621,7 @@ export function AttackMapPanel({
               }
             }}
           />
-        </Suspense>
+        </HydrationSuspense>
         <div
           className={cn(
             'min-w-0',

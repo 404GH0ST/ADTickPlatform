@@ -44,6 +44,7 @@ export function ParticipantJoinTeamForm() {
 
   return (
     <form
+      data-slot="well"
       className="flex flex-col gap-3 rounded-sm border border-border bg-card p-4 sm:flex-row sm:items-start"
       onSubmit={submit}
     >

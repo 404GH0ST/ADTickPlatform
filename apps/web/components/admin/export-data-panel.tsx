@@ -39,7 +39,7 @@ export function ExportDataPanel({
     <Card data-testid="export-data-panel">
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Download className="h-4 w-4 text-primary" />
+          <Download className="h-4 w-4 text-primary-ink" />
           <CardTitle className="text-base">Export snapshots</CardTitle>
         </div>
         <CardDescription>

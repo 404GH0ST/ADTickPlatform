@@ -136,6 +136,8 @@ export type OverviewViewProps = {
   scoreCount: number;
   serviceCount: number;
   attackCount: number;
+  /** Counts whose request failed. Their value is unknown, so don't show it as 0. */
+  unavailable?: { scores?: boolean; services?: boolean; attacks?: boolean };
 };
 
 export type ServicesViewProps = ServicesPanelProps & {

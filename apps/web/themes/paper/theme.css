@@ -1,3 +1,7 @@
+/* Error responses can load this sheet before Tailwind's. Naming the order here
+ * keeps Tailwind's reset from overriding component styles when that happens. */
+@layer properties, theme, base, components, utilities;
+
 /* ── Paper: warm workroom (previous default, optional) ────────────────── */
 :root[data-scheme="paper"] {
   color-scheme: light;

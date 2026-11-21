@@ -9,6 +9,7 @@ import type {
   AdminOverview,
 } from '@/lib/admin-dashboard-types';
 import { processApiResponse } from '@/lib/api-utils';
+import { formatTimestampsInText } from '@/lib/date-format';
 
 type Props = {
   overview: AdminOverview;
@@ -131,13 +132,14 @@ export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
       ) : null}
 
       {overview.message ? (
-        <StatusBanner message={overview.message} variant="warning" />
+        <StatusBanner message={overview.message} variant="warning" announce="change" />
       ) : null}
       {operationsStatus?.alerts.map((alert) => (
         <StatusBanner
           key={alert.id}
-          message={alert.detail ? `${alert.summary} ${alert.detail}` : alert.summary}
+          message={alert.detail ? `${alert.summary} ${formatTimestampsInText(alert.detail)}` : alert.summary}
           variant={alert.severity === 'critical' ? 'error' : 'warning'}
+          announce="change"
         />
       )) ?? null}
     </>

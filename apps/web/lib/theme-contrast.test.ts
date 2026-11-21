@@ -145,6 +145,8 @@ const SHARED: Pair[] = [
   text("var(--muted-foreground)", "var(--background)"),
   text("var(--muted-foreground)", "var(--muted)"),
   text("var(--primary-foreground)", "var(--primary)"),
+  text("var(--primary-ink)", "var(--card)"),
+  text("var(--primary-ink)", "var(--background)"),
   text("var(--secondary-foreground)", "var(--secondary)"),
   text("var(--accent-foreground)", "var(--accent)"),
   ...["success", "warning", "danger", "info", "neutral"].map((tone) =>
@@ -179,7 +181,7 @@ const NEUBRUTALISM: Record<"light" | "dark", Pair[]> = {
     text("var(--nb-ink)", "var(--nb-hover-fill)"),
     text("var(--nb-ink)", "color-mix(in oklab, var(--nb-pink) 24%, var(--nb-sheet))"),
     ...NB_SCORES.map((s) => text(`var(--nb-score-${s})`, `color-mix(in oklab, var(--nb-score-${s}) 12%, var(--nb-sheet))`)),
-    // .text-primary (current-team names, panel icons) reads in --signal-info,
+    // text-primary-ink (current-team names, panel icons) reads in --signal-info,
     // and status text sits on zebra wells and the lilac "you" row as well as on cards.
     ...NB_ROW_SURFACES.light.flatMap((bg) => NB_TEXT_SIGNALS.map((signal) => text(`var(--signal-${signal})`, bg))),
     { fg: "var(--border)", bg: "var(--card)", min: 3, label: "outline on card" },

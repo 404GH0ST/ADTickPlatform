@@ -3,10 +3,10 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { ScrollableRegion } from '@/components/ui/scrollable-region';
 
-function Table({ className, scrollLabel = 'Table', ...props }: React.ComponentProps<'table'> & { scrollLabel?: string }) {
+function Table({ className, scrollLabel, ...props }: React.ComponentProps<'table'> & { scrollLabel?: string }) {
   return (
-    <ScrollableRegion axis="horizontal" label={scrollLabel} data-slot="table-container" className="relative w-full overflow-x-auto">
-      <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
+    <ScrollableRegion axis="horizontal" label={scrollLabel ?? 'Table'} data-slot="table-container" className="relative w-full overflow-x-auto">
+      <table aria-label={scrollLabel} className={cn('w-full caption-bottom text-sm', className)} {...props} />
     </ScrollableRegion>
   );
 }

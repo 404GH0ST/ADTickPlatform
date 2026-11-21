@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  startTransition,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   persistThemePreference,
@@ -41,7 +49,10 @@ export function DocumentAppearance({
 
   useLayoutEffect(() => {
     const storedMode = readStoredThemePreference();
-    if (storedMode) setSelectedMode(storedMode);
+    // The inline head script has already applied this mode. An urgent update
+    // here would make React discard server HTML that hasn't hydrated yet,
+    // including anything typed into it.
+    if (storedMode) startTransition(() => setSelectedMode(storedMode));
 
     const media = window.matchMedia(SYSTEM_COLOR_SCHEME_QUERY);
     const updateSystemMode = () => setSystemMode(media.matches ? "dark" : "light");
@@ -51,13 +62,21 @@ export function DocumentAppearance({
   }, []);
 
   const preference = selectedMode ?? defaultMode;
-  function selectMode(mode: ThemePreference) {
-    persistThemePreference(mode);
-    setSelectedMode(mode);
-  }
+  // Stable across renders: a new context value reaches every Suspense boundary
+  // still waiting to hydrate, and React then replaces its server HTML.
+  const colorMode = useMemo(
+    () => ({
+      preference,
+      selectMode(mode: ThemePreference) {
+        persistThemePreference(mode);
+        setSelectedMode(mode);
+      },
+    }),
+    [preference],
+  );
 
   return (
-    <ColorModeContext.Provider value={{ preference, selectMode }}>
+    <ColorModeContext.Provider value={colorMode}>
       <html
         lang="en"
         className={className}

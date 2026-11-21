@@ -77,8 +77,11 @@ block too, or it carries into dark mode. Keep the contrast rules in
 
 Extra CSS (classes for your views, backgrounds, per-component tweaks) is
 allowed. Put it under `@layer components { :root[data-scheme="my-theme"] ... }`
-so utilities can still override it. `lib/themes.test.ts` fails if a theme's
-CSS mentions another theme's `data-scheme`.
+so utilities can still override it. A theme that uses `@layer` must start with
+`@layer properties, theme, base, components, utilities;`: error responses can
+load its CSS before Tailwind's, and without this line Tailwind's reset wins.
+`lib/themes.test.ts` fails if that line is missing or if a theme's CSS mentions
+another theme's `data-scheme`.
 
 **Restyling stock views:** target the attributes stock components expose,
 not their Tailwind classes, so a class refactor in a stock view cannot
@@ -86,8 +89,16 @@ silently change your theme:
 
 - `data-slot` on primitives (`card`, `button`, `input`, `badge`,
   `table-container`, `info-panel`, `summary-strip`, …) and `data-slot="well"`
-  on inner boxes: stat boxes, disclosures and list frames that sit inside a
-  card. A danger well also carries `data-tone="danger"`.
+  on inner boxes: stat boxes, disclosures, list rows and frames that sit
+  inside a card (the attack globe frame is one). A danger well also carries
+  `data-tone="danger"`. A bordered wrapper around a bare `<input>` is
+  `data-slot="input-group"`; the theme picker's preview is
+  `data-slot="swatch"`. A framed stock section that is not a `Card` (the
+  setup checklist) is `data-slot="panel"`; the award leaders' rank and score
+  figures are `data-slot="leader-rank"` / `"leader-score"`. An option card (a label
+  wrapping a radio, such as a challenge's TCP/HTTP connection) is
+  `data-slot="choice"`; style its chosen state with `:has(:checked)`. The category
+  icon square on the stock service card is `data-slot="category-icon"`.
 - `data-tone` on `InfoPanel` (`muted`, `surface`, `warning`).
 - `aria-pressed`, `aria-checked` and `data-active` for selected state.
 - `data-fx` on attack-map parts. Some ship hidden (`display="none"`) for a
@@ -95,9 +106,24 @@ silently change your theme:
   shapes `globe-sphere-shadow`, `team-core-shadow` and `team-plate-shadow`.
   Prefer them to `filter: drop-shadow()`, which re-rasterizes on every frame
   of the rotating globe.
+  The compact "Globe controls" panel is `data-fx="map-popover"`.
 
 When you add a bordered inner box to a stock view, give it
-`data-slot="well"`.
+`data-slot="well"`. A bordered box with no slot gets no theme styling at all:
+themes never match `rounded-sm border` and friends.
+
+**Challenge category and connection:** service rows carry `category`
+(`pwn | web | crypto | ""`) and `protocol` (`tcp | http`), and
+`describeService()` returns `categoryLabel` and `connection` (an `nc` command or
+URL, with `copyText` and, for HTTP, `href`). Draw the glyph with
+`ChallengeCategoryIcon`, reuse `ServiceConnectionLine`, or build your own row
+with `useCopyFeedback()`; all are in the kit.
+
+**Primary-tinted text:** stock views colour icons and the current team's name
+with `text-primary-ink`, backed by the `--primary-ink` token (Graphite sets it
+to `--primary`). If your `--primary` is a fill colour that fails as text, as
+Neubrutalism's yellow does, set `--primary-ink` to a text-safe hue in both
+modes instead of restyling the class.
 
 Graphite's fallback tokens are loaded globally. The root layout loads the
 selected theme stylesheet separately. Use lazy imports for view overrides to
@@ -193,6 +219,10 @@ untouched.
   still switch modes.
 - Keep accessible names: label the flag textarea "Flags", and keep the button
   names ("SSH Access", "Restart", "Factory Reset", "Submit").
+- Attach `inputRef` to the flag textarea and `fieldRefs.*` to the login fields.
+  They keep text typed or autofilled before the page finishes loading.
+- When `unavailable` is set (Scoreboard, Attacks, Overview), the request failed.
+  Don't draw an empty board or a 0: render `DataUnavailable` from the kit.
 - If an override throws while rendering, the stock view is shown instead and
   the error is logged as `[theme:<id>] <Slot> override failed`. A throw
   during server rendering doesn't fail the page: React retries that view in
