@@ -16,7 +16,8 @@ import {
   isDefaultAttackFilters,
   type AttackFilters,
 } from '@/lib/dashboard-utils';
-import { PlatformAPIError, processApiResponse } from '@/lib/api-utils';
+import { browserRequestErrorMessage, PlatformAPIError, processApiResponse } from '@/lib/api-utils';
+import { LiveStream } from '@/lib/live-stream';
 import {
   SERVICE_ACTION_COOLDOWN_SECONDS,
   cooldownKey,
@@ -25,6 +26,7 @@ import {
   parseRetryAfterSeconds,
   remainingCooldownSeconds,
   restartSuccessMessage,
+  slowActionMessage,
   type ServiceAction,
   type ServiceActionFeedback,
   type ServiceNotice,
@@ -35,7 +37,14 @@ export type ControlCenterOptions = {
   realtimeBaseUrl: string;
   scores: ScoreRow[];
   services: ServiceRow[];
+  /** These requests failed on the latest refresh, so what is on screen stays. */
+  scoresUnavailable?: boolean;
+  servicesUnavailable?: boolean;
+  attacksUnavailable?: boolean;
 };
+
+// A normal action answers well before this.
+const SLOW_ACTION_MS = 10_000;
 
 const baseAttackFilters = {
   limit: '12',
@@ -59,14 +68,22 @@ export type ControlCenterState = {
   actionError: string | null;
   applyAttackFilters: () => Promise<void>;
   attackFilters: AttackFilters;
+  /** The filters behind the rows on screen. A failed request leaves these unchanged. */
+  appliedAttackFilters: AttackFilters;
+  attackFeedError: string | null;
   highlightedAttackIDs: string[];
   attackLiveMode: boolean;
+  /** The live streams are delivering data, whatever the last page load did. */
+  scoresLive: boolean;
+  attacksLive: boolean;
   attackPageState: AttackFeedPage;
   closeFactoryResetDialog: () => void;
   closeSSHSessionDialog: () => void;
   issuedSession: SSHSessionData | null;
   pageAttackFeed: (direction: 'prev' | 'next') => Promise<void>;
   pendingAction: string | null;
+  /** Set once the pending action has run unusually long. */
+  pendingNote: string | null;
   requestFactoryReset: () => Promise<void>;
   requestRestart: (service: ServiceRow) => Promise<void>;
   requestSSHSession: () => Promise<void>;
@@ -93,6 +110,9 @@ export function useControlCenter({
   realtimeBaseUrl,
   scores,
   services,
+  scoresUnavailable,
+  servicesUnavailable,
+  attacksUnavailable,
 }: ControlCenterOptions): ControlCenterState {
   const initialAttackFilters = useMemo<AttackFilters>(
     () => ({
@@ -112,13 +132,15 @@ export function useControlCenter({
     return () => window.removeEventListener('platform:flag-accepted', refresh);
   }, [router]);
 
+  // A failed refresh arrives as an empty list. It says nothing about the match,
+  // so the last good rows stay until a real answer replaces them.
   useEffect(() => {
-    setRows(services);
-  }, [services]);
+    if (!servicesUnavailable) setRows(services);
+  }, [services, servicesUnavailable]);
 
   useEffect(() => {
-    setScoreRows(scores);
-  }, [scores]);
+    if (!scoresUnavailable) setScoreRows(scores);
+  }, [scores, scoresUnavailable]);
 
 
   useEffect(() => {
@@ -133,11 +155,23 @@ export function useControlCenter({
   const [resetTarget, setResetTarget] = useState<ServiceRow | null>(null);
   const [issuedSession, setIssuedSession] = useState<SSHSessionData | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [slowAction, setSlowAction] = useState<string | null>(null);
+  const pendingNote =
+    pendingAction && slowAction === pendingAction ? slowActionMessage(pendingAction) : null;
   const [actionError, setActionError] = useState<string | null>(null);
   const [serviceNotices, setServiceNotices] = useState<Record<string, ServiceNotice>>({});
   const [cooldownUntil, setCooldownUntil] = useState<Record<string, number>>({});
   const [now, setNow] = useState(() => Date.now());
   const cooldownActive = Object.values(cooldownUntil).some((until) => until > now);
+
+  useEffect(() => {
+    if (!pendingAction) return;
+    const timer = setTimeout(() => setSlowAction(pendingAction), SLOW_ACTION_MS);
+    return () => {
+      clearTimeout(timer);
+      setSlowAction(null);
+    };
+  }, [pendingAction]);
 
   useEffect(() => {
     if (!cooldownActive) {
@@ -176,7 +210,7 @@ export function useControlCenter({
         startCooldown(action, serviceId, seconds);
       }
       const message =
-        error.message && !error.message.startsWith('API request to')
+        error.message && !error.message.startsWith('Too many requests')
           ? error.message
           : cooldownMessage(action, seconds ?? SERVICE_ACTION_COOLDOWN_SECONDS[action]);
       return { action, variant: 'warning', message };
@@ -184,27 +218,44 @@ export function useControlCenter({
     return {
       action,
       variant: 'error',
-      message: error instanceof Error ? error.message : fallback,
+      message: browserRequestErrorMessage(error, fallback),
     };
+  }
+
+  function slowNotice(serviceId: string): ServiceNotice | null {
+    if (!pendingNote || !pendingAction?.endsWith(`:${serviceId}`)) return null;
+    if (pendingAction.startsWith('restart:')) return { action: 'restart', variant: 'warning', message: pendingNote };
+    if (pendingAction.startsWith('reset:')) return { action: 'reset', variant: 'warning', message: pendingNote };
+    return null;
   }
 
   function serviceFeedback(service: ServiceRow): ServiceActionFeedback {
     return {
-      notice: serviceNotices[service.id] ?? null,
+      notice: slowNotice(service.id) ?? serviceNotices[service.id] ?? null,
       restartCooldown: remainingCooldownSeconds(cooldownUntil[cooldownKey('restart', service.id)], now),
       resetCooldown: remainingCooldownSeconds(cooldownUntil[cooldownKey('reset', service.id)], now),
     };
   }
   const [attackFilters, setAttackFilters] = useState<AttackFilters>(initialAttackFilters);
+  const [appliedAttackFilters, setAppliedAttackFilters] = useState<AttackFilters>(initialAttackFilters);
+  const [attackFeedError, setAttackFeedError] = useState<string | null>(null);
+  const [scoresLive, setScoresLive] = useState(false);
+  const [attacksLive, setAttacksLive] = useState(false);
   const attackPageRef = useRef<AttackFeedPage>(attackPage);
   const { highlightedAttackIDs, scheduleAttackHighlights, clearAttackHighlights } = useAttackHighlights();
   const playAttackSfx = useAttackSfx();
   const attackRealtimeEnabled = initialAttackFilters.offset === '0';
   const attackLiveMode = useMemo(
-    () => attackRealtimeEnabled && isDefaultAttackFilters(attackFilters, initialAttackFilters),
-    [attackFilters, attackRealtimeEnabled, initialAttackFilters],
+    () => attackRealtimeEnabled && isDefaultAttackFilters(appliedAttackFilters, initialAttackFilters),
+    [appliedAttackFilters, attackRealtimeEnabled, initialAttackFilters],
   );
   const attackRows = attackPageState.items;
+
+  // A page that opened during an outage has no feed to keep: take the first good one.
+  useEffect(() => {
+    if (attacksUnavailable || !attackLiveMode || attackPage.items.length === 0) return;
+    setAttackPageState((current) => (current.items.length === 0 ? attackPage : current));
+  }, [attackPage, attacksUnavailable, attackLiveMode]);
 
   const summary = useMemo(() => {
     const stableServices = rows.filter((row) => row.status === 'stable').length;
@@ -229,34 +280,43 @@ export function useControlCenter({
       return;
     }
 
-    const scoreboardSource = new EventSource(`${realtimeBaseUrl}/scoreboard/stream`);
-    const attacksSource = new EventSource(`${realtimeBaseUrl}/attacks/stream`);
+    const scoreboardSource = new LiveStream(`${realtimeBaseUrl}/scoreboard/stream`);
+    const attacksSource = new LiveStream(`${realtimeBaseUrl}/attacks/stream`);
 
     scoreboardSource.onmessage = (event) => {
       try {
         setScoreRows(JSON.parse(event.data) as ScoreRow[]);
+        setScoresLive(true);
       } catch {
         // Keep the last good snapshot if one event is malformed.
       }
     };
+    scoreboardSource.onerror = () => setScoresLive(false);
 
-    attacksSource.onmessage = handleRealtimeAttackMessage({
+    const handleAttackFrame = handleRealtimeAttackMessage({
       isLive: () => attackLiveMode,
       currentPage: () => attackPageRef.current,
-      limitStr: attackFilters.limit,
+      limitStr: appliedAttackFilters.limit,
       setPage: setAttackPageState,
-      onInvalidate: () => { void refreshAttackFeed(true, attackFilters, true); },
+      onInvalidate: () => { void refreshAttackFeed(true, initialAttackFilters, true); },
       scheduleHighlights: (ids, firstBloodIds) => {
         scheduleAttackHighlights([...new Set([...ids, ...firstBloodIds])]);
         playAttackSfx(ids, firstBloodIds);
       },
     });
+    attacksSource.onmessage = (event) => {
+      setAttacksLive(attackLiveMode);
+      handleAttackFrame(event);
+    };
+    attacksSource.onerror = () => setAttacksLive(false);
 
     return () => {
       scoreboardSource.close();
       attacksSource.close();
+      setScoresLive(false);
+      setAttacksLive(false);
     };
-  }, [attackFilters.limit, attackLiveMode, playAttackSfx, realtimeBaseUrl, scheduleAttackHighlights]);
+  }, [appliedAttackFilters.limit, attackLiveMode, initialAttackFilters, playAttackSfx, realtimeBaseUrl, scheduleAttackHighlights]);
 
   function buildAttackQuery(filters: AttackFilters): string {
     const params = new URLSearchParams();
@@ -320,6 +380,7 @@ export function useControlCenter({
     if (!silent) {
       setPendingAction('attacks:refresh');
       setActionError(null);
+      setAttackFeedError(null);
     }
 
     try {
@@ -328,9 +389,12 @@ export function useControlCenter({
 
       if (!preserveHighlights) clearAttackHighlights();
       setAttackPageState(payload);
+      setAppliedAttackFilters(filters);
     } catch (error) {
       if (!silent) {
-        setActionError(error instanceof Error ? error.message : 'attack feed fetch failed');
+        setAttackFeedError(browserRequestErrorMessage(error, "The attack feed couldn't be loaded."));
+        // The rows didn't change, so neither did their place in the feed.
+        setAttackFilters((current) => ({ ...current, offset: appliedAttackFilters.offset }));
       }
     } finally {
       if (!silent) {
@@ -388,7 +452,7 @@ export function useControlCenter({
         current ? { ...current, sshHint: payload.connection_hint } : current,
       );
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'ssh session request failed');
+      setActionError(browserRequestErrorMessage(error, 'ssh session request failed'));
     } finally {
       setPendingAction(null);
     }
@@ -540,14 +604,19 @@ export function useControlCenter({
     actionError,
     applyAttackFilters,
     attackFilters,
+    appliedAttackFilters,
+    attackFeedError,
     highlightedAttackIDs,
     attackLiveMode,
+    scoresLive,
+    attacksLive,
     attackPageState,
     closeFactoryResetDialog,
     closeSSHSessionDialog,
     issuedSession,
     pageAttackFeed,
     pendingAction,
+    pendingNote,
     requestFactoryReset,
     requestRestart,
     requestSSHSession,
