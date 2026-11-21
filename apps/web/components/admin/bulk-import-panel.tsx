@@ -12,7 +12,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
-import { processApiResponse, parseApiError } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  parseApiError,
+  processApiResponse,
+} from "@/lib/api-utils";
 import type { AdminBulkImportResult } from "@/lib/admin-dashboard-types";
 import { parseTeamCsv } from "@/lib/team-csv";
 
@@ -66,7 +70,7 @@ export function BulkImportPanel(): ReactElement {
       setDetails(result.errors ?? []);
     } catch (importError) {
       setError(
-        importError instanceof Error ? importError.message : "import failed",
+        browserRequestErrorMessage(importError, "import failed"),
       );
     } finally {
       setPending(false);

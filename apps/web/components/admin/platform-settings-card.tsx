@@ -1,5 +1,6 @@
 "use client";
 
+import { browserRequestErrorMessage } from "@/lib/api-utils";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
@@ -82,7 +83,7 @@ export function PlatformSettingsCard(): ReactElement {
       setMaxTeamMembers(String(data.max_team_members ?? 0));
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "failed to load platform settings.";
+        browserRequestErrorMessage(error, "failed to load platform settings.");
       setSaveState({ kind: "error", message });
     }
   }, []);
@@ -122,7 +123,7 @@ export function PlatformSettingsCard(): ReactElement {
       setSaveState({ kind: "saved" });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "failed to save platform settings.";
+        browserRequestErrorMessage(error, "failed to save platform settings.");
       setSaveState({ kind: "error", message });
     }
   }, [isValid, maxTeamMembersValid, parsedMaxTeamMembers, trimmed]);
@@ -148,7 +149,7 @@ export function PlatformSettingsCard(): ReactElement {
       setSaveState({ kind: "saved" });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "failed to save or reload flag format.";
+        browserRequestErrorMessage(error, "failed to save or reload flag format.");
       setSaveState({ kind: "error", message });
     }
   }, [isValid, maxTeamMembersValid, parsedMaxTeamMembers, trimmed]);
@@ -161,7 +162,7 @@ export function PlatformSettingsCard(): ReactElement {
       setSaveState({ kind: "saved" });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "flag format reload failed.";
+        browserRequestErrorMessage(error, "flag format reload failed.");
       setSaveState({ kind: "error", message });
     }
   }, []);

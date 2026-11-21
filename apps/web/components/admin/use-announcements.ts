@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import { processApiResponse, parseApiError } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  parseApiError,
+  processApiResponse,
+} from "@/lib/api-utils";
 import type { AdminMatchAnnouncement } from "@/lib/admin-dashboard-types";
 
 /** State and actions for organizer match announcements (OrganizerAnnouncements slot). */
@@ -45,9 +49,7 @@ export function useAnnouncements(): AnnouncementsState {
   useEffect(() => {
     void refresh().catch((loadError: unknown) => {
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "failed to load announcements",
+        browserRequestErrorMessage(loadError, "failed to load announcements"),
       );
     });
   }, [refresh]);
@@ -73,9 +75,7 @@ export function useAnnouncements(): AnnouncementsState {
       await refresh();
     } catch (createError) {
       setError(
-        createError instanceof Error
-          ? createError.message
-          : "create announcement failed",
+        browserRequestErrorMessage(createError, "create announcement failed"),
       );
     } finally {
       setPending(false);
@@ -97,9 +97,7 @@ export function useAnnouncements(): AnnouncementsState {
       await refresh();
     } catch (deleteError) {
       setError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : "delete announcement failed",
+        browserRequestErrorMessage(deleteError, "delete announcement failed"),
       );
     } finally {
       setPending(false);

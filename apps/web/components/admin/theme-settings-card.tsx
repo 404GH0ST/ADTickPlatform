@@ -1,5 +1,6 @@
 "use client";
 
+import { browserRequestErrorMessage } from "@/lib/api-utils";
 import { useRouter } from "next/navigation";
 import { useLayoutEffect, useRef, useState, useTransition } from "react";
 
@@ -64,7 +65,7 @@ export function ThemeSettingsCard() {
       // Re-render the root layout so html[data-scheme] and layout overrides switch.
       startRefresh(() => router.refresh());
     } catch (error) {
-      setState({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      setState({ kind: "error", message: browserRequestErrorMessage(error, String(error))});
     }
   }
 

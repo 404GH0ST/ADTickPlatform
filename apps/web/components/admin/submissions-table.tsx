@@ -8,7 +8,10 @@ import type {
   AdminSubmissionPage,
   SubmissionDeletion,
 } from '@/lib/admin-dashboard-types';
-import { processApiResponse } from '@/lib/api-utils';
+import {
+  browserRequestErrorMessage,
+  processApiResponse,
+} from '@/lib/api-utils';
 import { formatIndonesianDate } from '@/lib/date-format';
 import { Button } from '@/components/ui/button';
 import { AppDialog } from '@/components/ui/app-dialog';
@@ -75,9 +78,7 @@ export function SubmissionsTable({
       }
     } catch (cause) {
       setActionError(
-        cause instanceof Error
-          ? cause.message
-          : 'Could not delete this submission. Try again.',
+        browserRequestErrorMessage(cause, 'Could not delete this submission. Try again.'),
       );
     } finally {
       setPending(false);

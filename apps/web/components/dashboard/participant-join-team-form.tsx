@@ -6,7 +6,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBanner } from "@/components/ui/status-banner";
-import { parseApiError } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  parseApiError,
+} from "@/lib/api-utils";
 
 export function ParticipantJoinTeamForm() {
   const router = useRouter();
@@ -36,7 +39,7 @@ export function ParticipantJoinTeamForm() {
 
       router.refresh();
     } catch (joinError) {
-      setError(joinError instanceof Error ? joinError.message : "team join failed");
+      setError(browserRequestErrorMessage(joinError, "team join failed"));
     } finally {
       setPending(false);
     }

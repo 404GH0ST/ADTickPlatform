@@ -1,5 +1,6 @@
 "use client";
 
+import { browserRequestErrorMessage } from "@/lib/api-utils";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { FocusEvent, ReactElement, ReactNode, RefObject } from "react";
@@ -2227,7 +2228,7 @@ export function ScoreboardFreezeControl(): ReactElement {
       setStatus((await res.json()) as AdminScoreboardFreeze);
       setNote("Freeze window saved.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "freeze update failed");
+      setError(browserRequestErrorMessage(err, "freeze update failed"));
     } finally {
       setBusy(false);
     }
@@ -2252,7 +2253,7 @@ export function ScoreboardFreezeControl(): ReactElement {
       setUnfreezeAt(emptyFreezeDateTime);
       setNote("Freeze cleared. Participant board is live.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "freeze clear failed");
+      setError(browserRequestErrorMessage(err, "freeze clear failed"));
     } finally {
       setBusy(false);
     }

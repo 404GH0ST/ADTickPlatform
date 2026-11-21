@@ -18,7 +18,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { StatusBanner } from "@/components/ui/status-banner";
 import type { PlatformOverview } from "@/lib/dashboard-types";
-import { parseApiError } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  parseApiError,
+} from "@/lib/api-utils";
 
 type TeamMember = {
   player_id: number;
@@ -119,9 +122,7 @@ export function ParticipantAccountSettings({
         if (!cancelled) {
           setMembers([]);
           setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "failed to load team members",
+            browserRequestErrorMessage(loadError, "failed to load team members"),
           );
         }
       } finally {
@@ -202,9 +203,7 @@ export function ParticipantAccountSettings({
       router.refresh();
     } catch (updateError) {
       setError(
-        updateError instanceof Error
-          ? updateError.message
-          : "profile update failed",
+        browserRequestErrorMessage(updateError, "profile update failed"),
       );
     } finally {
       setPending(false);
@@ -236,9 +235,7 @@ export function ParticipantAccountSettings({
       router.refresh();
     } catch (transferError) {
       setError(
-        transferError instanceof Error
-          ? transferError.message
-          : "captain transfer failed",
+        browserRequestErrorMessage(transferError, "captain transfer failed"),
       );
     } finally {
       setPending(false);

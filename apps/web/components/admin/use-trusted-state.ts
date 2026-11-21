@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { processApiResponse } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  processApiResponse,
+} from "@/lib/api-utils";
 import type {
   AdminControllerAccessStatus,
   AdminWireGuardGatewayStatus,
@@ -109,9 +112,7 @@ export function useTrustedState(): TrustedState {
       }
     } catch (loadError) {
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "trusted state refresh failed",
+        browserRequestErrorMessage(loadError, "trusted state refresh failed"),
       );
     }
   }, []);
@@ -147,9 +148,7 @@ export function useTrustedState(): TrustedState {
       window.dispatchEvent(new Event("ad-platform:deployments-reconciled"));
     } catch (reconcileError) {
       setError(
-        reconcileError instanceof Error
-          ? reconcileError.message
-          : "trusted reconcile failed",
+        browserRequestErrorMessage(reconcileError, "trusted reconcile failed"),
       );
     } finally {
       setPending(false);
