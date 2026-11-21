@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { AppearanceControls } from '@/components/ui/appearance-controls';
+import { LinkPendingSignal } from '@/components/ui/link-pending';
 import { WorkspaceFrame } from '@/components/ui/workspace-frame';
 
 export type NavItem = {
@@ -78,6 +79,7 @@ export function DefaultAppShell({
                 className="shell-nav-link shrink-0"
               >
                 {item.label}
+                <LinkPendingSignal />
               </Link>
             ))}
             {secondaryNavItems.length > 0 ? (
@@ -91,6 +93,7 @@ export function DefaultAppShell({
                     className="shell-nav-link shrink-0"
                   >
                     {item.label}
+                    <LinkPendingSignal />
                   </Link>
                 ))}
               </>

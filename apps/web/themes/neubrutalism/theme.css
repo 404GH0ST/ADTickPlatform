@@ -392,6 +392,24 @@
   font-weight: 700;
 }
 
+/* Touch: a 44px target that reaches into the well's padding, so the layout
+   doesn't move. */
+@media (pointer: coarse), (width < 40rem) {
+  :root[data-scheme="neubrutalism"] details[data-slot="well"] > summary {
+    margin-block: -0.75rem;
+    padding-block: 0.75rem;
+  }
+
+  /* A bare disclosure in a filter form has no padding to reach into. */
+  :root[data-scheme="neubrutalism"] main form details:not([data-slot]) > summary {
+    padding-block: 0.75rem;
+  }
+
+  :root[data-scheme="neubrutalism"] a.nb-connection-target {
+    min-block-size: 2.75rem;
+  }
+}
+
 :root[data-scheme="neubrutalism"] [data-slot="card-header"] {
   border-bottom: var(--nb-line) solid var(--border);
 }
@@ -1300,6 +1318,10 @@
   :root[data-scheme="neubrutalism"] .nb-nav-link:hover {
     border-color: color-mix(in oklab, var(--nb-on-blue) 70%, transparent);
     background: var(--nb-rail-hover);
+  }
+
+  :root[data-scheme="neubrutalism"] .nb-nav-link:has(> [data-link-pending="true"]) {
+    outline-color: var(--nb-on-blue);
   }
 
   /* Current page: a white key on the blue rail (selection, not status). */

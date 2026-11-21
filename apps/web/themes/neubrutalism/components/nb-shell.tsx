@@ -20,7 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { AppearanceControls, type AppShellProps, type NavItem } from "@/components/theme/kit";
+import { AppearanceControls, LinkPendingSignal, type AppShellProps, type NavItem } from "@/components/theme/kit";
 
 import { NbMenu } from "./nb-menu";
 
@@ -105,6 +105,7 @@ function NavGroup({
           >
             <Icon className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
             <span className="nb-rail-text min-w-0 wrap-anywhere">{item.label}</span>
+            <LinkPendingSignal />
           </Link>
         );
       })}

@@ -3,6 +3,7 @@
 import type { ReactElement, ReactNode } from "react";
 
 import { ThemeSlot } from "@/components/theme/theme-slot";
+import { LinkPendingSignal } from "@/components/ui/link-pending";
 import Link from "next/link";
 import type { OverviewLink } from "@/lib/theme-contract";
 
@@ -46,6 +47,7 @@ export function DefaultOrganizerOverviewView({
                   <span className="text-xs tabular-nums text-muted-foreground">{link.meta}</span>
                 </span>
                 <span className="text-xs leading-5 text-muted-foreground">{link.description}</span>
+                <LinkPendingSignal />
               </Link>
             </li>
           ))}

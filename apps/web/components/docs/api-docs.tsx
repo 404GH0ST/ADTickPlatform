@@ -25,7 +25,7 @@ export function DefaultApiDocsView({ specURL, explorer }: ApiDocsViewProps): Rea
       <div className="min-w-0 space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Swagger Explorer</CardTitle>
+            <CardTitle as="h2">Swagger Explorer</CardTitle>
             <CardDescription>
               Interactive view of the participant API using the same OpenAPI YAML served by this app.
             </CardDescription>

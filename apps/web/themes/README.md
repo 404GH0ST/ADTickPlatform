@@ -223,6 +223,14 @@ untouched.
   They keep text typed or autofilled before the page finishes loading.
 - When `unavailable` is set (Scoreboard, Attacks, Overview), the request failed.
   Don't draw an empty board or a 0: render `DataUnavailable` from the kit.
+- When `sessionEnded` is set on the flag form, show a link to `/login`. The
+  unsent text is kept for that player and discarded for any other account.
+- A custom attacks view should label its rows from `appliedFilters`, not
+  `attackFilters`, and show `feedError`. A failed request leaves the rows alone.
+- Put `LinkPendingSignal` from the kit inside each navigation `<Link>`. It styles
+  the link and shows the top progress bar while a slow page loads.
+- Show `pendingNote` in custom SSH and factory reset dialogs. It explains an
+  action that is taking unusually long.
 - If an override throws while rendering, the stock view is shown instead and
   the error is logged as `[theme:<id>] <Slot> override failed`. A throw
   during server rendering doesn't fail the page: React retries that view in

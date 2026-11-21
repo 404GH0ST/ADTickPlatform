@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { LinkPendingSignal } from '@/components/ui/link-pending';
+
 export type ActionCardProps = {
   href: string;
   title: string;
@@ -27,6 +29,7 @@ export function ActionCard({ href, title, description, meta }: ActionCardProps) 
       <p className="border-t border-border px-3.5 py-2 text-xs font-medium tabular-nums text-muted-foreground">
         {meta}
       </p>
+      <LinkPendingSignal />
     </Link>
   );
 }

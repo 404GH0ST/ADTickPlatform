@@ -140,6 +140,7 @@ export { Input } from "@/components/ui/input";
 export { Label } from "@/components/ui/label";
 export { ScrollableRegion } from "@/components/ui/scrollable-region";
 export { StatusBanner } from "@/components/ui/status-banner";
+export { LinkPendingSignal } from "@/components/ui/link-pending";
 export {
   ATTACKS_UNAVAILABLE,
   DataUnavailable,

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowUpRight, BookOpen, Server, Trophy, Zap, type LucideIcon } from "lucide-react";
 
-import { cn, type OverviewLink, type OverviewViewProps } from "@/components/theme/kit";
+import { cn, LinkPendingSignal, type OverviewLink, type OverviewViewProps } from "@/components/theme/kit";
 
 const STYLE: Record<OverviewLink["id"], { icon: LucideIcon; layout: string }> = {
   services: { icon: Server, layout: "md:col-span-2 md:min-h-[17rem]" },
@@ -75,6 +75,7 @@ export function NbOverview({ links, teamName, scoreCount, serviceCount, attackCo
                   <span>{link.meta.replace(/^\d+\s*/, "")}</span>
                 </p>
               </div>
+              <LinkPendingSignal />
             </Link>
           );
         })}
