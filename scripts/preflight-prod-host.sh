@@ -169,6 +169,18 @@ if [[ -n "${default_routes}" ]] && ! awk -v uplink="${internet_interface}" '
   exit 1
 fi
 
+if [[ "${GAME_CORE_CHECKER_SOURCE_MODE:-player}" == "player" ]]; then
+  if [[ "${CONTROLLER_ACCESS_MODE:-host}" != "host" ]]; then
+    echo "GAME_CORE_CHECKER_SOURCE_MODE=player requires CONTROLLER_ACCESS_MODE=host" >&2
+    exit 1
+  fi
+  checker_route_conflicts="$(ip -4 -o route show root 10.79.0.0/16 | grep -v ' dev adpchk0 ' || true)"
+  if [[ -n "${checker_route_conflicts}" ]]; then
+    echo "checker network 10.79.0.0/16 conflicts with an existing host route: ${checker_route_conflicts}" >&2
+    exit 1
+  fi
+fi
+
 assert_port_free "${POSTGRES_LOOPBACK_PORT}" "postgres loopback"
 assert_port_free "${CHECKER_RUNNER_LOOPBACK_PORT}" "checker-runner loopback"
 assert_port_free "${CONTROLLER_HOST_PORT}" "controller-service host"

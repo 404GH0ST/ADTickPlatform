@@ -78,6 +78,7 @@ export function DefaultParticipantManualView({ steps, apiExplorerHref, openApiHr
             <p>Download the whitebox source bundle, submit a correct enemy flag on the challenge, and open SSH Access to view the stable team credential.</p>
             <p>Patch files directly inside the running service container, then use <code>POST /api/v2/services/{'{challenge_id}'}/reset/restart</code> when you want to keep the current filesystem changes.</p>
             <p>Use <code>POST /api/v2/services/{'{challenge_id}'}/reset/factory</code> only when you want to throw away the current patch state and return to the organizer baseline image. If an issued flag is still outstanding, the reset forfeits its tick SLA and incurs a severe defense penalty.</p>
+            <p><strong>Fair play:</strong> defend by fixing vulnerabilities. Do not block, allowlist, or treat traffic differently based on source IP, team, or whether it looks like the checker, including in application code or proxies. Checker runs use addresses from the player VPN range, so filtering players can fail your checker and cost SLA.</p>
           </CardContent>
         </Card>
       </div>

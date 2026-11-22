@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"adplatform/internal/platform/config"
+	"adplatform/internal/platform/gamenet"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -326,6 +327,7 @@ func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, bin
 		if isValidIP(policy.ServiceIP) {
 			// Filter still drops participant traffic to closed services.
 			fmt.Fprintf(&rules, "-A %s%s -d %s/32 -j ACCEPT\n", chain, iptablesInterface("-i", e.interfaceName), policy.ServiceIP)
+			fmt.Fprintf(&rules, "-A %s -i %s -d %s/32 -j ACCEPT\n", chain, gamenet.CheckerBridgeName, policy.ServiceIP)
 		}
 	}
 	return e.restoreIptablesTable(ctx, binary, rules.String())
@@ -349,6 +351,13 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, bi
 
 	ingress := iptablesInterface("-i", e.interfaceName)
 	egress := iptablesInterface("-o", e.interfaceName)
+	// Checkers keep reaching service ports during pre-match warmup, when players
+	// are closed out. The match pause guard still stops them while play is halted.
+	for _, policy := range policies {
+		if isValidIP(policy.ServiceIP) && policy.ServicePort > 0 {
+			fmt.Fprintf(&rules, "-A %s -i %s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, gamenet.CheckerBridgeName, policy.ServiceIP, policy.ServicePort)
+		}
+	}
 	// Closed services and SSH are checked before established connections.
 	for _, policy := range policies {
 		if !policy.NetworkClosed || !isValidIP(policy.ServiceIP) {

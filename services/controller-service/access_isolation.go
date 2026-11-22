@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"adplatform/internal/platform/config"
+	"adplatform/internal/platform/gamenet"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -67,6 +68,8 @@ func gameNetworkCIDRs(policies []apigateway.ControllerServiceAccessPolicy) ([]st
 //     chain applies the same limit to ports Docker publishes on the host.
 //   - forward: egress-disabled services can reach only game networks and VPN
 //     clients, so reverse shells to players work on every challenge.
+//   - checker_source: checkers reach services from the player address range, so
+//     a service cannot keep its SLA by trusting only the checker network.
 //   - bridge: one service instance can open a connection to another only on an
 //     open service port. Checkers are not service addresses, so warmup and SLA
 //     checks are unaffected. The bridge hook sees every Docker network on the
@@ -96,12 +99,18 @@ func renderGameIsolationRules(tableName, wireGuardInterface string, gameCIDRs []
 	writeNftSet(&rules, "egress_denied", "ipv4_addr", "", egressDenied)
 	rules.WriteString("  chain input {\n    type filter hook input priority filter; policy accept;\n")
 	rules.WriteString("    ct state established,related accept\n")
-	rules.WriteString("    ip saddr @game_networks drop\n  }\n")
+	rules.WriteString("    ip saddr @game_networks drop\n")
+	fmt.Fprintf(&rules, "    ip saddr %s drop\n  }\n", gamenet.CheckerNetworkSubnet)
+	// Checkers reach services with a player-range source address, keeping the
+	// host part so each run has one stable address.
+	rules.WriteString("  chain checker_source {\n    type nat hook postrouting priority srcnat; policy accept;\n")
+	fmt.Fprintf(&rules, "    ip saddr %[1]s ip daddr @game_networks snat ip prefix to ip saddr map { %[1]s : %[2]s }\n  }\n", gamenet.CheckerNetworkSubnet, gamenet.PlayerNetworkSubnet)
 	rules.WriteString("  chain forward {\n    type filter hook forward priority filter; policy accept;\n")
 	rules.WriteString("    ct state established,related accept\n")
 	// Docker DNATs published host ports before the input hook, so a connection
 	// to any host address arrives here instead.
 	rules.WriteString("    ip saddr @game_networks ct status dnat drop\n")
+	fmt.Fprintf(&rules, "    ip saddr %s ip daddr != @game_networks drop\n", gamenet.CheckerNetworkSubnet)
 	// The VPN is part of the game, so player callbacks survive disabled egress.
 	if wireGuardInterface != "" {
 		fmt.Fprintf(&rules, "    ip saddr @egress_denied oifname != %q ip daddr != @game_networks drop\n  }\n}\n", wireGuardInterface)

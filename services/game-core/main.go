@@ -57,10 +57,10 @@ func run(ctx context.Context) error {
 	server := newGameCoreServer(
 		adminToken,
 		store,
-		newCheckerClient(
+		withPlayerCheckerSource(newCheckerClient(
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
 			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
-		),
+		), store, config.String("GAME_CORE_CHECKER_SOURCE_MODE", "service")),
 		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET"), flagPrefix),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),

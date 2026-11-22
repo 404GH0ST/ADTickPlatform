@@ -31,6 +31,8 @@ services:
     environment:
       CONTROLLER_INTERNAL_URL: ${CONTROLLER_INTERNAL_URL_HOST:-http://host.docker.internal:18084}
       CONTROLLER_INTERNAL_TOKEN: ${CONTROLLER_INTERNAL_TOKEN}
+      # Checkers reach services from a random unused player VPN address.
+      GAME_CORE_CHECKER_SOURCE_MODE: ${GAME_CORE_CHECKER_SOURCE_MODE:-player}
 
   controller-service:
     networks: !reset []

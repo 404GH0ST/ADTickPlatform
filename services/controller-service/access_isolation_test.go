@@ -54,6 +54,10 @@ func TestRenderGameIsolationRules(t *testing.T) {
 		"elements = { 10.80.1.101, 10.80.1.102, 10.80.1.103 }",
 		"elements = { 10.80.1.101 . 8080, 10.80.1.102 . 8080 }",
 		"ip saddr @game_networks ct status dnat drop",
+		"ip saddr 10.79.0.0/16 drop",
+		"ip saddr 10.79.0.0/16 ip daddr != @game_networks drop",
+		"type nat hook postrouting priority srcnat; policy accept;",
+		"ip saddr 10.79.0.0/16 ip daddr @game_networks snat ip prefix to ip saddr map { 10.79.0.0/16 : 10.70.0.0/16 }",
 		`ip saddr @egress_denied oifname != "wg0" ip daddr != @game_networks drop`,
 	} {
 		if !strings.Contains(rules, want) {
@@ -109,6 +113,28 @@ func TestHostAccessAppliesIsolationFirstWithEveryBackend(t *testing.T) {
 		}
 		if _, err := os.Stat(e.paths.rulesPath + ".isolation"); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s: teardown must remove the isolation artifact: %v", backend, err)
+		}
+	}
+}
+
+func TestHostAccessLetsCheckersReachServicePortsOnly(t *testing.T) {
+	runner := &recordingControllerCommandRunner{}
+	if _, err := hostAccess(t, runner, "iptables", "wg0", "eth0").Apply(context.Background(), []apigateway.ControllerServiceAccessPolicy{
+		{ServiceIP: "10.80.1.101", ServicePort: 8080, SSHPort: 22, NetworkClosed: true},
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	accept := slices.Index(runner.rules, "-A ADPLATFORM-WG-SERVICES -i adpchk0 -d 10.80.1.101/32 -p tcp --dport 8080 -j ACCEPT")
+	closed := slices.Index(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.101/32 -j DROP")
+	if accept < 0 || closed < accept {
+		t.Fatalf("warmup checkers must reach closed service ports: %v", runner.rules)
+	}
+	if !slices.Contains(runner.rules, "-A ADPLATFORM-WG-RAW -i adpchk0 -d 10.80.1.101/32 -j ACCEPT") {
+		t.Fatalf("Docker's raw guard must allow the checker bridge: %v", runner.rules)
+	}
+	for _, rule := range runner.rules {
+		if strings.Contains(rule, "adpchk0") && strings.Contains(rule, "--dport 22") {
+			t.Fatalf("checkers must not get SSH access: %s", rule)
 		}
 	}
 }

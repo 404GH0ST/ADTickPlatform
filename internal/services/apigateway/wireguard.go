@@ -184,6 +184,38 @@ func wireGuardPeerAddressAt(index int) string {
 	return fmt.Sprintf("10.70.%d.%d", (index/200)+1, (index%200)+20)
 }
 
+// UnassignedPlayerAddresses lists free player addresses in the /24 blocks that
+// already hold players, so a checker source blends in with real participants.
+// A new block is used only when those blocks are full.
+func UnassignedPlayerAddresses(assigned []string) []string {
+	const addressesPerBlock = 200
+	maxBlocks := wireGuardPeerAddressPoolSize / addressesPerBlock
+	used := make(map[string]struct{}, len(assigned))
+	blocks := 1
+	for _, address := range assigned {
+		address = strings.TrimSpace(address)
+		used[address] = struct{}{}
+		if ip := net.ParseIP(address).To4(); ip != nil && ip[0] == 10 && ip[1] == 70 && int(ip[2]) > blocks {
+			blocks = min(int(ip[2]), maxBlocks)
+		}
+	}
+	collect := func(blockCount int) []string {
+		free := make([]string, 0, blockCount*addressesPerBlock)
+		for index := range blockCount * addressesPerBlock {
+			address := wireGuardPeerAddressAt(index)
+			if _, taken := used[address]; !taken {
+				free = append(free, address)
+			}
+		}
+		return free
+	}
+	free := collect(blocks)
+	if len(free) == 0 && blocks < maxBlocks {
+		free = collect(blocks + 1)
+	}
+	return free
+}
+
 func wireGuardServerEndpoint() string {
 	explicitEndpoint := strings.TrimSpace(config.String("WIREGUARD_SERVER_ENDPOINT", ""))
 	if explicitEndpoint != "" && !isExampleWireGuardEndpoint(explicitEndpoint) {

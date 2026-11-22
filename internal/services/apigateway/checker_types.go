@@ -50,6 +50,9 @@ type CheckerExecutionRequest struct {
 	Metadata       string `json:"metadata,omitempty"`
 	CheckerToken   string `json:"checker_token,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	// SourceIP is the player-range address the service should see. Empty runs
+	// the checker directly on the service network.
+	SourceIP string `json:"source_ip,omitempty"`
 }
 
 type CheckerExecutionResult struct {
@@ -85,6 +88,7 @@ type CheckerBatchExecutionRequest struct {
 	Metadata       string   `json:"metadata,omitempty"`
 	CheckerToken   string   `json:"checker_token,omitempty"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	SourceIP       string   `json:"source_ip,omitempty"`
 }
 
 // CheckerPhaseResult is the outcome of one phase within a batch run.
