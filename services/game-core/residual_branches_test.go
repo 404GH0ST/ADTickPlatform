@@ -255,7 +255,7 @@ func TestMemoryStoreGates(t *testing.T) {
 	}
 	at := time.Now()
 	for _, flag := range []string{"a", "b"} {
-		if err := mem.RecordSubmission(ctx, apigateway.AdminSubmission{TeamID: 1, Flag: flag, Status: "invalid", SubmittedAt: at}); err != nil {
+		if err := mem.RecordSubmissions(ctx, apigateway.AdminSubmission{TeamID: 1, Flag: flag, Status: "invalid", SubmittedAt: at}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -320,7 +320,7 @@ func faultyGameStore(t *testing.T, db *sql.DB) (gameStore, *dbtest.Faults) {
 
 type recordSubmissionFails struct{ gameStore }
 
-func (recordSubmissionFails) RecordSubmission(context.Context, apigateway.AdminSubmission) error {
+func (recordSubmissionFails) RecordSubmissions(context.Context, ...apigateway.AdminSubmission) error {
 	return errScripted
 }
 

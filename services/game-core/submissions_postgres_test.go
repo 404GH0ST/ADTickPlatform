@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -17,6 +18,45 @@ import (
 func isolatedSubmissionDB(t *testing.T) *sql.DB {
 	t.Helper()
 	return dbtest.IsolatedSchema(t, "SUBMISSION_TEST_POSTGRES_DSN", "submission_test")
+}
+
+func TestRejectedSubmissionRetention(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		checkRejectedSubmissionRetention(t, newMemoryGameStore())
+	})
+	t.Run("postgres", func(t *testing.T) {
+		db := isolatedSubmissionDB(t)
+		if err := database.RunEmbeddedMigrations(context.Background(), db); err != nil {
+			t.Fatal(err)
+		}
+		checkRejectedSubmissionRetention(t, newPostgresGameStore(db))
+	})
+}
+
+func checkRejectedSubmissionRetention(t *testing.T, store gameStore) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	attempts := make([]apigateway.AdminSubmission, rejectedSubmissionsPerTeam+1)
+	for i := range attempts {
+		attempts[i] = apigateway.AdminSubmission{TeamID: 101, Status: "invalid", Flag: "invalid-flag", SubmittedAt: now}
+	}
+	attempts[1].SubmittedAt = now.Add(-rejectedSubmissionMaxAge - time.Hour)
+	if err := store.RecordSubmissions(ctx, attempts...); err != nil {
+		t.Fatal(err)
+	}
+	query := apigateway.SubmissionQuery{Status: "invalid"}
+	page, err := store.ListSubmissions(ctx, query)
+	if err != nil || page.TotalCount != rejectedSubmissionsPerTeam {
+		t.Fatalf("unexpected count after trimming: %d, %v", page.TotalCount, err)
+	}
+	if err := store.PruneRejectedSubmissions(ctx, now.Add(-rejectedSubmissionMaxAge)); err != nil {
+		t.Fatal(err)
+	}
+	page, err = store.ListSubmissions(ctx, query)
+	if err != nil || page.TotalCount != rejectedSubmissionsPerTeam-1 {
+		t.Fatalf("unexpected count after expiry: %d, %v", page.TotalCount, err)
+	}
 }
 
 func TestPostgresSubmissionDeletionAndConcurrentNextWinner(t *testing.T) {
@@ -48,7 +88,7 @@ func TestPostgresSubmissionDeletionAndConcurrentNextWinner(t *testing.T) {
 		}
 	}
 	for _, status := range []string{"invalid", "duplicate"} {
-		if err := store.RecordSubmission(ctx, apigateway.AdminSubmission{TeamID: 101, Attacker: "team-101", Flag: "shared", Status: status, Tick: 1, SubmittedAt: now}); err != nil {
+		if err := store.RecordSubmissions(ctx, apigateway.AdminSubmission{TeamID: 101, Attacker: "team-101", Flag: "shared", Status: status, Tick: 1, SubmittedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +203,8 @@ func TestSubmissionMigrationBackfillsLegacyCaptureAndCanDeleteIt(t *testing.T) {
 	db := isolatedSubmissionDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if _, err := db.ExecContext(ctx, `CREATE TABLE teams(id integer,name text); CREATE TABLE submitted_flags(flag text,team_id integer,submitted_at timestamptz); CREATE TABLE issued_flags(flag text,owner_team_name text,challenge_id integer,challenge_name text,issued_tick integer); CREATE TABLE attack_events(id text,attacker text,victim text,challenge_id integer,service text,tick integer,created_at timestamptz,first_blood boolean); CREATE TABLE game_ticks(id integer);`); err != nil {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE teams(id integer,name text); CREATE TABLE submitted_flags(flag text,team_id integer,submitted_at timestamptz); CREATE TABLE issued_flags(flag text,owner_team_name text,challenge_id integer,challenge_name text,issued_tick integer); CREATE TABLE attack_events(id text,attacker text,victim text,challenge_id integer,service text,tick integer,created_at timestamptz,first_blood boolean); CREATE TABLE game_ticks(id integer);
+ CREATE TABLE team_service_states(team_id integer, challenge_id integer, unlocked boolean, ssh_grant_start_id bigint, ssh_hint text, last_event text);`); err != nil {
 		t.Fatal(err)
 	}
 	sub := acceptedFlagSubmission{Flag: "legacy-flag", SubmittingTeam: 101, SubmissionTick: 7}
@@ -220,10 +261,25 @@ func TestPostgresCaptureGrantsOnlyAttackerMatchingSSHAccess(t *testing.T) {
 	}
 	store := &postgresGameStore{db: db}
 	now := time.Now().UTC()
-	if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: "enemy", OwnerTeamID: 102, ChallengeID: 1, IssuedTick: 1, ExpiresTick: 1, CreatedAt: now}); err != nil {
+	if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: "enemy", OwnerTeamID: 102, ChallengeID: 1, IssuedTick: 1, ExpiresTick: 2, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{Flag: "enemy", SubmittingTeam: 101, ChallengeID: 1, ExpiresTick: 1, SubmittedAt: now}); err != nil || !ok {
+	capture := acceptedFlagSubmission{Flag: "enemy", SubmittingTeam: 101, ChallengeID: 1, ExpiresTick: 2, SubmittedAt: now}
+	for _, eligibility := range []string{
+		`UPDATE teams SET active = FALSE WHERE id = 101`,
+		`UPDATE teams SET active = TRUE, play_from_tick = 2 WHERE id = 101`,
+	} {
+		mustExec(t, db, eligibility)
+		if ok, err := store.AcceptFlagSubmission(ctx, capture); ok || !errors.Is(err, errFlagNoLongerValid) {
+			t.Fatalf("ineligible team: %v %v", ok, err)
+		}
+		var unlocked bool
+		if err := db.QueryRowContext(ctx, `SELECT unlocked FROM team_service_states WHERE team_id = 101 AND challenge_id = 1`).Scan(&unlocked); err != nil || unlocked {
+			t.Fatalf("SSH grant before team eligibility: %v %v", unlocked, err)
+		}
+	}
+	mustExec(t, db, `INSERT INTO game_ticks(id,status) VALUES(2,'running')`)
+	if ok, err := store.AcceptFlagSubmission(ctx, capture); err != nil || !ok {
 		t.Fatalf("accept: %v %v", ok, err)
 	}
 	rows, err := db.QueryContext(ctx, `SELECT team_id,challenge_id,unlocked FROM team_service_states`)
@@ -243,6 +299,26 @@ func TestPostgresCaptureGrantsOnlyAttackerMatchingSSHAccess(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+
+	capture.Flag = "second"
+	if ok, err := store.AcceptFlagSubmission(ctx, capture); err != nil || !ok {
+		t.Fatalf("accept second capture: %v %v", ok, err)
+	}
+	for _, flag := range []string{"second", "enemy"} {
+		var id int64
+		if err := db.QueryRowContext(ctx, `SELECT id FROM submission_events WHERE flag = $1`, flag).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		wantRevoked := flag == "enemy"
+		result, err := store.DeleteSubmission(ctx, id)
+		if err != nil || result.SSHGrantRevoked != wantRevoked {
+			t.Fatalf("delete %s: %+v, %v", flag, result, err)
+		}
+		var unlocked bool
+		if err := db.QueryRowContext(ctx, `SELECT unlocked FROM team_service_states WHERE team_id = 101 AND challenge_id = 1`).Scan(&unlocked); err != nil || unlocked == wantRevoked {
+			t.Fatalf("grant after deleting %s: %v, %v", flag, unlocked, err)
+		}
 	}
 }
 

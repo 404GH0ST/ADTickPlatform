@@ -3,22 +3,87 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"adplatform/internal/services/apigateway"
 )
 
 var errSubmissionNotFound = errors.New("submission not found")
 
-func (s *memoryGameStore) RecordSubmission(_ context.Context, row apigateway.AdminSubmission) error {
+const (
+	rejectedSubmissionsPerTeam = 4096
+	rejectedSubmissionMaxAge   = 7 * 24 * time.Hour
+)
+
+func (s *gameCoreServer) startSubmissionHistoryPruner(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			pruneCtx, cancelPrune := context.WithTimeout(ctx, 30*time.Second)
+			err := s.store.PruneRejectedSubmissions(pruneCtx, s.now().Add(-rejectedSubmissionMaxAge))
+			cancelPrune()
+			if err != nil && ctx.Err() == nil {
+				log.Printf("prune rejected submissions: %v", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (s *memoryGameStore) RecordSubmissions(_ context.Context, rows ...apigateway.AdminSubmission) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nextSubmission++
-	row.ID = s.nextSubmission
-	s.submissions = append(s.submissions, row)
+	for _, row := range rows {
+		s.nextSubmission++
+		row.ID = s.nextSubmission
+		s.submissions = append(s.submissions, row)
+	}
+	teamID := rows[0].TeamID
+	count := 0
+	for i := len(s.submissions) - 1; i >= 0; i-- {
+		row := s.submissions[i]
+		if row.TeamID != teamID || row.Status == "accepted" {
+			continue
+		}
+		count++
+		if count > rejectedSubmissionsPerTeam {
+			s.submissions = slices.DeleteFunc(s.submissions, func(entry apigateway.AdminSubmission) bool {
+				return entry.TeamID == teamID && entry.Status != "accepted" && entry.ID <= row.ID
+			})
+			break
+		}
+	}
+	return nil
+}
+
+func (s *memoryGameStore) PruneRejectedSubmissions(_ context.Context, cutoff time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.submissions = slices.DeleteFunc(s.submissions, func(row apigateway.AdminSubmission) bool {
+		return row.Status != "accepted" && row.SubmittedAt.Before(cutoff)
+	})
 	return nil
 }
 
@@ -58,6 +123,18 @@ func (s *memoryGameStore) DeleteSubmission(_ context.Context, id int64) (apigate
 		result := apigateway.SubmissionDeletion{ID: id, Status: row.Status, Service: row.Service, FirstBloodCleared: row.FirstBlood}
 		if row.Status == "accepted" {
 			delete(s.accepted, acceptedSubmissionKey(row.Flag, row.TeamID))
+			result.TeamID, result.ChallengeID = row.TeamID, row.ChallengeID
+			remaining := false
+			for _, capture := range s.accepted {
+				if capture.SubmittingTeam == row.TeamID && capture.ChallengeID == row.ChallengeID {
+					remaining = true
+					break
+				}
+			}
+			if !remaining && row.ChallengeID > 0 {
+				result.SSHGrantRevoked = true
+				result.RevokedThrough = s.nextSubmission
+			}
 			for j, event := range s.attackFeed {
 				if event.ID == row.AttackID {
 					s.attackFeed = append(s.attackFeed[:j], s.attackFeed[j+1:]...)
@@ -76,8 +153,50 @@ func (s *memoryGameStore) DeleteSubmission(_ context.Context, id int64) (apigate
 	return apigateway.SubmissionDeletion{}, errSubmissionNotFound
 }
 
-func (s *postgresGameStore) RecordSubmission(ctx context.Context, row apigateway.AdminSubmission) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO submission_events (team_id, attacker, victim, challenge_id, service, flag, tick, status, detail, submitted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, row.TeamID, row.Attacker, row.Victim, row.ChallengeID, row.Service, row.Flag, row.Tick, row.Status, row.Detail, row.SubmittedAt.UTC())
+func (s *postgresGameStore) RecordSubmissions(ctx context.Context, rows ...apigateway.AdminSubmission) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	teamID := rows[0].TeamID
+	// Serialize inserts and trimming for each team's rejected history.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(48144, $1::integer)`, teamID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO submission_events (team_id, attacker, victim, challenge_id, service, flag, tick, status, detail, submitted_at)
+		SELECT $2, attacker, victim, challenge_id, service, flag, tick, status, detail, submitted_at
+		FROM jsonb_to_recordset($1::jsonb) AS rejected(
+			attacker text, victim text, challenge_id integer, service text, flag text,
+			tick integer, status text, detail text, submitted_at timestamptz
+		)
+	`, payload, teamID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM submission_events
+		WHERE id IN (
+			SELECT id FROM submission_events
+			WHERE team_id = $1 AND status <> 'accepted'
+			ORDER BY id DESC OFFSET $2
+		)
+	`, teamID, rejectedSubmissionsPerTeam); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *postgresGameStore) PruneRejectedSubmissions(ctx context.Context, cutoff time.Time) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM submission_events WHERE status <> 'accepted' AND submitted_at < $1`, cutoff)
 	return err
 }
 
@@ -149,9 +268,8 @@ func (s *postgresGameStore) DeleteSubmission(ctx context.Context, id int64) (api
 	}
 	result := apigateway.SubmissionDeletion{ID: id}
 	var flag string
-	var teamID int
 	var attackID sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT flag, team_id, status, service, attack_event_id FROM submission_events WHERE id=$1 FOR UPDATE`, id).Scan(&flag, &teamID, &result.Status, &result.Service, &attackID)
+	err = tx.QueryRowContext(ctx, `SELECT flag, team_id, challenge_id, status, service, attack_event_id FROM submission_events WHERE id=$1 FOR UPDATE`, id).Scan(&flag, &result.TeamID, &result.ChallengeID, &result.Status, &result.Service, &attackID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, errSubmissionNotFound
 	}
@@ -165,8 +283,31 @@ func (s *postgresGameStore) DeleteSubmission(ctx context.Context, id int64) (api
 				return result, err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM submitted_flags WHERE flag=$1 AND team_id=$2`, flag, teamID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM submitted_flags WHERE flag=$1 AND team_id=$2`, flag, result.TeamID); err != nil {
 			return result, err
+		}
+		if result.ChallengeID > 0 {
+			change, err := tx.ExecContext(ctx, `
+				UPDATE team_service_states state
+				SET unlocked = FALSE, ssh_grant_start_id = NULL,
+				    ssh_hint = 'capture a flag to unlock SSH',
+				    last_event = 'SSH grant revoked because its qualifying captures were deleted'
+				WHERE state.team_id = $1 AND state.challenge_id = $2 AND state.unlocked
+				  AND NOT EXISTS (
+					SELECT 1 FROM submission_events e
+					JOIN submitted_flags f ON f.team_id = e.team_id AND f.flag = e.flag
+					WHERE e.team_id = state.team_id AND e.challenge_id = state.challenge_id AND e.status = 'accepted'
+					  AND e.id >= COALESCE(state.ssh_grant_start_id, 0)
+				  )
+			`, result.TeamID, result.ChallengeID)
+			if err != nil {
+				return result, err
+			}
+			affected, err := change.RowsAffected()
+			if err != nil {
+				return result, err
+			}
+			result.SSHGrantRevoked = affected > 0
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE attack_feed_state SET revision=revision+1 WHERE singleton=TRUE`); err != nil {
 			return result, err

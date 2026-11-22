@@ -49,3 +49,34 @@ func (c *httpAccessReconcileClient) ReconcileAccess(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Retry failed grant revocations even when ticks are paused. Each retry reads
+// the current policy, so it also covers any intervening changes in access.
+func (s *gameCoreServer) startAccessReconcileRetry(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	if s.accessReconcile == nil {
+		return cancel
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if s.accessPending.Swap(false) {
+					if err := s.accessReconcile.ReconcileAccess(ctx); err != nil {
+						s.accessPending.Store(true)
+					}
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}

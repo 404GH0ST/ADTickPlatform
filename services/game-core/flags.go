@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -18,6 +19,7 @@ type flagClaims struct {
 	ChallengeID int
 	IssuedTick  int
 	ExpiresTick int
+	Nonce       string
 }
 
 type flagCodec struct {
@@ -43,7 +45,14 @@ func (c flagCodec) withPrefix(prefix string) flagCodec {
 }
 
 func (c flagCodec) Issue(ownerTeamID, challengeID, issuedTick, expiresTick int) string {
+	return c.issueWithNonce(ownerTeamID, challengeID, issuedTick, expiresTick, rand.Text())
+}
+
+func (c flagCodec) issueWithNonce(ownerTeamID, challengeID, issuedTick, expiresTick int, nonce string) string {
 	payload := fmt.Sprintf("%d:%d:%d:%d", ownerTeamID, challengeID, issuedTick, expiresTick)
+	if nonce != "" {
+		payload += ":" + nonce
+	}
 	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	mac := hmac.New(sha256.New, c.secret)
 	mac.Write([]byte(encodedPayload))
@@ -75,7 +84,10 @@ func (c flagCodec) Parse(value string) (flagClaims, bool) {
 		return flagClaims{}, false
 	}
 	fields := strings.Split(string(payload), ":")
-	if len(fields) != 4 {
+	if len(fields) != 4 && len(fields) != 5 {
+		return flagClaims{}, false
+	}
+	if len(fields) == 5 && fields[4] == "" {
 		return flagClaims{}, false
 	}
 
@@ -96,11 +108,15 @@ func (c flagCodec) Parse(value string) (flagClaims, bool) {
 		return flagClaims{}, false
 	}
 
-	return flagClaims{
+	claims := flagClaims{
 		Value:       trimmed,
 		OwnerTeamID: ownerTeamID,
 		ChallengeID: challengeID,
 		IssuedTick:  issuedTick,
 		ExpiresTick: expiresTick,
-	}, true
+	}
+	if len(fields) == 5 {
+		claims.Nonce = fields[4]
+	}
+	return claims, true
 }

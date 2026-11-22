@@ -14,7 +14,7 @@ import (
 )
 
 func TestSubmissionHistoryDeletionAndFirstBloodReopens(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -27,8 +27,8 @@ func TestSubmissionHistoryDeletionAndFirstBloodReopens(t *testing.T) {
 	if res := call(http.MethodPost, "/internal/v1/game/ticks/advance", ""); res.Code != 200 {
 		t.Fatal(res.Body.String())
 	}
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
-	other := newFlagCodec("test-flag-secret", "PLAYIT").Issue(104, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
+	other := issuedTestFlag(t, store, 104, 1, 1)
 	if res := call(http.MethodPost, "/internal/v1/flags/submit", fmt.Sprintf(`{"team_id":101,"flags":[%q,%q,"garbage"]}`, flag, flag)); res.Code != 200 {
 		t.Fatal(res.Body.String())
 	}
@@ -142,7 +142,7 @@ type failingHistoryStore struct {
 	*memoryGameStore
 }
 
-func (failingHistoryStore) RecordSubmission(context.Context, apigateway.AdminSubmission) error {
+func (failingHistoryStore) RecordSubmissions(context.Context, ...apigateway.AdminSubmission) error {
 	return errors.New("transient submission history failure")
 }
 

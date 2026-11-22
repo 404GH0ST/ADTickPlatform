@@ -71,6 +71,10 @@ func (s *submissionServiceServer) handleSubmit(w http.ResponseWriter, r *http.Re
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "submission request is invalid.")
 		return
 	}
+	if err := apigateway.ValidateSubmittedFlags(request.Flags); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
 
 	results, err := s.gameCore.SubmitFlags(r.Context(), request.TeamID, request.Flags)
 	if err != nil {

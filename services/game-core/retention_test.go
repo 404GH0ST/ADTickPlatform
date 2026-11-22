@@ -36,6 +36,7 @@ func (c *retentionTestChecker) Execute(_ context.Context, r apigateway.CheckerEx
 			c.beforeGet = nil
 		}
 		if c.unavailable {
+			result.Output = "private transport diagnostic"
 			return result, errors.New("checker network unavailable")
 		}
 		if r.Metadata != `{"path":"flag.txt","private_slot":"opaque"}` {
@@ -44,6 +45,7 @@ func (c *retentionTestChecker) Execute(_ context.Context, r apigateway.CheckerEx
 		if c.value != r.Flag {
 			result.Status = "failed"
 			result.ExitCode = flagMissingExitCode
+			result.Output = c.value
 		}
 	}
 	return result, nil
@@ -170,6 +172,15 @@ func TestRetentionTransportFailureDoesNotReceiveSeverePenalty(t *testing.T) {
 	}
 	if row := retentionTeamScore(t, store); row.Defense != -10 {
 		t.Fatalf("later confirmed loss not penalized: %+v", row)
+	}
+	runs, err := store.ListCheckerRuns(ctx, apigateway.GameCheckerRunQuery{Phase: "get", Status: "failed"})
+	if err != nil || len(runs.Items) != 2 {
+		t.Fatalf("expected two failed retention runs, got %+v, %v", runs, err)
+	}
+	for _, run := range runs.Items {
+		if run.Output != "" {
+			t.Fatalf("retention failure persisted private output: %+v", run)
+		}
 	}
 }
 func TestRetentionSkipsOrganizerResetOrMaintenanceRaces(t *testing.T) {

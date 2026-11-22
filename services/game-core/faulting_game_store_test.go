@@ -151,12 +151,19 @@ func (s faultingGameStore) AcceptFlagSubmission(ctx context.Context, submission 
 	return s.inner.AcceptFlagSubmission(ctx, submission)
 }
 
-func (s faultingGameStore) RecordSubmission(a0 context.Context, a1 apigateway.AdminSubmission) (err error) {
+func (s faultingGameStore) RecordSubmissions(a0 context.Context, a1 ...apigateway.AdminSubmission) (err error) {
 	if s.faults.fail() {
 		err = errGameStoreDown
 		return
 	}
-	return s.inner.RecordSubmission(a0, a1)
+	return s.inner.RecordSubmissions(a0, a1...)
+}
+
+func (s faultingGameStore) PruneRejectedSubmissions(ctx context.Context, cutoff time.Time) error {
+	if s.faults.fail() {
+		return errGameStoreDown
+	}
+	return s.inner.PruneRejectedSubmissions(ctx, cutoff)
 }
 
 func (s faultingGameStore) ListSubmissions(a0 context.Context, a1 apigateway.SubmissionQuery) (r0 apigateway.SubmissionPage, err error) {

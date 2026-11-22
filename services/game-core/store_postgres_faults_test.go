@@ -113,7 +113,7 @@ func TestPostgresGameStoreSurvivesInjectedFaults(t *testing.T) {
 			return err
 		},
 		"SubmissionHistory": func(r int) error {
-			if err := store.RecordSubmission(ctx, apigateway.AdminSubmission{TeamID: attacker.TeamID, Attacker: attacker.TeamName, Flag: fmt.Sprintf("bad-%d", r), Status: "invalid", Tick: 1, SubmittedAt: now}); err != nil {
+			if err := store.RecordSubmissions(ctx, apigateway.AdminSubmission{TeamID: attacker.TeamID, Attacker: attacker.TeamName, Flag: fmt.Sprintf("bad-%d", r), Status: "invalid", Tick: 1, SubmittedAt: now}); err != nil {
 				return err
 			}
 			_, err := store.ListSubmissions(ctx, apigateway.SubmissionQuery{AttackFeedQuery: apigateway.AttackFeedQuery{Limit: 5, Attacker: attacker.TeamName, TickFrom: 1, TickTo: 99}, Status: "invalid", Flag: "bad"})

@@ -21,18 +21,28 @@ func signedFlag(secret, prefix, payload string) string {
 func TestFlagCodecRejectsMalformedSignedPayloads(t *testing.T) {
 	codec := newFlagCodec("flag-secret", "CTF")
 	for _, payload := range []string{
-		"1:2:3",     // too few fields
-		"1:2:3:4:5", // too many fields
-		"x:2:3:4",   // non-numeric owner
-		"1:x:3:4",   // non-numeric challenge
-		"1:2:x:4",   // non-numeric issued tick
-		"1:2:3:x",   // non-numeric expiry
-		"",          // empty
+		"1:2:3",           // too few fields
+		"1:2:3:4:nonce:x", // too many fields
+		"x:2:3:4:nonce",   // non-numeric owner
+		"1:x:3:4:nonce",   // non-numeric challenge
+		"1:2:x:4:nonce",   // non-numeric issued tick
+		"1:2:3:x:nonce",   // non-numeric expiry
+		"1:2:3:4:",        // empty nonce
+		"",                // empty
 	} {
 		flag := signedFlag("flag-secret", "CTF", payload)
 		if claims, ok := codec.Parse(flag); ok {
 			t.Fatalf("payload %q must be rejected even when signed, got %+v", payload, claims)
 		}
+	}
+}
+
+func TestFlagCodecAcceptsLegacyFlagForAnActiveMatch(t *testing.T) {
+	codec := newFlagCodec("flag-secret", "CTF")
+	legacy := codec.issueWithNonce(101, 2, 5, 9, "")
+	claims, ok := codec.Parse(legacy)
+	if !ok || claims.OwnerTeamID != 101 || claims.ChallengeID != 2 || claims.Nonce != "" {
+		t.Fatalf("legacy issued flag should remain valid until its tick expires: %+v, %v", claims, ok)
 	}
 }
 
@@ -75,9 +85,8 @@ func TestFlagCodecRejectsUndecodableSignedPayload(t *testing.T) {
 }
 
 // FuzzFlagCodecParseIsCanonical checks the anti-replay property duplicate
-// detection relies on: anything Parse accepts must be exactly the string Issue
-// produces for those claims, so one capture cannot be resubmitted under an
-// alternate spelling.
+// detection relies on: anything Parse accepts must be exactly the string
+// issueWithNonce produces for those claims and nonce.
 func FuzzFlagCodecParseIsCanonical(f *testing.F) {
 	codec := newFlagCodec("fuzz-secret", "CTF")
 	f.Add(codec.Issue(101, 2, 5, 9))
@@ -90,7 +99,7 @@ func FuzzFlagCodecParseIsCanonical(f *testing.F) {
 		if !ok {
 			return
 		}
-		canonical := codec.Issue(claims.OwnerTeamID, claims.ChallengeID, claims.IssuedTick, claims.ExpiresTick)
+		canonical := codec.issueWithNonce(claims.OwnerTeamID, claims.ChallengeID, claims.IssuedTick, claims.ExpiresTick, claims.Nonce)
 		if strings.TrimSpace(candidate) != canonical {
 			t.Fatalf("accepted non-canonical flag %q; canonical form is %q", candidate, canonical)
 		}

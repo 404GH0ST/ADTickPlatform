@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"adplatform/internal/services/apigateway"
 )
@@ -43,10 +45,20 @@ func (s *gameCoreServer) handleDeleteSubmission(w http.ResponseWriter, r *http.R
 	if result.Status == "accepted" {
 		s.scheduleScoreboardRecompute()
 	}
+	if result.SSHGrantRevoked && s.accessReconcile != nil {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+		defer cancel()
+		if err := s.accessReconcile.ReconcileAccess(ctx); err != nil {
+			log.Printf("access reconcile after removing submission %d: %v", id, err)
+			s.accessPending.Store(true)
+			result.AccessReconcilePending = true
+		}
+	}
 	writeData(w, http.StatusOK, result)
 }
 
 func (s *gameCoreServer) recordRejectedSubmissions(ctx context.Context, teamID int, attacker string, tick int, verdicts []submissionVerdictAlias) error {
+	var rejected []apigateway.AdminSubmission
 	for _, verdict := range verdicts {
 		if verdict.Status == "accepted" {
 			continue
@@ -55,9 +67,10 @@ func (s *gameCoreServer) recordRejectedSubmissions(ctx context.Context, teamID i
 		if issued, err := s.store.LookupIssuedFlag(ctx, strings.TrimSpace(verdict.Flag)); err == nil {
 			row.Victim, row.ChallengeID, row.Service = issued.OwnerTeamName, issued.ChallengeID, issued.ChallengeName
 		}
-		if err := s.store.RecordSubmission(ctx, row); err != nil {
-			return err
-		}
+		rejected = append(rejected, row)
 	}
-	return nil
+	if len(rejected) == 0 {
+		return nil
+	}
+	return s.store.RecordSubmissions(ctx, rejected...)
 }

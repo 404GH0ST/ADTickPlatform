@@ -196,14 +196,7 @@ func TestMemoryRetentionStoreGuards(t *testing.T) {
 	if recorded, err := mem.RecordRetentionCheck(ctx, stale, run, false); err != nil || recorded {
 		t.Fatalf("a superseded flag is ignored: %v %v", recorded, err)
 	}
-	if _, err := decodeCheckerRunnerError(errorReader{}); err == nil {
-		t.Fatal("a body read failure must surface")
-	}
 }
-
-type errorReader struct{}
-
-func (errorReader) Read([]byte) (int, error) { return 0, errScripted }
 
 // A tick whose scoreboard recompute fails is reported as failed, even though
 // the tick itself is already stored.

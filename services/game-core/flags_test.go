@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"adplatform/internal/platform/httpapi"
 	"adplatform/internal/services/apigateway"
@@ -23,6 +24,45 @@ func TestFlagCodecIssuesAndParsesWithConfiguredPrefix(t *testing.T) {
 	}
 	if claims.OwnerTeamID != 101 || claims.ChallengeID != 1 || claims.IssuedTick != 1 || claims.ExpiresTick != 1 {
 		t.Fatalf("unexpected codec claims: %+v", claims)
+	}
+}
+
+func TestFlagCodecNeverReissuesAFlagAcrossMatchesWithSameSecretAndIDs(t *testing.T) {
+	firstMatch := newFlagCodec("reused-secret", "PLAYIT")
+	secondMatch := newFlagCodec("reused-secret", "PLAYIT")
+	oldFlag := firstMatch.Issue(101, 1, 1, 1)
+	newFlag := secondMatch.Issue(101, 1, 1, 1)
+	if oldFlag == newFlag {
+		t.Fatal("a new match reissued the previous match's flag")
+	}
+	if _, ok := secondMatch.Parse(newFlag); !ok {
+		t.Fatal("new flag should verify with the reused secret")
+	}
+	if _, ok := secondMatch.Parse(oldFlag); !ok {
+		t.Fatal("old flag should remain verifiable; issued-flag lookup rejects replay")
+	}
+}
+
+func TestOldEventFlagIsRejectedAfterNewEventIssuesSameIDs(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryGameStore().(*memoryGameStore)
+	now := time.Now().UTC()
+	if _, err := store.StartMatch(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartNextTick(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	codec := newFlagCodec("reused-secret", "PLAYIT")
+	oldFlag := codec.Issue(102, 1, 1, 1)
+	currentFlag := codec.Issue(102, 1, 1, 1)
+	if err := store.IssueFlag(ctx, issuedFlagRecord{Flag: currentFlag, OwnerTeamID: 102, ChallengeID: 1, IssuedTick: 1, ExpiresTick: 1, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	server := newGameCoreServer("test", store, testCheckerClient{}, codec, nil, nil, 15)
+	verdicts, err := server.submitFlags(ctx, 101, []string{oldFlag})
+	if err != nil || len(verdicts) != 1 || verdicts[0].Status != "invalid" {
+		t.Fatalf("old event flag should not score: %+v, %v", verdicts, err)
 	}
 }
 

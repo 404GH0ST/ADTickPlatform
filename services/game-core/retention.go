@@ -15,6 +15,12 @@ import (
 	"adplatform/internal/services/apigateway"
 )
 
+const (
+	missingStoredFlagMessage    = "confirmed missing stored flag; tick SLA forfeited and severe defense penalty"
+	retentionCheckerUnavailable = "flag retention checker execution unavailable"
+	retentionVerificationFailed = "stored flag failed retention verification"
+)
+
 func (s *gameCoreServer) lockRetentionTarget(t checkerTarget) func() {
 	value, _ := s.retentionLocks.LoadOrStore([2]int{t.TeamID, t.ChallengeID}, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
@@ -57,18 +63,21 @@ func (s *gameCoreServer) checkFlagRetention(ctx, execCtx context.Context, target
 	}
 
 	run := checkerRunRecord{TickID: flag.IssuedTick, TeamID: target.TeamID, TeamName: target.TeamName, ChallengeID: target.ChallengeID, ChallengeName: target.ChallengeName,
-		CheckerImage: target.CheckerImage, Phase: "get", Target: target.Target, CheckedAt: s.now().UTC(), Status: normalizedCheckerRunStatus(result.Status), ExitCode: result.ExitCode, Output: result.Output, Message: "stored flag passed retention verification"}
+		CheckerImage: target.CheckerImage, Phase: "get", Target: target.Target, CheckedAt: s.now().UTC(), Status: normalizedCheckerRunStatus(result.Status), ExitCode: result.ExitCode}
 	confirmed := execErr == nil && run.Status == "failed" && result.ExitCode == flagMissingExitCode
 	if execErr != nil {
 		run.Status = "failed"
 		run.ExitCode = -1
-		run.Message = "flag retention checker execution unavailable"
+		run.Message = retentionCheckerUnavailable
 	} else if run.Status != "success" {
 		run.Status = "failed"
-		run.Message = "stored flag failed retention verification"
+		run.Message = retentionVerificationFailed
+	} else {
+		run.Output = result.Output
+		run.Message = "stored flag passed retention verification"
 	}
 	if confirmed {
-		run.Message = "confirmed missing stored flag; tick SLA forfeited and severe defense penalty"
+		run.Message = missingStoredFlagMessage
 	}
 	applied, err := s.store.RecordRetentionCheck(ctx, flag, run, confirmed)
 	if err != nil {

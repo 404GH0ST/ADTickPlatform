@@ -48,6 +48,8 @@ func TestPostgresAcceptRejectsEveryInvalidState(t *testing.T) {
 	mustExec(t, db, `INSERT INTO game_ticks(id, status) VALUES (7, 'running')`)
 	expectInvalid("expired", capture)
 	capture.ExpiresTick = 9
+	expectInvalid("unknown submitting team", capture)
+	mustExec(t, db, `INSERT INTO teams(id,name,email,join_key) VALUES(101,'attacker','a@test.local','a')`)
 	expectInvalid("unknown challenge", capture)
 	mustExec(t, db, `INSERT INTO challenges(id, name, maintenance) VALUES (1, 'web', TRUE)`)
 	expectInvalid("maintenance", capture)

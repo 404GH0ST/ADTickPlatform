@@ -190,26 +190,42 @@ func (c explicitStateCheckerClient) ExecuteBatch(ctx context.Context, request ap
 }
 
 func (c explicitStateCheckerClient) Execute(_ context.Context, request apigateway.CheckerExecutionRequest) (apigateway.CheckerExecutionResult, error) {
-	return apigateway.CheckerExecutionResult{
-		ChallengeID:  request.ChallengeID,
-		TeamID:       request.TeamID,
-		Phase:        request.Phase,
-		Status:       "failed",
-		ExitCode:     1,
-		CheckedAt:    "2026-03-10T10:01:00Z",
-		Message:      "checker phase failed in test",
-		ServiceState: c.state,
-		StateMessage: c.message,
-	}, nil
+	result := apigateway.CheckerExecutionResult{
+		ChallengeID: request.ChallengeID,
+		TeamID:      request.TeamID,
+		Phase:       request.Phase,
+		Status:      "success",
+		CheckedAt:   "2026-03-10T10:01:00Z",
+	}
+	if request.Phase == "check" {
+		result.ServiceState = c.state
+		result.StateMessage = c.message
+	}
+	return result, nil
 }
 
 func newTestGameCoreMux(checker checkerClient) *http.ServeMux {
+	mux, _ := newTestGameCoreMuxWithStore(checker)
+	return mux
+}
+
+func newTestGameCoreMuxWithStore(checker checkerClient) (*http.ServeMux, *memoryGameStore) {
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "dev", Addr: ":0"})
-	newGameCoreServer("dev-admin-token", newMemoryGameStore(), checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+	store := newMemoryGameStore().(*memoryGameStore)
+	newGameCoreServer("dev-admin-token", store, checker, newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
 		WithWarmupRequired(false).
 		WithAutoTickOnMatchStart(false).
 		RegisterRoutes(mux)
-	return mux
+	return mux, store
+}
+
+func issuedTestFlag(t *testing.T, store *memoryGameStore, teamID, challengeID, tickID int) string {
+	t.Helper()
+	flag, err := store.LatestIssuedFlag(context.Background(), teamID, challengeID)
+	if err != nil || flag.IssuedTick != tickID {
+		t.Fatalf("issued flag for team %d challenge %d tick %d: %+v, %v", teamID, challengeID, tickID, flag, err)
+	}
+	return flag.Flag
 }
 
 func newTestGameCoreMuxWithScheduler(checker checkerClient, scheduler gameScheduler) *http.ServeMux {
@@ -527,6 +543,11 @@ func TestWarmupFailsAfterExhaustingPutRetries(t *testing.T) {
 	if payload.Status != "failed" || payload.PutFailed != payload.TotalTargets {
 		t.Fatalf("expected warmup to fail after retries exhausted, got %+v", payload)
 	}
+	for _, failure := range payload.Failures {
+		if failure.Error != "put phase did not succeed: checker command exited with status 1" {
+			t.Fatalf("unexpected warmup failure: %+v", failure)
+		}
+	}
 	// Each target attempted the full budget: 1 + 2 retries = 3.
 	for key, n := range checker.attempts {
 		if n != 3 {
@@ -712,6 +733,50 @@ func TestCheckerRunsEndpointHonorsLimit(t *testing.T) {
 	}
 }
 
+func TestCheckerFailureDoesNotExposeRunDiagnostics(t *testing.T) {
+	store := newMemoryGameStore()
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{failPhase: "get"},
+		newFlagCodec("test-flag-secret", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithAutoTickOnMatchStart(false)
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "game-core", Version: "test", Addr: ":0"})
+	server.RegisterRoutes(mux)
+	startTestMatch(t, mux)
+	ctx := context.Background()
+	if _, err := server.advanceTick(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := store.ListCheckerRuns(ctx, apigateway.GameCheckerRunQuery{Phase: "get", Status: "failed"})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatalf("expected persisted failed runs, got %+v, %v", page, err)
+	}
+	for _, run := range page.Items {
+		if run.Output != "" || run.Message != "checker command exited with status 1" {
+			t.Fatalf("unexpected persisted failure diagnostics: %+v", run)
+		}
+	}
+	flag, err := store.LatestIssuedFlag(ctx, 101, 1)
+	if err != nil || flag.Metadata != "put-output" {
+		t.Fatalf("successful put metadata was lost: got %q, %v", flag.Metadata, err)
+	}
+
+	// Simulate history written before failed output was dropped.
+	const privateOutput = "private flag, token and multiline\nmetadata"
+	if _, err := store.RecordCheckerRun(ctx, checkerRunRecord{
+		TickID: 1, TeamID: 101, ChallengeID: 1, Phase: "get", Status: "failed", ExitCode: 1,
+		Message: privateOutput, Output: privateOutput, CheckedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/game/checker-runs?team_id=101&challenge_id=1", nil)
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "private flag") {
+		t.Fatalf("checker history returned raw failure details: %d %s", response.Code, response.Body)
+	}
+}
+
 func TestMetricsEndpointIncludesGameCoreMetrics(t *testing.T) {
 	info := httpapi.ServiceInfo{Name: "game-core-metrics-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")), Version: "test", Addr: ":0"}
 	store := newMemoryGameStore()
@@ -837,7 +902,7 @@ func TestCheckerReportedServiceStateOverridesPhaseInference(t *testing.T) {
 	if payload.Items[0].ServiceState != "recovering" || payload.Items[0].StatePhase != "put" {
 		t.Fatalf("expected checker-reported recovering state, got %+v", payload.Items[0])
 	}
-	if payload.Items[0].StateMessage != "put failed but the checker still classified the service as recovering" {
+	if payload.Items[0].StateMessage != "flag storage failed but retrieval and functionality still passed" {
 		t.Fatalf("unexpected checker-reported state message %+v", payload.Items[0])
 	}
 }
@@ -1100,8 +1165,7 @@ func TestSubmitFlagsRejectsChallengeUnderMaintenance(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	// Same issuance path as the happy-path submit test (checker put during advance).
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
 	store.setChallengeMaintenanceForTest(1, true)
 
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
@@ -1120,7 +1184,7 @@ func TestSubmitFlagsRejectsChallengeUnderMaintenance(t *testing.T) {
 		t.Fatalf("unexpected maintenance verdict %+v", payload[0])
 	}
 
-	otherFlag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 2, 1, 1)
+	otherFlag := issuedTestFlag(t, store, 102, 2, 1)
 	otherSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+otherFlag+`"]}`))
 	otherSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	otherResponse := httptest.NewRecorder()
@@ -1135,7 +1199,7 @@ func TestSubmitFlagsRejectsChallengeUnderMaintenance(t *testing.T) {
 }
 
 func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1146,7 +1210,7 @@ func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`","`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -1165,7 +1229,7 @@ func TestSubmitFlagsAcceptsIssuedEnemyFlag(t *testing.T) {
 }
 
 func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1176,7 +1240,7 @@ func TestSubmitFlagsAcceptsSameFlagFromMultipleAttackers(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
 	for _, teamID := range []int{101, 103} {
 		submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(fmt.Sprintf(`{"team_id":%d,"flags":["%s"]}`, teamID, flag)))
 		submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
@@ -1306,7 +1370,7 @@ func TestSubmitFlagsRejectsOwnAndExpiredFlags(t *testing.T) {
 }
 
 func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1317,7 +1381,7 @@ func TestScoreboardRecomputeReflectsCheckerAndSubmissionState(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -1354,7 +1418,7 @@ func approxScore(value, expected float64) bool {
 }
 
 func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1365,7 +1429,7 @@ func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	flag := newFlagCodec("test-flag-secret", "PLAYIT").Issue(102, 1, 1, 1)
+	flag := issuedTestFlag(t, store, 102, 1, 1)
 	submitRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+flag+`"]}`))
 	submitRequest.Header.Set("Authorization", "Bearer dev-admin-token")
 	submitResponse := httptest.NewRecorder()
@@ -1395,7 +1459,7 @@ func TestAttackFeedEndpointReflectsAcceptedSubmissions(t *testing.T) {
 }
 
 func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1406,8 +1470,7 @@ func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret", "PLAYIT")
-	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
+	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 102, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(firstSubmitResponse, firstSubmit)
@@ -1415,7 +1478,7 @@ func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
 		t.Fatalf("expected first submit 200, got %d", firstSubmitResponse.Code)
 	}
 
-	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(103, 2, 1, 1)+`"]}`))
+	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 103, 2, 1)+`"]}`))
 	secondSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	secondSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(secondSubmitResponse, secondSubmit)
@@ -1441,7 +1504,7 @@ func TestAttackFeedEndpointSupportsOffset(t *testing.T) {
 }
 
 func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1452,8 +1515,7 @@ func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret", "PLAYIT")
-	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
+	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 102, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(firstSubmitResponse, firstSubmit)
@@ -1461,7 +1523,7 @@ func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
 		t.Fatalf("expected first submit 200, got %d", firstSubmitResponse.Code)
 	}
 
-	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(103, 2, 1, 1)+`"]}`))
+	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 103, 2, 1)+`"]}`))
 	secondSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	secondSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(secondSubmitResponse, secondSubmit)
@@ -1487,7 +1549,7 @@ func TestAttackFeedEndpointSupportsTextFilters(t *testing.T) {
 }
 
 func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
-	mux := newTestGameCoreMux(testCheckerClient{})
+	mux, store := newTestGameCoreMuxWithStore(testCheckerClient{})
 	startTestMatch(t, mux)
 
 	advanceRequest := httptest.NewRequest(http.MethodPost, "/internal/v1/game/ticks/advance", nil)
@@ -1498,8 +1560,7 @@ func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
 		t.Fatalf("expected advance 200, got %d", advanceResponse.Code)
 	}
 
-	codec := newFlagCodec("test-flag-secret", "PLAYIT")
-	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(102, 1, 1, 1)+`"]}`))
+	firstSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 102, 1, 1)+`"]}`))
 	firstSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	firstSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(firstSubmitResponse, firstSubmit)
@@ -1515,7 +1576,7 @@ func TestAttackFeedEndpointSupportsTickRange(t *testing.T) {
 		t.Fatalf("expected second advance 200, got %d", secondTickResponse.Code)
 	}
 
-	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+codec.Issue(103, 2, 2, 2)+`"]}`))
+	secondSubmit := httptest.NewRequest(http.MethodPost, "/internal/v1/flags/submit", bytes.NewBufferString(`{"team_id":101,"flags":["`+issuedTestFlag(t, store, 103, 2, 2)+`"]}`))
 	secondSubmit.Header.Set("Authorization", "Bearer dev-admin-token")
 	secondSubmitResponse := httptest.NewRecorder()
 	mux.ServeHTTP(secondSubmitResponse, secondSubmit)

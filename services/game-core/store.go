@@ -86,6 +86,9 @@ type acceptedFlagSubmission struct {
 	SubmittingTeam int
 	AttackerName   string
 	VictimName     string
+	// OwnerTeamID is the team the flag was stolen from. Flags of a disqualified
+	// owner no longer score.
+	OwnerTeamID    int
 	ChallengeName  string
 	ChallengeID    int
 	SubmissionTick int
@@ -94,6 +97,8 @@ type acceptedFlagSubmission struct {
 	// flag when currentTick is 0 or greater than ExpiresTick.
 	ExpiresTick int
 	SubmittedAt time.Time
+	// recordedID receives the committed history ID when requested by the submitter.
+	recordedID *int64
 }
 
 type schedulerEventRecord struct {
@@ -126,7 +131,8 @@ type gameStore interface {
 	ScheduleRetentionCheck(context.Context, string, time.Time) error
 	RecordRetentionCheck(context.Context, issuedFlagRecord, checkerRunRecord, bool) (bool, error)
 	AcceptFlagSubmission(ctx context.Context, submission acceptedFlagSubmission) (bool, error)
-	RecordSubmission(context.Context, apigateway.AdminSubmission) error
+	RecordSubmissions(context.Context, ...apigateway.AdminSubmission) error
+	PruneRejectedSubmissions(context.Context, time.Time) error
 	ListSubmissions(context.Context, apigateway.SubmissionQuery) (apigateway.SubmissionPage, error)
 	DeleteSubmission(context.Context, int64) (apigateway.SubmissionDeletion, error)
 	ListScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error)
@@ -456,8 +462,12 @@ func (s *memoryGameStore) AcceptFlagSubmission(_ context.Context, submission acc
 	}
 	firstBlood := !s.firstBloodChallenges[submission.ChallengeID]
 	s.firstBloodChallenges[submission.ChallengeID] = true
-	s.accepted[key] = submission
 	s.nextSubmission++
+	if submission.recordedID != nil {
+		*submission.recordedID = s.nextSubmission
+		submission.recordedID = nil
+	}
+	s.accepted[key] = submission
 	attackID := fmt.Sprintf("%s-%d", acceptedFlagAttackEventID(submission), s.nextSubmission)
 	s.submissions = append(s.submissions, apigateway.AdminSubmission{ID: s.nextSubmission, TeamID: submission.SubmittingTeam, Attacker: submission.AttackerName, Victim: submission.VictimName, ChallengeID: submission.ChallengeID, Service: submission.ChallengeName, Flag: submission.Flag, Tick: submission.SubmissionTick, Status: "accepted", Detail: "flag is correct.", FirstBlood: firstBlood, SubmittedAt: submission.SubmittedAt.UTC(), AttackID: attackID})
 	s.attackFeed = append([]apigateway.AttackEventAlias{{
@@ -1211,6 +1221,37 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	if currentTick == 0 || currentTick > submission.ExpiresTick {
 		return false, errFlagNoLongerValid
 	}
+	var teamEligible bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT active AND (play_from_tick IS NULL OR play_from_tick <= $2)
+		FROM teams
+		WHERE id = $1
+		FOR SHARE
+	`, submission.SubmittingTeam, currentTick).Scan(&teamEligible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, errFlagNoLongerValid
+	}
+	if err != nil {
+		return false, err
+	}
+	if !teamEligible {
+		return false, errFlagNoLongerValid
+	}
+	if submission.OwnerTeamID > 0 {
+		// Locked so a disqualification cannot commit between this check and the
+		// capture insert.
+		var ownerActive bool
+		err = tx.QueryRowContext(ctx, `SELECT active FROM teams WHERE id = $1 FOR SHARE`, submission.OwnerTeamID).Scan(&ownerActive)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, errFlagNoLongerValid
+		}
+		if err != nil {
+			return false, err
+		}
+		if !ownerActive {
+			return false, errFlagNoLongerValid
+		}
+	}
 	if submission.ChallengeID > 0 {
 		var blocked bool
 		err = tx.QueryRowContext(ctx, `
@@ -1248,12 +1289,13 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	}
 
 	var attackID string
+	var captureID int64
 	err = tx.QueryRowContext(ctx, `
  WITH seq AS (SELECT nextval(pg_get_serial_sequence('submission_events', 'id')) AS id)
  INSERT INTO submission_events (id, team_id, attacker, victim, challenge_id, service, flag, tick, status, detail, submitted_at, attack_event_id)
  SELECT seq.id, $1, $2, $3, $4, $5, $6, $7, 'accepted', 'flag is correct.', $8, $9 || '-' || seq.id::text FROM seq
- RETURNING attack_event_id
- `, submission.SubmittingTeam, submission.AttackerName, submission.VictimName, submission.ChallengeID, submission.ChallengeName, submission.Flag, submission.SubmissionTick, submission.SubmittedAt.UTC(), acceptedFlagAttackEventID(submission)).Scan(&attackID)
+ RETURNING attack_event_id, id
+ `, submission.SubmittingTeam, submission.AttackerName, submission.VictimName, submission.ChallengeID, submission.ChallengeName, submission.Flag, submission.SubmissionTick, submission.SubmittedAt.UTC(), acceptedFlagAttackEventID(submission)).Scan(&attackID, &captureID)
 	if err != nil {
 		return false, err
 	}
@@ -1270,15 +1312,19 @@ func (s *postgresGameStore) AcceptFlagSubmission(ctx context.Context, submission
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE team_service_states
 		SET unlocked = TRUE,
+		    ssh_grant_start_id = $3,
 		    ssh_hint = 'enemy flag accepted; open SSH Access to view the team credential',
 		    last_event = 'SSH unlocked by accepted enemy flag'
 		WHERE team_id = $1 AND challenge_id = $2 AND unlocked = FALSE
-	`, submission.SubmittingTeam, submission.ChallengeID); err != nil {
+	`, submission.SubmittingTeam, submission.ChallengeID, captureID); err != nil {
 		return false, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		return false, err
+	}
+	if submission.recordedID != nil {
+		*submission.recordedID = captureID
 	}
 	return true, nil
 }
@@ -1964,21 +2010,23 @@ func (s *postgresGameStore) AuditScoreboard(ctx context.Context) (apigateway.Sco
 
 func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) ([]apigateway.ScoreRowAlias, error) {
 	type teamRecord struct {
-		ID   int
-		Name string
+		ID            int
+		Name          string
+		Active        bool
+		ScoreIdentity string
 	}
 
 	teams := make([]teamRecord, 0)
-	// Deactivated teams are excluded from the leaderboard. Their historical
-	// rows (flags, captures, checker runs) are left intact so reactivation
-	// restores them cleanly; they simply do not surface while inactive.
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM teams WHERE active = TRUE ORDER BY id`)
+	// Deactivated teams stay on the board as disqualified, ranked below every
+	// eligible team. Counting them in teamCount keeps the SLA factor stable, so
+	// a disqualification cannot rewrite the other teams' past SLA points.
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, active, score_identity::text FROM teams ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var team teamRecord
-		if err := rows.Scan(&team.ID, &team.Name); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.Active, &team.ScoreIdentity); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -2114,16 +2162,22 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 			services = append(services, service)
 		}
 		scoreboard = append(scoreboard, teamScoreSnapshot{
-			TeamID:   team.ID,
-			Team:     team.Name,
-			Attack:   attackByTeam[team.ID],
-			Defense:  defenseByTeam[team.ID],
-			SLA:      slaByTeam[team.ID],
-			Services: services,
+			TeamID:       team.ID,
+			Team:         team.Name,
+			TeamIdentity: team.ScoreIdentity,
+			Attack:       attackByTeam[team.ID],
+			Defense:      defenseByTeam[team.ID],
+			SLA:          slaByTeam[team.ID],
+			Services:     services,
+
+			Disqualified: !team.Active,
 		})
 	}
 
 	sort.Slice(scoreboard, func(i, j int) bool {
+		if scoreboard[i].Disqualified != scoreboard[j].Disqualified {
+			return scoreboard[j].Disqualified
+		}
 		return scoreRanksBefore(
 			scoreRankKey{scoreboard[i].Total(), scoreboard[i].Attack, scoreboard[i].Defense, scoreboard[i].Team},
 			scoreRankKey{scoreboard[j].Total(), scoreboard[j].Attack, scoreboard[j].Defense, scoreboard[j].Team},
@@ -2133,14 +2187,17 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 	result := make([]apigateway.ScoreRowAlias, 0, len(scoreboard))
 	for index, snapshot := range scoreboard {
 		row := apigateway.ScoreRowAlias{
-			Rank:     index + 1,
-			Team:     snapshot.Team,
-			Attack:   snapshot.Attack,
-			Defense:  snapshot.Defense,
-			SLA:      snapshot.SLA,
-			Total:    snapshot.Total(),
-			Delta:    rankDelta(previousRanks[snapshot.TeamID], index+1),
-			Services: append([]apigateway.ServiceScoreBreakdownAlias(nil), snapshot.Services...),
+			Rank:         index + 1,
+			Team:         snapshot.Team,
+			TeamIdentity: snapshot.TeamIdentity,
+			Attack:       snapshot.Attack,
+			Defense:      snapshot.Defense,
+			SLA:          snapshot.SLA,
+			Total:        snapshot.Total(),
+			Delta:        rankDelta(previousRanks[snapshot.TeamID], index+1),
+			Services:     append([]apigateway.ServiceScoreBreakdownAlias(nil), snapshot.Services...),
+
+			Disqualified: snapshot.Disqualified,
 		}
 		result = append(result, row)
 	}
@@ -2171,12 +2228,6 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		}
 	}
 
-	// Drop deleted and deactivated teams. The team list above is read without a
-	// lock, so a deactivation committing mid-recompute can re-upsert its row;
-	// this sweep removes it on the same or the next recompute.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id NOT IN (SELECT id FROM teams WHERE active = TRUE)`); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -2185,9 +2236,10 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 
 func (s *postgresGameStore) listStoredScoreboard(ctx context.Context) ([]apigateway.ScoreRowAlias, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT rank, team_name, attack_points, defense_points, sla_points, total_points, delta
-		FROM scoreboard_entries
-		ORDER BY rank ASC, team_name ASC
+		SELECT se.rank, se.team_name, se.attack_points, se.defense_points, se.sla_points, se.total_points, se.delta, NOT t.active, t.score_identity::text
+		FROM scoreboard_entries se
+		JOIN teams t ON t.id = se.team_id
+		ORDER BY se.rank ASC, se.team_name ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -2197,7 +2249,7 @@ func (s *postgresGameStore) listStoredScoreboard(ctx context.Context) ([]apigate
 	result := make([]apigateway.ScoreRowAlias, 0)
 	for rows.Next() {
 		var row apigateway.ScoreRowAlias
-		if err := rows.Scan(&row.Rank, &row.Team, &row.Attack, &row.Defense, &row.SLA, &row.Total, &row.Delta); err != nil {
+		if err := rows.Scan(&row.Rank, &row.Team, &row.Attack, &row.Defense, &row.SLA, &row.Total, &row.Delta, &row.Disqualified, &row.TeamIdentity); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -2537,12 +2589,15 @@ func scoreRanksBefore(a, b scoreRankKey) bool {
 }
 
 type teamScoreSnapshot struct {
-	TeamID   int
-	Team     string
-	Attack   float64
-	Defense  float64
-	SLA      float64
-	Services []apigateway.ServiceScoreBreakdownAlias
+	TeamID       int
+	Team         string
+	TeamIdentity string
+	Attack       float64
+	Defense      float64
+	SLA          float64
+	Services     []apigateway.ServiceScoreBreakdownAlias
+
+	Disqualified bool
 }
 
 func (s teamScoreSnapshot) Total() float64 {

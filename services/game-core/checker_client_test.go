@@ -71,9 +71,9 @@ func TestHTTPCheckerClientErrors(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"problem detail", http.StatusInternalServerError, `{"title":"x","detail":" docker unavailable "}`, "docker unavailable"},
-		{"problem title", http.StatusBadGateway, `{"title":" Runner down "}`, "Runner down"},
-		{"message", http.StatusBadGateway, `{"message":"legacy"}`, "legacy"},
+		{"problem detail", http.StatusInternalServerError, `{"title":"x","detail":"private-token"}`, "status 500"},
+		{"problem title", http.StatusBadGateway, `{"title":"private-token"}`, "status 502"},
+		{"message", http.StatusBadGateway, `{"message":"private-token"}`, "status 502"},
 		{"empty", http.StatusBadGateway, `{}`, "status 502"},
 		{"not json", http.StatusBadGateway, `oops`, "status 502"},
 		{"bad success body", http.StatusOK, `{bad`, "invalid"},
@@ -86,10 +86,10 @@ func TestHTTPCheckerClientErrors(t *testing.T) {
 			}))
 			defer server.Close()
 			client := newCheckerClient(server.URL, "")
-			if _, err := client.Execute(context.Background(), apigateway.CheckerExecutionRequest{}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := client.Execute(context.Background(), apigateway.CheckerExecutionRequest{}); err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-token") {
 				t.Fatalf("execute: want %q, got %v", tc.want, err)
 			}
-			if _, err := client.ExecuteBatch(context.Background(), apigateway.CheckerBatchExecutionRequest{}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := client.ExecuteBatch(context.Background(), apigateway.CheckerBatchExecutionRequest{}); err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-token") {
 				t.Fatalf("batch: want %q, got %v", tc.want, err)
 			}
 		})

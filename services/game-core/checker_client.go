@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -141,13 +141,6 @@ func (c *httpCheckerClient) Execute(ctx context.Context, request apigateway.Chec
 		}
 		return payload, nil
 	}
-	message, err := decodeCheckerRunnerError(resp.Body)
-	if err != nil {
-		return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
-	}
-	if message != "" {
-		return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed: %s", message)
-	}
 	return apigateway.CheckerExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 }
 
@@ -177,35 +170,31 @@ func (c *httpCheckerClient) ExecuteBatch(ctx context.Context, request apigateway
 		}
 		return payload, nil
 	}
-	message, err := decodeCheckerRunnerError(resp.Body)
-	if err != nil {
-		return apigateway.CheckerBatchExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
-	}
-	if message != "" {
-		return apigateway.CheckerBatchExecutionResult{}, fmt.Errorf("checker-runner request failed: %s", message)
-	}
 	return apigateway.CheckerBatchExecutionResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 }
 
-func decodeCheckerRunnerError(body io.Reader) (string, error) {
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return "", err
+const checkerExecutionUnavailable = "checker execution unavailable"
+
+func checkerExecutionErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return apigateway.CheckerCanceledFailure
+	case errors.Is(err, context.DeadlineExceeded):
+		return apigateway.CheckerTimeoutFailure
+	default:
+		return checkerExecutionUnavailable
 	}
-	var problem httpapi.ProblemDetails
-	if err := json.Unmarshal(data, &problem); err == nil {
-		if trimmed := strings.TrimSpace(problem.Detail); trimmed != "" {
-			return trimmed, nil
-		}
-		if trimmed := strings.TrimSpace(problem.Title); trimmed != "" {
-			return trimmed, nil
-		}
+}
+
+// Failed results from older runners can contain arbitrary checker output.
+func checkerRunFailureMessage(message string, exitCode int) string {
+	switch message {
+	case apigateway.CheckerCanceledFailure, apigateway.CheckerTimeoutFailure,
+		apigateway.CheckerOutputLimitFailure, apigateway.CheckerBatchFramingFailure,
+		checkerExecutionUnavailable, missingStoredFlagMessage,
+		retentionCheckerUnavailable, retentionVerificationFailed:
+		return message
+	default:
+		return apigateway.CheckerExitFailureMessage(exitCode)
 	}
-	var payload struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(payload.Message), nil
 }

@@ -14,6 +14,7 @@ import (
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/database"
 	"adplatform/internal/platform/httpapi"
+	"adplatform/internal/services/apigateway"
 )
 
 // fatal reports a startup failure and exits; tests replace it.
@@ -49,6 +50,10 @@ func run(ctx context.Context) error {
 	}
 
 	adminToken := config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN")
+	flagPrefix := config.String("GAME_CORE_FLAG_FORMAT_PREFIX", "PLAYIT")
+	if len(strings.TrimSpace(flagPrefix)) > apigateway.MaxFlagFormatPrefixBytes {
+		return fmt.Errorf("GAME_CORE_FLAG_FORMAT_PREFIX must be at most %d bytes", apigateway.MaxFlagFormatPrefixBytes)
+	}
 	server := newGameCoreServer(
 		adminToken,
 		store,
@@ -56,7 +61,7 @@ func run(ctx context.Context) error {
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
 			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		),
-		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET"), config.String("GAME_CORE_FLAG_FORMAT_PREFIX", "PLAYIT")),
+		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET"), flagPrefix),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
@@ -108,6 +113,10 @@ func run(ctx context.Context) error {
 	defer matchMonitor.Close()
 	stopRetentionMonitor := server.startRetentionMonitor()
 	defer stopRetentionMonitor()
+	stopSubmissionHistoryPruner := server.startSubmissionHistoryPruner(ctx)
+	defer stopSubmissionHistoryPruner()
+	stopAccessRetry := server.startAccessReconcileRetry(ctx)
+	defer stopAccessRetry()
 
 	mux := httpapi.NewBaseMux(info)
 	server.RegisterRoutes(mux)

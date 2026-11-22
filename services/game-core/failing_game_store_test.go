@@ -85,9 +85,13 @@ func (failingGameStore) AcceptFlagSubmission(ctx context.Context, submission acc
 	return
 }
 
-func (failingGameStore) RecordSubmission(context.Context, apigateway.AdminSubmission) (err error) {
+func (failingGameStore) RecordSubmissions(context.Context, ...apigateway.AdminSubmission) (err error) {
 	err = errGameStoreDown
 	return
+}
+
+func (failingGameStore) PruneRejectedSubmissions(context.Context, time.Time) error {
+	return errGameStoreDown
 }
 
 func (failingGameStore) ListSubmissions(context.Context, apigateway.SubmissionQuery) (r0 apigateway.SubmissionPage, err error) {

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"adplatform/internal/platform/httpapi"
@@ -23,6 +24,7 @@ type gameCoreServer struct {
 	store           gameStore
 	checker         checkerClient
 	accessReconcile accessReconcileClient
+	accessPending   atomic.Bool
 	flags           flagCodec
 	flagsMu         sync.RWMutex
 	tickMu          sync.Mutex
@@ -637,6 +639,21 @@ func (s *gameCoreServer) handleCheckerRuns(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
 		return
 	}
+	for i := range runs.Items {
+		run := &runs.Items[i]
+		// History can include diagnostics persisted by older runners.
+		switch normalizedCheckerRunStatus(run.Status) {
+		case "skipped":
+			run.Output = ""
+		case "failed":
+			run.Output = ""
+			run.Message = checkerRunFailureMessage(run.Message, run.ExitCode)
+			run.StateMessage = ""
+		}
+		if message := apigateway.CheckerServiceFailureMessage(run.ServiceState); message != "" {
+			run.StateMessage = message
+		}
+	}
 	writeData(w, http.StatusOK, runs)
 }
 
@@ -780,6 +797,10 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag submission request is invalid.")
 		return
 	}
+	if err := apigateway.ValidateSubmittedFlags(request.Flags); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", err.Error())
+		return
+	}
 	results, err := s.submitFlags(r.Context(), request.TeamID, request.Flags)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
@@ -790,7 +811,7 @@ func (s *gameCoreServer) handleSubmitFlags(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, statusCode, "Flag submission failed", err.Error())
 		return
 	}
-	writeData(w, http.StatusOK, toSubmissionVerdictAliases(results))
+	writeData(w, http.StatusOK, results)
 }
 
 func (s *gameCoreServer) handleGetFlagFormat(w http.ResponseWriter, r *http.Request) {
@@ -814,6 +835,10 @@ func (s *gameCoreServer) handleRefreshFlagFormat(w http.ResponseWriter, r *http.
 	}
 	if strings.TrimSpace(req.Prefix) == "" {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "prefix must not be empty.")
+		return
+	}
+	if len(strings.TrimSpace(req.Prefix)) > apigateway.MaxFlagFormatPrefixBytes {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", fmt.Sprintf("prefix must be at most %d bytes.", apigateway.MaxFlagFormatPrefixBytes))
 		return
 	}
 	active := s.reloadFlagFormat(req.Prefix)
@@ -1249,13 +1274,12 @@ func (s *gameCoreServer) attemptWarmupPut(ctx context.Context, target checkerTar
 		TimeoutSeconds: s.checkerTimeout,
 	})
 	if execErr != nil {
-		return fmt.Errorf("checker execution failed: %w", execErr)
+		return errors.New(checkerExecutionErrorMessage(execErr))
 	}
 
 	status := normalizedCheckerRunStatus(result.Status)
 	if status != "success" {
-		return fmt.Errorf("put phase did not succeed: status=%s message=%s",
-			status, strings.TrimSpace(result.Message))
+		return fmt.Errorf("put phase did not succeed: %s", checkerRunFailureMessage(result.Message, result.ExitCode))
 	}
 	return nil
 }
@@ -1471,7 +1495,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 			// Batch transport/infra failure (docker, network, timeout): no phase
 			// ran. Attribute the failure to the first phase and skip the rest.
 			run.Status = "failed"
-			run.Message = execErr.Error()
+			run.Message = checkerExecutionErrorMessage(execErr)
 			halted = true
 		default:
 			result, ok := phaseResults[phase]
@@ -1484,21 +1508,26 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 			}
 			run.Status = normalizedCheckerRunStatus(result.Status)
 			run.ExitCode = result.ExitCode
-			run.Message = strings.TrimSpace(result.Message)
-			run.Output = strings.TrimSpace(result.Output)
-			run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
-			run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
 			if parsed, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
 				run.CheckedAt = parsed.UTC()
 			}
-			if run.Status == "failed" {
+			switch run.Status {
+			case "success":
+				run.Message = strings.TrimSpace(result.Message)
+				run.Output = strings.TrimSpace(result.Output)
+				run.ReportedServiceState = apigateway.NormalizeServiceStateStatus(result.ServiceState)
+				run.ReportedStateMessage = strings.TrimSpace(result.StateMessage)
+			case "skipped":
+				run.Message = "phase skipped after previous checker failure"
+			default:
+				run.Message = checkerRunFailureMessage(result.Message, result.ExitCode)
 				halted = true
 			}
 		}
 
 		retentionRecorded := false
 		if phase == "get" && run.Status == "failed" && run.ExitCode == flagMissingExitCode {
-			run.Message = "confirmed missing stored flag; tick SLA forfeited and severe defense penalty"
+			run.Message = missingStoredFlagMessage
 			flag, err := s.store.LookupIssuedFlag(ctx, flagValue)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return counts, err
@@ -1625,16 +1654,19 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			continue
 		}
 
+		var captureID int64
 		accepted, err := s.store.AcceptFlagSubmission(ctx, acceptedFlagSubmission{
 			Flag:           trimmed,
 			SubmittingTeam: teamID,
 			AttackerName:   attackerName,
 			VictimName:     issued.OwnerTeamName,
+			OwnerTeamID:    issued.OwnerTeamID,
 			ChallengeName:  issued.ChallengeName,
 			ChallengeID:    issued.ChallengeID,
 			SubmissionTick: currentTick,
 			ExpiresTick:    claims.ExpiresTick,
 			SubmittedAt:    s.now().UTC(),
+			recordedID:     &captureID,
 		})
 		if err != nil {
 			if errors.Is(err, errFlagNoLongerValid) {
@@ -1648,7 +1680,7 @@ func (s *gameCoreServer) submitFlags(ctx context.Context, teamID int, flags []st
 			continue
 		}
 
-		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct.", ChallengeID: issued.ChallengeID})
+		results = append(results, submissionVerdictAlias{Flag: trimmed, Status: "accepted", Detail: "flag is correct.", ChallengeID: issued.ChallengeID, CaptureID: captureID})
 		acceptedAny = true
 	}
 	// Accepted captures are already committed. Their follow-up work and the
@@ -1755,17 +1787,4 @@ func normalizedCheckerRunStatus(status string) string {
 	}
 }
 
-type submissionVerdictAlias struct {
-	ChallengeID int    `json:"challenge_id,omitempty"`
-	Flag        string `json:"flag"`
-	Status      string `json:"status"`
-	Detail      string `json:"detail"`
-}
-
-func toSubmissionVerdictAliases(values []submissionVerdictAlias) []apigateway.SubmissionVerdictAlias {
-	result := make([]apigateway.SubmissionVerdictAlias, 0, len(values))
-	for _, value := range values {
-		result = append(result, apigateway.SubmissionVerdictAlias{Flag: value.Flag, Status: value.Status, Detail: value.Detail, ChallengeID: value.ChallengeID})
-	}
-	return result
-}
+type submissionVerdictAlias = apigateway.SubmissionVerdictAlias
