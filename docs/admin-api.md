@@ -151,7 +151,7 @@ Fetch the current WireGuard config and peer metadata for one player.
 
 ### POST `/api/v2/admin/players/{player_id}/wireguard/rotate`
 
-Rotate one player's WireGuard config and issue a fresh artifact.
+Rotate one player's WireGuard config, assign a new random VPN address, and issue a fresh artifact.
 
 ### POST `/api/v2/admin/players/{player_id}/wireguard/revoke`
 

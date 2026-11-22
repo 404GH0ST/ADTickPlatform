@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -59,8 +60,8 @@ func TestPlayerSourceCheckerUsesUnassignedPlayerAddresses(t *testing.T) {
 	}
 	distinct := map[string]struct{}{}
 	for _, source := range inner.sources {
-		if !strings.HasPrefix(source, "10.70.1.") || source == "10.70.1.20" || source == "10.70.1.21" {
-			t.Fatalf("checker source %q must be a free address beside real players", source)
+		if !strings.HasPrefix(source, "10.70.") || source == "10.70.1.20" || source == "10.70.1.21" {
+			t.Fatalf("checker source %q must be a free player-pool address", source)
 		}
 		distinct[source] = struct{}{}
 	}
@@ -73,9 +74,15 @@ func TestPlayerSourceCheckerUsesUnassignedPlayerAddresses(t *testing.T) {
 }
 
 func TestPlayerSourceCheckerNeverSharesAnAddress(t *testing.T) {
-	assigned := make([]string, 0, 198)
-	for _, address := range apigateway.UnassignedPlayerAddresses(nil)[:198] {
-		assigned = append(assigned, address)
+	// Leave exactly two free addresses so a shared address would be detected.
+	assigned := make([]string, 0, 50798)
+	for block := 1; block <= 254; block++ {
+		for host := 20; host <= 219; host++ {
+			if block == 7 && (host == 33 || host == 34) {
+				continue
+			}
+			assigned = append(assigned, fmt.Sprintf("10.70.%d.%d", block, host))
+		}
 	}
 	inner := &recordingSourceClient{hold: make(chan struct{}), entered: make(chan struct{}, 2)}
 	client := &playerSourceChecker{inner: inner, addresses: fakePlayerAddresses{addresses: assigned}, inUse: map[string]struct{}{}}

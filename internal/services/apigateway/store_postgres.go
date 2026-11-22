@@ -1777,7 +1777,16 @@ func (s *postgresStore) RotateAdminPlayerWireGuardConfig(ctx context.Context, pl
 	if !found {
 		return adminWireGuardPeer{}, ErrPlayerNotFound
 	}
-	wireGuardState, err := newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, existingState.Address, now)
+	// Rotation already requires a new client config, so it also moves peers
+	// issued before addresses were randomized.
+	address, err := allocateWireGuardPeerAddressTx(ctx, tx)
+	if errors.Is(err, ErrPlayerAddressPool) {
+		address, err = existingState.Address, nil
+	}
+	if err != nil {
+		return adminWireGuardPeer{}, err
+	}
+	wireGuardState, err := newWireGuardPeerState(identity.PlayerID, identity.TeamID, identity.TeamName, identity.DisplayName, identity.WireGuardPeer, address, now)
 	if err != nil {
 		return adminWireGuardPeer{}, err
 	}
@@ -3739,27 +3748,32 @@ func allocateTeamNetworkIDTx(ctx context.Context, tx *sql.Tx) (int, error) {
 
 func allocateWireGuardPeerAddressTx(ctx context.Context, tx *sql.Tx) (string, error) {
 	// Serialize allocation across registrations, joins, imports, and lazy peer
-	// repair. The unique constraint remains the final safety net, while scanning
-	// the pool preserves legacy addresses and reuses holes left by deletions.
+	// repair. The unique constraint remains the final safety net. Random placement
+	// keeps real players from forming a range that excludes checker sources.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(71407051820)`); err != nil {
 		return "", err
 	}
-	var address string
-	err := tx.QueryRowContext(ctx, `
-		SELECT '10.70.' || ((candidate / 200) + 1)::text || '.' || ((candidate % 200) + 20)::text
-		FROM generate_series(0, $1) AS candidate
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM wireguard_peers wp
-			WHERE wp.address = '10.70.' || ((candidate / 200) + 1)::text || '.' || ((candidate % 200) + 20)::text
-		)
-		ORDER BY candidate
-		LIMIT 1
-	`, wireGuardPeerAddressPoolSize-1).Scan(&address)
-	if errors.Is(err, sql.ErrNoRows) {
+	rows, err := tx.QueryContext(ctx, `SELECT address FROM wireguard_peers`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	used := make(map[string]struct{})
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return "", err
+		}
+		used[strings.TrimSpace(address)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	address, ok := RandomUnassignedPlayerAddress(used)
+	if !ok {
 		return "", ErrPlayerAddressPool
 	}
-	return address, err
+	return address, nil
 }
 
 func (s *postgresStore) loadAdminWireGuardPeer(ctx context.Context, playerID int) (adminWireGuardPeer, error) {

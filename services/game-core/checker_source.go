@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	mrand "math/rand/v2"
 	"strings"
 	"sync"
 
@@ -58,24 +57,26 @@ func (c *playerSourceChecker) acquire(ctx context.Context) (string, func()) {
 		log.Printf("game-core: checker source lookup failed; using the service network: %v", err)
 		return "", func() {}
 	}
-	candidates := apigateway.UnassignedPlayerAddresses(assigned)
-	mrand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, address := range candidates {
-		if _, busy := c.inUse[address]; busy {
-			continue
-		}
-		c.inUse[address] = struct{}{}
-		return address, func() {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			delete(c.inUse, address)
-		}
+	used := make(map[string]struct{}, len(assigned)+len(c.inUse))
+	for _, address := range assigned {
+		used[strings.TrimSpace(address)] = struct{}{}
 	}
-	log.Printf("game-core: no free checker source address; using the service network")
-	return "", func() {}
+	for address := range c.inUse {
+		used[address] = struct{}{}
+	}
+	address, ok := apigateway.RandomUnassignedPlayerAddress(used)
+	if !ok {
+		log.Printf("game-core: no free checker source address; using the service network")
+		return "", func() {}
+	}
+	c.inUse[address] = struct{}{}
+	return address, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.inUse, address)
+	}
 }
 
 func (s *postgresGameStore) ListPlayerVPNAddresses(ctx context.Context) ([]string, error) {

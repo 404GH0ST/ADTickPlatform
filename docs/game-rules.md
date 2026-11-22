@@ -252,6 +252,11 @@ client. A service that rejects player traffic can therefore fail its checker and
 lose SLA for that tick. Real players keep their real VPN addresses in service
 logs and packet captures.
 
+New VPN peers receive random addresses from the whole player pool, so an address
+range cannot separate players from checkers. Peers issued by an older release may
+still use sequential addresses. Rotate them before the match, then have those
+players download their new WireGuard config.
+
 ## 7. Unlocking Patch Access
 
 ## 7.1 Intent

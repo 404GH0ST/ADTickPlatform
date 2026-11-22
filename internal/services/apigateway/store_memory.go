@@ -3,6 +3,7 @@ package apigateway
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -1221,7 +1222,14 @@ func (s *memoryStore) RotateAdminPlayerWireGuardConfig(_ context.Context, player
 	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && record.Player.TeamID == 0 {
 		teamName = "Organizer"
 	}
-	wireGuardState, err := newWireGuardPeerState(record.Player.ID, record.Player.TeamID, teamName, record.Player.DisplayName, record.Player.WireGuardPeer, record.WireGuard.Address, now)
+	address, err := s.allocateWireGuardPeerAddressLocked()
+	if errors.Is(err, ErrPlayerAddressPool) {
+		address, err = record.WireGuard.Address, nil
+	}
+	if err != nil {
+		return adminWireGuardPeer{}, err
+	}
+	wireGuardState, err := newWireGuardPeerState(record.Player.ID, record.Player.TeamID, teamName, record.Player.DisplayName, record.Player.WireGuardPeer, address, now)
 	if err != nil {
 		return adminWireGuardPeer{}, err
 	}
@@ -2399,13 +2407,11 @@ func (s *memoryStore) allocateWireGuardPeerAddressLocked() (string, error) {
 			used[address] = struct{}{}
 		}
 	}
-	for index := 0; index < wireGuardPeerAddressPoolSize; index++ {
-		address := wireGuardPeerAddressAt(index)
-		if _, exists := used[address]; !exists {
-			return address, nil
-		}
+	address, ok := RandomUnassignedPlayerAddress(used)
+	if !ok {
+		return "", ErrPlayerAddressPool
 	}
-	return "", ErrPlayerAddressPool
+	return address, nil
 }
 
 func mustNewAdminPlayerRecord(id, teamID int, teamName, displayName, email, role, password string, createdAt time.Time) *adminPlayerRecord {
