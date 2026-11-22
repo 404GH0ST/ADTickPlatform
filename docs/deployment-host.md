@@ -24,6 +24,22 @@ Planning guidance (order-of-magnitude, not a guarantee):
 
 Each challenge instance is a full container plus checker work per tick. Disk, Docker overlay I/O, and concurrent checker CPU often saturate before raw RAM. Rehearse with `make simulate-attack-map-load` and a short match smoke before go-live. If you need more teams than one host can hold, treat multi-host runtime placement as a separate engineering project—not a config toggle.
 
+Run `prod-host` on Docker's classic `overlay2` driver with an XFS filesystem
+mounted with project quotas (`pquota` or `prjquota`). The default
+`CONTROLLER_SERVICE_DISK_LIMIT_MIB=1024` caps each challenge's writable layer and
+its state volume separately. Challenge logs rotate at three files of up to
+10 MiB each. Budget for both quotas per challenge instance, images, and
+control-plane data when sizing the host.
+
+Existing containers and volumes require an offline rollover. Before enabling
+quotas on an earlier deployment, back up PostgreSQL, each challenge state
+volume, and any team patches stored in container writable layers. Verify the
+backups, then provision quota-managed volumes and recreate the containers
+with the saved patches during maintenance. Keep volumes under their original
+names so the database still refers to the same state slot. Docker local volumes
+use the `size` option in bytes, which is `1073741824` at the default limit.
+Preflight reports legacy resources for migration and preserves their data.
+
 ## 2. Server Preparation
 
 Preferred path (detects apt vs pacman and installs Docker correctly):
@@ -103,9 +119,9 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    `make generate-prod-env` writes `deploy/compose/prod.env` with strong random
    secrets (service tokens, DB password, WireGuard key, **organizer ADMIN_PASSWORD**,
    Grafana password) and refuses to overwrite unless `FORCE=true` is set.
-   Flags are deterministic for a given `GAME_CORE_FLAG_SECRET`. If you rehearse on
-   one database and run the event on another, generate a new secret for the event
-   so rehearsal flags cannot be replayed (see
+   Each issued flag includes a fresh random nonce, so rehearsal flags are not
+   reissued when a new event reuses numeric IDs. Still generate a new
+   `GAME_CORE_FLAG_SECRET` for each event (see
    [Flag Lifecycle](game-rules.md#51-generation)).
    Production setup rejects plain HTTP. For local development without TLS, use
    the development stack instead of `prod.yml`. Public DNS names use Caddy's
@@ -142,6 +158,8 @@ sudo make wg-host-show
 
 1. **Run Preflight**:
    Ensures all required binaries, environment variables, and ports are ready.
+   Set `CONTROLLER_INTERNET_INTERFACE` in `prod.env` to the host's IPv4 uplink
+   if it differs from `eth0`. Per-challenge Internet egress rules use that interface.
    ```bash
    make preflight-prod-host
    ```
@@ -169,14 +187,14 @@ sudo make wg-host-show
 Once the platform is running, create your first organizer account:
 
 ```bash
-make create-admin PASSWORD=your-secure-password
+make create-admin
 ```
 
-This now also fetches and writes the organizer WireGuard client config by default to `.runtime/admin-wireguard/`.
+The command uses the organizer password from the private `prod.env` file. To override it, export `ADMIN_PASSWORD` in the shell before running the command. The command also writes the organizer WireGuard client config to `.runtime/admin-wireguard/`.
 Set a custom output directory with:
 
 ```bash
-make create-admin PASSWORD=your-secure-password ADMIN_WIREGUARD_OUTPUT_DIR=/path/to/output
+make create-admin ADMIN_WIREGUARD_OUTPUT_DIR=/path/to/output
 ```
 
 You can now log in at your configured `EDGE_SITE_ADDRESS` / `login` to access the dashboard.

@@ -530,16 +530,16 @@ Do not rely on Redis as the sole record for score-affecting events.
 
 ## 9. Flag Model
 
-Recommended flag structure:
+Flag structure:
 
-- encode `match_id`, `team_id`, `service_id`, `tick_id`, `slot`
+- encode the owner team, service, issue tick, expiry tick, and a fresh random nonce
 - add a MAC or signature using a server-side secret
 - include a short version prefix for future compatibility
 
 This allows:
 
 - fast validation in Submission Service
-- deterministic regeneration
+- resistance to replay when a new match reuses numeric IDs and a secret
 - easier incident recovery
 
 Persist at least:

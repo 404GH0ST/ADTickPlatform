@@ -10,7 +10,9 @@ Delete acts on one history entry and requires confirmation:
 - Rejected or duplicate attempt: remove that entry only. An existing accepted
   capture, its first blood, and its score remain intact.
 - Accepted capture: remove its acceptance ledger entry and attack event, and
-  recalculate score contributions. The same flag may be accepted again if valid.
+  recalculate score contributions. If the team has no other capture qualifying
+  for that challenge's current SSH grant, the platform revokes the grant and
+  reapplies the firewall policy. The same flag may be accepted again if valid.
 - First-blood capture: also clear the challenge's first blood. Older normal
   captures remain normal; the next accepted capture earns the award. Deletion and
   acceptance use the same database lock, so concurrent captures produce one winner.
@@ -25,6 +27,11 @@ team names. Earlier rejected and duplicate attempts cannot be reconstructed;
 those are logged only after this update. Flags rejected because the match is not
 running are also recorded when they reach game-core. Malformed HTTP requests and
 requests rejected by authentication or rate limiting do not create flag entries.
+
+Flag submissions accept up to 128 flags, each at most 512 bytes. Migration
+`0047_bound_rejected_submissions.sql` keeps up to 4,096 rejected or duplicate
+attempts per team and removes these entries after seven days. Accepted captures
+remain available for scoring and review.
 
 ## See the live first-blood sequence
 
@@ -84,6 +91,9 @@ and `has_next`. Each item includes its numeric `id`, timestamp `submitted_at`,
 `DELETE /api/v2/admin/submissions/{id}`
 
 Returns `200` with `id`, `status`, `service`, and `first_blood_cleared`.
+When deletion revokes an SSH grant, the response includes `ssh_grant_revoked`.
+If the firewall update fails, `access_reconcile_pending` is set while game-core
+retries the update.
 A missing or previously deleted ID returns `404`. A malformed ID returns `400`.
 No automatic promotion of older captures occurs. Live score reads reflect the
 remaining acceptance ledger; stored score snapshots are recomputed asynchronously.

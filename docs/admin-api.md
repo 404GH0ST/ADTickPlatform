@@ -88,6 +88,15 @@ Behavior:
 - creates a zeroed scoreboard row
 - replicates every already-published challenge into that team's service set
 
+### POST `/api/v2/admin/teams/{team_id}/join-key/rotate`
+
+Replace a team's invitation key. The response contains `team_id` and the new
+`join_key` and is marked `Cache-Control: no-store`. The previous key stops
+working immediately, and existing team members keep their access. An inactive
+team accepts no new members via a join key until it is reactivated.
+
+In the organizer UI, use **Rotate join key** in the team's row actions.
+
 ### DELETE `/api/v2/admin/teams/{team_id}`
 
 Delete a team.
@@ -119,6 +128,13 @@ Request body:
 ```
 
 Valid roles are `member`, `captain`, or `organizer`. `organizer` accounts have access to the global admin dashboard. Team ID `0` can be used for team-less organizer accounts.
+
+### PUT `/api/v2/admin/players/{player_id}`
+
+Update a player's display name, email, and role. A role change invalidates
+existing sessions. The update also reconciles controller and WireGuard access.
+If reconciliation fails after the update is saved, the API returns `502`.
+Submitting the same update retries both network operations.
 
 ### DELETE `/api/v2/admin/players/{player_id}`
 
@@ -193,7 +209,8 @@ Behavior:
 - `egress_enabled` (default `true`) controls whether the per-team service container
   is allowed to reach the public internet. When `false`, the controller emits an
   nftables/iptables DROP rule that blocks outbound traffic from that challenge's
-  service containers to the `CONTROLLER_INTERNET_INTERFACE` (default `eth0`).
+  service containers to the `CONTROLLER_INTERNET_INTERFACE` (default `eth0`) and
+  confines external DNS fallback to the container's unreachable loopback.
   Use this for air-gapped challenges that must not phone home or coordinate over
   external channels.
 - if omitted:
@@ -206,6 +223,8 @@ Behavior:
 ### PUT `/api/v2/admin/challenges/{challenge_id}`
 
 Update a challenge's name, images, source path, egress, category and protocol.
+Changing egress on a deployed challenge requires maintenance and a resume to
+recreate its containers with the corresponding DNS setting.
 `category` and `protocol` are optional here: omit them to keep the stored values,
 send `"category": ""` to clear the category.
 
@@ -385,7 +404,7 @@ Behavior:
 - pauses authoritative participant flag submission (submissions return 400 Bad Request)
 - stops the tick scheduler if it is currently running
 - blocks manual tick advancements
-- triggers an automatic WireGuard gateway reconcile to restrict VPN network access to organizer-only peers
+- restricts VPN network access to organizer peers and blocks direct and routed traffic from challenge containers to service IPs
 
 ### POST `/api/v2/admin/game/match/resume`
 
@@ -396,7 +415,7 @@ Behavior:
 - re-opens authoritative participant flag submission
 - restarts the tick scheduler automatically
 - unblocks manual tick advancements
-- triggers an automatic WireGuard gateway reconcile to restore VPN network access for all active participant peers
+- restores the normal service firewall policy and VPN network access for active participant peers
 
 ### POST `/api/v2/admin/game/match/stop`
 
@@ -628,6 +647,7 @@ The repository now also exposes realtime gateway endpoints:
 - `GET /public/v1/scoreboard/stream`
 - `GET /public/v1/attacks/stream`
 - `GET /admin/v1/game/scoreboard/stream`
+- `GET /admin/v1/game/attacks/stream`
 - `GET /admin/v1/game/status/stream`
 - `GET /admin/v1/game/checker-runs/stream`
 - `GET /admin/v1/game/scheduler/events/stream`
@@ -641,6 +661,9 @@ Current behavior:
 - each frame contains the full latest snapshot, not a partial delta
 - the participant dashboard subscribes directly to public streams
 - the organizer dashboard reaches admin streams through same-origin Next proxy routes so `ADMIN_API_TOKEN` stays server-side
+- public and organizer streams have independent global connection limits
+  (`REALTIME_MAX_SUBSCRIBERS` and `REALTIME_MAX_ADMIN_SUBSCRIBERS`) and each
+  applies `REALTIME_MAX_SUBSCRIBERS_PER_CLIENT` separately
 
 ## WireGuard Gateway Service
 
@@ -704,7 +727,7 @@ Not implemented yet:
 
 ## Submission history
 
-Use **Organizer → Submissions** to inspect every recorded flag attempt and delete
+Use **Organizer → Submissions** to inspect recent flag attempts and delete
 an individual entry. The organizer API exposes `GET /api/v2/admin/submissions`
 and `DELETE /api/v2/admin/submissions/{id}`. Deleting an accepted first-blood
 capture clears the award for the next accepted capture, without promoting an

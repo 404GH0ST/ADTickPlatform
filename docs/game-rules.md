@@ -159,14 +159,15 @@ Each flag is derived from:
 - service identifier
 - issuing tick
 - expiry tick
+- a fresh random nonce for each issued flag
 - server-side secret (`GAME_CORE_FLAG_SECRET`)
 
-There is no match identifier or random component. With the same secret, the
-same team, service and tick always produce the same flag string. A rehearsal
-and the real event that both start from a fresh database (team IDs from 101,
-challenge IDs from 1) would therefore issue identical flags. Anyone who saw
-rehearsal flags could submit them again in the real event. Generate a new
-`GAME_CORE_FLAG_SECRET` before every event.
+The nonce prevents a new event from issuing the same flag even if the secret,
+team, service and tick identifiers are reused. A submitted flag must also match
+an issued flag recorded in the current event. Rotate `GAME_CORE_FLAG_SECRET`
+before every event as defense in depth.
+Flags issued before the nonce change remain valid for their normal tick window
+when they are still recorded in the current event's database.
 
 Example logical format:
 
@@ -175,7 +176,7 @@ PLAYIT{<payload>.<mac>}
 ```
 
 The `<payload>` is the base64url encoding of
-`<owner_team_id>:<challenge_id>:<issued_tick>:<expires_tick>`, signed with HMAC-SHA256
+`<owner_team_id>:<challenge_id>:<issued_tick>:<expires_tick>:<nonce>`, signed with HMAC-SHA256
 using the platform flag secret. The `PLAYIT` prefix and the curly braces
 are the configurable flag format — the organizer can change the prefix
 from the admin dashboard (see [Platform Settings](admin-api.md#platform-settings)),

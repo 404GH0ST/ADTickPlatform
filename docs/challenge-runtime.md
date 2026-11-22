@@ -192,10 +192,18 @@ containers to the host's internet interface:
 - nftables: `oifname "<internet-iface>" ip saddr <service-ip> drop`
 - iptables: `-A ADPLATFORM-WG-SERVICES -o <internet-iface> -s <service-ip>/32 -j DROP`
 
-The internet interface defaults to `eth0` and is configured via
-`CONTROLLER_INTERNET_INTERFACE`. When set to an empty string, the egress DROP
-is omitted (the operator is opting in to the host's default firewall to handle
-egress).
+The controller also starts these containers with `--dns 127.0.0.1`. Docker's
+embedded resolver still answers names on the challenge network, but external
+DNS queries cannot use the host's resolver as a relay. Existing containers
+need recreation to acquire this setting. Put a deployed challenge under
+maintenance before changing `egress_enabled`, then resume it to redeploy its
+instances. For deployments created before this restriction, use the same
+maintenance and resume cycle for every challenge with egress disabled.
+
+The internet interface defaults to `eth0`. Set
+`CONTROLLER_INTERNET_INTERFACE` in `prod.env` to the production host's IPv4
+uplink if it has a different name. Production host preflight checks the
+configured interface against the host routing table.
 
 Existing established/related connections (conntrack) are still allowed by the
 chain's first rule, so the DROP only blocks new outbound connections — return
@@ -270,6 +278,7 @@ Relevant production knobs:
 - `GAME_CORE_SCORING_DEBOUNCE`: delay used to batch scoreboard recomputes after accepted submissions.
 - `GAME_CORE_SCORING_RETRY_DELAY`: retry delay after a failed asynchronous scoreboard recompute.
 - `CONTROLLER_SERVICE_MEMORY`, `CONTROLLER_SERVICE_CPUS`, `CONTROLLER_SERVICE_PIDS_LIMIT`: service container resource limits.
+- `CONTROLLER_SERVICE_DISK_LIMIT_MIB`: `prod-host` applies this quota separately to each writable layer and state volume. Images with a Dockerfile `VOLUME` declaration must use the platform state path so their data is inside the managed quota.
 - `CONTROLLER_SERVICE_CAP_DROP`, `CONTROLLER_SERVICE_CAP_ADD`, `CONTROLLER_SERVICE_SECURITY_OPT`: service container capability and security profile. Guarded capture requires `ALL` dropped, the limited SSH capabilities, `no-new-privileges:true`, and Docker's default seccomp policy. `NET_ADMIN` remains absent.
 - `CONTROLLER_CAPTURE_MODE=guarded`: enables direct live `tcpdump` with kernel send restrictions and an XDP receive boundary. The controller grants `NET_RAW` only behind a read-only startup gate and verifies both policies before releasing challenge code at each boot. Requires `make up-prod-host`, local rootful Docker, BPF LSM, BTF, and cgroup v2. `disabled` permits PCAP reading only. See [guarded capture deployment and migration](../deploy/security/direct-capture/README.md).
 - `CHECKER_RUNNER_MEMORY`, `CHECKER_RUNNER_CPUS`, `CHECKER_RUNNER_PIDS_LIMIT`: checker container resource limits.
@@ -354,7 +363,7 @@ port = int(os.environ["AD_TARGET_PORT"])
 flag = os.environ.get("AD_FLAG", "")
 
 if phase == "validate":
-    print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}')
+    print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}')
     print("ok")
     raise SystemExit(0)
 
@@ -374,19 +383,21 @@ Checker expectations:
 
 - support `put`, `get`, `check`
 - support `validate`
-- print `ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}` during `validate`
+- print `ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}` during `validate`
 - reach the target through `AD_TARGET_HOST` and `AD_TARGET_PORT`
 - treat `AD_FLAG` as the authoritative flag value for the current tick
 
 Reporting service state safely:
 
-- Emit the `ADPLATFORM_SERVICE_STATE=` line **before** echoing any
-  target-derived output. Checker stdout and stderr are merged, so a malicious
-  service can print its own `ADPLATFORM_SERVICE_STATE=` marker in its response;
-  the runner honors only the first such line, so a verdict you print first wins.
-- Do not blindly relay the target's raw response to stdout after your verdict if
-  it could contain a crafted marker. If you must, strip lines beginning with
-  `ADPLATFORM_SERVICE_STATE=` from target output before printing them.
+- The runner passes a fresh `AD_CHECKER_STATE_NONCE` to the checker container
+  for each execution. Emit `ADPLATFORM_SERVICE_STATE=` followed by JSON with
+  `status`, optional `message`, and `nonce` equal to that value. The runner
+  ignores markers without the matching nonce, including text echoed from the
+  target service. Keep the nonce inside the checker container and out of
+  target requests and responses.
+- Rebuild existing checker images to declare `state_nonce` during `validate`
+  and include the nonce in their check-phase state reports. Validation rejects
+  the old marker contract.
 
 ## Retention verification contract
 

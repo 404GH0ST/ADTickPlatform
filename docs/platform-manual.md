@@ -161,6 +161,8 @@ Notes:
 
 - The config contains the per-player private key, preshared key, and assigned
   `Address` inside the WireGuard game network. Treat the file as a secret.
+- Downloads return the saved configuration. If a peer was just added and its
+  first gateway update failed, the gateway retries in the background.
 - Import the file directly into WireGuard, `wg-quick`, or any compatible
   client. The `Endpoint` is the configured gateway; the `AllowedIPs` cover
   the game-network subnets.
