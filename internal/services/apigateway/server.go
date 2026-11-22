@@ -608,12 +608,23 @@ func (s *Server) handleGameStatus(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.gameCore.Status(r.Context())
 	if err != nil {
-		writeGameCoreFailure(w, err, "game-core status could not be read.")
+		writePublicGameStatusFailure(w, err)
 		return
 	}
 	// Public surface must not expose per-target warmup errors: those strings can
 	// include checker argv material (flags / checker tokens) from failed puts.
 	writeData(w, http.StatusOK, sanitizePublicGameStatus(status))
+}
+
+// writePublicGameStatusFailure keeps upstream error text, which can include
+// internal hostnames and database details, off the unauthenticated endpoint.
+func writePublicGameStatusFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, errGameCoreDisabled) {
+		writeProblem(w, http.StatusServiceUnavailable, "Game-core unavailable", "game-core is not configured.")
+		return
+	}
+	log.Printf("public game status failed: %v", err)
+	writeProblem(w, http.StatusBadGateway, "Game-core unavailable", "game-core status could not be read.")
 }
 
 // sanitizePublicGameStatus strips diagnostics that belong only on organizer
