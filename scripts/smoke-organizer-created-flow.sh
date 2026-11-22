@@ -254,13 +254,48 @@ team_one_token="$(
     jq -er '.token'
 )"
 
+# Participant endpoints stay hidden until the match starts, so readiness is
+# checked from inside each instance. Prints the container ID.
+wait_for_instance_health() {
+  local team_id="$1"
+  local container deadline
+  container="$(docker ps -aq --filter "label=adplatform.team_id=${team_id}" --filter "label=adplatform.challenge_id=${challenge_id}" | head -n 1)"
+  if [[ -z "${container}" ]]; then
+    echo "expected runtime container for team ${team_id} was not created" >&2
+    return 1
+  fi
+  deadline=$((SECONDS + 30))
+  until docker exec -i "${container}" python3 - >/dev/null 2>&1 <<'PY'
+import os
+from urllib.request import urlopen
+port = os.environ.get("AD_PLATFORM_SERVICE_PORT", os.environ.get("PORT", "8080"))
+with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
+    if response.status != 200:
+        raise SystemExit(1)
+PY
+  do
+    if (( SECONDS >= deadline )); then
+      echo "runtime container for team ${team_id} did not become healthy" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  printf '%s\n' "${container}"
+}
+
+container_name="$(wait_for_instance_health "${team_one_id}")"
+wait_for_instance_health "${team_two_id}" >/dev/null
+
+curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
+
 team_one_state="$(
   curl_json "read team one services" "${API_URL}/api/v2/team/services" \
     -H @<(bearer_header "${team_one_token}") |
     jq -ec --argjson challenge_id "${challenge_id}" 'map(select(.challenge_id == $challenge_id)) | first'
 )"
 printf '%s\n' "${team_one_state}" | jq -c '{challenge_id,name,endpoint,status,checker}'
-team_one_endpoint="$(printf '%s' "${team_one_state}" | jq -er '.endpoint')"
+team_one_endpoint="$(printf '%s' "${team_one_state}" | jq -er '.endpoint | select(length > 0)')"
 
 public_services="$(
   curl_json "read service targets" "${API_URL}/api/v2/services" \
@@ -270,26 +305,6 @@ team_two_endpoint="$(
   printf '%s\n' "${public_services}" |
     jq -er --arg challenge_id "${challenge_id}" --arg team_id "${team_two_id}" '.[$challenge_id][$team_id][0]'
 )"
-
-container_name="svc-$(slug_name "${CHALLENGE_NAME}")-team-${team_one_id}"
-if ! docker ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
-  echo "expected runtime container ${container_name} was not created" >&2
-  exit 1
-fi
-
-if ! wait_for_http "http://${team_one_endpoint}/health" 30; then
-  docker exec -i "${container_name}" python3 - <<'PY' >/dev/null
-import os
-from urllib.request import urlopen
-port = os.environ.get("AD_PLATFORM_SERVICE_PORT", os.environ.get("PORT", "8080"))
-with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
-    if response.status != 200:
-        raise SystemExit(1)
-PY
-fi
-
-curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
-  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 if [[ "${USE_SCHEDULER}" == "true" ]]; then
   if [[ -n "${SCHEDULER_INTERVAL_SECONDS}" ]]; then

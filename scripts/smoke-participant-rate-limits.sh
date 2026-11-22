@@ -192,54 +192,42 @@ if [[ "${ssh_429_seen}" -ne 1 ]]; then
 fi
 echo "ssh-session rate limit triggered"
 
-factory_reset_429_seen=0
-for attempt in 1 2 3 4; do
-  response="$(http_status_body \
+service_action_status() {
+  http_status_body \
     -X POST \
     -H @<(bearer_header "${participant_token}") \
-    "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/factory")"
-  status="$(printf '%s\n' "${response}" | sed -n '1p')"
-  body="$(printf '%s\n' "${response}" | tail -n +2)"
-  if [[ "${status}" == "400" ]]; then
-    continue
-  fi
-  if [[ "${status}" == "429" ]]; then
-    factory_reset_429_seen=1
-    break
-  fi
-  echo "factory reset attempt ${attempt} failed with unexpected status ${status}" >&2
-  printf '%s\n' "${body}" >&2
-  exit 1
-done
-if [[ "${factory_reset_429_seen}" -ne 1 ]]; then
-  echo "factory reset rate limit did not trigger within 4 attempts" >&2
-  exit 1
-fi
-echo "factory reset rate limit triggered"
+    "${EDGE_BASE_URL}/api/v2/services/$1/reset/$2" | sed -n '1p'
+}
 
-restart_429_seen=0
-for attempt in 1 2 3 4 5 6 7; do
-  response="$(http_status_body \
-    -X POST \
-    -H @<(bearer_header "${participant_token}") \
-    "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/restart")"
-  status="$(printf '%s\n' "${response}" | sed -n '1p')"
-  body="$(printf '%s\n' "${response}" | tail -n +2)"
-  if [[ "${status}" == "400" ]]; then
-    continue
-  fi
-  if [[ "${status}" == "429" ]]; then
-    restart_429_seen=1
-    break
-  fi
-  echo "restart attempt ${attempt} failed with unexpected status ${status}" >&2
-  printf '%s\n' "${body}" >&2
-  exit 1
+# A rejected reset or restart changes nothing, so it must not start a cooldown.
+for action in factory restart; do
+  for attempt in 1 2 3; do
+    status="$(service_action_status "${RATE_LIMIT_DRAFT_CHALLENGE_ID}" "${action}")"
+    if [[ "${status}" != "400" ]]; then
+      echo "rejected ${action} attempt ${attempt} returned ${status}; expected 400 with no cooldown" >&2
+      exit 1
+    fi
+  done
 done
-if [[ "${restart_429_seen}" -ne 1 ]]; then
-  echo "restart rate limit did not trigger within 7 attempts" >&2
-  exit 1
+echo "rejected service actions did not start a cooldown"
+
+# These actions restart or wipe a real instance, so the cooldown check is opt-in.
+# Set RATE_LIMIT_LIVE_CHALLENGE_ID only on a disposable stack, to a ready service
+# owned by SECURITY_TEAM_ID.
+if [[ -n "${RATE_LIMIT_LIVE_CHALLENGE_ID:-}" ]]; then
+  for action in restart factory; do
+    status="$(service_action_status "${RATE_LIMIT_LIVE_CHALLENGE_ID}" "${action}")"
+    if [[ "${status}" != "200" ]]; then
+      echo "first live ${action} returned ${status}; expected 200" >&2
+      exit 1
+    fi
+    status="$(service_action_status "${RATE_LIMIT_LIVE_CHALLENGE_ID}" "${action}")"
+    if [[ "${status}" != "429" ]]; then
+      echo "second live ${action} returned ${status}; expected a 429 cooldown" >&2
+      exit 1
+    fi
+    echo "${action} cooldown triggered"
+  done
 fi
-echo "restart rate limit triggered"
 
 echo "participant rate-limit smoke passed"
