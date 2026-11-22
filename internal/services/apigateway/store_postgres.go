@@ -1345,7 +1345,15 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 	if !validAccountEmail(email) {
 		return adminPlayer{}, ErrDuplicateResource
 	}
-	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email)
+	// Open registration does not prove email ownership, so an account that has
+	// not joined a team cannot block the organizer from provisioning that address.
+	duplicate, err := s.exists(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM players
+			WHERE LOWER(email) = LOWER($1)
+			  AND NOT (team_id IS NULL AND LOWER(TRIM(role)) = 'member')
+		)
+	`, email)
 	if err != nil {
 		return adminPlayer{}, err
 	}
@@ -1389,6 +1397,15 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 				role = "captain"
 			}
 		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM players
+		WHERE LOWER(email) = LOWER($1)
+		  AND team_id IS NULL
+		  AND LOWER(TRIM(role)) = 'member'
+	`, email); err != nil {
+		return adminPlayer{}, err
 	}
 
 	playerID, err := s.nextIDTx(ctx, tx, `SELECT nextval('players_id_seq')`)
