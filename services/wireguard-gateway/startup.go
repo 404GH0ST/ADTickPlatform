@@ -16,6 +16,7 @@ type wireGuardStartupStore interface {
 
 func restoreWireGuardState(ctx context.Context, store wireGuardStartupStore, server *wireGuardGatewayServer) error {
 	if !config.Bool("WIREGUARD_GATEWAY_RECONCILE_ON_STARTUP", true) {
+		server.pollSuspended = true
 		return nil
 	}
 	peers, err := store.ListWireGuardGatewayPeers(ctx)
@@ -38,6 +39,7 @@ func restoreWireGuardState(ctx context.Context, store wireGuardStartupStore, ser
 		return fmt.Errorf("wireguard startup restore failed: %w", err)
 	}
 	server.rememberStatus(status)
+	server.lastApplied = snapshot
 	log.Printf("wireguard startup restore applied %d active peer(s) in %s mode (paused: %v)", status.PeersActive, status.Mode, paused)
 	return nil
 }

@@ -145,20 +145,66 @@ func TestScoreboardStreamEmitsInitialAndUpdatedSnapshots(t *testing.T) {
 }
 
 func TestSubscriberLimitsAreReleasedOnUnsubscribe(t *testing.T) {
-	gateway := newRealtimeGateway(&testSnapshotClient{}, time.Second, "").withSubscriberLimits(2, 1, false)
-	_, _, unsubscribe, ok := gateway.subscribe(streamScoreboard, "192.0.2.1")
+	gateway := newRealtimeGateway(&testSnapshotClient{}, time.Second, "").withSubscriberLimits(2, 1, 1, false)
+	_, _, unsubscribe, ok := gateway.subscribe(streamScoreboard, "192.0.2.1", false)
 	if !ok {
 		t.Fatal("expected first subscription to succeed")
 	}
-	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.1"); ok {
+	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.1", false); ok {
 		t.Fatal("expected per-client subscription limit to reject second stream")
 	}
-	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.2"); !ok {
+	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.2", false); !ok {
 		t.Fatal("expected another client to use remaining global capacity")
 	}
 	unsubscribe()
-	if _, _, _, ok := gateway.subscribe(streamScoreboard, "192.0.2.3"); !ok {
+	if _, _, _, ok := gateway.subscribe(streamScoreboard, "192.0.2.3", false); !ok {
 		t.Fatal("expected unsubscribe to release global capacity")
+	}
+}
+
+func TestOrganizerStreamsHaveIndependentCapacity(t *testing.T) {
+	gateway := newRealtimeGateway(&testSnapshotClient{}, time.Second, "dev-admin-token").withSubscriberLimits(2, 1, 1, false)
+	address := "192.0.2.1"
+	if _, _, _, ok := gateway.subscribe(streamAttacks, address, false); !ok {
+		t.Fatal("public client could not open a stream")
+	}
+	if _, _, _, ok := gateway.subscribe(streamScoreboard, "192.0.2.2", false); !ok {
+		t.Fatal("public client could not fill public capacity")
+	}
+	if _, _, _, ok := gateway.subscribe(streamAttacks, "192.0.2.3", false); ok {
+		t.Fatal("public stream exceeded public capacity")
+	}
+	_, _, unsubscribe, ok := gateway.subscribe(streamAttacks, address, true)
+	if !ok {
+		t.Fatal("public streams blocked an organizer on the same address")
+	}
+	if _, _, _, ok := gateway.subscribe(streamAdminScoreboard, "192.0.2.2", true); ok {
+		t.Fatal("organizer stream exceeded organizer capacity")
+	}
+
+	mux := http.NewServeMux()
+	gateway.RegisterRoutes(mux)
+	request := httptest.NewRequest(http.MethodGet, "/admin/v1/game/attacks/stream", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("organizer attack stream without authorization returned %d", response.Code)
+	}
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("organizer attack stream at capacity returned %d", response.Code)
+	}
+	unsubscribe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request.RemoteAddr = address + ":1234"
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request.WithContext(ctx))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("authenticated organizer could not stream while public capacity was full: %d", response.Code)
 	}
 }
 

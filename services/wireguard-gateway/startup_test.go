@@ -45,6 +45,7 @@ type wireGuardApplierStub struct {
 	status   apigateway.WireGuardGatewayStatus
 	err      error
 	snapshot wireGuardGatewaySnapshot
+	applies  int
 }
 
 func (s *wireGuardApplierStub) Status() apigateway.WireGuardGatewayStatus {
@@ -52,6 +53,7 @@ func (s *wireGuardApplierStub) Status() apigateway.WireGuardGatewayStatus {
 }
 
 func (s *wireGuardApplierStub) Apply(_ context.Context, snapshot wireGuardGatewaySnapshot) (apigateway.WireGuardGatewayStatus, error) {
+	s.applies++
 	s.snapshot = snapshot
 	if s.err != nil {
 		return apigateway.WireGuardGatewayStatus{State: "error", Mode: "host", LastError: s.err.Error()}, s.err

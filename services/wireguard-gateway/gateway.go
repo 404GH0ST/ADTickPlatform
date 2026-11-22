@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,9 @@ type wireGuardGatewayServer struct {
 	mu         sync.Mutex
 	applyMu    sync.Mutex
 	lastStatus apigateway.WireGuardGatewayStatus
+	// Only accessed under applyMu once the server starts.
+	lastApplied   wireGuardGatewaySnapshot
+	pollSuspended bool
 }
 
 type wireGuardApplier interface {
@@ -134,16 +138,27 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
-	started := time.Now()
-
-	peers, err := s.store.ListWireGuardGatewayPeers(r.Context())
+	s.pollSuspended = false
+	status, title, err := s.reconcile(r.Context(), true)
 	if err != nil {
-		s.metrics.recordReconcile(time.Since(started), 0, true)
-		writeProblem(w, http.StatusInternalServerError, "Internal state unavailable", err.Error())
+		writeProblem(w, http.StatusInternalServerError, title, err.Error())
 		return
 	}
+	writeData(w, http.StatusOK, status)
+}
 
-	paused, err := s.store.IsMatchPaused(r.Context())
+// reconcile runs with applyMu held. Explicit requests reapply rules to repair
+// host drift. The background loop applies only changes or retries after a failure.
+func (s *wireGuardGatewayServer) reconcile(ctx context.Context, force bool) (apigateway.WireGuardGatewayStatus, string, error) {
+	started := time.Now()
+
+	peers, err := s.store.ListWireGuardGatewayPeers(ctx)
+	if err != nil {
+		s.metrics.recordReconcile(time.Since(started), 0, true)
+		return apigateway.WireGuardGatewayStatus{}, "Internal state unavailable", err
+	}
+
+	paused, err := s.store.IsMatchPaused(ctx)
 	if err != nil {
 		log.Printf("warning: could not determine match pause state, assuming paused: %v", err)
 		paused = true
@@ -152,22 +167,50 @@ func (s *wireGuardGatewayServer) handleReconcile(w http.ResponseWriter, r *http.
 	snapshot, err := buildWireGuardGatewaySnapshot(peers, s.now())
 	if err != nil {
 		s.metrics.recordReconcile(time.Since(started), len(peers), true)
-		writeProblem(w, http.StatusInternalServerError, "WireGuard server configuration invalid", err.Error())
-		return
+		return apigateway.WireGuardGatewayStatus{}, "WireGuard server configuration invalid", err
 	}
 	snapshot.MatchPaused = paused
-
-	status, err := s.applier.Apply(r.Context(), snapshot)
-	if err != nil {
-		s.rememberStatus(status)
-		s.metrics.recordReconcile(time.Since(started), snapshot.PeersTotal, true)
-		writeProblem(w, http.StatusInternalServerError, "WireGuard reconcile failed", status.LastError)
-		return
+	lastStatus := s.status()
+	if !force && lastStatus.State == "applied" && lastStatus.LastError == "" &&
+		snapshot.Revision == s.lastApplied.Revision && snapshot.MatchPaused == s.lastApplied.MatchPaused &&
+		slices.Equal(snapshot.Peers, s.lastApplied.Peers) {
+		return lastStatus, "", nil
 	}
 
+	status, err := s.applier.Apply(ctx, snapshot)
 	s.rememberStatus(status)
-	s.metrics.recordReconcile(time.Since(started), snapshot.PeersTotal, false)
-	writeData(w, http.StatusOK, status)
+	s.metrics.recordReconcile(time.Since(started), snapshot.PeersTotal, err != nil)
+	if err != nil {
+		s.lastApplied = wireGuardGatewaySnapshot{}
+		return status, "WireGuard reconcile failed", err
+	}
+
+	s.lastApplied = snapshot
+	return status, "", nil
+}
+
+func (s *wireGuardGatewayServer) poll(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.applyMu.TryLock() {
+				continue
+			}
+			if !s.pollSuspended {
+				applyCtx, cancel := context.WithTimeout(ctx, interval)
+				_, title, err := s.reconcile(applyCtx, false)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					log.Printf("wireguard background reconcile failed: %s", title)
+				}
+			}
+			s.applyMu.Unlock()
+		}
+	}
 }
 
 func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +225,9 @@ func (s *wireGuardGatewayServer) handleTeardown(w http.ResponseWriter, r *http.R
 		writeProblem(w, http.StatusInternalServerError, "WireGuard teardown failed", err.Error())
 		return
 	}
+	s.pollSuspended = true
+	s.lastApplied = wireGuardGatewaySnapshot{}
+	s.rememberStatus(s.applier.Status())
 	s.metrics.recordOperation(wireGuardOperationTeardown, time.Since(started), false)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -379,6 +425,14 @@ func (a *hostWireGuardApplier) Apply(ctx context.Context, snapshot wireGuardGate
 	applyCtx, cancel := context.WithTimeout(ctx, a.applyTimeout)
 	defer cancel()
 
+	if a.firewallBackend == "nftables" {
+		if err := a.ensureFirewallTable(applyCtx); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeStatusArtifact(a.paths.statusPath, status)
+			return status, err
+		}
+	}
 	if err := a.runner.Run(applyCtx, a.wgBinary, "syncconf", a.interfaceName, a.paths.configPath); err != nil {
 		status.State = "error"
 		status.LastError = err.Error()
@@ -386,7 +440,6 @@ func (a *hostWireGuardApplier) Apply(ctx context.Context, snapshot wireGuardGate
 		return status, err
 	}
 	if a.firewallBackend == "nftables" {
-		_ = a.runner.Run(applyCtx, a.nftBinary, "delete", "table", "inet", a.nftTable)
 		if err := a.runner.Run(applyCtx, a.nftBinary, "-f", a.paths.rulesPath); err != nil {
 			status.State = "error"
 			status.LastError = err.Error()
@@ -401,6 +454,19 @@ func (a *hostWireGuardApplier) Apply(ctx context.Context, snapshot wireGuardGate
 		return status, err
 	}
 	return status, nil
+}
+
+func (a *hostWireGuardApplier) ensureFirewallTable(ctx context.Context) error {
+	if err := a.runner.Run(ctx, a.nftBinary, "list", "table", "inet", a.nftTable); err == nil {
+		return nil
+	}
+	// Start with a deny policy before activating peers on a fresh host. An
+	// exclusive create also avoids replacing a table if the probe itself failed.
+	guard := fmt.Sprintf(`create table inet %[1]s {
+		chain input { type filter hook input priority filter; policy accept; iifname %[2]q drop; }
+		chain forward { type filter hook forward priority filter; policy accept; iifname %[2]q drop; }
+	}`, a.nftTable, a.interfaceName)
+	return a.runner.Run(ctx, a.nftBinary, guard)
 }
 
 func (a *hostWireGuardApplier) Teardown(ctx context.Context) error {
@@ -578,6 +644,9 @@ func renderNftablesRules(tableName, interfaceName, serverIP string, peers []apig
 // reach host-routable infra (e.g. docker-socket-proxy) by widening client AllowedIPs.
 func renderNftablesRulesWithForwardCIDRs(tableName, interfaceName, serverIP string, peers []apigateway.WireGuardGatewayPeer, forwardCIDRs []string) string {
 	var builder strings.Builder
+	// The entire file is one transaction. The first add makes deletion safe
+	// on initial setup, while a failed reload leaves the live table in place.
+	fmt.Fprintf(&builder, "add table inet %[1]s\ndelete table inet %[1]s\n", tableName)
 	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
 	builder.WriteString("  set active_peers {\n")
 	builder.WriteString("    type ipv4_addr\n")

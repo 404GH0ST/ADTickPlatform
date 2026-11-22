@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"adplatform/internal/platform/config"
 	"adplatform/internal/platform/database"
@@ -42,6 +43,18 @@ func run(ctx context.Context) error {
 	httpapi.RegisterMetricsSource(info.Name, server)
 	if err := restoreWireGuardState(ctx, store, server); err != nil {
 		return err
+	}
+	if interval := config.Duration("WIREGUARD_GATEWAY_RECONCILE_INTERVAL", 15*time.Second); interval > 0 {
+		pollCtx, stopPoll := context.WithCancel(ctx)
+		pollDone := make(chan struct{})
+		go func() {
+			defer close(pollDone)
+			server.poll(pollCtx, interval)
+		}()
+		defer func() {
+			stopPoll()
+			<-pollDone
+		}()
 	}
 
 	mux := httpapi.NewBaseMux(info)

@@ -242,13 +242,13 @@ func TestHostWireGuardApplierRunsWgAndNft(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 	if len(runner.commands) != 3 {
-		t.Fatalf("expected 3 commands, got %d", len(runner.commands))
+		t.Fatalf("expected firewall check, peer sync and one nft transaction, got %v", runner.commands)
 	}
-	if runner.commands[0] != "wg syncconf wg0 "+applier.paths.configPath {
-		t.Fatalf("unexpected wg command %q", runner.commands[0])
+	if runner.commands[0] != "nft list table inet adplatform_wireguard" {
+		t.Fatalf("unexpected firewall check %q", runner.commands[0])
 	}
-	if runner.commands[1] != "nft delete table inet adplatform_wireguard" {
-		t.Fatalf("unexpected nft delete command %q", runner.commands[1])
+	if runner.commands[1] != "wg syncconf wg0 "+applier.paths.configPath {
+		t.Fatalf("unexpected wg command %q", runner.commands[1])
 	}
 	if runner.commands[2] != "nft -f "+applier.paths.rulesPath {
 		t.Fatalf("unexpected nft apply command %q", runner.commands[2])
@@ -258,8 +258,8 @@ func TestHostWireGuardApplierRunsWgAndNft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected rules file, got %v", err)
 	}
-	if strings.Contains(string(rulesBody), "flush table inet") {
-		t.Fatalf("expected rules body to omit flush table directive")
+	if !strings.HasPrefix(string(rulesBody), "add table inet adplatform_wireguard\ndelete table inet adplatform_wireguard\ntable inet adplatform_wireguard {") {
+		t.Fatalf("expected replacement to be contained in a single nft transaction: %s", rulesBody)
 	}
 	if !strings.Contains(string(rulesBody), "10.70.11.20") || strings.Contains(string(rulesBody), "10.70.12.21") {
 		t.Fatalf("unexpected rules body %q", string(rulesBody))
@@ -374,6 +374,36 @@ func TestWireGuardGatewayServerReconcileReturnsCounts(t *testing.T) {
 	}
 	if payload.Mode != "dry-run" || payload.State != "applied" {
 		t.Fatalf("unexpected status: %+v", payload)
+	}
+}
+
+func TestBackgroundReconcileAppliesChangesAndRetriesFailures(t *testing.T) {
+	ctx := context.Background()
+	store := apigateway.NewMemoryStore(101)
+	applier := &wireGuardApplierStub{}
+	server := newWireGuardGatewayServer("admin-token", store, applier)
+	if err := restoreWireGuardState(ctx, store, server); err != nil {
+		t.Fatal(err)
+	}
+	server.applyMu.Lock()
+	defer server.applyMu.Unlock()
+
+	if _, _, err := server.reconcile(ctx, false); err != nil || applier.applies != 1 {
+		t.Fatalf("unchanged background reconcile reapplied the gateway: calls=%d err=%v", applier.applies, err)
+	}
+	if _, err := store.RevokeAdminPlayerWireGuardConfig(ctx, 2, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	applier.err = errors.New("apply failed")
+	if _, _, err := server.reconcile(ctx, false); !errors.Is(err, applier.err) || applier.applies != 2 {
+		t.Fatalf("background reconciliation did not attempt the changed config: calls=%d err=%v", applier.applies, err)
+	}
+	applier.err = nil
+	if _, _, err := server.reconcile(ctx, false); err != nil || applier.applies != 3 || applier.snapshot.PeersRevoked != 1 {
+		t.Fatalf("background reconciliation did not retry the apply: calls=%d err=%v", applier.applies, err)
+	}
+	if _, _, err := server.reconcile(ctx, true); err != nil || applier.applies != 4 {
+		t.Fatalf("an explicit reconcile should always reapply: calls=%d err=%v", applier.applies, err)
 	}
 }
 

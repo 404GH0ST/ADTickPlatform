@@ -37,33 +37,38 @@ type realtimeGateway struct {
 	// keepaliveInterval spaces SSE comment frames that keep idle proxies open.
 	keepaliveInterval time.Duration
 
-	mu                  sync.RWMutex
-	scoreboard          []byte
-	scoreHash           [32]byte
-	adminScoreboard     []byte
-	adminScoreHash      [32]byte
-	attacks             []byte
-	attackHash          [32]byte
-	gameStatus          []byte
-	gameStatusHash      [32]byte
-	schedulerEvents     []byte
-	schedulerHash       [32]byte
-	checkerRuns         []byte
-	checkerRunsHash     [32]byte
-	subscribers         map[streamKind]map[int]realtimeSubscriber
-	nextSubscriberID    int
-	maxSubscribers      int
-	maxPerClient        int
-	trustProxyHeaders   bool
-	subscriberTotal     int
-	subscribersByClient map[string]int
-	lastSyncAt          time.Time
-	lastSyncSuccessful  bool
-	syncErrorsTotal     uint64
+	mu                 sync.RWMutex
+	scoreboard         []byte
+	scoreHash          [32]byte
+	adminScoreboard    []byte
+	adminScoreHash     [32]byte
+	attacks            []byte
+	attackHash         [32]byte
+	gameStatus         []byte
+	gameStatusHash     [32]byte
+	schedulerEvents    []byte
+	schedulerHash      [32]byte
+	checkerRuns        []byte
+	checkerRunsHash    [32]byte
+	subscribers        map[streamKind]map[int]realtimeSubscriber
+	nextSubscriberID   int
+	publicPool         subscriberPool
+	organizerPool      subscriberPool
+	maxPerClient       int
+	trustProxyHeaders  bool
+	lastSyncAt         time.Time
+	lastSyncSuccessful bool
+	syncErrorsTotal    uint64
 	// shutdown ends every open stream when the server starts shutting down,
 	// so graceful shutdown is not held open by long-lived SSE requests. A nil
 	// channel never fires.
 	shutdown <-chan struct{}
+}
+
+type subscriberPool struct {
+	limit    int
+	total    int
+	byClient map[string]int
 }
 
 type realtimeSubscriber struct {
@@ -73,13 +78,13 @@ type realtimeSubscriber struct {
 
 func newRealtimeGateway(client publicSnapshotClient, pollInterval time.Duration, adminToken string) *realtimeGateway {
 	return &realtimeGateway{
-		client:              client,
-		pollInterval:        pollInterval,
-		keepaliveInterval:   15 * time.Second,
-		adminToken:          strings.TrimSpace(adminToken),
-		maxSubscribers:      2000,
-		maxPerClient:        12,
-		subscribersByClient: make(map[string]int),
+		client:            client,
+		pollInterval:      pollInterval,
+		keepaliveInterval: 15 * time.Second,
+		adminToken:        strings.TrimSpace(adminToken),
+		publicPool:        subscriberPool{limit: 2000, byClient: make(map[string]int)},
+		organizerPool:     subscriberPool{limit: 32, byClient: make(map[string]int)},
+		maxPerClient:      12,
 		subscribers: map[streamKind]map[int]realtimeSubscriber{
 			streamScoreboard:      make(map[int]realtimeSubscriber),
 			streamAdminScoreboard: make(map[int]realtimeSubscriber),
@@ -97,9 +102,12 @@ func (g *realtimeGateway) withShutdown(done <-chan struct{}) *realtimeGateway {
 	return g
 }
 
-func (g *realtimeGateway) withSubscriberLimits(total, perClient int, trustProxyHeaders bool) *realtimeGateway {
-	if total > 0 {
-		g.maxSubscribers = total
+func (g *realtimeGateway) withSubscriberLimits(public, organizer, perClient int, trustProxyHeaders bool) *realtimeGateway {
+	if public > 0 {
+		g.publicPool.limit = public
+	}
+	if organizer > 0 {
+		g.organizerPool.limit = organizer
 	}
 	if perClient > 0 {
 		g.maxPerClient = perClient
@@ -112,6 +120,7 @@ func (g *realtimeGateway) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /public/v1/scoreboard/stream", g.handleScoreboardStream)
 	mux.HandleFunc("GET /public/v1/attacks/stream", g.handleAttackStream)
 	mux.HandleFunc("GET /admin/v1/game/scoreboard/stream", g.handleAdminScoreboardStream)
+	mux.HandleFunc("GET /admin/v1/game/attacks/stream", g.handleAdminAttackStream)
 	mux.HandleFunc("GET /admin/v1/game/status/stream", g.handleAdminGameStatusStream)
 	mux.HandleFunc("GET /admin/v1/game/checker-runs/stream", g.handleAdminCheckerRunsStream)
 	mux.HandleFunc("GET /admin/v1/game/scheduler/events/stream", g.handleAdminSchedulerEventsStream)
@@ -188,11 +197,18 @@ func (g *realtimeGateway) syncOnce(ctx context.Context) error {
 }
 
 func (g *realtimeGateway) handleScoreboardStream(w http.ResponseWriter, r *http.Request) {
-	g.handleStream(w, r, streamScoreboard)
+	g.handleStream(w, r, streamScoreboard, false)
 }
 
 func (g *realtimeGateway) handleAttackStream(w http.ResponseWriter, r *http.Request) {
-	g.handleStream(w, r, streamAttacks)
+	g.handleStream(w, r, streamAttacks, false)
+}
+
+func (g *realtimeGateway) handleAdminAttackStream(w http.ResponseWriter, r *http.Request) {
+	if !g.requireAdminAuth(w, r) {
+		return
+	}
+	g.handleStream(w, r, streamAttacks, true)
 }
 
 func (g *realtimeGateway) handleAdminScoreboardStream(w http.ResponseWriter, r *http.Request) {
@@ -201,38 +217,38 @@ func (g *realtimeGateway) handleAdminScoreboardStream(w http.ResponseWriter, r *
 	}
 	// Organizers get the live board, which ignores the freeze window, so their
 	// stream keeps updating while participants see the frozen snapshot.
-	g.handleStream(w, r, streamAdminScoreboard)
+	g.handleStream(w, r, streamAdminScoreboard, true)
 }
 
 func (g *realtimeGateway) handleAdminGameStatusStream(w http.ResponseWriter, r *http.Request) {
 	if !g.requireAdminAuth(w, r) {
 		return
 	}
-	g.handleStream(w, r, streamGameStatus)
+	g.handleStream(w, r, streamGameStatus, true)
 }
 
 func (g *realtimeGateway) handleAdminCheckerRunsStream(w http.ResponseWriter, r *http.Request) {
 	if !g.requireAdminAuth(w, r) {
 		return
 	}
-	g.handleStream(w, r, streamCheckerRuns)
+	g.handleStream(w, r, streamCheckerRuns, true)
 }
 
 func (g *realtimeGateway) handleAdminSchedulerEventsStream(w http.ResponseWriter, r *http.Request) {
 	if !g.requireAdminAuth(w, r) {
 		return
 	}
-	g.handleStream(w, r, streamSchedulerEvents)
+	g.handleStream(w, r, streamSchedulerEvents, true)
 }
 
-func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, kind streamKind) {
+func (g *realtimeGateway) handleStream(w http.ResponseWriter, r *http.Request, kind streamKind, organizer bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 
-	_, updates, unsubscribe, subscribed := g.subscribe(kind, g.clientKey(r))
+	_, updates, unsubscribe, subscribed := g.subscribe(kind, g.clientKey(r), organizer)
 	if !subscribed {
 		w.Header().Set("Retry-After", "5")
 		httpapi.WriteProblem(w, http.StatusTooManyRequests, httpapi.ProblemDetails{
@@ -368,10 +384,14 @@ func (g *realtimeGateway) current(kind streamKind) []byte {
 	}
 }
 
-func (g *realtimeGateway) subscribe(kind streamKind, clientKey string) (int, <-chan []byte, func(), bool) {
+func (g *realtimeGateway) subscribe(kind streamKind, clientKey string, organizer bool) (int, <-chan []byte, func(), bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.subscriberTotal >= g.maxSubscribers || g.subscribersByClient[clientKey] >= g.maxPerClient {
+	pool := &g.publicPool
+	if organizer {
+		pool = &g.organizerPool
+	}
+	if pool.total >= pool.limit || pool.byClient[clientKey] >= g.maxPerClient {
 		return 0, nil, func() {}, false
 	}
 
@@ -379,8 +399,8 @@ func (g *realtimeGateway) subscribe(kind streamKind, clientKey string) (int, <-c
 	g.nextSubscriberID++
 	ch := make(chan []byte, 8)
 	g.subscribers[kind][id] = realtimeSubscriber{updates: ch, clientKey: clientKey}
-	g.subscriberTotal++
-	g.subscribersByClient[clientKey]++
+	pool.total++
+	pool.byClient[clientKey]++
 
 	return id, ch, func() {
 		g.mu.Lock()
@@ -388,10 +408,10 @@ func (g *realtimeGateway) subscribe(kind streamKind, clientKey string) (int, <-c
 		if subscriber, ok := g.subscribers[kind][id]; ok {
 			delete(g.subscribers[kind], id)
 			close(subscriber.updates)
-			g.subscriberTotal--
-			g.subscribersByClient[subscriber.clientKey]--
-			if g.subscribersByClient[subscriber.clientKey] == 0 {
-				delete(g.subscribersByClient, subscriber.clientKey)
+			pool.total--
+			pool.byClient[subscriber.clientKey]--
+			if pool.byClient[subscriber.clientKey] == 0 {
+				delete(pool.byClient, subscriber.clientKey)
 			}
 		}
 	}, true

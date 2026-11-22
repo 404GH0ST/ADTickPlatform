@@ -36,6 +36,7 @@ func run(ctx context.Context) error {
 		config.Secret("REALTIME_ADMIN_TOKEN", "ADMIN_API_TOKEN"),
 	).withSubscriberLimits(
 		config.Int("REALTIME_MAX_SUBSCRIBERS", 2000),
+		config.Int("REALTIME_MAX_ADMIN_SUBSCRIBERS", 32),
 		config.Int("REALTIME_MAX_SUBSCRIBERS_PER_CLIENT", 12),
 		config.Bool("REALTIME_TRUST_PROXY_HEADERS", false),
 	).withShutdown(ctx.Done())

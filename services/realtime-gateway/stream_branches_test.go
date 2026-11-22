@@ -57,7 +57,7 @@ func TestSyncKindSurfacesEveryUpstreamFailure(t *testing.T) {
 
 func TestPublishIfChangedSkipsDuplicatesAndFullSubscribers(t *testing.T) {
 	g := newRealtimeGateway(&testSnapshotClient{}, time.Hour, "admin")
-	_, updates, unsubscribe, ok := g.subscribe(streamAttacks, "client")
+	_, updates, unsubscribe, ok := g.subscribe(streamAttacks, "client", false)
 	if !ok {
 		t.Fatal("subscribe")
 	}
@@ -83,7 +83,7 @@ func TestPublishIfChangedSkipsDuplicatesAndFullSubscribers(t *testing.T) {
 }
 
 func TestClientKeyAndAdminAuthBranches(t *testing.T) {
-	g := newRealtimeGateway(&testSnapshotClient{}, time.Hour, "").withSubscriberLimits(1, 1, true)
+	g := newRealtimeGateway(&testSnapshotClient{}, time.Hour, "").withSubscriberLimits(1, 1, 1, true)
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("X-Forwarded-For", " 203.0.113.9 , 10.0.0.1")
 	if got := g.clientKey(request); got != "203.0.113.9" {
@@ -132,16 +132,16 @@ func TestHandleStreamBranches(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/public/v1/scoreboard/stream", nil)
 
 	plain := &nonFlushingWriter{header: http.Header{}}
-	g.handleStream(plain, request, streamScoreboard) // returns 500 without streaming
+	g.handleStream(plain, request, streamScoreboard, false) // returns 500 without streaming
 
 	// Snapshot write fails immediately.
-	g.handleStream(&brokenStreamWriter{header: http.Header{}}, request, streamScoreboard)
+	g.handleStream(&brokenStreamWriter{header: http.Header{}}, request, streamScoreboard, false)
 
 	// The first snapshot succeeds; the next update write fails.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 1}, request, streamScoreboard)
+		g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 1}, request, streamScoreboard, false)
 	}()
 	waitForSubscribers(t, g, streamScoreboard, 1)
 	g.publishIfChanged(streamScoreboard, []byte(`[{"team":"B"}]`))
@@ -149,22 +149,22 @@ func TestHandleStreamBranches(t *testing.T) {
 
 	// Keepalive write fails once the stream is idle.
 	g.keepaliveInterval = 10 * time.Millisecond
-	g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 1}, request, streamScoreboard)
+	g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 1}, request, streamScoreboard, false)
 
 	// A closed update channel ends the stream.
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
 		g.keepaliveInterval = time.Hour
-		g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 10}, request, streamScoreboard)
+		g.handleStream(&brokenStreamWriter{header: http.Header{}, okLeft: 10}, request, streamScoreboard, false)
 	}()
 	waitForSubscribers(t, g, streamScoreboard, 1)
 	g.mu.Lock()
 	for id, subscriber := range g.subscribers[streamScoreboard] {
 		close(subscriber.updates)
 		delete(g.subscribers[streamScoreboard], id)
-		g.subscriberTotal--
-		g.subscribersByClient[subscriber.clientKey]--
+		g.publicPool.total--
+		g.publicPool.byClient[subscriber.clientKey]--
 	}
 	g.mu.Unlock()
 	<-done
@@ -174,16 +174,16 @@ func TestHandleStreamBranches(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
 	recorder := newSafeRecorder()
-	g.handleStream(recorder, request.WithContext(ctx), streamScoreboard)
+	g.handleStream(recorder, request.WithContext(ctx), streamScoreboard, false)
 	if !strings.Contains(recorder.BodyString(), ": keepalive") {
 		t.Fatalf("idle stream must send keepalives, got %q", recorder.BodyString())
 	}
 
-	limited := newRealtimeGateway(client, time.Hour, "admin").withSubscriberLimits(1, 1, false)
-	_, _, unsubscribe, _ := limited.subscribe(streamScoreboard, "192.0.2.1")
+	limited := newRealtimeGateway(client, time.Hour, "admin").withSubscriberLimits(1, 1, 1, false)
+	_, _, unsubscribe, _ := limited.subscribe(streamScoreboard, "192.0.2.1", false)
 	defer unsubscribe()
 	overflow := httptest.NewRecorder()
-	limited.handleStream(overflow, request, streamScoreboard)
+	limited.handleStream(overflow, request, streamScoreboard, false)
 	if overflow.Code != http.StatusTooManyRequests || overflow.Header().Get("Retry-After") != "5" {
 		t.Fatalf("subscriber limit must answer 429, got %d", overflow.Code)
 	}
@@ -240,15 +240,15 @@ func TestSyncKindSurfacesEncodingFailures(t *testing.T) {
 }
 
 func TestRejectedSubscriptionReturnsHarmlessUnsubscribe(t *testing.T) {
-	g := newRealtimeGateway(&testSnapshotClient{}, time.Hour, "admin").withSubscriberLimits(1, 1, false)
-	_, _, first, _ := g.subscribe(streamAttacks, "c")
+	g := newRealtimeGateway(&testSnapshotClient{}, time.Hour, "admin").withSubscriberLimits(1, 1, 1, false)
+	_, _, first, _ := g.subscribe(streamAttacks, "c", false)
 	defer first()
-	_, updates, unsubscribe, ok := g.subscribe(streamAttacks, "c")
+	_, updates, unsubscribe, ok := g.subscribe(streamAttacks, "c", false)
 	if ok || updates != nil {
 		t.Fatal("over-limit subscription must be rejected")
 	}
 	unsubscribe() // must be safe to call
-	if g.subscriberTotal != 1 {
-		t.Fatalf("a rejected unsubscribe must not change counts, got %d", g.subscriberTotal)
+	if g.publicPool.total != 1 {
+		t.Fatalf("a rejected unsubscribe must not change counts, got %d", g.publicPool.total)
 	}
 }

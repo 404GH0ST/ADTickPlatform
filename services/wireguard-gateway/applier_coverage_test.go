@@ -198,6 +198,21 @@ func TestHostApplierFailuresAndTeardown(t *testing.T) {
 		if err == nil || status.State != "error" || !strings.Contains(status.LastError, failOn) {
 			t.Fatalf("failure in %q must surface, got %+v %v", failOn, status, err)
 		}
+		if failOn == "nft -f" && len(runner.calls) != 3 {
+			t.Fatalf("a failed firewall update must not delete the installed table: %v", runner.calls)
+		}
+		if failOn == "wg syncconf" && len(runner.calls) != 2 {
+			t.Fatalf("a failed peer sync must not apply a new firewall policy: %v", runner.calls)
+		}
+	}
+	runnerOnNewHost := &scriptedRunner{failOn: "nft list"}
+	newHost := &hostWireGuardApplier{fileWireGuardApplier: fileWireGuardApplier{mode: "host", paths: testPaths(t.TempDir())}, interfaceName: "wg0", wgBinary: "wg", firewallBackend: "nftables", nftBinary: "nft", nftTable: "t", applyTimeout: time.Second, runner: runnerOnNewHost}
+	if _, err := newHost.Apply(context.Background(), testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	calls := runnerOnNewHost.calls
+	if len(calls) != 4 || !strings.HasPrefix(calls[1], "nft create table inet t") || !strings.Contains(calls[1], `iifname "wg0" drop`) || !strings.HasPrefix(calls[2], "wg syncconf") || !strings.HasPrefix(calls[3], "nft -f") {
+		t.Fatalf("initial apply must activate a deny policy before syncing peers: %v", calls)
 	}
 
 	// A status file that cannot be written after a successful apply is an error.
