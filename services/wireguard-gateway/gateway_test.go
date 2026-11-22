@@ -108,6 +108,28 @@ func TestRenderNftablesRulesSkipsRevokedPeers(t *testing.T) {
 	}
 }
 
+func TestRenderNftablesRulesIsolatesVPNClients(t *testing.T) {
+	rules := renderNftablesRulesWithForwardCIDRs("adplatform_wireguard", "wg0", "10.70.0.1", []apigateway.WireGuardGatewayPeer{
+		{Address: "10.70.11.20"},
+		{Address: "10.70.0.9", Organizer: true},
+	}, []string{"10.70.0.0/16", "10.80.0.0/16"})
+
+	hairpin := strings.Index(rules, `iifname "wg0" oifname "wg0" drop`)
+	established := strings.Index(rules, "ct state established,related accept")
+	organizers := strings.Index(rules, `oifname "wg0" ip daddr { 10.70.0.9 } drop`)
+	callbacks := strings.Index(rules, `oifname "wg0" ip saddr { 10.70.0.0/16, 10.80.0.0/16 } accept`)
+	toClients := strings.Index(rules, "\n    oifname \"wg0\" drop")
+	allowlist := strings.Index(rules, `ip saddr @active_peers ip daddr { 10.70.0.0/16, 10.80.0.0/16 } accept`)
+	if hairpin < 0 || established < hairpin || organizers < established || callbacks < organizers || toClients < callbacks || allowlist < toClients {
+		t.Fatalf("peers stay isolated while game services can call back to players:\n%s", rules)
+	}
+	edge := strings.Index(rules, `iifname "wg0" ip saddr @active_peers ct status dnat ct original ip daddr 10.70.0.1 meta l4proto tcp ct original proto-dst { 80, 443 } accept`)
+	residual := strings.LastIndex(rules, `iifname "wg0" drop`)
+	if edge < toClients || edge > residual {
+		t.Fatalf("published edge access must be allowed before the residual drop:\n%s", rules)
+	}
+}
+
 func TestParseIPv4CIDRListRejectsNonIPv4(t *testing.T) {
 	got := parseIPv4CIDRList("10.80.0.0/16, not-a-cidr, 2001:db8::/32, 10.70.0.1")
 	if len(got) != 2 || got[0] != "10.80.0.0/16" || got[1] != "10.70.0.1/32" {
