@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { RetryButton } from '@/components/ui/retry-button';
 import { StatusBanner } from '@/components/ui/status-banner';
 import type {
   AdminOperationsStatus,
@@ -86,31 +87,40 @@ export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
   const operationsAlertCount =
     operationsStatus?.alerts.length ?? overview.operationsAlertCount;
 
+  const failed = overview.unavailable;
+  // A failed read is unknown, so don't count it as zero.
+  const shownCount = (unavailable: boolean | undefined, count: number) =>
+    unavailable ? '—' : String(count);
+
   return (
     <>
       {showStats ? (
         <section className="surface-inset overflow-hidden rounded-sm border" data-slot="summary-strip" data-testid="organizer-summary">
           <dl className="grid grid-cols-2 gap-0 sm:grid-cols-3 xl:grid-cols-6">
-            <SummaryItem label="Teams" value={String(overview.teamCount)} />
-            <SummaryItem label="Players" value={String(overview.playerCount)} />
+            <SummaryItem label="Teams" value={shownCount(failed?.teams, overview.teamCount)} />
+            <SummaryItem label="Players" value={shownCount(failed?.players, overview.playerCount)} />
             <SummaryItem
               label="Challenges"
               value={
-                <>
-                  {overview.publishedChallengeCount}
-                  <span className="font-normal text-muted-foreground"> / {overview.challengeCount} published</span>
-                </>
+                failed?.challenges ? '—' : (
+                  <>
+                    {overview.publishedChallengeCount}
+                    <span className="font-normal text-muted-foreground"> / {overview.challengeCount} published</span>
+                  </>
+                )
               }
             />
             <SummaryItem
               label="Deployments"
               value={
-                <>
-                  {overview.deploymentCount}
-                  {overview.pendingDeploymentCount > 0 ? (
-                    <span className="font-normal text-highlight"> · {overview.pendingDeploymentCount} pending</span>
-                  ) : null}
-                </>
+                failed?.deployments ? '—' : (
+                  <>
+                    {overview.deploymentCount}
+                    {overview.pendingDeploymentCount > 0 ? (
+                      <span className="font-normal text-highlight"> · {overview.pendingDeploymentCount} pending</span>
+                    ) : null}
+                  </>
+                )
               }
             />
             <SummaryItem
@@ -123,7 +133,7 @@ export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
                 )
               }
             />
-            <SummaryItem label="Persisted Ticks" value={String(overview.totalTicks)} />
+            <SummaryItem label="Persisted Ticks" value={shownCount(failed?.gameStatus, overview.totalTicks)} />
           </dl>
           <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
             API base <span className="wrap-anywhere font-mono text-foreground">{overview.apiBaseUrl}</span>
@@ -133,6 +143,11 @@ export function OrganizerStatusSummary({ overview, showStats = true }: Props) {
 
       {overview.message ? (
         <StatusBanner message={overview.message} variant="warning" announce="change" />
+      ) : null}
+      {overview.source === 'degraded' ? (
+        <div>
+          <RetryButton variant="outline" size="sm" />
+        </div>
       ) : null}
       {operationsStatus?.alerts.map((alert) => (
         <StatusBanner

@@ -1,12 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent, type RefCallback } from "react";
+import { useMemo, useState, useSyncExternalStore, type FormEvent, type RefCallback } from "react";
 
 import { browserRequestErrorMessage, parseApiError } from "@/lib/api-utils";
 import { keepEarlyInput } from "@/lib/early-input";
 
 export type ParticipantLoginMode = "login" | "register";
+
+// Production session cookies are always Secure, so a browser on plain HTTP would
+// discard one and leave the person signed out with no explanation.
+const PLAIN_HTTP_MESSAGE =
+  "This address uses plain HTTP, so your browser can't keep you signed in. Open the platform's HTTPS address and sign in there.";
+
+const subscribeToNothing = () => () => {};
+const cannotKeepSession = () => process.env.NODE_ENV === "production" && !window.isSecureContext;
+const canKeepSessionOnServer = () => false;
 
 /**
  * Login / registration state and actions. The Login theme slot receives
@@ -44,6 +53,7 @@ export function useParticipantLogin(): ParticipantLoginState {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const plainHttp = useSyncExternalStore(subscribeToNothing, cannotKeepSession, canKeepSessionOnServer);
   const fieldRefs = useMemo(
     () => ({
       displayName: keepEarlyInput(setDisplayName),
@@ -76,6 +86,8 @@ export function useParticipantLogin(): ParticipantLoginState {
       if (!response.ok) {
         throw new Error(await parseApiError(response, endpoint));
       }
+      // A proxy's HTML page can arrive as a 200, which is not a sign-in.
+      await response.json();
 
       router.push("/services");
       router.refresh();
@@ -93,7 +105,8 @@ export function useParticipantLogin(): ParticipantLoginState {
 
   function onSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (pending) {
+    // Don't send a password over a connection that can't produce a session.
+    if (pending || plainHttp) {
       return;
     }
     void submit();
@@ -110,7 +123,7 @@ export function useParticipantLogin(): ParticipantLoginState {
     setPassword,
     fieldRefs,
     pending,
-    error,
+    error: plainHttp ? PLAIN_HTTP_MESSAGE : error,
     minPasswordLength: 8,
     onSubmit,
   };

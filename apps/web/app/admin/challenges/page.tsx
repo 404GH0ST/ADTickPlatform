@@ -27,6 +27,7 @@ export default async function AdminChallengesPage() {
         schedulerEventPage={dashboard.schedulerEventPage}
         scoreboard={dashboard.scoreboard}
         teams={dashboard.teams}
+        unavailable={dashboard.unavailable}
         initialTab="challenges"
       />
     </OrganizerShell>

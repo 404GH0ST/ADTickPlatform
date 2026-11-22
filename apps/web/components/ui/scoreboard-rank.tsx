@@ -9,6 +9,7 @@ type Props = {
   rank: number;
   delta: string;
   isCurrentTeam?: boolean;
+  disqualified?: boolean;
 };
 
 const medalClass = {
@@ -23,7 +24,29 @@ const medalTitle = {
   3: "3rd Place (Bronze)",
 } as const;
 
-export function RankBadge({ rank }: { rank: number }): ReactElement {
+export function DisqualifiedBadge(): ReactElement {
+  return (
+    <span
+      data-testid="scoreboard-dq-badge"
+      title="Disqualified"
+      className="inline-flex h-5 items-center rounded-sm border border-negative/50 bg-negative/10 px-1.5 font-mono text-[10px] font-extrabold uppercase tracking-wider text-negative select-none"
+    >
+      <span aria-hidden>DQ</span>
+      <span className="sr-only">Disqualified</span>
+    </span>
+  );
+}
+
+export function RankBadge({
+  rank,
+  disqualified,
+}: {
+  rank: number;
+  disqualified?: boolean;
+}): ReactElement {
+  if (disqualified) {
+    return <DisqualifiedBadge />;
+  }
   if (rank === 1 || rank === 2 || rank === 3) {
     return (
       <div
@@ -46,7 +69,21 @@ export function ScoreboardRank({
   rank,
   delta,
   isCurrentTeam,
+  disqualified,
 }: Props): ReactElement {
+  if (disqualified) {
+    return (
+      <div
+        className="flex items-center gap-2"
+        aria-label={`Disqualified${isCurrentTeam ? ", current team" : ""}`}
+      >
+        <div className="flex w-8 items-center justify-center">
+          <DisqualifiedBadge />
+        </div>
+      </div>
+    );
+  }
+
   const deltaValue = parseInt(delta, 10);
   const isNew = delta === "new";
   const isUp = !isNaN(deltaValue) && deltaValue > 0;

@@ -103,7 +103,7 @@ export function SliceCountBadge({
   offset = 0,
 }: SliceCountBadgeProps): ReactElement {
   const start = visibleCount > 0 ? offset + 1 : 0;
-  const end = offset + visibleCount;
+  const end = visibleCount > 0 ? offset + visibleCount : 0;
   const range = `${start}-${end}`;
 
   const label = suffix

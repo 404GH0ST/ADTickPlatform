@@ -1,10 +1,11 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { Wrench } from "lucide-react";
+import { Check, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { InfoLine, InfoPanel } from "@/components/ui/info-panel";
+import { useCopyFeedback } from "@/components/ui/service-connection";
 
 export type SSHSessionData = {
   challenge_id: number;
@@ -15,6 +16,34 @@ export type SSHSessionData = {
   password_mode?: "stable";
   connection_hint: string;
 };
+
+/** Reports the result, because pasting a stale clipboard into a root login is easy to miss. */
+function CopyCredentialButton({
+  label,
+  subject,
+  text,
+}: {
+  label: string;
+  subject: string;
+  text: string;
+}): ReactElement {
+  const { status, copy } = useCopyFeedback();
+  return (
+    <>
+      <Button type="button" size="sm" variant="outline" onClick={() => void copy(text)}>
+        {status === "copied" ? <Check className="h-4 w-4" aria-hidden /> : null}
+        {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
+      </Button>
+      <span className="sr-only" aria-live="polite">
+        {status === "copied"
+          ? `${subject} copied`
+          : status === "failed"
+            ? `Couldn't copy the ${subject.toLowerCase()}. Select it and copy it manually.`
+            : ""}
+      </span>
+    </>
+  );
+}
 
 export function IssuedRootCredentialBlock({
   issuedSession,
@@ -34,26 +63,16 @@ export function IssuedRootCredentialBlock({
           valueClassName="font-mono"
         />
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void navigator.clipboard?.writeText(issuedSession.connection_hint);
-            }}
-          >
-            Copy SSH command
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void navigator.clipboard?.writeText(issuedSession.password);
-            }}
-          >
-            Copy password
-          </Button>
+          <CopyCredentialButton
+            label="Copy SSH command"
+            subject="SSH command"
+            text={issuedSession.connection_hint}
+          />
+          <CopyCredentialButton
+            label="Copy password"
+            subject="Password"
+            text={issuedSession.password}
+          />
         </div>
       </InfoPanel>
       <PatchWorkflowBlock issuedSession={issuedSession} />

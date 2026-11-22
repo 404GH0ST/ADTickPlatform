@@ -1,4 +1,8 @@
+'use client';
+
 import { Snowflake } from 'lucide-react';
+
+import { useLiveMatchStatus } from '@/components/admin/organizer-live-status';
 
 import { formatMatchStateLabel } from '@/lib/match-state';
 import type { AdminOverview } from '@/lib/admin-dashboard-types';
@@ -14,7 +18,11 @@ const STATE_TONE: Record<string, string> = {
  * and whether participants are looking at a frozen board.
  */
 export function OrganizerMatchStatus({ overview }: { overview: AdminOverview }) {
-  const state = overview.matchState?.toLowerCase();
+  // The dashboard's live state is newer than this server-rendered overview.
+  const live = useLiveMatchStatus();
+  const matchState = live ? live.matchState : overview.matchState;
+  const currentTick = live ? live.currentTick : overview.currentTick;
+  const state = matchState?.toLowerCase();
   return (
     <div
       role="group"
@@ -28,14 +36,16 @@ export function OrganizerMatchStatus({ overview }: { overview: AdminOverview }) 
         data-state={state ?? 'unknown'}
         className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-semibold ${STATE_TONE[state ?? ''] ?? 'tone-neutral'}`}
       >
-        {formatMatchStateLabel(overview.matchState)}
+        {!live && !matchState && overview.unavailable?.gameStatus
+          ? 'Status unavailable'
+          : formatMatchStateLabel(matchState)}
       </span>
-      {typeof overview.currentTick === 'number' ? (
+      {typeof currentTick === 'number' ? (
         <span
           data-slot="badge"
           className="tone-neutral inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-semibold tabular-nums"
         >
-          Tick #{overview.currentTick}
+          Tick #{currentTick}
         </span>
       ) : null}
       {overview.scoreboardFrozen ? (

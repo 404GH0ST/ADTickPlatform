@@ -29,6 +29,7 @@ export default async function AdminScoreboardPage() {
           schedulerEventPage={dashboard.schedulerEventPage}
           scoreboard={dashboard.scoreboard}
           teams={dashboard.teams}
+          unavailable={dashboard.unavailable}
           initialTab="scoreboard"
         />
         <ExportDataPanel

@@ -144,6 +144,7 @@ export { LinkPendingSignal } from "@/components/ui/link-pending";
 export {
   ATTACKS_UNAVAILABLE,
   DataUnavailable,
+  listUnavailableMessage,
   SCORES_UNAVAILABLE,
 } from "@/components/ui/data-unavailable";
 export { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";

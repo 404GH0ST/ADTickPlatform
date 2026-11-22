@@ -13,15 +13,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollableRegion } from '@/components/ui/scrollable-region';
+import { useUnsavedGuard } from '@/components/ui/unsaved-guard';
 
 type AppDialogProps = {
   body: ReactNode;
   contentClassName?: string;
   description: ReactNode;
+  /** Shown above the footer, so a failed save is visible without scrolling. */
+  error?: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
   open: boolean;
   pinFormFooter?: boolean;
+  /** Escape, the X and an outside click ask first once a field has changed. */
+  protectUnsaved?: boolean;
+  /** A save is running, so closing can't discard it. */
+  busy?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
   showCloseButton?: boolean;
   title: ReactNode;
@@ -31,20 +38,26 @@ export function AppDialog({
   body,
   contentClassName,
   description,
+  error,
   footer,
   onClose,
   open,
   pinFormFooter = false,
+  protectUnsaved = false,
+  busy = false,
   returnFocusRef,
   showCloseButton = true,
   title,
 }: AppDialogProps): ReactElement {
   const opener = useRef<HTMLElement | null>(null);
   const titleElement = useRef<HTMLHeadingElement>(null);
+  const unsaved = useUnsavedGuard({ open, onClose, enabled: protectUnsaved, busy });
+
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && unsaved.requestClose()}>
       <DialogContent
         showCloseButton={showCloseButton}
+        onChangeCapture={unsaved.markChanged}
         onOpenAutoFocus={(event) => {
           const active = document.activeElement;
           opener.current = returnFocusRef?.current ?? (active instanceof HTMLElement && active !== document.body ? active : null);
@@ -111,9 +124,10 @@ export function AppDialog({
         ) : (
           <div className="min-w-0">{body}</div>
         )}
+        {error ? <div className="min-w-0">{error}</div> : null}
         {footer ? (
           <DialogFooter className="border-t border-border/70 pt-4">
-            {footer}
+            {unsaved.prompt ?? footer}
           </DialogFooter>
         ) : null}
       </DialogContent>

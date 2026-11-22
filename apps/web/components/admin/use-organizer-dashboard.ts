@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import type {
+  AdminDataUnavailable,
   AdminAttackFeedPage,
   AdminAttackFeedQuery,
   AdminChallenge,
@@ -35,7 +37,10 @@ import {
 } from "@/lib/api-utils";
 import { writeTextToClipboard } from "@/lib/clipboard";
 import { focusNeighborWhenRemoved } from "@/lib/focus-after-removal";
+import { formatIndonesianDate } from "@/lib/date-format";
+import { publishLiveMatchStatus } from "@/components/admin/organizer-live-status";
 import { LiveStream } from "@/lib/live-stream";
+import { headerRefreshDelayMs } from "@/lib/match-clock";
 import {
   parseChallengeCategory,
   parseChallengeProtocol,
@@ -67,6 +72,8 @@ export type OrganizerDashboardOptions = {
   schedulerEventPage: AdminSchedulerEventPage;
   scoreboard: AdminGameScoreRow[];
   teams: AdminTeam[];
+  /** Reads that failed on this load. Their lists are unknown, not empty. */
+  unavailable?: AdminDataUnavailable;
 };
 
 const defaultCheckerRunFilters = {
@@ -152,6 +159,9 @@ export type OrganizerDashboardState = {
   actionNote: string | null;
   applyAttackFilters: () => Promise<void>;
   attackFilters: AttackFilters;
+  /** What the attack rows on screen were loaded with. */
+  appliedAttackFilters: AttackFilters;
+  unavailableData: AdminDataUnavailable;
   highlightedAttackIDs: string[];
   attackPageState: AdminAttackFeedPage;
   attacksLiveMode: boolean;
@@ -179,6 +189,7 @@ export type OrganizerDashboardState = {
   openCreateDialog: (entity: "team" | "player" | "challenge") => void;
   openEditDialog: (entity: "team" | "player" | "challenge", id: number) => void;
   selectDeleteTarget: (target: DeleteTarget) => void;
+  rotateTeamJoinKey: (team: AdminTeam) => Promise<void>;
   setTeamActiveState: (team: AdminTeam, active: boolean) => Promise<void>;
   setPlayerActiveState: (player: AdminPlayer, active: boolean) => Promise<void>;
   setChallengeMaintenanceState: (
@@ -288,7 +299,9 @@ export function useOrganizerDashboard({
   schedulerEventPage,
   scoreboard,
   teams,
+  unavailable,
 }: OrganizerDashboardOptions): OrganizerDashboardState {
+  const router = useRouter();
   const initialAttackFilters = useMemo<AttackFilters>(
     () => ({
       ...baseAttackFilters,
@@ -384,6 +397,15 @@ export function useOrganizerDashboard({
     useState<AttackFilters>(initialAttackFilters);
   const [schedulerEventFilters, setSchedulerEventFilters] =
     useState<SchedulerEventFilters>(defaultSchedulerEventFilters);
+  // What each feed's rows were loaded with. A failed request leaves these alone,
+  // so a badge never calls old rows "Filtered" or "Live" on the form's say-so.
+  const [appliedAttackFilters, setAppliedAttackFilters] =
+    useState<AttackFilters>(initialAttackFilters);
+  const [appliedCheckerRunFilters, setAppliedCheckerRunFilters] =
+    useState<CheckerRunFilters>(defaultCheckerRunFilters);
+  const [appliedSchedulerEventFilters, setAppliedSchedulerEventFilters] =
+    useState<SchedulerEventFilters>(defaultSchedulerEventFilters);
+  const [unavailableData, setUnavailableData] = useState<AdminDataUnavailable>(unavailable ?? {});
   const attacksLiveRef = useRef(true);
   const attackPageRef = useRef<AdminAttackFeedPage>(attackPage);
   const checkerRunsLiveRef = useRef(true);
@@ -415,20 +437,47 @@ export function useOrganizerDashboard({
     ],
   );
   const checkerRunsLiveMode = useMemo(
-    () => isDefaultCheckerRunFilters(checkerRunFilters),
-    [checkerRunFilters],
+    () => isDefaultCheckerRunFilters(appliedCheckerRunFilters),
+    [appliedCheckerRunFilters],
   );
   const attackRealtimeEnabled = initialAttackFilters.offset === "0";
   const attacksLiveMode = useMemo(
     () =>
       attackRealtimeEnabled &&
-      isDefaultAttackFilters(attackFilters, initialAttackFilters),
-    [attackFilters, attackRealtimeEnabled, initialAttackFilters],
+      isDefaultAttackFilters(appliedAttackFilters, initialAttackFilters),
+    [appliedAttackFilters, attackRealtimeEnabled, initialAttackFilters],
   );
   const schedulerEventsLiveMode = useMemo(
-    () => isDefaultSchedulerEventFilters(schedulerEventFilters),
-    [schedulerEventFilters],
+    () => isDefaultSchedulerEventFilters(appliedSchedulerEventFilters),
+    [appliedSchedulerEventFilters],
   );
+
+  // The header follows the live state directly. The page's own status read may
+  // stay down for a while, so retry it slowly to avoid loading a failing gateway.
+  const serverStatusUnknown = Boolean(unavailable?.gameStatus);
+  const clientStatusKnown = !unavailableData.gameStatus;
+  const liveMatchState = gameState.match?.state;
+  const liveTick = gameState.current_tick?.id;
+  useEffect(() => {
+    publishLiveMatchStatus(
+      clientStatusKnown ? { matchState: liveMatchState, currentTick: liveTick } : null,
+    );
+  }, [clientStatusKnown, liveMatchState, liveTick]);
+  useEffect(() => () => publishLiveMatchStatus(null), []);
+  useEffect(() => {
+    if (!serverStatusUnknown || !clientStatusKnown) return;
+    let attempt = 0;
+    let timer = 0;
+    const refresh = () => {
+      if (!document.hidden) {
+        router.refresh();
+      }
+      timer = window.setTimeout(refresh, headerRefreshDelayMs(attempt));
+      attempt += 1;
+    };
+    refresh();
+    return () => window.clearTimeout(timer);
+  }, [clientStatusKnown, router, serverStatusUnknown]);
 
   useEffect(() => {
     void refreshWireGuardGatewayStatus(true);
@@ -522,6 +571,7 @@ export function useOrganizerDashboard({
       try {
         const payload = JSON.parse(event.data) as AdminGameStatus;
         setGameState(payload);
+        setUnavailableData((current) => ({ ...current, gameStatus: false }));
         maybeAuditCompletedTick(payload);
       } catch {
         // Keep the last good organizer snapshot if one frame is malformed.
@@ -1196,6 +1246,18 @@ export function useOrganizerDashboard({
     }
   }
 
+  async function rotateTeamJoinKey(team: AdminTeam) {
+    return postRowAction<{ join_key: string }>({
+      actionKey: `team:join-key:${team.id}`,
+      url: `/api/admin/teams/${team.id}/join-key/rotate`,
+      errorLabel: "Could not rotate the join key",
+      successNote: `Join key rotated for "${team.name}". Share the new key with anyone who still needs to join.`,
+      apply: ({ join_key }) => {
+        setTeamRows((current) => current.map((item) => item.id === team.id ? { ...item, join_key } : item));
+      },
+    });
+  }
+
   async function setTeamActiveState(
     team: AdminTeam,
     active: boolean,
@@ -1590,6 +1652,7 @@ export function useOrganizerDashboard({
       );
 
       setGameState(payload);
+      setUnavailableData((current) => ({ ...current, gameStatus: false }));
       maybeAuditCompletedTick(payload);
       if (!silent) {
         setActionNote(
@@ -1616,6 +1679,7 @@ export function useOrganizerDashboard({
       url: "/api/admin/deployments",
       errorLabel: "deployment list fetch failed",
       setPage: setDeploymentRows,
+      onLoaded: () => setUnavailableData((current) => ({ ...current, deployments: false })),
       formatNote: (rows) => `Loaded ${rows.length} deployment job(s).`,
     });
   }
@@ -1871,7 +1935,7 @@ export function useOrganizerDashboard({
 
       setGameState((current) => ({ ...current, match: payload }));
       setActionNote(
-        `Match window updated. Start: ${payload?.scheduled_start_at ?? "manual"}; end: ${payload?.scheduled_end_at ?? "manual"}.`,
+        `Match window updated. Start: ${payload?.scheduled_start_at ? formatIndonesianDate(payload.scheduled_start_at) : "manual"}; end: ${payload?.scheduled_end_at ? formatIndonesianDate(payload.scheduled_end_at) : "manual"}.`,
       );
     } catch (error) {
       setActionError(
@@ -1924,6 +1988,8 @@ export function useOrganizerDashboard({
     setPage: (page: T) => void;
     formatNote: (page: T) => string;
     beforeSet?: () => void;
+    onLoaded?: () => void;
+    onFailed?: () => void;
   }): Promise<void> {
     if (!opts.silent) {
       setPendingAction(opts.actionKey);
@@ -1937,6 +2003,7 @@ export function useOrganizerDashboard({
 
       opts.beforeSet?.();
       opts.setPage(payload);
+      opts.onLoaded?.();
       if (!opts.silent) {
         setActionNote(opts.formatNote(payload));
       }
@@ -1945,6 +2012,7 @@ export function useOrganizerDashboard({
         setActionError(
           browserRequestErrorMessage(error, opts.errorLabel),
         );
+        opts.onFailed?.();
       }
     } finally {
       if (!opts.silent) {
@@ -1965,8 +2033,11 @@ export function useOrganizerDashboard({
       errorLabel: "attack feed fetch failed",
       setPage: setAttackPageState,
       beforeSet: preserveHighlights ? undefined : clearAttackHighlights,
+      // The rows didn't change on failure, so neither did their place in the feed.
+      onLoaded: () => setAppliedAttackFilters(filters),
+      onFailed: () => setAttackFilters((current) => ({ ...current, offset: appliedAttackFilters.offset })),
       formatNote: (page) =>
-        `Loaded ${page.items.length} accepted attack row(s) (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+        `Loaded ${page.items.length} accepted attack row(s) (${pageRangeLabel(page)}).`,
     });
   }
 
@@ -1980,8 +2051,10 @@ export function useOrganizerDashboard({
       url: `/api/admin/game/checker-runs${buildCheckerRunQueryString(filters)}`,
       errorLabel: "checker runs fetch failed",
       setPage: setCheckerRunPageState,
+      onLoaded: () => setAppliedCheckerRunFilters(filters),
+      onFailed: () => setCheckerRunFilters((current) => ({ ...current, offset: appliedCheckerRunFilters.offset })),
       formatNote: (page) =>
-        `Loaded ${page.items.length} checker run row(s) from game-core (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+        `Loaded ${page.items.length} checker run row(s) from game-core (${pageRangeLabel(page)}).`,
     });
   }
 
@@ -1995,8 +2068,10 @@ export function useOrganizerDashboard({
       url: `/api/admin/game/scheduler/events${buildSchedulerEventQueryString(filters)}`,
       errorLabel: "scheduler events fetch failed",
       setPage: setSchedulerEventPageState,
+      onLoaded: () => setAppliedSchedulerEventFilters(filters),
+      onFailed: () => setSchedulerEventFilters((current) => ({ ...current, offset: appliedSchedulerEventFilters.offset })),
       formatNote: (page) =>
-        `Loaded ${page.items.length} scheduler event row(s) from game-core (${page.offset + 1}-${page.offset + page.items.length} of ${page.total_count}).`,
+        `Loaded ${page.items.length} scheduler event row(s) from game-core (${pageRangeLabel(page)}).`,
     });
   }
 
@@ -2081,6 +2156,7 @@ export function useOrganizerDashboard({
       );
 
       setScoreRows(payload);
+      setUnavailableData((current) => ({ ...current, scoreboard: false }));
       if (!silent) {
         setActionNote(
           `Loaded ${payload.length} scoreboard row(s) from game-core.`,
@@ -2357,6 +2433,7 @@ export function useOrganizerDashboard({
   }
 
   function closeFormDialog(): void {
+    setActionError(null);
     setFormMode(null);
     setFormEntity(null);
     setEditingId(null);
@@ -2493,6 +2570,8 @@ export function useOrganizerDashboard({
     actionNote,
     applyAttackFilters,
     attackFilters,
+    appliedAttackFilters,
+    unavailableData,
     highlightedAttackIDs,
     attackPageState,
     attacksLiveMode,
@@ -2527,6 +2606,7 @@ export function useOrganizerDashboard({
     openCreateDialog,
     openEditDialog,
     selectDeleteTarget,
+    rotateTeamJoinKey,
     setTeamActiveState,
     setPlayerActiveState,
     setChallengeMaintenanceState,
@@ -2651,6 +2731,11 @@ function buildSchedulerEventQueryString(
 }
 
 
+
+function pageRangeLabel(page: { items: unknown[]; offset: number; total_count: number }): string {
+  const range = page.items.length > 0 ? `${page.offset + 1}-${page.offset + page.items.length}` : "0-0";
+  return `${range} of ${page.total_count}`;
+}
 
 function isDefaultCheckerRunFilters(filters: CheckerRunFilters): boolean {
   return (

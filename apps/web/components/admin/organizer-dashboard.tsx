@@ -35,6 +35,7 @@ export function OrganizerDashboard({
   schedulerEventPage,
   checkerRunPage,
   scoreboard,
+  unavailable,
   initialTab = "teams",
 }: OrganizerDashboardOptions & {
   initialTab?:
@@ -58,16 +59,19 @@ export function OrganizerDashboard({
     schedulerEventPage,
     scoreboard,
     teams,
+    unavailable,
   });
 
   return (
     <div className="grid gap-4">
-      {state.actionError ? <ErrorBanner message={state.actionError} /> : null}
+      {/* While a form is open its own error line shows this, in front of the overlay. */}
+      {state.actionError && state.formMode === null ? <ErrorBanner message={state.actionError} /> : null}
       {state.actionNote ? <NoteBanner message={state.actionNote} /> : null}
 
       {renderOrganizerPanel({
         accessStatus: state.accessStatus,
         attackFilters: state.attackFilters,
+        appliedAttackFilters: state.appliedAttackFilters,
         attackPage: state.attackPageState,
         attacksLiveMode: state.attacksLiveMode,
         highlightedAttackIDs: state.highlightedAttackIDs,
@@ -90,6 +94,7 @@ export function OrganizerDashboard({
         scoreRows: state.scoreRows,
         selectedWireGuardPeer: state.selectedWireGuardPeer,
         teamRows: state.teamRows,
+        unavailableData: state.unavailableData,
         wireGuardDialogOpen: state.wireGuardDialogOpen,
         wireGuardGatewayStatus: state.wireGuardGatewayStatus,
         onAdvanceGameTick: () => {
@@ -118,6 +123,9 @@ export function OrganizerDashboard({
         onOpenCreateDialog: state.openCreateDialog,
         onOpenEditDialog: state.openEditDialog,
         onSelectDeleteTarget: state.selectDeleteTarget,
+        onRotateTeamJoinKey: (team) => {
+          void state.rotateTeamJoinKey(team);
+        },
         onSetTeamActiveState: (team, active) => {
           void state.setTeamActiveState(team, active);
         },
@@ -244,6 +252,7 @@ export function OrganizerDashboard({
         formMode={state.formMode}
         formEntity={state.formEntity}
 
+        actionError={state.actionError}
         pendingAction={state.pendingAction}
         teamDraft={state.teamDraft}
         playerDraft={state.playerDraft}
@@ -266,6 +275,7 @@ export function OrganizerDashboard({
 function renderOrganizerPanel({
   accessStatus,
   attackFilters,
+  appliedAttackFilters,
   attackPage,
   attacksLiveMode,
   highlightedAttackIDs,
@@ -288,6 +298,7 @@ function renderOrganizerPanel({
   scoreRows,
   selectedWireGuardPeer,
   teamRows,
+  unavailableData,
   wireGuardDialogOpen,
   wireGuardGatewayStatus,
   onAdvanceGameTick,
@@ -302,6 +313,7 @@ function renderOrganizerPanel({
   onOpenCreateDialog,
   onOpenEditDialog,
   onSelectDeleteTarget,
+  onRotateTeamJoinKey,
   onSetTeamActiveState,
   onSetPlayerActiveState,
   onSetChallengeMaintenanceState,
@@ -349,6 +361,7 @@ function renderOrganizerPanel({
 }: {
   accessStatus: OrganizerDashboardState["accessStatus"];
   attackFilters: OrganizerDashboardState["attackFilters"];
+  appliedAttackFilters: OrganizerDashboardState["appliedAttackFilters"];
   attackPage: OrganizerDashboardState["attackPageState"];
   attacksLiveMode: boolean;
   highlightedAttackIDs: string[];
@@ -378,6 +391,7 @@ function renderOrganizerPanel({
   scoreRows: OrganizerDashboardOptions["scoreboard"];
   selectedWireGuardPeer: OrganizerDashboardState["selectedWireGuardPeer"];
   teamRows: OrganizerDashboardOptions["teams"];
+  unavailableData: OrganizerDashboardState["unavailableData"];
   wireGuardDialogOpen: boolean;
   wireGuardGatewayStatus: OrganizerDashboardState["wireGuardGatewayStatus"];
   onAdvanceGameTick: () => void;
@@ -395,6 +409,7 @@ function renderOrganizerPanel({
     id: number,
   ) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onRotateTeamJoinKey: (team: OrganizerDashboardOptions["teams"][number]) => void;
   onSetTeamActiveState: (
     team: OrganizerDashboardOptions["teams"][number],
     active: boolean,
@@ -465,11 +480,13 @@ function renderOrganizerPanel({
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
         teamRows={teamRows}
+        unavailable={Boolean(unavailableData.teams) && teamRows.length === 0}
         onCloseDeleteDialog={onCloseDeleteDialog}
         onConfirmDelete={onConfirmDelete}
         onOpenCreateDialog={() => onOpenCreateDialog("team")}
         onOpenEditDialog={(id) => onOpenEditDialog("team", id)}
         onSelectDeleteTarget={onSelectDeleteTarget}
+        onRotateTeamJoinKey={onRotateTeamJoinKey}
         onSetTeamActiveState={onSetTeamActiveState}
       />
     );
@@ -482,6 +499,7 @@ function renderOrganizerPanel({
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
         playerRows={playerRows}
+        unavailable={Boolean(unavailableData.players) && playerRows.length === 0}
         selectedWireGuardPeer={selectedWireGuardPeer}
         wireGuardDialogOpen={wireGuardDialogOpen}
         wireGuardGatewayStatus={wireGuardGatewayStatus}
@@ -510,6 +528,7 @@ function renderOrganizerPanel({
     return (
       <ThemedChallengesTab
         challengeRows={challengeRows}
+        unavailable={Boolean(unavailableData.challenges) && challengeRows.length === 0}
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
         validationRows={challengeValidationRows}
@@ -530,6 +549,7 @@ function renderOrganizerPanel({
       <ThemedDeploymentsTab
         deleteTarget={deleteTarget}
         deploymentRows={deploymentRows}
+        unavailable={Boolean(unavailableData.deployments) && deploymentRows.length === 0}
         pendingAction={pendingAction}
         onCloseDeleteDialog={onCloseDeleteDialog}
         onConfirmDelete={onConfirmDelete}
@@ -544,6 +564,7 @@ function renderOrganizerPanel({
         pendingAction={pendingAction}
         scoringAudit={scoringAudit}
         scoreRows={scoreRows}
+        unavailable={Boolean(unavailableData.scoreboard) && scoreRows.length === 0}
         onAudit={onAuditGameScoring}
         onRefresh={onRefreshGameScoreboard}
       />
@@ -557,6 +578,7 @@ function renderOrganizerPanel({
         attacksLiveMode={attacksLiveMode}
         highlightedAttackIDs={highlightedAttackIDs}
         filters={attackFilters}
+        appliedFilters={appliedAttackFilters}
         pendingAction={pendingAction}
         serviceOptions={challengeRows.map((challenge) => challenge.name)}
         teamOptions={teamRows.map((team) => team.name)}
@@ -582,6 +604,8 @@ function renderOrganizerPanel({
         checkerRun: checkerRunFilters,
         schedulerEvent: schedulerEventFilters,
       }}
+      appliedAttackFilters={appliedAttackFilters}
+      matchStatusUnknown={Boolean(unavailableData.gameStatus)}
       gameState={gameState}
       accessStatus={accessStatus}
       deploymentRows={deploymentRows}

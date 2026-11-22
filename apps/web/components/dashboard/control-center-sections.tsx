@@ -2,8 +2,9 @@
 import type { ReactElement, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
+import { nextClockOffset, overdueRefreshDelayMs } from "@/lib/match-clock";
 import { formatMatchStateLabel } from "@/lib/match-state";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, LoaderCircle, Timer, Calendar, Activity, RefreshCw } from "lucide-react";
 import { ScoreboardTable } from "@/components/ui/scoreboard-table";
 import { AttackFeedTable } from "@/components/ui/attack-feed-table";
@@ -41,6 +42,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AppDialog } from "@/components/ui/app-dialog";
+import { formatIndonesianDate, formatWibTime } from "@/lib/date-format";
 import { ChallengeCategoryIcon } from "@/components/ui/challenge-category-icon";
 import { ServiceConnectionLine } from "@/components/ui/service-connection";
 import {
@@ -180,7 +182,7 @@ export function ScoreboardPanel({
             className="tone-warning rounded-md border px-3 py-2 text-sm"
           >
             <span className="font-semibold">Scoreboard frozen.</span>
-            {freezeAt ? ` Snapshot as of ${formatFreezeTimestamp(freezeAt)}.` : ""}
+            {freezeAt ? ` Snapshot as of ${formatIndonesianDate(freezeAt)}.` : ""}
           </div>
         )}
         {unavailable ? (
@@ -195,14 +197,6 @@ export function ScoreboardPanel({
       </CardContent>
     </Card>
   );
-}
-
-function formatFreezeTimestamp(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleString();
 }
 
 function formatCountdown(seconds: number): string {
@@ -234,6 +228,14 @@ export function useMatchClock(overview: PlatformOverview): MatchClock {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [overdue, setOverdue] = useState(false);
   const router = useRouter();
+  // Participants' laptops are often minutes off, so count against server time.
+  const clockOffset = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (overview.serverTime !== undefined) {
+      clockOffset.current = nextClockOffset(clockOffset.current, overview.serverTime - Date.now());
+    }
+  }, [overview.serverTime]);
 
   useEffect(() => {
     if (!overview.nextTickAt) {
@@ -245,7 +247,7 @@ export function useMatchClock(overview: PlatformOverview): MatchClock {
     const intervalMs = (overview.tickInterval ?? 0) * 1000;
 
     const update = () => {
-      const now = Date.now();
+      const now = Date.now() + (clockOffset.current ?? 0);
       // The boundary has passed but the backend hasn't published the next
       // nextTickAt yet — drive the recovery refresh below.
       setOverdue(now >= target);
@@ -274,11 +276,19 @@ export function useMatchClock(overview: PlatformOverview): MatchClock {
 
     router.refresh();
 
-    const interval = setInterval(() => {
-      router.refresh();
-    }, 3500);
+    // A stalled scheduler can stay late for a long time, so ease off.
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleRefresh = () => {
+      timer = setTimeout(() => {
+        router.refresh();
+        attempt += 1;
+        scheduleRefresh();
+      }, overdueRefreshDelayMs(attempt));
+    };
+    scheduleRefresh();
 
-    return () => clearInterval(interval);
+    return () => clearTimeout(timer);
   }, [overdue, overview.nextTickAt, router]);
 
   const matchState = overview.matchState?.toLowerCase();
@@ -330,11 +340,7 @@ export function useMatchClock(overview: PlatformOverview): MatchClock {
     stateLabel,
     stateKind: isRunning ? "running" : isPaused ? "paused" : "idle",
     nextTickLabel: overview.nextTickAt
-      ? new Date(overview.nextTickAt).toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
+      ? formatWibTime(overview.nextTickAt)
       : "—",
     countdown,
     counting: isRunning && timeLeft !== null,

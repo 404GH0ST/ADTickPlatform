@@ -30,6 +30,11 @@ export function StaleDataNotice() {
   );
 }
 
+/** For a failed list inside a table, where the full block won't fit. */
+export function listUnavailableMessage(plural: string): string {
+  return `${plural} can't be loaded right now. This doesn't mean there are none, so check before adding one.`;
+}
+
 export const SCORES_UNAVAILABLE = {
   title: "Scores can't be loaded",
   description: "The platform API didn't return the standings. This doesn't mean no team has scored.",

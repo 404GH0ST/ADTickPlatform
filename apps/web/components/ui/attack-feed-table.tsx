@@ -1,5 +1,8 @@
-import type { ReactElement } from "react";
+"use client";
 
+import { useRef, useState, type ReactElement } from "react";
+
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -20,8 +23,11 @@ type AttackRow = {
   verdict: string;
 };
 
+const ROW_BATCH = 50;
+
 /**
  * Shared attack feed table used by both organizer and participant dashboards.
+ * The attack map can load 1,000 rows, so the table adds them in batches.
  */
 export function AttackFeedTable({
   attackRows,
@@ -30,7 +36,19 @@ export function AttackFeedTable({
   attackRows: AttackRow[];
   emptyMessage?: string;
 }): ReactElement {
+  const [shownCount, setShownCount] = useState(ROW_BATCH);
+  const countLabel = useRef<HTMLParagraphElement>(null);
+  const rows = attackRows.slice(0, shownCount);
+  const remaining = attackRows.length - rows.length;
+
+  function showMore() {
+    setShownCount(rows.length + ROW_BATCH);
+    // The button is about to disappear, so keep keyboard focus nearby.
+    if (remaining <= ROW_BATCH) requestAnimationFrame(() => countLabel.current?.focus());
+  }
+
   return (
+    <div className="grid min-w-0 gap-3">
     <Table scrollLabel="Accepted attacks">
       <TableHeader>
         <TableRow>
@@ -45,7 +63,7 @@ export function AttackFeedTable({
         {attackRows.length === 0 && emptyMessage ? (
           <EmptyTableRow colSpan={5} message={emptyMessage} />
         ) : (
-          attackRows.map((attack) => (
+          rows.map((attack) => (
             <TableRow key={attack.id}>
               <TableCell className="font-mono text-xs">
                 #{attack.tick}
@@ -59,5 +77,18 @@ export function AttackFeedTable({
         )}
       </TableBody>
     </Table>
+    {attackRows.length > ROW_BATCH ? (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p ref={countLabel} tabIndex={-1} role="status" className="text-sm text-muted-foreground">
+          Showing {rows.length.toLocaleString("en-US")} of {attackRows.length.toLocaleString("en-US")} attacks
+        </p>
+        {remaining > 0 ? (
+          <Button type="button" variant="outline" size="sm" onClick={showMore}>
+            Show {Math.min(remaining, ROW_BATCH)} more
+          </Button>
+        ) : null}
+      </div>
+    ) : null}
+    </div>
   );
 }

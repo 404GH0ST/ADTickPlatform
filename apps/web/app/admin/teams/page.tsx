@@ -29,6 +29,7 @@ export default async function AdminTeamsPage() {
           schedulerEventPage={dashboard.schedulerEventPage}
           scoreboard={dashboard.scoreboard}
           teams={dashboard.teams}
+          unavailable={dashboard.unavailable}
           initialTab="teams"
         />
         {/* Rare, one-shot setup task: below the registry organizers use all match. */}

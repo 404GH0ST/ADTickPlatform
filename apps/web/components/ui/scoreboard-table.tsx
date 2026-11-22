@@ -33,6 +33,7 @@ export type ScoreboardRow = {
   sla: number;
   total: number;
   services?: ScoreboardServiceRow[];
+  disqualified?: boolean;
 };
 
 type ServiceColumn = {
@@ -203,6 +204,12 @@ export function ScoreboardTable({
 
   const sortedRows = useMemo(() => {
     return [...scoreRows].sort((left, right) => {
+      // Disqualified teams stay at the bottom under every sort.
+      const disqualifiedOrder =
+        Number(Boolean(left.disqualified)) - Number(Boolean(right.disqualified));
+      if (disqualifiedOrder !== 0) {
+        return disqualifiedOrder;
+      }
       const direction = sortDirection === "asc" ? 1 : -1;
       switch (sortField) {
         case "team":
@@ -432,6 +439,7 @@ export function ScoreboardTable({
                       rank={score.rank}
                       delta={score.delta}
                       isCurrentTeam={isCurrentTeam}
+                      disqualified={score.disqualified}
                     />
                   </TableCell>
                   <TableCell
@@ -580,12 +588,12 @@ function MobileScoreboardCards({
               "rounded-sm border border-border/65 bg-card p-3",
               isCurrentTeam && "border-primary/70 bg-primary/5",
             )}
-            aria-label={`Rank ${score.rank}, ${score.team}${score.institution ? ` (${score.institution})` : ""}, total ${compactNumber(score.total)}`}
+            aria-label={`${score.disqualified ? "Disqualified" : `Rank ${score.rank}`}, ${score.team}${score.institution ? ` (${score.institution})` : ""}, total ${compactNumber(score.total)}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="mb-1.5 flex items-center">
-                  <RankBadge rank={score.rank} />
+                  <RankBadge rank={score.rank} disqualified={score.disqualified} />
                 </div>
                 <p className={cn("truncate text-base font-semibold", isCurrentTeam && "text-primary-ink")}>
                   {score.team}

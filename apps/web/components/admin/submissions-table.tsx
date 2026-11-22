@@ -63,11 +63,13 @@ export function SubmissionsTable({
         'Delete submission',
       );
       setRemoved((ids) => new Set([...ids, selected.id]));
-      setNote(
-        result.first_blood_cleared
+      const deletionNote = result.first_blood_cleared
           ? `Submission #${result.id} deleted. First blood on ${result.service} is open for the next accepted capture.`
-          : `Submission #${result.id} deleted.${result.status === 'accepted' ? ' Its capture has been removed from scoring and the attack feed.' : ' Scores are unchanged.'}`,
-      );
+          : `Submission #${result.id} deleted.${result.status === 'accepted' ? ' Its capture has been removed from scoring and the attack feed.' : ' Scores are unchanged.'}`;
+      const accessNote = result.access_reconcile_pending
+        ? ' The SSH grant was revoked, but the firewall update is pending.'
+        : result.ssh_grant_revoked ? ' SSH access was revoked.' : '';
+      setNote(deletionNote + accessNote);
       setSelected(null);
       if (page.items.length === 1 && page.offset > 0) {
         const params = new URLSearchParams(window.location.search);

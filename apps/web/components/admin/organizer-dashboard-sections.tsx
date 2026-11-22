@@ -1,8 +1,11 @@
 "use client";
 
-import { browserRequestErrorMessage } from "@/lib/api-utils";
+import {
+  browserRequestErrorMessage,
+  errorNeedsSignIn,
+} from "@/lib/api-utils";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { FocusEvent, ReactElement, ReactNode, RefObject } from "react";
 import { Fragment, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
@@ -11,6 +14,7 @@ import {
   Download,
   Ellipsis,
   Flag,
+  KeyRound,
   LoaderCircle,
   Network,
   Pause,
@@ -67,6 +71,7 @@ import {
 } from "@/components/ui/card";
 import { AppDialog } from "@/components/ui/app-dialog";
 import { EmptyStateText, EmptyTableRow } from "@/components/ui/empty-state";
+import { listUnavailableMessage } from "@/components/ui/data-unavailable";
 import { InfoLine, InfoPanel } from "@/components/ui/info-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,9 +89,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { buildAttackFilterOptions } from "@/lib/dashboard-utils";
+import {
+  buildAttackFilterOptions,
+  isSameAttackView,
+} from "@/lib/dashboard-utils";
 import { cn } from "@/lib/utils";
-import { formatIndonesianDate, formatTimestampsInText } from "@/lib/date-format";
+import {
+  formatIndonesianDate,
+  formatTimestampsInText,
+  fromWibInputValue,
+  toWibInputValue,
+} from "@/lib/date-format";
 import {
   CHALLENGE_CATEGORIES,
   CHALLENGE_CATEGORY_LABELS,
@@ -133,6 +146,8 @@ type ChallengeDraft = {
 };
 
 type TeamsTabProps = {
+  /** The list failed to load, so an empty table says nothing. */
+  unavailable?: boolean;
   deleteTarget: DeleteTarget | null;
   pendingAction: string | null;
   teamRows: AdminTeam[];
@@ -141,10 +156,13 @@ type TeamsTabProps = {
   onOpenCreateDialog: () => void;
   onOpenEditDialog: (id: number) => void;
   onSelectDeleteTarget: (target: DeleteTarget) => void;
+  onRotateTeamJoinKey: (team: AdminTeam) => void;
   onSetTeamActiveState: (team: AdminTeam, active: boolean) => void;
 };
 
 type PlayersTabProps = {
+  /** The list failed to load, so an empty table says nothing. */
+  unavailable?: boolean;
   accessStatus: AdminControllerAccessStatus | null;
   deleteTarget: DeleteTarget | null;
   pendingAction: string | null;
@@ -172,6 +190,8 @@ type PlayersTabProps = {
 };
 
 type ChallengesTabProps = {
+  /** The list failed to load, so an empty table says nothing. */
+  unavailable?: boolean;
   challengeRows: AdminChallenge[];
   deleteTarget: DeleteTarget | null;
   pendingAction: string | null;
@@ -190,6 +210,8 @@ type ChallengesTabProps = {
 };
 
 type DeploymentsTabProps = {
+  /** The list failed to load, so an empty table says nothing. */
+  unavailable?: boolean;
   deleteTarget: DeleteTarget | null;
   deploymentRows: AdminDeploymentJob[];
   pendingAction: string | null;
@@ -199,6 +221,8 @@ type DeploymentsTabProps = {
 };
 
 type ScoreboardTabProps = {
+  /** The scoreboard failed to load, so an empty board says nothing. */
+  unavailable?: boolean;
   pendingAction: string | null;
   scoringAudit: AdminScoringAudit | null;
   scoreRows: AdminGameScoreRow[];
@@ -243,6 +267,10 @@ type GameTabProps = {
   checkerRunsLiveMode: boolean;
   deploymentRows: AdminDeploymentJob[];
   filters: GameFilters;
+  /** What the attack rows on screen were loaded with. */
+  appliedAttackFilters?: GameFilters["attack"];
+  /** The status request failed, which is different from the API reporting no match. */
+  matchStatusUnknown?: boolean;
   focusPanel?: "all" | "attacks";
   gameState: AdminGameStatus;
   operationsStatus: AdminOperationsStatus | null;
@@ -328,53 +356,57 @@ const checkerRunTone = {
 const selectClassName =
   "flex h-10 w-full rounded-sm border border-input bg-card px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
-function toDateTimeLocalValue(isoString?: string): string {
-  if (!isoString) {
-    return "";
-  }
+const WIB_UTC_OFFSET_MINUTES = -420;
 
-  const parsed = new Date(isoString);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-
-  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+/**
+ * Read after mount. A value that differs from the server's during hydration
+ * would make React discard this section's HTML, and any text typed into it.
+ */
+function useDeviceTimeZone(): string {
+  const [zone, setZone] = useState("");
+  useEffect(() => {
+    setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
+  return zone;
 }
 
-function fromDateTimeLocalValue(value: string): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return undefined;
-  }
-  return parsed.toISOString();
+function WibTimeNote({ id }: { id: string }): ReactElement {
+  return (
+    <p id={id} className="text-xs text-muted-foreground">
+      Times are in WIB (UTC+7).
+    </p>
+  );
 }
 
-function LocalDateTimePreview({
+function WibDateTimePreview({
   id,
   value,
 }: {
   id: string;
   value: string;
 }): ReactElement | null {
-  const iso = fromDateTimeLocalValue(value);
+  const zone = useDeviceTimeZone();
+  const iso = fromWibInputValue(value);
   if (!iso) return null;
+  const date = new Date(iso);
+  const showDeviceTime = zone !== "" && date.getTimezoneOffset() !== WIB_UTC_OFFSET_MINUTES;
 
   return (
     <p id={id} className="wrap-anywhere text-sm text-foreground">
-      <time dateTime={iso}>
-        {new Date(iso).toLocaleString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })}
-      </time>
+      <time dateTime={iso}>{formatIndonesianDate(iso)}</time>
+      {showDeviceTime ? (
+        <span className="block text-xs text-muted-foreground">
+          On this device:{" "}
+          {date.toLocaleString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}{" "}
+          ({zone})
+        </span>
+      ) : null}
     </p>
   );
 }
@@ -467,6 +499,7 @@ function RowActions({ groups }: { groups: ReactNode[] }): ReactElement {
 const statusChipClass = "min-w-[5.25rem] justify-center";
 
 export function TeamsTab({
+  unavailable,
   deleteTarget,
   pendingAction,
   teamRows,
@@ -475,8 +508,11 @@ export function TeamsTab({
   onOpenCreateDialog,
   onOpenEditDialog,
   onSelectDeleteTarget,
+  onRotateTeamJoinKey,
   onSetTeamActiveState,
 }: TeamsTabProps): ReactElement {
+  const [rotateTarget, setRotateTarget] = useState<AdminTeam | null>(null);
+
   function renderTeamActions(team: AdminTeam, popoverId?: string) {
     const activeAction = team.active ? "Deactivate" : "Reactivate";
     const size = popoverId ? "touch" : "sm";
@@ -516,6 +552,18 @@ export function TeamsTab({
         >
           <Pencil className="size-4" aria-hidden />
           {popoverId ? "Edit team" : null}
+        </Button>
+        <Button
+          size={size}
+          variant="ghost"
+          title={`Rotate join key for ${team.name}`}
+          aria-label={`Rotate join key for ${team.name}`}
+          disabled={pendingAction !== null}
+          holdFocus
+          onClick={() => run(() => setRotateTarget(team))}
+        >
+          <KeyRound className="size-4" aria-hidden />
+          {popoverId ? "Rotate join key" : null}
         </Button>
         <Button
           size={size}
@@ -565,7 +613,7 @@ export function TeamsTab({
               {teamRows.length === 0 && (
                 <EmptyTableRow
                   colSpan={8}
-                  message="No teams yet. Click Create Team to add one."
+                  message={unavailable ? listUnavailableMessage("Teams") : "No teams yet. Click Create Team to add one."}
                 />
               )}
               {teamRows.map((team) => {
@@ -643,6 +691,26 @@ export function TeamsTab({
             </TableBody>
           </Table>
     </AdminRegistryCard>
+      <AppDialog
+        open={rotateTarget !== null}
+        onClose={() => setRotateTarget(null)}
+        title="Rotate join key"
+        description={rotateTarget ? `Replace the join key for ${rotateTarget.name}? The old key will stop working immediately.` : ""}
+        body={<p className="text-sm">Current team members keep their access.</p>}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setRotateTarget(null)}>Cancel</Button>
+            <Button
+              disabled={pendingAction !== null || rotateTarget === null}
+              onClick={() => {
+                if (!rotateTarget) return;
+                setRotateTarget(null);
+                onRotateTeamJoinKey(rotateTarget);
+              }}
+            >Rotate key</Button>
+          </>
+        }
+      />
       <DeleteConfirmDialog
         deleteTarget={deleteTarget}
         pendingAction={pendingAction}
@@ -654,6 +722,7 @@ export function TeamsTab({
 }
 
 export function PlayersTab({
+  unavailable,
   accessStatus,
   deleteTarget,
   pendingAction,
@@ -684,6 +753,7 @@ export function PlayersTab({
     <>
       <div className="grid grid-cols-1 gap-4">
         <PlayerRegistryCard
+          unavailable={unavailable}
           pendingAction={pendingAction}
           playerRows={playerRows}
           onOpenCreateDialog={onOpenCreateDialog}
@@ -743,6 +813,7 @@ export function PlayersTab({
 }
 
 export function ChallengesTab({
+  unavailable,
   challengeRows,
   deleteTarget,
   pendingAction,
@@ -760,6 +831,7 @@ export function ChallengesTab({
     <>
       <div className="grid gap-4">
         <ChallengeCatalogCard
+          unavailable={unavailable}
           challengeRows={challengeRows}
           pendingAction={pendingAction}
           validationRows={validationRows}
@@ -1072,6 +1144,7 @@ function RuntimeActionIcon({
 
 
 function PlayerRegistryCard({
+  unavailable,
   pendingAction,
   playerRows,
   onOpenCreateDialog,
@@ -1082,6 +1155,7 @@ function PlayerRegistryCard({
   onSelectDeleteTarget,
   onSetPlayerActiveState,
 }: {
+  unavailable?: boolean;
   pendingAction: string | null;
   playerRows: AdminPlayer[];
   onOpenCreateDialog: () => void;
@@ -1109,6 +1183,7 @@ function PlayerRegistryCard({
             { label: "Action", className: "text-right" },
           ]} />
           <TableBody>
+            {unavailable ? <EmptyTableRow colSpan={6} message={listUnavailableMessage("Players")} /> : null}
             {playerRows.map((player) => {
               const hasWireGuardPeer =
                 Boolean(player.wireguard_peer) &&
@@ -1285,6 +1360,7 @@ function PlayerRegistryCard({
 
 
 function ChallengeCatalogCard({
+  unavailable,
   challengeRows,
   pendingAction,
   validationRows,
@@ -1295,6 +1371,7 @@ function ChallengeCatalogCard({
   onValidateChallenge,
   onSetChallengeMaintenanceState,
 }: {
+  unavailable?: boolean;
   challengeRows: AdminChallenge[];
   pendingAction: string | null;
   validationRows: Record<number, AdminChallengeValidationResult>;
@@ -1325,6 +1402,7 @@ function ChallengeCatalogCard({
             { label: "Action", className: "text-right" },
           ]} />
           <TableBody>
+            {unavailable ? <EmptyTableRow colSpan={6} message={listUnavailableMessage("Challenges")} /> : null}
             {challengeRows.map((challenge) => (
               <ChallengeCatalogRow
                 key={`challenge-row-${challenge.id}`}
@@ -1583,6 +1661,7 @@ function ChallengeCatalogRow({
 }
 
 export function DeploymentsTab({
+  unavailable,
   deleteTarget,
   deploymentRows,
   pendingAction,
@@ -1617,7 +1696,10 @@ export function DeploymentsTab({
             </TableHeader>
             <TableBody>
               {deploymentRows.length === 0 ? (
-                <EmptyTableRow colSpan={7} message="No deployment jobs yet." />
+                <EmptyTableRow
+                  colSpan={7}
+                  message={unavailable ? listUnavailableMessage("Deployment jobs") : "No deployment jobs yet."}
+                />
               ) : (
                 deploymentRows.map((deployment) => {
                   return (
@@ -1699,6 +1781,8 @@ export function DeploymentsTab({
 
 export function GameTab({
   accessStatus,
+  appliedAttackFilters,
+  matchStatusUnknown = false,
   attackPage,
   attacksLiveMode,
   highlightedAttackIDs = [],
@@ -1769,6 +1853,7 @@ export function GameTab({
         attacksLiveMode={attacksLiveMode}
         highlightedAttackIDs={highlightedAttackIDs}
         filters={filters.attack}
+        appliedFilters={appliedAttackFilters}
         pendingAction={pendingAction}
         serviceOptions={serviceOptions}
         teamOptions={teamOptions}
@@ -1818,6 +1903,7 @@ export function GameTab({
           return (
             <div className="grid grid-cols-1 gap-4">
               <SchedulerCard
+                statusUnknown={matchStatusUnknown}
                 filters={filters.schedulerEvent}
                 pendingAction={pendingAction}
                 scheduler={gameState.scheduler}
@@ -1874,6 +1960,7 @@ export function GameTab({
         return (
           <div className="grid grid-cols-1 gap-4">
             <GameControlCard
+              statusUnknown={matchStatusUnknown}
               gameState={gameState}
               pendingAction={pendingAction}
               scoringAudit={scoringAudit}
@@ -2103,11 +2190,19 @@ export function ScoreboardCategoryLeadersPanel({
   );
 }
 
-function freezeStateLabel(status: AdminScoreboardFreeze | null): {
+function freezeStateLabel(
+  status: AdminScoreboardFreeze | null,
+  read: FreezeStatusRead,
+): {
   label: string;
   tone: string;
 } {
-  if (!status || !status.configured) {
+  if (!status) {
+    return read === "failed"
+      ? { label: "Status unavailable", tone: "tone-neutral" }
+      : { label: "Checking...", tone: "tone-neutral" };
+  }
+  if (!status.configured) {
     return { label: "Live", tone: "tone-success" };
   }
   if (status.frozen) {
@@ -2116,6 +2211,7 @@ function freezeStateLabel(status: AdminScoreboardFreeze | null): {
   return { label: "Scheduled", tone: "tone-info" };
 }
 
+type FreezeStatusRead = "loading" | "ready" | "failed";
 type FreezeDateTime = { date: string; time: string };
 const emptyFreezeDateTime: FreezeDateTime = { date: "", time: "" };
 const scheduleDateClassName = "px-0.5 sm:px-3 [&::-webkit-calendar-picker-indicator]:px-0";
@@ -2141,7 +2237,7 @@ function FreezeDateTimeFields({
         <Input
           id={`${id}-date`}
           type="date"
-          aria-describedby={complete ? previewId : undefined}
+          aria-describedby={complete ? `scoreboard-freeze-zone ${previewId}` : "scoreboard-freeze-zone"}
           className={scheduleDateClassName}
           value={value.date}
           onChange={(event) => onChange({ ...value, date: event.target.value })}
@@ -2151,14 +2247,14 @@ function FreezeDateTimeFields({
         <Input
           id={`${id}-time`}
           type="time"
-          aria-describedby={complete ? previewId : undefined}
+          aria-describedby={complete ? `scoreboard-freeze-zone ${previewId}` : "scoreboard-freeze-zone"}
           className="px-1 sm:px-3"
           value={value.time}
           onChange={(event) => onChange({ ...value, time: event.target.value })}
         />
       </Field>
       {complete && (
-        <LocalDateTimePreview id={previewId} value={`${value.date}T${value.time}`} />
+        <WibDateTimePreview id={previewId} value={`${value.date}T${value.time}`} />
       )}
     </fieldset>
   );
@@ -2169,7 +2265,9 @@ function FreezeDateTimeFields({
 // through the organizer dashboard hook. The participant board freezes; this
 // organizer view (and the admin SSE stream) stay live.
 export function ScoreboardFreezeControl(): ReactElement {
+  const router = useRouter();
   const [status, setStatus] = useState<AdminScoreboardFreeze | null>(null);
+  const [statusRead, setStatusRead] = useState<FreezeStatusRead>("loading");
   const [freezeAt, setFreezeAt] = useState(emptyFreezeDateTime);
   const [unfreezeAt, setUnfreezeAt] = useState(emptyFreezeDateTime);
   const [busy, setBusy] = useState(false);
@@ -2177,15 +2275,16 @@ export function ScoreboardFreezeControl(): ReactElement {
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setStatusRead("loading");
     try {
       const res = await fetch("/api/admin/game/scoreboard/freeze", {
         cache: "no-store",
       });
-      if (res.ok) {
-        setStatus((await res.json()) as AdminScoreboardFreeze);
-      }
+      if (!res.ok) throw new Error("freeze status unavailable");
+      setStatus((await res.json()) as AdminScoreboardFreeze);
+      setStatusRead("ready");
     } catch {
-      // leave previous status in place on transient failure
+      setStatusRead("failed");
     }
   }, []);
 
@@ -2194,14 +2293,18 @@ export function ScoreboardFreezeControl(): ReactElement {
   }, [load]);
 
   async function applyFreeze(): Promise<void> {
-    const freezeTimestamp = fromDateTimeLocalValue(`${freezeAt.date}T${freezeAt.time}`);
-    const unfreezeTimestamp = fromDateTimeLocalValue(`${unfreezeAt.date}T${unfreezeAt.time}`);
+    const freezeTimestamp = fromWibInputValue(`${freezeAt.date}T${freezeAt.time}`);
+    const unfreezeTimestamp = fromWibInputValue(`${unfreezeAt.date}T${unfreezeAt.time}`);
     if (!freezeTimestamp) {
       setError("Pick a freeze date and time.");
       return;
     }
     if ((unfreezeAt.date || unfreezeAt.time) && !unfreezeTimestamp) {
       setError("Pick both an unfreeze date and time, or leave both blank.");
+      return;
+    }
+    if (unfreezeTimestamp && Date.parse(unfreezeTimestamp) <= Date.parse(freezeTimestamp)) {
+      setError("The unfreeze time must be later than the freeze time.");
       return;
     }
     setBusy(true);
@@ -2226,7 +2329,9 @@ export function ScoreboardFreezeControl(): ReactElement {
         throw new Error(problem?.detail ?? "freeze update failed");
       }
       setStatus((await res.json()) as AdminScoreboardFreeze);
+      setStatusRead("ready");
       setNote("Freeze window saved.");
+      router.refresh();
     } catch (err) {
       setError(browserRequestErrorMessage(err, "freeze update failed"));
     } finally {
@@ -2249,9 +2354,11 @@ export function ScoreboardFreezeControl(): ReactElement {
         throw new Error(problem?.detail ?? "freeze clear failed");
       }
       setStatus((await res.json()) as AdminScoreboardFreeze);
+      setStatusRead("ready");
       setFreezeAt(emptyFreezeDateTime);
       setUnfreezeAt(emptyFreezeDateTime);
       setNote("Freeze cleared. Participant board is live.");
+      router.refresh();
     } catch (err) {
       setError(browserRequestErrorMessage(err, "freeze clear failed"));
     } finally {
@@ -2259,7 +2366,7 @@ export function ScoreboardFreezeControl(): ReactElement {
     }
   }
 
-  const state = freezeStateLabel(status);
+  const state = freezeStateLabel(status, statusRead);
 
   return (
     <Card data-testid="scoreboard-freeze-card">
@@ -2276,15 +2383,26 @@ export function ScoreboardFreezeControl(): ReactElement {
           <Badge className={state.tone} data-testid="scoreboard-freeze-state">
             {state.label}
           </Badge>
+          {statusRead === "failed" ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+              Try again
+            </Button>
+          ) : null}
           {status?.freeze_at && (
             <span className="text-xs text-muted-foreground">
-              from {new Date(status.freeze_at).toLocaleString()}
+              from {formatIndonesianDate(status.freeze_at)}
               {status.unfreeze_at
-                ? ` to ${new Date(status.unfreeze_at).toLocaleString()}`
+                ? ` to ${formatIndonesianDate(status.unfreeze_at)}`
                 : ""}
             </span>
           )}
         </div>
+        {statusRead === "failed" && !status ? (
+          <p role="status" className="text-sm text-foreground">
+            Couldn&apos;t read the freeze window. Set Freeze and Clear still work.
+          </p>
+        ) : null}
+        <WibTimeNote id="scoreboard-freeze-zone" />
         <div className="grid grid-cols-1 gap-3 @min-[22rem]:grid-cols-2">
           <FreezeDateTimeFields
             id="scoreboard-freeze-at"
@@ -2312,7 +2430,7 @@ export function ScoreboardFreezeControl(): ReactElement {
               type="button"
               variant="ghost"
               className="button-danger-subtle"
-              disabled={busy || !status?.configured}
+              disabled={busy || statusRead === "loading" || (statusRead === "ready" && !status?.configured)}
               holdFocus={busy}
               data-testid="scoreboard-freeze-clear"
               onClick={() => void clearFreeze()}
@@ -2331,6 +2449,7 @@ export function ScoreboardFreezeControl(): ReactElement {
 }
 
 export function ScoreboardTab({
+  unavailable,
   pendingAction,
   scoringAudit,
   scoreRows,
@@ -2349,6 +2468,7 @@ export function ScoreboardTab({
   return (
     <div className="grid gap-4">
       <GameScoreboardCard
+        unavailable={unavailable}
         pendingAction={pendingAction}
         scoreRows={filteredRows}
         onRefresh={onRefresh}
@@ -2369,7 +2489,7 @@ export function ScoreboardTab({
               aria-live="polite"
               className="whitespace-nowrap text-xs text-muted-foreground tabular-nums"
             >
-              Showing {filteredRows.length} of {scoreRows.length} teams.
+              {unavailable ? "Standings unavailable." : `Showing ${filteredRows.length} of ${scoreRows.length} teams.`}
             </span>
           </div>
         }
@@ -2382,12 +2502,13 @@ export function ScoreboardTab({
           onAudit={onAudit}
         />
       </div>
-      <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
+      {unavailable ? null : <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />}
     </div>
   );
 }
 
 function GameControlCard({
+  statusUnknown,
   gameState,
   pendingAction,
   scoringAudit,
@@ -2402,6 +2523,7 @@ function GameControlCard({
   onStopMatch,
   onUpdateMatchSchedule,
 }: {
+  statusUnknown: boolean;
   gameState: AdminGameStatus;
   pendingAction: string | null;
   scoringAudit: AdminScoringAudit | null;
@@ -2423,6 +2545,7 @@ function GameControlCard({
     <div className="grid items-start gap-4 xl:grid-cols-[1.1fr_1fr_0.9fr]">
       <MatchLifecycleCard
         matchState={gameState.match}
+        statusUnknown={statusUnknown}
         pendingAction={pendingAction}
         onRefreshGameStatus={onRefreshGameStatus}
         onStartMatch={onStartMatch}
@@ -2432,11 +2555,13 @@ function GameControlCard({
       />
       <MatchScheduleCard
         matchState={gameState.match}
+        statusUnknown={statusUnknown}
         pendingAction={pendingAction}
         onUpdateMatchSchedule={onUpdateMatchSchedule}
       />
       <QuickActionsCard
         currentTick={gameState.current_tick}
+        statusUnknown={statusUnknown}
         pendingAction={pendingAction}
         scoringAudit={scoringAudit}
         scoreRowCount={scoreRowCount}
@@ -2452,6 +2577,7 @@ function GameControlCard({
 
 function MatchLifecycleCard({
   matchState,
+  statusUnknown,
   pendingAction,
   onRefreshGameStatus,
   onStartMatch,
@@ -2460,6 +2586,8 @@ function MatchLifecycleCard({
   onStopMatch,
 }: {
   matchState: AdminGameStatus["match"];
+  /** The status request failed, so a start could reopen a finished match. */
+  statusUnknown: boolean;
   pendingAction: string | null;
   onRefreshGameStatus: () => void;
   onStartMatch: () => void;
@@ -2469,7 +2597,7 @@ function MatchLifecycleCard({
 }): ReactElement {
   const state = matchState?.state;
   // A finished match can be started again; it carries on from its ticks and scores.
-  const canStart = state !== "running" && state !== "paused";
+  const canStart = !statusUnknown && state !== "running" && state !== "paused";
   const restarting = state === "finished";
   const canPause = state === "running";
   const canResume = state === "paused";
@@ -2501,7 +2629,7 @@ function MatchLifecycleCard({
         <InfoPanel layout="grid">
           <InfoLine
             label="State"
-            value={matchState?.state ?? "not loaded"}
+            value={matchState?.state ?? (statusUnknown ? "unavailable" : "not loaded")}
             valueClassName="font-mono"
           />
           <InfoLine
@@ -2568,6 +2696,11 @@ function MatchLifecycleCard({
             Refresh status
           </Button>
           </div>
+          {statusUnknown ? (
+            <p data-testid="match-status-unknown" role="status" className="text-sm text-muted-foreground">
+              The match status can&apos;t be read, so match controls are hidden. Choose Refresh status to bring them back.
+            </p>
+          ) : null}
           {restarting ? (
             <p className="text-sm text-muted-foreground">
               Starting again reopens submissions and continues from the current tick and scores. A scheduled end that has already passed is cleared.
@@ -2593,10 +2726,13 @@ function MatchLifecycleCard({
 
 function MatchScheduleCard({
   matchState,
+  statusUnknown,
   pendingAction,
   onUpdateMatchSchedule,
 }: {
   matchState: AdminGameStatus["match"];
+  /** The saved window is unknown, so saving could overwrite it. */
+  statusUnknown: boolean;
   pendingAction: string | null;
   onUpdateMatchSchedule: (schedule: {
     scheduledStartAt?: string;
@@ -2607,13 +2743,13 @@ function MatchScheduleCard({
   const [draftScheduledEnd, setDraftScheduledEnd] = useState("");
 
   useEffect(() => {
-    setDraftScheduledStart(toDateTimeLocalValue(matchState?.scheduled_start_at));
-    setDraftScheduledEnd(toDateTimeLocalValue(matchState?.scheduled_end_at));
+    setDraftScheduledStart(toWibInputValue(matchState?.scheduled_start_at));
+    setDraftScheduledEnd(toWibInputValue(matchState?.scheduled_end_at));
   }, [matchState?.scheduled_end_at, matchState?.scheduled_start_at]);
 
   const scheduleChanged =
-    draftScheduledStart !== toDateTimeLocalValue(matchState?.scheduled_start_at) ||
-    draftScheduledEnd !== toDateTimeLocalValue(matchState?.scheduled_end_at);
+    draftScheduledStart !== toWibInputValue(matchState?.scheduled_start_at) ||
+    draftScheduledEnd !== toWibInputValue(matchState?.scheduled_end_at);
   const scheduleRangeInvalid =
     draftScheduledStart !== "" &&
     draftScheduledEnd !== "" &&
@@ -2641,6 +2777,7 @@ function MatchScheduleCard({
           />
         </InfoPanel>
         <div data-slot="well" className="grid grid-cols-1 gap-3 sm:rounded-sm sm:border sm:border-border/70 sm:bg-background sm:p-3">
+          <WibTimeNote id="match-schedule-zone" />
           <div className="grid grid-cols-1 items-start gap-3 @min-[24rem]:grid-cols-2">
             <div className="grid grid-cols-1 gap-3">
               <Field
@@ -2650,7 +2787,7 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-start-date"
                   type="date"
-                  aria-describedby={draftScheduledStart ? "match-start-preview" : undefined}
+                  aria-describedby={draftScheduledStart ? "match-schedule-zone match-start-preview" : "match-schedule-zone"}
                   className={scheduleDateClassName}
                   value={datePartFromDateTimeLocalValue(draftScheduledStart)}
                   onChange={(event) =>
@@ -2670,7 +2807,7 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-start-time"
                   type="time"
-                  aria-describedby={draftScheduledStart ? "match-start-preview" : undefined}
+                  aria-describedby={draftScheduledStart ? "match-schedule-zone match-start-preview" : "match-schedule-zone"}
                   className="px-1 sm:px-3"
                   step={60}
                   value={timePartFromDateTimeLocalValue(draftScheduledStart)}
@@ -2684,7 +2821,7 @@ function MatchScheduleCard({
                   }
                 />
               </Field>
-              <LocalDateTimePreview id="match-start-preview" value={draftScheduledStart} />
+              <WibDateTimePreview id="match-start-preview" value={draftScheduledStart} />
             </div>
             <div className="grid grid-cols-1 gap-3">
               <Field
@@ -2694,7 +2831,7 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-end-date"
                   type="date"
-                  aria-describedby={draftScheduledEnd ? "match-end-preview" : undefined}
+                  aria-describedby={draftScheduledEnd ? "match-schedule-zone match-end-preview" : "match-schedule-zone"}
                   className={scheduleDateClassName}
                   value={datePartFromDateTimeLocalValue(draftScheduledEnd)}
                   onChange={(event) =>
@@ -2711,7 +2848,7 @@ function MatchScheduleCard({
                 <Input
                   id="match-scheduled-end-time"
                   type="time"
-                  aria-describedby={draftScheduledEnd ? "match-end-preview" : undefined}
+                  aria-describedby={draftScheduledEnd ? "match-schedule-zone match-end-preview" : "match-schedule-zone"}
                   className="px-1 sm:px-3"
                   step={60}
                   value={timePartFromDateTimeLocalValue(draftScheduledEnd)}
@@ -2722,20 +2859,20 @@ function MatchScheduleCard({
                   }
                 />
               </Field>
-              <LocalDateTimePreview id="match-end-preview" value={draftScheduledEnd} />
+              <WibDateTimePreview id="match-end-preview" value={draftScheduledEnd} />
             </div>
           </div>
           <CardActionRow>
             <Button
               disabled={
-                pendingAction !== null || !scheduleChanged || scheduleRangeInvalid
+                pendingAction !== null || statusUnknown || !scheduleChanged || scheduleRangeInvalid
               }
               holdFocus
               variant="outline"
               onClick={() =>
                 onUpdateMatchSchedule({
-                  scheduledStartAt: fromDateTimeLocalValue(draftScheduledStart),
-                  scheduledEndAt: fromDateTimeLocalValue(draftScheduledEnd),
+                  scheduledStartAt: fromWibInputValue(draftScheduledStart),
+                  scheduledEndAt: fromWibInputValue(draftScheduledEnd),
                 })
               }
             >
@@ -2749,6 +2886,7 @@ function MatchScheduleCard({
             <Button
               disabled={
                 pendingAction !== null ||
+                statusUnknown ||
                 (draftScheduledStart === "" && draftScheduledEnd === "")
               }
               holdFocus
@@ -2774,6 +2912,7 @@ function MatchScheduleCard({
 }
 
 function QuickActionsCard({
+  statusUnknown,
   currentTick,
   pendingAction,
   scoringAudit,
@@ -2784,6 +2923,8 @@ function QuickActionsCard({
   onAuditScores,
   onRecomputeScores,
 }: {
+  /** The match state is unknown, so live-changing actions stay off. */
+  statusUnknown: boolean;
   currentTick?: AdminGameTickStatus;
   pendingAction: string | null;
   scoringAudit: AdminScoringAudit | null;
@@ -2850,7 +2991,7 @@ function QuickActionsCard({
             <p className="mt-2 text-sm text-muted-foreground">These operations modify live progression or rebuild rankings. Use them only after checking runtime health and the latest tick.</p>
             <CardActionRow className="mt-3">
           <Button
-            disabled={pendingAction !== null}
+            disabled={pendingAction !== null || statusUnknown}
             holdFocus
             data-testid="advance-tick"
             onClick={onAdvanceTick}
@@ -2863,7 +3004,7 @@ function QuickActionsCard({
             Advance tick
           </Button>
           <Button
-            disabled={pendingAction !== null}
+            disabled={pendingAction !== null || statusUnknown}
             holdFocus
             variant="outline"
             data-testid="recompute-scores"
@@ -3941,6 +4082,8 @@ function operationsAlertAction(alert: AdminOperationsStatus["alerts"][number]):
 }
 
 type SchedulerCardProps = {
+  /** The match state is unknown, so scheduler changes stay off. */
+  statusUnknown?: boolean;
   filters: GameFilters["schedulerEvent"];
   pendingAction: string | null;
   scheduler: AdminGameStatus["scheduler"];
@@ -3957,6 +4100,7 @@ type SchedulerCardProps = {
 };
 
 function SchedulerCard({
+  statusUnknown = false,
   filters,
   pendingAction,
   scheduler,
@@ -3983,7 +4127,7 @@ function SchedulerCard({
 
   const parsedInterval = Number.parseInt(draftInterval, 10);
   const intervalChanged =
-    parsedInterval !== scheduler?.interval_seconds && parsedInterval > 0;
+    !statusUnknown && parsedInterval !== scheduler?.interval_seconds && parsedInterval > 0;
 
   return (
     <Card data-testid="scheduler-card" id="scheduler-card">
@@ -4026,6 +4170,7 @@ function SchedulerCard({
           <SchedulerActionRow
             pendingAction={pendingAction}
             schedulerState={scheduler?.state}
+            statusUnknown={statusUnknown}
             onStartScheduler={onStartScheduler}
             onStopScheduler={onStopScheduler}
           />
@@ -4192,11 +4337,13 @@ function SchedulerIntervalControl({
 }
 
 function SchedulerActionRow({
+  statusUnknown,
   pendingAction,
   schedulerState,
   onStartScheduler,
   onStopScheduler,
 }: {
+  statusUnknown: boolean;
   pendingAction: string | null;
   schedulerState?: string;
   onStartScheduler: () => void;
@@ -4205,7 +4352,7 @@ function SchedulerActionRow({
   return (
     <CardActionRow well className="rounded-sm border border-border/70 bg-muted/10 p-3 pt-3">
       <Button
-        disabled={pendingAction !== null || schedulerState === "running"}
+        disabled={pendingAction !== null || statusUnknown || schedulerState === "running"}
         holdFocus
         variant="outline"
         onClick={onStartScheduler}
@@ -4525,8 +4672,9 @@ function ScoreboardSnapshotCard({
   scoreRows: AdminGameScoreRow[];
   onRefresh: () => void;
 }): ReactElement {
-  const leader = scoreRows[0];
-  const lastPlace = scoreRows[scoreRows.length - 1];
+  const eligibleRows = scoreRows.filter((row) => !row.disqualified);
+  const leader = eligibleRows[0];
+  const lastPlace = eligibleRows[eligibleRows.length - 1];
 
   return (
     <Card>
@@ -4581,6 +4729,7 @@ export function GameAttacksCard({
   attacksLiveMode,
   highlightedAttackIDs = [],
   filters,
+  appliedFilters = filters,
   pendingAction,
   serviceOptions = [],
   teamOptions = [],
@@ -4594,7 +4743,10 @@ export function GameAttacksCard({
   attackPage: AdminAttackFeedPage;
   attacksLiveMode: boolean;
   highlightedAttackIDs?: string[];
+  /** What is selected in the form, which may not be applied yet. */
   filters: GameFilters["attack"];
+  /** What the rows on screen were loaded with. Defaults to filters. */
+  appliedFilters?: GameFilters["attack"];
   pendingAction: string | null;
   serviceOptions?: string[];
   teamOptions?: string[];
@@ -4608,7 +4760,8 @@ export function GameAttacksCard({
 }): ReactElement {
   const attackRows = attackPage.items;
   const latestTick = attackRows.reduce((value, row) => Math.max(value, row.tick), 0);
-  const filtersApplied = hasAttackFiltersApplied(filters);
+  const filtersApplied = hasAttackFiltersApplied(appliedFilters);
+  const selectionPending = !isSameAttackView(filters, appliedFilters);
   const attackerChoices = buildAttackFilterOptions(
     [...teamOptions, ...attackRows.map((row) => row.attacker)],
     filters.attacker,
@@ -4716,7 +4869,7 @@ export function GameAttacksCard({
               </select>
             </Field>
           </div>
-          {filtersApplied ? (
+          {selectionPending ? (
             <p className="text-xs text-muted-foreground" role="status">
               Selected filters are ready. Choose Apply view to refresh the organizer feed.
             </p>
@@ -4746,7 +4899,7 @@ export function GameAttacksCard({
             <SliceCountBadge
               totalCount={attackPage.total_count}
               visibleCount={attackRows.length}
-              offset={Number.parseInt(filters.offset, 10) || 0}
+              offset={attackPage.offset ?? 0}
             />
             <LiveModeBadge
               filteredLabel="Filtered"
@@ -4902,11 +5055,13 @@ function formatScoreValue(value: number): string {
 }
 
 function GameScoreboardCard({
+  unavailable,
   pendingAction,
   scoreRows,
   onRefresh,
   toolbar,
 }: {
+  unavailable?: boolean;
   pendingAction: string | null;
   scoreRows: AdminGameScoreRow[];
   onRefresh: () => void;
@@ -4944,7 +5099,7 @@ function GameScoreboardCard({
       <CardContent>
         <ScoreboardTable
           scoreRows={scoreRows}
-          emptyMessage="No score rows persisted yet."
+          emptyMessage={unavailable ? listUnavailableMessage("Scores") : "No score rows persisted yet."}
         />
       </CardContent>
     </Card>
@@ -5268,7 +5423,23 @@ function hasCheckerRunFiltersApplied(
 }
 
 export function ErrorBanner({ message }: { message: string }): ReactElement {
-  return <StatusBanner message={message} variant="error" />;
+  if (!errorNeedsSignIn(message)) {
+    return <StatusBanner message={message} variant="error" />;
+  }
+  return (
+    <div className="grid justify-items-start gap-2">
+      <div className="w-full">
+        <StatusBanner message={message} variant="error" />
+      </div>
+      {/* A new tab, so an open form keeps its text while you sign back in. */}
+      <Button asChild variant="outline" size="sm">
+        <a href="/login" target="_blank" rel="noreferrer">
+          Sign in again
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      </Button>
+    </div>
+  );
 }
 
 export function NoteBanner({ message }: { message: string }): ReactElement {
@@ -5849,6 +6020,7 @@ function StillNeeded({ messages }: { messages: string[] }): ReactElement {
 }
 
 export function EntityFormDialog({
+  actionError,
   formMode,
   formEntity,
 
@@ -5865,6 +6037,8 @@ export function EntityFormDialog({
   onClose,
   onSubmit,
 }: {
+  /** The last save's failure, shown in the dialog rather than behind it. */
+  actionError?: string | null;
   formMode: FormMode;
   formEntity: FormEntity;
 
@@ -6553,6 +6727,9 @@ export function EntityFormDialog({
     <AppDialog
       open={isOpen}
       pinFormFooter
+      protectUnsaved
+      busy={isSubmitting}
+      error={actionError ? <ErrorBanner message={actionError} /> : null}
       onClose={onClose}
       title={title}
       description={

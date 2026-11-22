@@ -30,6 +30,7 @@ export default async function AdminDeploymentsPage() {
           schedulerEventPage={dashboard.schedulerEventPage}
           scoreboard={dashboard.scoreboard}
           teams={dashboard.teams}
+          unavailable={dashboard.unavailable}
           initialTab="deployments"
         />
       </div>

@@ -25,6 +25,7 @@ export function ExportDataPanel({
     sla: number;
     total: number;
     delta: string;
+    disqualified?: boolean;
   }>;
   attacks: Array<{
     id: string;
@@ -53,7 +54,7 @@ export function ExportDataPanel({
           variant="outline"
           onClick={() => {
             const csv = toCsv([
-              ["rank", "team", "attack", "defense", "sla", "total", "delta"],
+              ["rank", "team", "attack", "defense", "sla", "total", "delta", "status"],
               ...scoreboard.map((row) => [
                 String(row.rank),
                 row.team,
@@ -62,6 +63,7 @@ export function ExportDataPanel({
                 String(row.sla),
                 String(row.total),
                 row.delta,
+                row.disqualified ? "DQ" : "active",
               ]),
             ]);
             downloadText(
