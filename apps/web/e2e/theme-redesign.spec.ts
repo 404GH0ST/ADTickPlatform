@@ -769,8 +769,8 @@ test("populated organizer views and scheduling values fit at narrow widths with 
     await expectNoHorizontalOverflow(page.getByLabel("Scheduled End Date"));
     const time = page.getByLabel("Scheduled Start Time");
     await time.fill("19:45");
-    await expect(time).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
-    await expect(page.locator("time[datetime='2029-06-07T19:45:00.000Z']")).toBeVisible();
+    await expect(time).toHaveAccessibleDescription(/2029-06-07 19:45:00 WIB/);
+    await expect(page.locator("time[datetime='2029-06-07T12:45:00.000Z']")).toBeVisible();
     await expectReflow("filled match schedule");
 
     await page.goto("/admin/scoreboard");
@@ -779,13 +779,115 @@ test("populated organizer views and scheduling values fit at narrow widths with 
     await freezeTime.fill("19:45");
     const freezeDate = freeze.getByLabel("Date", { exact: true });
     await freezeDate.fill("2029-06-07");
-    await expect(freezeTime).toHaveAccessibleDescription(/Jun 7, 2029.*7:45 PM/);
-    await expect(page.locator("time[datetime='2029-06-07T19:45:00.000Z']")).toBeVisible();
+    await expect(freezeTime).toHaveAccessibleDescription(/2029-06-07 19:45:00 WIB/);
+    await expect(page.locator("time[datetime='2029-06-07T12:45:00.000Z']")).toBeVisible();
     await expectReflow("filled freeze schedule");
     await expectNoHorizontalOverflow(freezeDate);
   } finally {
     await browser.close();
   }
+});
+
+test.describe("accessibility regressions", () => {
+  test.use({ storageState: participantStorageState });
+
+  test("flag results announce the summary, not every verdict", async ({ page }) => {
+    await page.goto("/services");
+    await page.getByRole("textbox", { name: "Flags" }).fill("PLAYIT{invalid-one}\nPLAYIT{invalid-two}");
+    await page.getByRole("button", { name: "Submit", exact: true }).click();
+    await expect(page.getByTestId("flag-verdict")).toHaveCount(2);
+    const panel = page.getByTestId("flag-submit-panel");
+    await expect(panel.locator("[aria-live]").getByTestId("flag-submit-summary")).toBeVisible();
+    await expect(panel.locator('[aria-live] [data-testid="flag-verdict"]')).toHaveCount(0);
+  });
+
+  test("service actions name their service", async ({ page }) => {
+    await page.goto("/services");
+    const card = page.getByTestId("nb-service-svc-1");
+    for (const action of ["Copy URL", "Restart", "Factory Reset"]) {
+      await expect(card.getByRole("button", { name: `${action} college-http` })).toBeVisible();
+    }
+    await expect(card.getByRole("link", { name: "Download Source college-http" })).toBeVisible();
+  });
+
+  test("the header menu closes when keyboard focus leaves it", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/services");
+    const menu = page.getByTestId("nb-account-menu");
+    await menu.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(menu).toHaveAttribute("open", "");
+    for (let stop = 0; stop < 12; stop += 1) {
+      await page.keyboard.press("Tab");
+      if (!(await menu.evaluate((element) => element.contains(document.activeElement)))) break;
+    }
+    await expect(menu).not.toHaveAttribute("open", "");
+  });
+
+  test("a collapsed rail names the focused key and Escape dismisses it", async ({ page }) => {
+    await page.goto("/services");
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    await page.reload();
+    const tip = page.locator(".nb-rail-tip");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(tip).toHaveText("AD Platform");
+    await page.keyboard.press("Tab");
+    await expect(tip).toHaveText("Overview");
+    await expect(tip).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tip).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Overview" })).toBeFocused();
+  });
+
+  test("per-service scores explain their abbreviations", async ({ page }) => {
+    await page.goto("/scoreboard");
+    await expect(page.getByTestId("nb-score-legend")).toHaveText(/A Attack\s*D Defense\s*SLA Availability/);
+    const score = page.getByTestId("nb-service-score").first();
+    await expect(score.locator(".nb-stat-a .sr-only")).toHaveText("Attack");
+    await expect(score.locator(".nb-stat-d .sr-only")).toHaveText("Defense");
+  });
+
+  test("globe pins keep their full pointer target", async ({ page }) => {
+    await page.goto("/attacks");
+    const globe = page.getByTestId("cyber-attack-map");
+    await globe.locator("[data-attack-team-hit]").first().scrollIntoViewIfNeeded();
+    await expect.poll(() => globe.evaluate((map) => {
+      const pins = [...map.querySelectorAll("[data-attack-team-hit]")].filter((pin) => pin.getBoundingClientRect().width > 0);
+      const reachable = pins.filter((pin) => {
+        const box = pin.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        return [[4, 0], [-4, 0], [0, 4], [0, -4]].every(([dx, dy]) =>
+          document.elementFromPoint(x + dx, y + dy)?.closest("[data-attack-team-hit]") === pin);
+      });
+      return pins.length > 0 && reachable.length >= pins.length / 2;
+    })).toBe(true);
+  });
+
+  test("touch controls are at least 44px", async ({ browser, baseURL }) => {
+    const context = await browser.newContext({
+      baseURL,
+      hasTouch: true,
+      isMobile: true,
+      storageState: participantStorageState,
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    for (const route of ["/services", "/scoreboard"]) {
+      await page.goto(route);
+      await expect(page.locator("main")).toBeVisible();
+      const small = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('[data-slot="button"], button, select, summary, .nb-nav-link')]
+          .filter((element) => {
+            const box = element.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && Math.min(box.width, box.height) < 44;
+          })
+          .map((element) => (element.getAttribute("aria-label") || element.textContent || "").trim()));
+      expect(small, route).toEqual([]);
+    }
+    await context.close();
+  });
 });
 
 test("login works through the redesigned form", async ({ browser }) => {

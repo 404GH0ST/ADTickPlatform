@@ -87,7 +87,7 @@ test("organizer scoreboard page filters and sorts authoritative rankings", async
   await expect(firstDataRow).toContainText("295.00");
 });
 
-test("organizer scoreboard page shows degraded warning and empty state when the authoritative feed fails", async ({
+test("organizer scoreboard page says the feed is unavailable when it fails", async ({
   page,
   request,
 }) => {
@@ -101,8 +101,8 @@ test("organizer scoreboard page shows degraded warning and empty state when the 
       "Organizer data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Showing 0 of 0 teams.")).toBeVisible();
-  await expect(
-    page.getByRole("status").filter({ hasText: "No score rows persisted yet." }),
-  ).toBeVisible();
+  await expect(page.getByText("Standings unavailable.")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Scores can't be loaded right now." })).toBeVisible();
+  await expect(page.getByText("No score rows persisted yet.")).toHaveCount(0);
+  await expect(page.getByText("Showing 0 of 0 teams.")).toHaveCount(0);
 });

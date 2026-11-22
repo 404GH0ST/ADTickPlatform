@@ -48,7 +48,8 @@ test("organizer overview shows degraded-data warning when admin feeds fail", asy
       "Organizer data is partially unavailable. Only live responses that succeeded are shown. No sample data is injected.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("0 rows")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Scoreboard.*unavailable/ })).toBeVisible();
+  await expect(page.getByText("0 rows")).toHaveCount(0);
 });
 
 test("organizer overview refreshes runtime alerts on focus", async ({

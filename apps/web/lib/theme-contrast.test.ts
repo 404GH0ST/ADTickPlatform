@@ -214,11 +214,17 @@ const NEUBRUTALISM: Record<"light" | "dark", Pair[]> = {
   ],
 };
 
+// Institution text on the cream first-blood panels, in both modes.
+const NB_FIRST_BLOOD_TEXT = [
+  text("color-mix(in oklab, var(--nb-ink) 75%, var(--nb-cream))", "var(--nb-cream)"),
+  text("color-mix(in oklab, var(--nb-ink) 72%, var(--nb-cream))", "var(--nb-cream)"),
+];
+
 for (const theme of GENERATED_THEMES) {
   for (const mode of ["light", "dark"] as const) {
     describe(`${theme.id} ${mode}: contrast`, () => {
       const tokens = themeTokens(theme.id, mode);
-      const pairs = [...SHARED, ...(theme.id === "neubrutalism" ? NEUBRUTALISM[mode] : [])];
+      const pairs = [...SHARED, ...(theme.id === "neubrutalism" ? [...NEUBRUTALISM[mode], ...NB_FIRST_BLOOD_TEXT] : [])];
       for (const pair of pairs) {
         let fg: Color | null;
         let bg: Color | null;

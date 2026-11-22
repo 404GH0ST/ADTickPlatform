@@ -15,6 +15,65 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`);
 });
 
+test("login and registration reject oversized and malformed credentials", async ({ request }) => {
+  for (const action of ["login", "register"]) {
+    const url = `/api/platform/session/${action}`;
+    const oversized = await request.post(url, { data: { password: "x".repeat(16 * 1024) } });
+    expect(oversized.status()).toBe(413);
+    const malformed = await request.post(url, { data: { email: [], password: true } });
+    expect(malformed.status()).toBe(400);
+  }
+});
+
+test("participant account updates reject oversized bodies and invalid field types", async ({ request }) => {
+  for (const [method, path, field] of [
+    ["POST", "team", "team_key"],
+    ["POST", "team/captain", "player_id"],
+    ["PUT", "profile", "display_name"],
+    ["PUT", "password", "new_password"],
+  ]) {
+    const url = `/api/platform/session/${path}`;
+    const oversized = await request.fetch(url, { method, data: { [field]: "x".repeat(16 * 1024) } });
+    expect(oversized.status()).toBe(413);
+    const invalid = await request.fetch(url, { method, data: { [field]: { value: true } } });
+    expect(invalid.status()).toBe(400);
+    const crossSite = await request.fetch(url, { method, headers: { Origin: "https://different.example" }, data: {} });
+    expect(crossSite.status()).toBe(403);
+  }
+});
+
+test("flag submissions require same-origin JSON, authentication, and a bounded body", async ({
+  baseURL,
+  context,
+}) => {
+  const url = "/api/platform/submit";
+  const origin = new URL(baseURL!).origin;
+  const data = { flags: ["test-flag"] };
+
+  const unsigned = await context.request.post(url, { headers: { Origin: origin }, data });
+  expect(unsigned.status()).toBe(403);
+  await setParticipantSession(context);
+
+  const wrongOrigin = await context.request.post(url, {
+    headers: { Origin: "https://different.example" },
+    data,
+  });
+  expect(wrongOrigin.status()).toBe(403);
+  const unsupported = await context.request.post(url, {
+    headers: { Origin: origin, "Content-Type": "text/plain" },
+    data: JSON.stringify(data),
+  });
+  expect(unsupported.status()).toBe(415);
+  const oversized = await context.request.post(url, {
+    headers: { Origin: origin },
+    data: { flags: ["x".repeat(128 * 1024)] },
+  });
+  expect(oversized.status()).toBe(413);
+  const allowed = await context.request.post(url, { headers: { Origin: origin }, data });
+  expect(allowed.status()).toBe(200);
+  expect(await allowed.json()).toMatchObject({ rejected_count: 1 });
+});
+
 test("participant announcement remains visible while switching pages", async ({
   page,
 }) => {
@@ -96,6 +155,7 @@ const adminApiCases: ApiCase[] = [
   { method: "GET", path: "/api/admin/realtime/game/status/stream" },
   { method: "GET", path: "/api/admin/runtime-health/report" },
   { method: "POST", path: "/api/admin/teams" },
+  { method: "POST", path: "/api/admin/teams/101/join-key/rotate" },
   { method: "PUT", path: "/api/admin/teams/101" },
   { method: "DELETE", path: "/api/admin/teams/101" },
   { method: "POST", path: "/api/admin/wireguard/reconcile" },
@@ -149,13 +209,21 @@ test("participant login shows an error for invalid credentials", async ({
 
 test("participant can sign in and sign out through the session routes", async ({
   page,
+  request,
 }) => {
   await loginAsParticipant(page);
+  const session = (await page.context().cookies()).find(({ name }) => name === "ad_platform_team_jwt");
+  expect(session).toBeTruthy();
+  const headers = { Authorization: `Bearer ${session!.value}` };
+  const before = await request.get(`${mockApiBaseUrl}/api/v2/session`, { headers });
+  expect(before.status()).toBe(200);
 
   await page.getByRole("button", { name: "Sign Out" }).click();
 
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("link", { name: "Sign In" })).toBeVisible();
+  const replay = await request.get(`${mockApiBaseUrl}/api/v2/session`, { headers });
+  expect(replay.status()).toBe(403);
 });
 
 test("registered participant can join a team with a team key", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import http from "node:http";
 
 const port = Number(process.env.MOCK_PLATFORM_API_PORT || "4010");
@@ -507,6 +507,7 @@ function buildParticipantToken(player) {
       display_name: player.display_name,
       email: player.email,
       role: player.role,
+      jti: randomUUID(),
       iat: 1_777_777_777,
       exp: 4_102_444_800,
     }),
@@ -551,6 +552,7 @@ function decodeParticipantToken(token) {
 
 function createInitialState() {
   return {
+    revokedSessions: new Set(),
     failedRoutes: [],
     streamScenario: "default",
     attackItems: attackItems.map((item) => ({ ...item })),
@@ -953,7 +955,7 @@ function createStateForScenario(scenario = "default") {
   if (scenario === "degraded-admin-attacks") {
     nextState.failedRoutes = [
       "GET /api/v2/attacks",
-      "GET /public/v1/attacks/stream",
+      "GET /admin/v1/game/attacks/stream",
     ];
   }
 
@@ -1574,6 +1576,13 @@ async function handleSystemRoutes({ req, res, url, method }) {
     return writeSuccess(res, { sessionOutage: state.sessionOutage });
   }
 
+  // Fails specific reads for one test. /__reset clears it.
+  if (method === "POST" && url.pathname === "/__failed-routes") {
+    const body = await readJsonBody(req);
+    state.failedRoutes = Array.isArray(body?.routes) ? body.routes : [];
+    return writeSuccess(res, { failedRoutes: state.failedRoutes });
+  }
+
   if (shouldFailRoute(method, url.pathname)) {
     return writeFailure(res, 503, `mock degraded route: ${url.pathname}`);
   }
@@ -1582,6 +1591,14 @@ async function handleSystemRoutes({ req, res, url, method }) {
 }
 
 async function handleAuthenticationRoutes({ req, res, url, method }) {
+  if (method === "POST" && url.pathname === "/api/v2/session/logout") {
+    const token = (req.headers.authorization || "").replace(/^Bearer /, "");
+    const claims = decodeParticipantToken(token);
+    if (claims) state.revokedSessions.add(claims.jti ?? token);
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
   if (method === "GET" && url.pathname === "/api/v2/session") {
     if (state.sessionOutage) {
       return writeFailure(res, 503, "mock session outage.");
@@ -1595,6 +1612,7 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
     if (
       !claims ||
       !player ||
+      state.revokedSessions.has(claims.jti ?? token) ||
       player.team_id !== claims.team_id ||
       player.role !== claims.role
     ) {
@@ -1732,7 +1750,7 @@ async function handleAuthenticationRoutes({ req, res, url, method }) {
 
     const body = await readJsonBody(req);
     const teamKey = body?.team_key?.trim();
-    const team = state.teams.find((item) => item.join_key === teamKey);
+    const team = state.teams.find((item) => item.join_key === teamKey && item.active !== false);
     if (!team) {
       return writeFailure(res, 403, "team key is invalid.", "forbidden");
     }
@@ -1995,6 +2013,20 @@ async function handleAdminTeamRoutes({ req, res, url, method }) {
     return writeSuccess(res, team);
   }
 
+  const rotateJoinKeyTeamID = routeID(
+    url.pathname,
+    /^\/api\/v2\/admin\/teams\/(\d+)\/join-key\/rotate$/,
+  );
+  if (method === "POST" && rotateJoinKeyTeamID !== null) {
+    const team = state.teams.find((item) => item.id === rotateJoinKeyTeamID);
+    if (!team) {
+      return writeFailure(res, 404, "team not found.");
+    }
+    const key = randomUUID().replaceAll("-", "").toUpperCase();
+    team.join_key = `TEAM-${key.slice(0, 8)}-${key.slice(8, 16)}-${key.slice(16, 24)}`;
+    return writeSuccess(res, { team_id: team.id, join_key: team.join_key });
+  }
+
   const deactivateTeamID = routeID(
     url.pathname,
     /^\/api\/v2\/admin\/teams\/(\d+)\/deactivate$/,
@@ -2012,6 +2044,19 @@ async function handleAdminTeamRoutes({ req, res, url, method }) {
     }
     team.active = active;
     team.deactivated_at = active ? undefined : nowIso();
+    for (const row of state.scoreboard) {
+      if (row.team === team.name) {
+        row.disqualified = !active;
+      }
+    }
+    state.scoreboard.sort(
+      (a, b) =>
+        Number(Boolean(a.disqualified)) - Number(Boolean(b.disqualified)) ||
+        b.total - a.total,
+    );
+    state.scoreboard.forEach((row, index) => {
+      row.rank = index + 1;
+    });
     return writeSuccess(res, team);
   }
 

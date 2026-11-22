@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import {
   BookOpen,
   Boxes,
@@ -149,6 +149,22 @@ export function NbShell({
   const organizer = surface === "organizer";
   const rail = useRailCollapsed();
   const navRef = useRef<HTMLElement>(null);
+  const railColumnRef = useRef<HTMLDivElement>(null);
+  const [railTip, setRailTip] = useState<{ label: string; y: number } | null>(null);
+  // A collapsed key shows only its icon, and a title tooltip never appears on
+  // keyboard focus, so focus gets its own label beside the rail.
+  const showRailTip = (target: EventTarget) => {
+    if (!rail.collapsed || !(target instanceof Element)) return;
+    const key = target.closest<HTMLElement>("a, button");
+    const label = key?.getAttribute("title");
+    if (!key || !label || !key.matches(":focus-visible")) return;
+    requestAnimationFrame(() => {
+      const column = railColumnRef.current;
+      if (!column || document.activeElement !== key) return;
+      const box = key.getBoundingClientRect();
+      setRailTip({ label, y: box.top + box.height / 2 - column.getBoundingClientRect().top });
+    });
+  };
   useEffect(() => {
     const nav = navRef.current;
     if (!nav || nav.scrollWidth <= nav.clientWidth || nav.matches(":focus-within")) return;
@@ -160,14 +176,24 @@ export function NbShell({
       <a href="#nb-main" className="nb-skip">
         Skip to content
       </a>
-      <div className="nb-rail-column p-3 lg:sticky lg:top-0 lg:h-dvh lg:p-0">
+      <div ref={railColumnRef} className="nb-rail-column p-3 lg:sticky lg:top-0 lg:h-dvh lg:p-0">
         <div className="nb-rail-motion">
           <aside
             id="nb-rail"
             className="nb-rail lg:flex lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden"
+            onFocus={(event) => showRailTip(event.target)}
+            onBlur={() => setRailTip(null)}
+            onScroll={() => setRailTip(null)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setRailTip(null);
+            }}
           >
             <div className="nb-rail-brand flex items-center px-4 pb-1 pt-3 lg:px-5 lg:pb-5 lg:pt-5">
-              <Link href={organizer ? "/admin" : "/"} className="min-w-0">
+              <Link
+                href={organizer ? "/admin" : "/"}
+                className="min-w-0"
+                title={rail.collapsed ? "AD Platform" : undefined}
+              >
                 <Brand organizer={organizer} />
               </Link>
             </div>
@@ -207,7 +233,10 @@ export function NbShell({
                 aria-expanded={!rail.collapsed}
                 aria-label={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 title={rail.collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                onClick={rail.toggle}
+                onClick={() => {
+                  setRailTip(null);
+                  rail.toggle();
+                }}
               >
                 {rail.collapsed ? (
                   <PanelLeftOpen className="size-[1.05rem] shrink-0" strokeWidth={2.25} aria-hidden />
@@ -219,6 +248,15 @@ export function NbShell({
             </div>
           </aside>
         </div>
+        {rail.collapsed && railTip ? (
+          <span
+            aria-hidden
+            className="nb-rail-tip"
+            style={{ "--nb-rail-tip-y": `${railTip.y}px` } as CSSProperties}
+          >
+            {railTip.label}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex min-w-0 flex-col gap-6 px-3 pb-10 pt-1 sm:px-6 lg:px-8 lg:pt-4">

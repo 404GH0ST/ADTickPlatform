@@ -229,6 +229,8 @@ untouched.
   `attackFilters`, and show `feedError`. A failed request leaves the rows alone.
 - Put `LinkPendingSignal` from the kit inside each navigation `<Link>`. It styles
   the link and shows the top progress bar while a slow page loads.
+- Organizer tabs also receive `unavailable` when their list failed to load. Show
+  `listUnavailableMessage()` from the kit instead of an empty state.
 - Show `pendingNote` in custom SSH and factory reset dialogs. It explains an
   action that is taking unusually long.
 - If an override throws while rendering, the stock view is shown instead and

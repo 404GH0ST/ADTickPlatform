@@ -11,6 +11,7 @@ import {
   type ScoreRow,
   type ScoreboardViewProps,
 } from "@/components/theme/kit";
+import { formatIndonesianDate } from "@/lib/date-format";
 
 function format(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
@@ -60,7 +61,10 @@ function PodiumBlock({ row, fill, height, mine }: { row: ScoreRow; fill: string;
 
 /** Podium for the top three, then every team as a row with a score bar. */
 export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt, unavailable }: ScoreboardViewProps) {
-  const podium = PODIUM.map((slot) => ({ slot, row: scoreRows.find((row) => row.rank === slot.place) })).filter(
+  const podium = PODIUM.map((slot) => ({
+    slot,
+    row: scoreRows.find((row) => row.rank === slot.place && !row.disqualified),
+  })).filter(
     (entry): entry is { slot: (typeof PODIUM)[number]; row: ScoreRow } => entry.row !== undefined,
   );
 
@@ -75,7 +79,7 @@ export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt, una
           <Snowflake className="size-5 shrink-0" strokeWidth={2.4} aria-hidden />
           <span>
             <span className="font-bold">Scoreboard frozen.</span>
-            {freezeAt ? ` Snapshot as of ${new Date(freezeAt).toLocaleString()}.` : ""}
+            {freezeAt ? ` Snapshot as of ${formatIndonesianDate(freezeAt)}.` : ""}
           </span>
         </p>
       ) : null}

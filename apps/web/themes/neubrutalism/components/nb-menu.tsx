@@ -25,11 +25,18 @@ export function NbMenu({ children, label = "Menu" }: { children: ReactNode; labe
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && menu.contains(document.activeElement)) close(true);
     };
+    // A null target means focus left the page or landed on nothing, so the
+    // panel stays put; a real target outside it means the user tabbed away.
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node && !menu.contains(event.relatedTarget)) close(false);
+    };
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
+    menu.addEventListener("focusout", onFocusOut);
     return () => {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
+      menu.removeEventListener("focusout", onFocusOut);
     };
   }, []);
 

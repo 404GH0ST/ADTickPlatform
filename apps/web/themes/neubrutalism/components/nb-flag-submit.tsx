@@ -67,17 +67,20 @@ export function NbFlagSubmit({
             </Button>
           </div>
           <p id={hintId} className="text-xs font-medium text-muted-foreground">{hint}</p>
-          <div aria-live="polite" className="grid gap-2">
-            {error ? <div id={errorId}><StatusBanner message={error} variant="error" announce="inherit" /></div> : null}
+          <div className="grid gap-2">
+            {/* Only the outcome is announced; the per-flag list stays browsable. */}
+            <div aria-live="polite" className="grid gap-2">
+              {error ? <div id={errorId}><StatusBanner message={error} variant="error" announce="inherit" /></div> : null}
+              {note ? (
+                <div data-testid="flag-submit-summary" data-variant={note.variant}>
+                  <StatusBanner message={note.message} variant={note.variant} announce="inherit" />
+                </div>
+              ) : null}
+            </div>
             {sessionEnded ? (
               <Button asChild variant="outline" className="justify-self-start">
                 <Link href="/login">Sign in again</Link>
               </Button>
-            ) : null}
-            {note ? (
-              <div data-testid="flag-submit-summary" data-variant={note.variant}>
-                <StatusBanner message={note.message} variant={note.variant} announce="inherit" />
-              </div>
             ) : null}
             {verdicts.length > 0 ? (
               <ScrollableRegion axis="vertical" label="Flag results" className="max-h-44 overflow-y-auto">

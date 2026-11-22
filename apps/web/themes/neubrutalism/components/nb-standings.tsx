@@ -126,8 +126,15 @@ export function NbStandings({
                   )}
                 >
                   <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0">
-                    <span className="nb-display min-w-0 wrap-anywhere text-lg font-extrabold tabular-nums"><span className="sr-only">Rank </span>#{row.rank}</span>
-                    {showDelta ? <RankDelta delta={row.delta} /> : null}
+                    {row.disqualified ? (
+                      <span data-testid="nb-score-dq" title="Disqualified" className="nb-sticker nb-stat py-0 text-xs text-negative">
+                        <span aria-hidden>DQ</span>
+                        <span className="sr-only">Disqualified</span>
+                      </span>
+                    ) : (
+                      <span className="nb-display min-w-0 wrap-anywhere text-lg font-extrabold tabular-nums"><span className="sr-only">Rank </span>#{row.rank}</span>
+                    )}
+                    {showDelta && !row.disqualified ? <RankDelta delta={row.delta} /> : null}
                   </span>
                   <span className="min-w-0 wrap-anywhere font-semibold">
                     {row.team}
@@ -172,10 +179,10 @@ export function NbStandings({
                           </span>
                           <span className="grid min-w-0 grid-cols-1 gap-1.5 tabular-nums @[9rem]:grid-cols-2 @[16rem]:grid-cols-[repeat(2,minmax(0,1fr))_minmax(0,1.5fr)]">
                             <span className="nb-sticker nb-stat nb-stat-a min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Attack">
-                              A {format(service.attack)}
+                              <span className="min-w-0"><span aria-hidden>A </span><span className="sr-only">Attack </span>{format(service.attack)}</span>
                             </span>
                             <span className="nb-sticker nb-stat nb-stat-d min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Defense">
-                              D {format(service.defense)}
+                              <span className="min-w-0"><span aria-hidden>D </span><span className="sr-only">Defense </span>{format(service.defense)}</span>
                             </span>
                             <span className="nb-sticker nb-stat nb-stat-sla col-span-full min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal @[16rem]:col-span-1" title="SLA">
                               SLA {format(service.sla)}
@@ -189,6 +196,16 @@ export function NbStandings({
               );
             })}
           </ol>
+          {hasDetail && showDetail ? (
+            <p
+              data-testid="nb-score-legend"
+              className="col-span-full mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t-2 border-dashed border-border px-3 pt-2.5 text-xs font-semibold text-muted-foreground"
+            >
+              <span><span className="font-extrabold text-foreground">A</span> Attack</span>
+              <span><span className="font-extrabold text-foreground">D</span> Defense</span>
+              <span><span className="font-extrabold text-foreground">SLA</span> Availability</span>
+            </p>
+          ) : null}
         </div>
       )}
     </div>

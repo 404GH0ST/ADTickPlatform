@@ -6,6 +6,7 @@ import { LoaderCircle, RefreshCw } from "lucide-react";
 import {
   Button,
   Input,
+  listUnavailableMessage,
   ScoreboardCategoryLeadersPanel,
   ScoreboardFreezeControl,
   ScoringAuditCard,
@@ -22,6 +23,7 @@ export function NbOrganizerScoreboard({
   pendingAction,
   scoringAudit,
   scoreRows,
+  unavailable,
   onAudit,
   onRefresh,
 }: ThemeSlotProps["OrganizerScoreboard"]) {
@@ -37,10 +39,16 @@ export function NbOrganizerScoreboard({
         rows={rows}
         teamCount={scoreRows.length}
         showDelta
-        emptyMessage={query ? "No teams match this filter." : "No score rows persisted yet."}
+        emptyMessage={
+          unavailable
+            ? listUnavailableMessage("Scores")
+            : query
+              ? "No teams match this filter."
+              : "No score rows persisted yet."
+        }
         meta={
           <span role="status" aria-live="polite" className="text-xs font-semibold text-muted-foreground tabular-nums">
-            Showing {rows.length} of {scoreRows.length} teams.
+            {unavailable ? "Standings unavailable." : `Showing ${rows.length} of ${scoreRows.length} teams.`}
           </span>
         }
         toolbar={
@@ -70,7 +78,7 @@ export function NbOrganizerScoreboard({
         <ScoreboardFreezeControl />
         <ScoringAuditCard pendingAction={pendingAction} scoringAudit={scoringAudit} onAudit={onAudit} />
       </div>
-      <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />
+      {unavailable ? null : <ScoreboardCategoryLeadersPanel scoreRows={scoreRows} />}
     </div>
   );
 }

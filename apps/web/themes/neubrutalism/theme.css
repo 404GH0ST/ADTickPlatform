@@ -973,6 +973,27 @@
   }
 }
 
+/* Touch: every key, field, tab and rail link is at least a 44px target. */
+@media (pointer: coarse) {
+  :root[data-scheme="neubrutalism"] :is(
+    [data-slot="button"],
+    [data-slot="input"],
+    [data-slot="input-group"],
+    select,
+    button.nb-sticker,
+    .section-tab,
+    .nb-nav-link,
+    .nb-menu-key,
+    [data-testid="match-readiness-toggle"]
+  ) {
+    min-block-size: 2.75rem;
+  }
+
+  :root[data-scheme="neubrutalism"] [data-slot="button"][data-size="icon"] {
+    min-inline-size: 2.75rem;
+  }
+}
+
 /* Touch screens fire :hover on tap and keep it; a key left floating after a
    tap reads as stuck, so lifts only happen under a real pointer. */
 @media (hover: none) {
@@ -1351,6 +1372,10 @@
     transform: rotate(-4deg);
   }
 
+  :root[data-scheme="neubrutalism"] .nb-rail-tip {
+    display: none;
+  }
+
   /* Use Tailwind's lg breakpoint for the shell grid and the rail together. */
   @media (width >= 64rem) {
     :root[data-scheme="neubrutalism"] .nb-frame {
@@ -1456,6 +1481,28 @@
       :root[data-scheme="neubrutalism"] :is(.nb-rail-motion, .nb-rail-motion::before, .nb-rail-column::before) {
         transition-property: none;
       }
+    }
+
+    /* Keyboard focus on a collapsed rail: the key's name, beside the rail. It
+       sits outside the rail's clip so the label is never cut off. */
+    :root[data-scheme="neubrutalism"][data-rail="collapsed"] .nb-rail-tip {
+      position: absolute;
+      z-index: 2;
+      display: block;
+      inset-block-start: var(--nb-rail-tip-y);
+      inset-inline-start: calc(var(--nb-rail-inset) + var(--nb-rail-collapsed-width) + 0.75rem);
+      translate: 0 -50%;
+      border: 2px solid var(--border);
+      border-radius: var(--nb-radius-sm);
+      padding: 0.3rem 0.65rem;
+      background: var(--card);
+      color: var(--foreground);
+      font-family: var(--nb-display);
+      font-size: 0.875rem;
+      font-weight: 700;
+      white-space: nowrap;
+      box-shadow: 3px 3px 0 var(--nb-shadow);
+      pointer-events: none;
     }
 
     /* Group headings become a short rule so Match/Setup still read as two groups. */
@@ -1900,8 +1947,14 @@
 }
 
 /* ---------- Team pins: stickers, not glows ---------- */
+/* The halo is never painted here, but it stays as the pin's pointer target. */
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-halo"] {
-  display: none;
+  opacity: 0;
+  stroke: transparent;
+  stroke-width: 4px;
+  vector-effect: non-scaling-stroke;
+  animation: none !important;
+  pointer-events: all;
 }
 
 :root[data-scheme="neubrutalism"] [data-testid="cyber-attack-map"] [data-fx="team-ring"] {
@@ -2105,7 +2158,7 @@
 
 /* Live notice institutions: ink type on the cream speech bubble. */
 :root[data-scheme="neubrutalism"] [data-first-blood-notice-institution] {
-  color: color-mix(in oklab, var(--nb-ink) 75%, transparent) !important;
+  color: color-mix(in oklab, var(--nb-ink) 75%, var(--nb-cream)) !important;
   font-weight: 700;
 }
 
@@ -2130,7 +2183,7 @@
 }
 
 :root[data-scheme="neubrutalism"] [data-first-blood-banner-extra-institution] {
-  color: color-mix(in oklab, var(--nb-ink) 72%, transparent) !important;
+  color: color-mix(in oklab, var(--nb-ink) 72%, var(--nb-cream)) !important;
 }
 
 :root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] {

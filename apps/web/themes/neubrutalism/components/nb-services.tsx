@@ -37,12 +37,27 @@ function Fact({ label, value, tone }: { label: string; value: ReactNode; tone?: 
   );
 }
 
+/** Keeps repeated card actions distinct when read outside their card. */
+function ServiceNameForReaders({ name }: { name: string }) {
+  return <span className="sr-only"> {name}</span>;
+}
+
 /**
  * How to connect, as a zone at the top of the card: a neutral protocol sticker
  * (protocol is not a status, so it takes no status hue), then the URL (HTTP,
  * openable) or nc command (TCP), and a copy key.
  */
-function NbConnection({ connection, endpoint, serviceId }: { connection: ServiceConnection | null; endpoint: string; serviceId: string }) {
+function NbConnection({
+  connection,
+  endpoint,
+  serviceId,
+  serviceName,
+}: {
+  connection: ServiceConnection | null;
+  endpoint: string;
+  serviceId: string;
+  serviceName: string;
+}) {
   const { status, copy } = useCopyFeedback();
   if (!connection) {
     return (
@@ -84,6 +99,7 @@ function NbConnection({ connection, endpoint, serviceId }: { connection: Service
           <Copy className="size-4" strokeWidth={2.4} aria-hidden />
         )}
         {copyButtonLabel(connection, status)}
+        <ServiceNameForReaders name={serviceName} />
       </Button>
       <span className="sr-only" aria-live="polite">
         {status === "copied"
@@ -166,7 +182,12 @@ export function NbServices({
                   </div>
 
                   <div className="grid min-w-0 flex-1 gap-4 px-5 py-4 @max-[12rem]:px-2">
-                    <NbConnection connection={view.connection} endpoint={service.endpoint} serviceId={service.id} />
+                    <NbConnection
+                      connection={view.connection}
+                      endpoint={service.endpoint}
+                      serviceId={service.id}
+                      serviceName={service.name}
+                    />
                     <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-x-6 gap-y-3 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]">
                       <Fact
                         label="Checker"
@@ -219,6 +240,7 @@ export function NbServices({
                         <KeyRound className="size-4" strokeWidth={2.4} aria-hidden />
                       )}
                       {view.ssh.label}
+                      <ServiceNameForReaders name={service.name} />
                     </Button>
                     <Button variant="secondary" disabled={view.restart.disabled} holdFocus={view.restart.pending} onClick={() => onRestart(service)}>
                       {view.restart.pending ? (
@@ -227,6 +249,7 @@ export function NbServices({
                         <RotateCcw className="size-4" strokeWidth={2.4} aria-hidden />
                       )}
                       Restart{view.restart.cooldownSeconds > 0 ? ` ${view.restart.cooldownSeconds}s` : ""}
+                      <ServiceNameForReaders name={service.name} />
                     </Button>
                     <Button
                       variant="outline"
@@ -237,12 +260,14 @@ export function NbServices({
                     >
                       {view.reset.pending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden /> : null}
                       Factory Reset{view.reset.cooldownSeconds > 0 ? ` ${view.reset.cooldownSeconds}s` : ""}
+                      <ServiceNameForReaders name={service.name} />
                     </Button>
                     {view.sourceHref ? (
                       <Button variant="outline" asChild>
                         <a href={view.sourceHref} download>
                           <Download className="size-4" strokeWidth={2.4} aria-hidden />
                           Download Source
+                          <ServiceNameForReaders name={service.name} />
                         </a>
                       </Button>
                     ) : null}
