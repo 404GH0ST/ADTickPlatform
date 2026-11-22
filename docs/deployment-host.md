@@ -31,6 +31,25 @@ its state volume separately. Challenge logs rotate at three files of up to
 10 MiB each. Budget for both quotas per challenge instance, images, and
 control-plane data when sizing the host.
 
+If `make preflight-prod-host` fails with *"prod-host requires Docker overlay2 on
+XFS with project quotas"*, provision it with:
+
+```bash
+# Dry run first (prints the plan, changes nothing):
+sudo make provision-docker-xfs
+# Apply:
+sudo make provision-docker-xfs CONFIRM=yes
+```
+
+This creates a loop-backed XFS image (default `/var/lib/docker-xfs.img`, size
+`DOCKER_XFS_SIZE=150G`), mounts it with project quotas, adds an `/etc/fstab`
+entry so it survives reboot, and points Docker's `data-root` at it with
+`storage-driver=overlay2`. **No real partition is reformatted.** Switching the
+`data-root` makes images and containers on the old root inactive (they are not
+deleted); recreate them afterward, and pass `MIGRATE_VOLUMES=true` to copy
+existing named-volume data onto the new root. On a host that already meets the
+requirement the command is a no-op.
+
 Existing containers and volumes require an offline rollover. Before enabling
 quotas on an earlier deployment, back up PostgreSQL, each challenge state
 volume, and any team patches stored in container writable layers. Verify the
