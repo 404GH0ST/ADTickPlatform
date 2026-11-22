@@ -27,11 +27,11 @@ wait_for_http "${EDGE_BASE_URL}/healthz" 60 "edge healthz"
 
 cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
-    curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -fsS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
   fi
   if [[ -n "${RATE_LIMIT_DRAFT_CHALLENGE_ID}" ]]; then
-    curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -fsS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges/${RATE_LIMIT_DRAFT_CHALLENGE_ID}" >/dev/null || true
   fi
 }
@@ -68,7 +68,7 @@ auth_429_seen=0
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   response="$(http_status_body \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${INVALID_EMAIL}" --arg password "wrong-password" '{email:$email,password:$password}')" \
+    --data-binary @<(jq -nc --arg email "${INVALID_EMAIL}" --arg password "wrong-password" '{email:$email,password:$password}') \
     "${EDGE_BASE_URL}/api/v2/authenticate")"
   status="$(printf '%s\n' "${response}" | sed -n '1p')"
   body="$(printf '%s\n' "${response}" | tail -n +2)"
@@ -100,14 +100,14 @@ create_player_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Rate Probe" \
     --arg email "${TEMP_EMAIL}" \
-    --arg password "${TEMP_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEMP_PASSWORD}") \
     --arg role "captain" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_player_response="$(
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_player_body}" \
+    --data-binary @<(printf '%s' "${create_player_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"
@@ -115,7 +115,7 @@ echo "created temporary player id=${TEMP_PLAYER_ID}"
 
 participant_token="$(
   curl -fsS -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${TEMP_EMAIL}" --arg password "${TEMP_PASSWORD}" '{email:$email,password:$password}')" \
+    --data-binary @<(jq -nc --arg email "${TEMP_EMAIL}" --rawfile password <(printf '%s' "${TEMP_PASSWORD}") '{email:$email,password:$password}') \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
@@ -124,7 +124,7 @@ printf 'participant token prefix=%s...\n' "${participant_token:0:16}"
 team_services_body=""
 team_services_429_seen=0
 for attempt in 1 2 3 4 5 6 7; do
-  response="$(http_status_body -H "Authorization: Bearer ${participant_token}" "${EDGE_BASE_URL}/api/v2/team/services")"
+  response="$(http_status_body -H @<(bearer_header "${participant_token}") "${EDGE_BASE_URL}/api/v2/team/services")"
   status="$(printf '%s\n' "${response}" | sed -n '1p')"
   body="$(printf '%s\n' "${response}" | tail -n +2)"
   if [[ "${status}" == "200" ]]; then
@@ -147,7 +147,7 @@ echo "team/services rate limit triggered"
 
 draft_challenge_body="$(
   source_bundle_path="$(
-    curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges" |
       jq -er 'first(.[] | select(.source_bundle_path != null and .source_bundle_path != "") | .source_bundle_path)'
   )"
@@ -159,7 +159,7 @@ draft_challenge_body="$(
     '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,source_bundle_path:$source_bundle_path}'
 )"
 draft_challenge_response="$(
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "${draft_challenge_body}" \
     "${EDGE_BASE_URL}/api/v2/admin/challenges"
@@ -171,7 +171,7 @@ ssh_429_seen=0
 for attempt in 1 2 3 4 5 6 7; do
   response="$(http_status_body \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/ssh-session")"
   status="$(printf '%s\n' "${response}" | sed -n '1p')"
   body="$(printf '%s\n' "${response}" | tail -n +2)"
@@ -196,7 +196,7 @@ factory_reset_429_seen=0
 for attempt in 1 2 3 4; do
   response="$(http_status_body \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/factory")"
   status="$(printf '%s\n' "${response}" | sed -n '1p')"
   body="$(printf '%s\n' "${response}" | tail -n +2)"
@@ -221,7 +221,7 @@ restart_429_seen=0
 for attempt in 1 2 3 4 5 6 7; do
   response="$(http_status_body \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${RATE_LIMIT_DRAFT_CHALLENGE_ID}/reset/restart")"
   status="$(printf '%s\n' "${response}" | sed -n '1p')"
   body="$(printf '%s\n' "${response}" | tail -n +2)"

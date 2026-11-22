@@ -147,13 +147,14 @@ else:
             result = run("docker", "run", "--rm", "--network", f"container:{name}",
                          "-e", "AD_TARGET_HOST=127.0.0.1", "-e", "AD_TARGET_PORT=8080",
                          "-e", f"AD_CHECKER_TOKEN={token}", "-e", f"AD_FLAG={flag}",
-                         "-e", f"AD_METADATA={metadata}", checker_image, phase, timeout=30)
+                         "-e", f"AD_METADATA={metadata}", "-e", "AD_CHECKER_STATE_NONCE=smoke-run-nonce",
+                         checker_image, phase, timeout=30)
             assert (result.returncode == 0) == success, f"{kind} {phase}: {result.stdout} {result.stderr}"
             if expected_code is not None:
                 assert result.returncode == expected_code, result.stderr
             return result.stdout.strip()
 
-        assert 'ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}' in checker("validate")
+        assert 'ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}' in checker("validate")
         assert "ADPLATFORM_SERVICE_STATE=" in checker("check")
         for tick in (1, 2):
             flag = f"CUSTOM{{example-{kind}-tick-{tick}}}"

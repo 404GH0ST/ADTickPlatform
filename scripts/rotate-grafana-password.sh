@@ -12,11 +12,10 @@
 # intact.
 #
 # Usage:  make rotate-grafana-password-prod
-# Effect: prints the new password to stdout exactly once. Record it in
-#         your password manager; the rotation script does not persist it
-#         anywhere retrievable after the script exits.
+# The new password is stored in the private production environment file.
 
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/deploy/compose/prod.env"
@@ -33,30 +32,37 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 
 cd "${COMPOSE_DIR}"
-if ! docker compose --env-file "${ENV_FILE}" ps grafana --format '{{.State}}' 2>/dev/null | grep -q '^running$'; then
+compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_DIR}/prod.yml")
+if ! "${compose[@]}" ps grafana --format '{{.State}}' 2>/dev/null | grep -q '^running$'; then
   echo "grafana container is not running; start it first with: make monitoring-up-prod" >&2
   exit 1
 fi
 
+mkdir -p -- "${ROOT_DIR}/.runtime"
+exec {rotation_lock}>>"${ROOT_DIR}/.runtime/grafana-password-rotation.lock"
+flock -x "${rotation_lock}"
+
 NEW_PASSWORD="$(openssl rand -hex 24)"
-
-docker compose --env-file "${ENV_FILE}" exec -T grafana \
-  grafana cli admin reset-admin-password "${NEW_PASSWORD}" >/dev/null
-
-awk -v pw="${NEW_PASSWORD}" -F= '
-    BEGIN { OFS="=" }
-    /^GRAFANA_ADMIN_PASSWORD=/ { $2=pw }
+replacement="$(mktemp -- "${ENV_FILE}.XXXXXXXX")"
+trap 'rm -f -- "${replacement}"' EXIT
+GRAFANA_ROTATION_PASSWORD="${NEW_PASSWORD}" awk '
+    BEGIN { assignment = "GRAFANA_ADMIN_PASSWORD=" ENVIRON["GRAFANA_ROTATION_PASSWORD"] }
+    /^GRAFANA_ADMIN_PASSWORD=/ { $0 = assignment; found = 1 }
     { print }
-  ' "${ENV_FILE}" > "${ENV_FILE}.new"
-mv "${ENV_FILE}.new" "${ENV_FILE}"
-chmod 600 "${ENV_FILE}"
+    END { if (!found) print assignment }
+  ' "${ENV_FILE}" > "${replacement}"
 
-echo
-echo "==============================================================="
-echo "  New Grafana admin password (record NOW; not stored elsewhere)"
-echo "==============================================================="
-echo "${NEW_PASSWORD}"
-echo "==============================================================="
-echo
+if ! reset_result="$(printf '%s\n' "${NEW_PASSWORD}" | "${compose[@]}" exec -T grafana \
+  grafana cli admin reset-admin-password --password-from-stdin 2>&1)" ||
+  [[ "${reset_result}" != *"Admin password changed successfully"* ]]; then
+  echo 'Grafana did not confirm the password change.' >&2
+  exit 1
+fi
+
+if ! mv -fT -- "${replacement}" "${ENV_FILE}"; then
+  trap - EXIT
+  echo "The password changed. Recover the replacement environment file at ${replacement}." >&2
+  exit 1
+fi
 echo "Updated deploy/compose/prod.env (GRAFANA_ADMIN_PASSWORD line)."
 echo "Volumes grafana-data and prometheus-data were not touched."

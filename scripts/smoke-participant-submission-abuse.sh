@@ -25,11 +25,11 @@ TEMP_ORGANIZER_ID=""
 
 cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
-    curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -fsS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
   fi
   if [[ -n "${TEMP_ORGANIZER_ID}" ]]; then
-    curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -fsS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_ORGANIZER_ID}" >/dev/null || true
   fi
 }
@@ -75,14 +75,14 @@ create_player_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Submit Probe" \
     --arg email "${TEMP_EMAIL}" \
-    --arg password "${TEMP_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEMP_PASSWORD}") \
     --arg role "captain" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_player_response="$(
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_player_body}" \
+    --data-binary @<(printf '%s' "${create_player_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"
@@ -90,7 +90,7 @@ echo "created temporary player id=${TEMP_PLAYER_ID}"
 
 participant_token="$(
   curl -fsS -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${TEMP_EMAIL}" --arg password "${TEMP_PASSWORD}" '{email:$email,password:$password}')" \
+    --data-binary @<(jq -nc --arg email "${TEMP_EMAIL}" --rawfile password <(printf '%s' "${TEMP_PASSWORD}") '{email:$email,password:$password}') \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
@@ -101,14 +101,14 @@ create_organizer_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Submit Organizer" \
     --arg email "${ORGANIZER_EMAIL}" \
-    --arg password "${ORGANIZER_PASSWORD}" \
+    --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") \
     --arg role "organizer" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_organizer_response="$(
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_organizer_body}" \
+    --data-binary @<(printf '%s' "${create_organizer_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_ORGANIZER_ID="$(printf '%s' "${create_organizer_response}" | jq -er '.id')"
@@ -116,7 +116,7 @@ echo "created temporary organizer id=${TEMP_ORGANIZER_ID}"
 
 organizer_token="$(
   curl -fsS -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${ORGANIZER_EMAIL}" --arg password "${ORGANIZER_PASSWORD}" '{email:$email,password:$password}')" \
+    --data-binary @<(jq -nc --arg email "${ORGANIZER_EMAIL}" --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") '{email:$email,password:$password}') \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
@@ -127,7 +127,7 @@ expect_problem \
   "403" \
   "please authenticate before submit." \
   -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
   -d '{"flags":["FLAGv1.demo"]}' \
   "${EDGE_BASE_URL}/api/v2/submit"
@@ -138,7 +138,7 @@ expect_problem \
   "403" \
   "please authenticate before submit." \
   -X POST \
-  -H "Authorization: Bearer ${organizer_token}" \
+  -H @<(bearer_header "${organizer_token}") \
   -H 'Content-Type: application/json' \
   -d '{"flags":["FLAGv1.demo"]}' \
   "${EDGE_BASE_URL}/api/v2/submit"
@@ -154,7 +154,7 @@ expect_problem \
   "400" \
   "too many flags in one request." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --argjson flags "${oversized_flags}" '{flags:$flags}')" \
   "${EDGE_BASE_URL}/api/v2/submit"
@@ -167,7 +167,7 @@ for attempt in $(seq 1 48); do
     status_file="${submit_status_dir}/status.${attempt}"
     status="$(curl -sS -o "${body_file}" -w '%{http_code}' \
       -X POST \
-      -H "Authorization: Bearer ${participant_token}" \
+      -H @<(bearer_header "${participant_token}") \
       -H 'Content-Type: application/json' \
       -d '{"flags":["FLAGv1.invalid"]}' \
       "${EDGE_BASE_URL}/api/v2/submit" || true)"
@@ -214,7 +214,7 @@ if [[ "${submit_429_seen}" -ne 1 ]]; then
 fi
 echo "submit rate limit triggered"
 
-curl -fsS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null
 TEMP_PLAYER_ID=""
 
@@ -223,7 +223,7 @@ expect_problem \
   "403" \
   "please authenticate before submit." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   -H 'Content-Type: application/json' \
   -d '{"flags":["FLAGv1.invalid"]}' \
   "${EDGE_BASE_URL}/api/v2/submit"

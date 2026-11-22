@@ -28,7 +28,7 @@ cleanup_files=()
 cleanup() {
   local path=""
   if [[ -n "${TEMP_PLAYER_ID}" && -n "${ADMIN_TOKEN}" ]]; then
-    curl -sS -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl -sS -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
   fi
   for path in "${cleanup_files[@]:-}"; do
@@ -51,7 +51,7 @@ login_cookie_jar() {
     -c "${jar}" \
     -b "${jar}" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${ORGANIZER_EMAIL}" --arg password "${ORGANIZER_PASSWORD}" '{email:$email,password:$password}')" \
+    --data-binary @<(jq -nc --arg email "${ORGANIZER_EMAIL}" --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") '{email:$email,password:$password}') \
     "${EDGE_BASE_URL}/api/platform/session/login")"
   status="${response}"
   if [[ "${status}" != "200" ]]; then
@@ -140,14 +140,14 @@ create_player_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Realtime Health Organizer" \
     --arg email "${ORGANIZER_EMAIL}" \
-    --arg password "${ORGANIZER_PASSWORD}" \
+    --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") \
     --arg role "organizer" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_player_response="$(
-  curl -sS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -sS -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_player_body}" \
+    --data-binary @<(printf '%s' "${create_player_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"

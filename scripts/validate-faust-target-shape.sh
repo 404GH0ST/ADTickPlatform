@@ -89,7 +89,7 @@ wait_for_operator_surface "${API_URL}"
 deployments="$(
   curl_json "list deployments" \
     "${API_URL}/api/v2/admin/deployments" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 challenges="$(
   curl_json "list challenges" \
@@ -102,12 +102,12 @@ game_status="$(
 admin_scheduler="$(
   curl_json "scheduler status" \
     "${API_URL}/api/v2/admin/game/scheduler" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 admin_match="$(
   curl_json "match status" \
     "${API_URL}/api/v2/admin/game/match" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 public_scoreboard="$(
   curl_json "scoreboard" \

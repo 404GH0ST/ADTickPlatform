@@ -41,7 +41,7 @@ curl_json() {
 
 matches="$(
   curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+    -H @<(bearer_header "${ADMIN_TOKEN}") |
     jq -c --arg prefix "${PREFIX}" 'map(select(.name | startswith($prefix))) | sort_by(.id)'
 )"
 
@@ -65,7 +65,7 @@ while IFS= read -r row; do
   challenge_name="$(printf '%s\n' "${row}" | jq -r '.name')"
   status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
     "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}")"
+    -H @<(bearer_header "${ADMIN_TOKEN}"))"
   if [[ "${status}" != "204" ]]; then
     echo "delete failed for challenge_id=${challenge_id} name=${challenge_name} status=${status}" >&2
     exit 1

@@ -109,7 +109,7 @@ wait_for_operator_surface "${API_URL}"
 admin_challenges="$(
   curl_json "list admin challenges" \
     "${API_URL}/api/v2/admin/challenges" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
 mapfile -t manifests < <(jq -r '.[].manifest' "${CHALLENGE_CATALOG_PATH}")
@@ -159,7 +159,7 @@ for manifest_ref in "${manifests[@]}"; do
     echo "updating ${display_name} (${challenge_id})"
     curl_json "update challenge ${display_name}" \
       -X PUT "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "${payload}" >/dev/null
   else
@@ -167,7 +167,7 @@ for manifest_ref in "${manifests[@]}"; do
     created="$(
       curl_json "create challenge ${display_name}" \
         -X POST "${API_URL}/api/v2/admin/challenges" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+        -H @<(bearer_header "${ADMIN_TOKEN}") \
         -H 'Content-Type: application/json' \
         -d "${payload}"
     )"
@@ -178,14 +178,14 @@ for manifest_ref in "${manifests[@]}"; do
     echo "validating ${display_name}"
     curl_json "validate challenge ${display_name}" \
       -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+      -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
   fi
 
   if [[ "${IMPORT_DEPLOY}" == "true" ]]; then
     echo "deploying ${display_name}"
     curl_json "deploy challenge ${display_name}" \
       -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/deploy" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+      -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
   fi
 done
 

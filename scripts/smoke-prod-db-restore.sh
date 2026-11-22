@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
@@ -57,8 +58,8 @@ compose_cmd() {
     "$@"
 }
 
-postgres_shell() {
-  compose_cmd exec -T postgres sh -lc "$1"
+postgres_exec() {
+  PGPASSWORD="${POSTGRES_PASSWORD}" compose_cmd exec -T -e PGPASSWORD postgres "$@"
 }
 
 wait_for_admin_json() {
@@ -67,7 +68,7 @@ wait_for_admin_json() {
   local i
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    if curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}${path}" >/dev/null 2>&1; then
       echo "organizer endpoint ready at ${EDGE_BASE_URL}${path}"
       return 0
@@ -82,7 +83,7 @@ wait_for_admin_json() {
 capture_admin_data() {
   local path="$1"
   local destination="$2"
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") \
     "${EDGE_BASE_URL}${path}" > "${destination}"
 }
 
@@ -127,17 +128,26 @@ compose_cmd ps > "${PRE_COMPOSE_FILE}"
 cat "${PRE_GAME_STATUS_FILE}"
 
 echo "dumping postgres backup to ${BACKUP_FILE}"
-postgres_shell "export PGPASSWORD='${POSTGRES_PASSWORD}'; pg_dump -U '${POSTGRES_USER}' -d '${POSTGRES_DB}' --clean --if-exists --no-owner --no-privileges" > "${BACKUP_FILE}"
+backup_tmp="$(mktemp -- "${BACKUP_FILE}.XXXXXXXX")"
+trap 'rm -f -- "${backup_tmp}"' EXIT
+postgres_exec pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --clean --if-exists --no-owner --no-privileges > "${backup_tmp}"
+exec {backup_fd}<"${backup_tmp}"
+mv -fT -- "${backup_tmp}" "${BACKUP_FILE}"
+trap - EXIT
 sha256sum "${BACKUP_FILE}" > "${BACKUP_FILE}.sha256"
 
 echo "stopping application services for restore:"
 compose_cmd stop "${APP_SERVICES[@]}"
 
 echo "dropping and recreating database ${POSTGRES_DB}:"
-postgres_shell "export PGPASSWORD='${POSTGRES_PASSWORD}'; psql -v ON_ERROR_STOP=1 -U '${POSTGRES_USER}' -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${POSTGRES_DB}' AND pid <> pg_backend_pid();\" -c \"DROP DATABASE IF EXISTS \\\"${POSTGRES_DB}\\\";\" -c \"CREATE DATABASE \\\"${POSTGRES_DB}\\\";\""
+postgres_exec psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d postgres \
+  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${POSTGRES_DB}' AND pid <> pg_backend_pid();" \
+  -c "DROP DATABASE IF EXISTS \"${POSTGRES_DB}\";" \
+  -c "CREATE DATABASE \"${POSTGRES_DB}\";"
 
 echo "restoring postgres backup:"
-postgres_shell "export PGPASSWORD='${POSTGRES_PASSWORD}'; psql -v ON_ERROR_STOP=1 -U '${POSTGRES_USER}' -d '${POSTGRES_DB}'" < "${BACKUP_FILE}"
+postgres_exec psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" <&"${backup_fd}"
+exec {backup_fd}<&-
 
 echo "starting stack after restore:"
 compose_cmd up -d

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-memory}"
@@ -133,7 +134,9 @@ if [[ "${AD_PLATFORM_NETWORK_LAYOUT}" == "shared" && ( "${CONTROLLER_RUNTIME_MOD
   fi
 fi
 
-cat > "${STACK_ENV_FILE}" <<EOF
+stack_env_tmp="$(mktemp -- "${STACK_ENV_FILE}.XXXXXXXX")"
+trap 'rm -f -- "${stack_env_tmp}"' EXIT
+cat > "${stack_env_tmp}" <<EOF
 AD_PLATFORM_STACK_MODE=${MODE}
 POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-}
 REDIS_HOST_PORT=${REDIS_HOST_PORT:-}
@@ -171,6 +174,8 @@ CHECKER_RUNNER_MODE=${CHECKER_RUNNER_MODE:-dry-run}
 CONTROLLER_DOCKER_NETWORK=${CONTROLLER_DOCKER_NETWORK:-}
 CHECKER_RUNNER_DOCKER_NETWORK=${CHECKER_RUNNER_DOCKER_NETWORK:-}
 EOF
+mv -fT -- "${stack_env_tmp}" "${STACK_ENV_FILE}"
+trap - EXIT
 
 declare -a PIDS=()
 

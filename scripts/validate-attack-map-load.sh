@@ -65,21 +65,21 @@ wait_for_http "${EDGE_BASE_URL}/api/v2/challenges" 60 "public challenges"
 # Return the platform to a healthy steady state for any following validation steps.
 curl_json "stop scheduler after attack-map load" -X POST \
   "${EDGE_BASE_URL}/api/v2/admin/game/scheduler/stop" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 curl_json "stop match after attack-map load" -X POST \
   "${EDGE_BASE_URL}/api/v2/admin/game/match/stop" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 curl_json "reconcile wireguard after attack-map load" -X POST \
   "${EDGE_BASE_URL}/api/v2/admin/wireguard/reconcile" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 curl_json "reconcile access policy after attack-map load" -X POST \
   "${EDGE_BASE_URL}/api/v2/admin/access/reconcile" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 operations_status_json="$(
   curl_json "operations status after attack-map load" \
     "${EDGE_BASE_URL}/api/v2/admin/operations/status" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${operations_status_json}" > "${OUTPUT_DIR}/operations-status.json"
 if ! printf '%s\n' "${operations_status_json}" | jq -e '.healthy == true and (.alerts | length == 0)' >/dev/null; then

@@ -57,7 +57,7 @@ cleanup_runtime_smoke() {
   echo "cleanup:"
   if curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
     "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+    -H @<(bearer_header "${ADMIN_TOKEN}") |
     grep -qx '204'; then
     echo "  deleted challenge_id=${challenge_id}"
   else
@@ -83,7 +83,7 @@ finish() {
 
 trap finish EXIT
 
-existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
+existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H @<(bearer_header "${ADMIN_TOKEN}"))"
 
 SERVICE_SUBNET_OCTET="${RUNTIME_SMOKE_SERVICE_SUBNET_OCTET:-}"
 if [[ -z "${SERVICE_SUBNET_OCTET}" ]]; then
@@ -115,7 +115,7 @@ create_payload="$(
 )"
 
 create_response="$(curl_json "challenge create" -X POST "${API_URL}/api/v2/admin/challenges" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
   -d "${create_payload}")"
 challenge_id="$(printf '%s' "${create_response}" | jq -er '.id')"
@@ -125,30 +125,30 @@ printf '%s\n' "${create_response}" | jq -c '{id,name,service_port,service_subnet
 
 echo "validation:"
 curl_json "challenge validate" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+  -H @<(bearer_header "${ADMIN_TOKEN}") |
   jq -c '{challenge_id,status,baseline_ssh_contract_ok,checker_contract_ok,message}'
 
 echo "deploy:"
 curl_json "challenge deploy" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/deploy" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+  -H @<(bearer_header "${ADMIN_TOKEN}") |
   jq -c '{job_id,challenge_id,status,queued_team_count,ready_team_count}'
 
 echo "reconcile:"
 curl_json "deployment reconcile" -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+  -H @<(bearer_header "${ADMIN_TOKEN}") |
   jq -c '{processed_jobs,processed_instances,completed_jobs}'
 
 participant_token="$(
   curl_json "participant authenticate" -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${EMAIL}" --arg password "${PASSWORD}" '{email:$email,password:$password}')" |
+    --data-binary @<(jq -nc --arg email "${EMAIL}" --rawfile password <(printf '%s' "${PASSWORD}") '{email:$email,password:$password}') |
     jq -er '.token'
 )"
 
 echo "team service state:"
 team_service_json="$(
   curl_json "team services read" "${API_URL}/api/v2/team/services" \
-    -H "Authorization: Bearer ${participant_token}" |
+    -H @<(bearer_header "${participant_token}") |
     jq -ec --argjson challenge_id "${challenge_id}" 'map(select(.challenge_id == $challenge_id)) | first'
 )"
 printf '%s\n' "${team_service_json}" | jq -c '{challenge_id,name,endpoint,status,checker}'
@@ -171,7 +171,7 @@ fi
 echo "public target map:"
 public_target_map="$(
   curl_json "public service map read" "${API_URL}/api/v2/services" \
-    -H "Authorization: Bearer ${participant_token}"
+    -H @<(bearer_header "${participant_token}")
 )"
 if [[ -n "${TEAM_ID}" ]]; then
   printf '%s\n' "${public_target_map}" |

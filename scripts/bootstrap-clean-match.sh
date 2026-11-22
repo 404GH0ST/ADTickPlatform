@@ -7,6 +7,7 @@ source "${ROOT_DIR}/scripts/lib/common.sh"
 
 require_bin psql
 require_bin docker
+require_bin python3
 
 load_default_env_files
 PROD_ENV="${PROD_ENV:-${ROOT_DIR}/deploy/compose/prod.env}"
@@ -32,8 +33,12 @@ if [[ -z "${POSTGRES_DSN}" ]]; then
   POSTGRES_DSN="postgres://adplatform:adplatform@127.0.0.1:${POSTGRES_PORT}/adplatform?sslmode=disable"
 fi
 
+postgres_cli() {
+  POSTGRES_DSN="${POSTGRES_DSN}" python3 "${ROOT_DIR}/scripts/lib/psql-env.py" "$@"
+}
+
 readarray -t runtime_rows < <(
-  psql "${POSTGRES_DSN}" -At -F '|' -c \
+  postgres_cli -At -F '|' -c \
     "SELECT COALESCE(container_name, ''), COALESCE(state_volume, '') FROM service_instances ORDER BY team_id, challenge_id" \
     2>/dev/null || true
 )
@@ -85,7 +90,7 @@ if [[ "${AD_PLATFORM_NETWORK_LAYOUT:-per-service}" == "per-service" ]]; then
   fi
 fi
 
-psql "${POSTGRES_DSN}" <<'SQL'
+postgres_cli <<'SQL'
 BEGIN;
 
 DELETE FROM checker_runs;
@@ -100,6 +105,10 @@ DELETE FROM team_service_states;
 DELETE FROM game_ticks;
 DELETE FROM challenges;
 DELETE FROM scoreboard_entries;
+UPDATE scoreboard_freeze
+SET freeze_at = NULL, unfreeze_at = NULL, snapshot = NULL,
+    snapshot_taken_at = NULL, updated_at = NOW()
+WHERE id = 1;
 
 INSERT INTO game_scheduler_state (singleton, state, interval_seconds, last_run_at, next_run_at, last_tick_id, last_error, updated_at)
 VALUES (TRUE, 'stopped', 60, NULL, NULL, NULL, '', NOW())
@@ -130,7 +139,7 @@ COMMIT;
 SQL
 
 if [[ "${CLEAR_TEAMS}" == "true" ]]; then
-  psql "${POSTGRES_DSN}" <<'SQL'
+  postgres_cli <<'SQL'
 BEGIN;
 DELETE FROM wireguard_peers;
 DELETE FROM players;
@@ -138,7 +147,7 @@ DELETE FROM teams;
 COMMIT;
 SQL
 else
-  psql "${POSTGRES_DSN}" <<'SQL'
+  postgres_cli <<'SQL'
 BEGIN;
 INSERT INTO scoreboard_entries (team_id, rank, team_name, attack_points, defense_points, sla_points, total_points, delta)
 SELECT

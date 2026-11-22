@@ -29,19 +29,19 @@ QUEUED_CHALLENGE_ID=""
 
 cleanup() {
   if [[ -n "${TEMP_PLAYER_ID}" ]]; then
-    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null || true
   fi
   if [[ -n "${TEMP_ORGANIZER_ID}" ]]; then
-    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_ORGANIZER_ID}" >/dev/null || true
   fi
   if [[ -n "${DRAFT_CHALLENGE_ID}" ]]; then
-    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges/${DRAFT_CHALLENGE_ID}" >/dev/null || true
   fi
   if [[ -n "${QUEUED_CHALLENGE_ID}" ]]; then
-    curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges/${QUEUED_CHALLENGE_ID}" >/dev/null || true
   fi
 }
@@ -106,14 +106,14 @@ create_player_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Probe" \
     --arg email "${TEMP_EMAIL}" \
-    --arg password "${TEMP_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEMP_PASSWORD}") \
     --arg role "captain" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_player_response="$(
-  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_player_body}" \
+    --data-binary @<(printf '%s' "${create_player_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"
@@ -122,12 +122,12 @@ echo "created temporary player id=${TEMP_PLAYER_ID}"
 participant_auth_body="$(
   jq -nc \
     --arg email "${TEMP_EMAIL}" \
-    --arg password "${TEMP_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEMP_PASSWORD}") \
     '{email:$email,password:$password}'
 )"
 participant_token="$(
   curl_retry -H 'Content-Type: application/json' \
-    -d "${participant_auth_body}" \
+    --data-binary @<(printf '%s' "${participant_auth_body}") \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
@@ -137,7 +137,7 @@ expect_problem \
   "participant token on admin route" \
   "403" \
   "please authenticate as organizer." \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/admin/teams"
 echo "participant token denied on admin route"
 
@@ -145,7 +145,7 @@ expect_problem \
   "admin token on participant route" \
   "403" \
   "please authenticate before access." \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${EDGE_BASE_URL}/api/v2/team/services"
 echo "admin token denied on participant route"
 
@@ -154,14 +154,14 @@ create_organizer_body="$(
     --argjson team_id "${SECURITY_TEAM_ID}" \
     --arg display_name "Security Organizer" \
     --arg email "${ORGANIZER_EMAIL}" \
-    --arg password "${ORGANIZER_PASSWORD}" \
+    --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") \
     --arg role "organizer" \
     '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}'
 )"
 create_organizer_response="$(
-  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_organizer_body}" \
+    --data-binary @<(printf '%s' "${create_organizer_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_ORGANIZER_ID="$(printf '%s' "${create_organizer_response}" | jq -er '.id')"
@@ -170,12 +170,12 @@ echo "created temporary organizer id=${TEMP_ORGANIZER_ID}"
 organizer_auth_body="$(
   jq -nc \
     --arg email "${ORGANIZER_EMAIL}" \
-    --arg password "${ORGANIZER_PASSWORD}" \
+    --rawfile password <(printf '%s' "${ORGANIZER_PASSWORD}") \
     '{email:$email,password:$password}'
 )"
 organizer_token="$(
   curl_retry -H 'Content-Type: application/json' \
-    -d "${organizer_auth_body}" \
+    --data-binary @<(printf '%s' "${organizer_auth_body}") \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
@@ -185,38 +185,38 @@ expect_problem \
   "organizer token on participant route" \
   "403" \
   "please authenticate before access." \
-  -H "Authorization: Bearer ${organizer_token}" \
+  -H @<(bearer_header "${organizer_token}") \
   "${EDGE_BASE_URL}/api/v2/team/services"
 echo "organizer token denied on participant route"
 
-curl_retry -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+curl_retry -X DELETE -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${EDGE_BASE_URL}/api/v2/admin/players/${TEMP_PLAYER_ID}" >/dev/null
 TEMP_PLAYER_ID=""
 expect_problem \
   "deleted player token on participant route" \
   "403" \
   "please authenticate before access." \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/team/services"
 echo "deleted player token denied"
 
 create_player_response="$(
-  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "${create_player_body}" \
+    --data-binary @<(printf '%s' "${create_player_body}") \
     "${EDGE_BASE_URL}/api/v2/admin/players"
 )"
 TEMP_PLAYER_ID="$(printf '%s' "${create_player_response}" | jq -er '.id')"
 participant_token="$(
   curl_retry -H 'Content-Type: application/json' \
-    -d "${participant_auth_body}" \
+    --data-binary @<(printf '%s' "${participant_auth_body}") \
     "${EDGE_BASE_URL}/api/v2/authenticate" |
     jq -er '.token'
 )"
 printf 'replacement participant token prefix=%s...\n' "${participant_token:0:16}"
 
 team_services="$(
-  curl_retry -H "Authorization: Bearer ${participant_token}" \
+  curl_retry -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/team/services"
 )"
 locked_challenge_id="$(
@@ -229,13 +229,13 @@ expect_problem \
   "400" \
   "service is not unlocked yet." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/services/${locked_challenge_id}/ssh-session"
 echo "locked service ssh denied"
 
 draft_challenge_body="$(
   source_bundle_path="$(
-    curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges" |
       jq -er 'first(.[] | select(.source_bundle_path != null and .source_bundle_path != "") | .source_bundle_path)'
   )"
@@ -247,7 +247,7 @@ draft_challenge_body="$(
     '{name:$name,baseline_image:$baseline_image,checker_image:$checker_image,source_bundle_path:$source_bundle_path}'
 )"
 draft_challenge_response="$(
-  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "${draft_challenge_body}" \
     "${EDGE_BASE_URL}/api/v2/admin/challenges"
@@ -259,7 +259,7 @@ expect_problem \
   "draft source download" \
   "404" \
   "challenge source is unavailable." \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/challenges/${DRAFT_CHALLENGE_ID}/source"
 echo "draft source denied"
 
@@ -268,7 +268,7 @@ expect_problem \
   "400" \
   "challenge id is invalid." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/ssh-session"
 echo "draft service ssh denied"
 
@@ -277,7 +277,7 @@ expect_problem \
   "400" \
   "challenge id is invalid." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/reset/factory"
 echo "draft service factory reset denied"
 
@@ -286,13 +286,13 @@ expect_problem \
   "400" \
   "challenge id is invalid." \
   -X POST \
-  -H "Authorization: Bearer ${participant_token}" \
+  -H @<(bearer_header "${participant_token}") \
   "${EDGE_BASE_URL}/api/v2/services/${DRAFT_CHALLENGE_ID}/reset/restart"
 echo "draft service restart denied"
 
 queued_challenge_body="$(
   challenge_template="$(
-    curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
       "${EDGE_BASE_URL}/api/v2/admin/challenges" |
       jq -er 'first(.[] | {baseline_image, checker_image, source_bundle_path})'
   )"
@@ -307,7 +307,7 @@ queued_challenge_body="$(
     }'
 )"
 queued_challenge_response="$(
-  curl_retry -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  curl_retry -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "${queued_challenge_body}" \
     "${EDGE_BASE_URL}/api/v2/admin/challenges"
@@ -315,12 +315,12 @@ queued_challenge_response="$(
 QUEUED_CHALLENGE_ID="$(printf '%s' "${queued_challenge_response}" | jq -er '.id')"
 echo "created queued challenge id=${QUEUED_CHALLENGE_ID}"
 
-curl_retry -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+curl_retry -X POST -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${EDGE_BASE_URL}/api/v2/admin/challenges/${QUEUED_CHALLENGE_ID}/deploy" >/dev/null
 echo "queued challenge deployed without reconcile"
 
 queued_state="$(
-  curl_retry -H "Authorization: Bearer ${participant_token}" \
+  curl_retry -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/team/services" |
     jq -r --argjson challenge_id "${QUEUED_CHALLENGE_ID}" 'first(.[] | select(.challenge_id == $challenge_id) | .reset_cooldown) // ""'
 )"
@@ -330,7 +330,7 @@ if [[ "${queued_state}" == "deploying" ]]; then
     "400" \
     "service is not available yet." \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/ssh-session"
   echo "queued service ssh denied"
 
@@ -339,7 +339,7 @@ if [[ "${queued_state}" == "deploying" ]]; then
     "400" \
     "service is not available yet." \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/reset/factory"
   echo "queued service factory reset denied"
 
@@ -348,7 +348,7 @@ if [[ "${queued_state}" == "deploying" ]]; then
     "400" \
     "service is not available yet." \
     -X POST \
-    -H "Authorization: Bearer ${participant_token}" \
+    -H @<(bearer_header "${participant_token}") \
     "${EDGE_BASE_URL}/api/v2/services/${QUEUED_CHALLENGE_ID}/reset/restart"
   echo "queued service restart denied"
 else

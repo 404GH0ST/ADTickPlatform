@@ -79,7 +79,7 @@ wait_for_operator_surface "${API_URL}"
 scoreboard="$(
   curl_json "scoreboard" \
     "${API_URL}/api/v2/admin/game/scoreboard" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 attacks="$(
   curl_json "attacks" \

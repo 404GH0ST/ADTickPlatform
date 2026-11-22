@@ -9,6 +9,7 @@ import json
 import os
 import ssl
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -247,8 +248,14 @@ def main() -> int:
         key_lines.append(f"{name}:{join_key}\n")
         print(f"created {name}")
 
-    output_path.write_text("".join(key_lines), encoding="utf-8")
-    output_path.chmod(0o600)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False) as key_file:
+        temporary_path = Path(key_file.name)
+        try:
+            key_file.writelines(key_lines)
+            key_file.close()
+            temporary_path.replace(output_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
     print(f"wrote {len(key_lines)} team key(s) to {output_path}")
     return 0
 

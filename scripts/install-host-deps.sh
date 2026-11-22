@@ -158,6 +158,7 @@ EOF
     nftables \
     iptables \
     iproute2 \
+    python3 \
     jq
 }
 
@@ -182,6 +183,7 @@ install_arch() {
     nftables \
     iptables \
     iproute2 \
+    python \
     jq
 
   # docker-compose on Arch provides the Compose V2 plugin used as `docker compose`.

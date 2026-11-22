@@ -52,7 +52,7 @@ if ! curl "${CURL_TLS_ARGS[@]}" -fsS --connect-timeout 2 --max-time 5 "${API_URL
 fi
 
 if curl "${CURL_TLS_ARGS[@]}" -fsS -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${API_URL}/api/v2/admin/access/teardown" >/dev/null; then
   echo "access teardown ok."
 else
@@ -60,7 +60,7 @@ else
 fi
 
 if curl "${CURL_TLS_ARGS[@]}" -fsS -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   "${API_URL}/api/v2/admin/wireguard/teardown" >/dev/null; then
   echo "wireguard teardown ok."
 else

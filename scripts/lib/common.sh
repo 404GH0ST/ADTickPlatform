@@ -148,7 +148,8 @@ ensure_runtime_secret() {
 
 ensure_runtime_wireguard_private_key() {
   if is_placeholder_secret "${WIREGUARD_SERVER_PRIVATE_KEY:-}"; then
-    export WIREGUARD_SERVER_PRIVATE_KEY="$(random_wireguard_private_key)"
+    WIREGUARD_SERVER_PRIVATE_KEY="$(random_wireguard_private_key)"
+    export WIREGUARD_SERVER_PRIVATE_KEY
   fi
 }
 
@@ -170,11 +171,15 @@ ensure_local_runtime_secrets() {
   fi
 }
 
-write_local_runtime_env_file() {
+write_local_runtime_env_file() (
   local runtime_env="${1:-.runtime/dev-secrets.env}"
+  local temp_file
 
+  umask 077
   mkdir -p "$(dirname "${runtime_env}")"
-  cat > "${runtime_env}" <<EOF
+  temp_file="$(mktemp -- "${runtime_env}.XXXXXXXX")"
+  trap 'rm -f -- "${temp_file}"' EXIT
+  cat > "${temp_file}" <<EOF
 ADMIN_API_TOKEN=${ADMIN_API_TOKEN}
 TEAM_JWT_SECRET=${TEAM_JWT_SECRET}
 SSH_CREDENTIAL_SECRET=${SSH_CREDENTIAL_SECRET}
@@ -189,8 +194,8 @@ WIREGUARD_SERVER_PRIVATE_KEY=${WIREGUARD_SERVER_PRIVATE_KEY}
 REALTIME_SOURCE_ADMIN_TOKEN=${REALTIME_SOURCE_ADMIN_TOKEN}
 REALTIME_ADMIN_TOKEN=${REALTIME_ADMIN_TOKEN}
 EOF
-  chmod 600 "${runtime_env}"
-}
+  mv -fT -- "${temp_file}" "${runtime_env}"
+)
 
 ensure_local_runtime_env_file() {
   local runtime_env="${1:-.runtime/dev-secrets.env}"
@@ -220,6 +225,21 @@ EOF
 
   printf '%s\n' "${ADMIN_API_TOKEN}"
 }
+
+bearer_header() {
+  printf 'Authorization: Bearer %s\n' "$1"
+}
+
+write_private_artifact() (
+  local destination="$1"
+  local temporary
+  umask 077
+  mkdir -p -- "$(dirname -- "${destination}")"
+  temporary="$(mktemp -- "${destination}.XXXXXXXX")"
+  trap 'rm -f -- "${temporary}"' EXIT
+  cat > "${temporary}" || return
+  mv -fT -- "${temporary}" "${destination}"
+)
 
 load_runtime_env_if_present() {
   local runtime_env="${1:-.runtime/backend-stack.env}"

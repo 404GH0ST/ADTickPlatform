@@ -29,12 +29,12 @@ ACCESS_FIREWALL_BACKEND="${CONTROLLER_ACCESS_FIREWALL_BACKEND:-iptables}"
 
 admin_get() {
   local path="$1"
-  curl_json "admin GET ${path}" -H "Authorization: Bearer ${ADMIN_TOKEN}" "${EDGE_BASE_URL}${path}"
+  curl_json "admin GET ${path}" -H @<(bearer_header "${ADMIN_TOKEN}") "${EDGE_BASE_URL}${path}"
 }
 
 admin_post() {
   local path="$1"
-  curl_json "admin POST ${path}" -X POST -H "Authorization: Bearer ${ADMIN_TOKEN}" "${EDGE_BASE_URL}${path}"
+  curl_json "admin POST ${path}" -X POST -H @<(bearer_header "${ADMIN_TOKEN}") "${EDGE_BASE_URL}${path}"
 }
 
 curl_json() {
@@ -63,20 +63,20 @@ participant_post() {
   local body="${3:-}"
   if [[ -n "${body}" ]]; then
     curl_json "participant POST ${path}" -X POST \
-      -H "Authorization: Bearer ${token}" \
+      -H @<(bearer_header "${token}") \
       -H 'Content-Type: application/json' \
       -d "${body}" \
       "${EDGE_BASE_URL}${path}"
     return 0
   fi
 
-  curl_json "participant POST ${path}" -X POST -H "Authorization: Bearer ${token}" "${EDGE_BASE_URL}${path}"
+  curl_json "participant POST ${path}" -X POST -H @<(bearer_header "${token}") "${EDGE_BASE_URL}${path}"
 }
 
 participant_get() {
   local path="$1"
   local token="$2"
-  curl_json "participant GET ${path}" -H "Authorization: Bearer ${token}" "${EDGE_BASE_URL}${path}"
+  curl_json "participant GET ${path}" -H @<(bearer_header "${token}") "${EDGE_BASE_URL}${path}"
 }
 
 authenticate_participant() {
@@ -85,7 +85,7 @@ authenticate_participant() {
   status="$(
     curl -sS -o "${response_file}" -w '%{http_code}' -X POST "${EDGE_BASE_URL}/api/v2/authenticate" \
       -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg email "${EMAIL}" --arg password "${PASSWORD}" '{email:$email,password:$password}')"
+      --data-binary @<(jq -nc --arg email "${EMAIL}" --rawfile password <(printf '%s' "${PASSWORD}") '{email:$email,password:$password}')
   )"
   if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
     echo "participant authenticate failed (status=${status})." >&2

@@ -72,7 +72,7 @@ wait_for_target_tick() {
     local status_json current_tick tick_status
     status_json="$(
       curl_json "game status" "${API_URL}/api/v2/admin/game/status" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}"
+        -H @<(bearer_header "${ADMIN_TOKEN}")
     )"
     current_tick="$(printf '%s\n' "${status_json}" | jq -r '.current_tick.id // 0')"
     tick_status="$(printf '%s\n' "${status_json}" | jq -r '.current_tick.status // ""')"
@@ -170,11 +170,11 @@ TEAM_ONE_EMAIL="alpha-${UNIQUE_SUFFIX}@college.local"
 TEAM_TWO_EMAIL="beta-${UNIQUE_SUFFIX}@college.local"
 TEAM_ONE_PLAYER_EMAIL="captain.alpha.${UNIQUE_SUFFIX}@college.local"
 TEAM_TWO_PLAYER_EMAIL="captain.beta.${UNIQUE_SUFFIX}@college.local"
-TEAM_ONE_PASSWORD="alpha-${UNIQUE_SUFFIX}-secret"
-TEAM_TWO_PASSWORD="beta-${UNIQUE_SUFFIX}-secret"
+TEAM_ONE_PASSWORD="$(random_secret)"
+TEAM_TWO_PASSWORD="$(random_secret)"
 CHALLENGE_NAME="college-http-${UNIQUE_SUFFIX}"
 
-existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
+existing_challenges="$(curl_json "challenge list" "${API_URL}/api/v2/admin/challenges" -H @<(bearer_header "${ADMIN_TOKEN}"))"
 SERVICE_SUBNET_OCTET=""
 used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.[].service_subnet_octet')"
 for candidate in $(seq 50 254); do
@@ -191,11 +191,11 @@ SERVICE_PORT="$((30000 + SERVICE_SUBNET_OCTET))"
 
 echo "creating organizer-owned teams and players"
 team_one_response="$(curl_json "create team one" -X POST "${API_URL}/api/v2/admin/teams" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg name "${TEAM_ONE_NAME}" --arg email "${TEAM_ONE_EMAIL}" '{name:$name,contact_email:$email}')")"
 team_two_response="$(curl_json "create team two" -X POST "${API_URL}/api/v2/admin/teams" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg name "${TEAM_TWO_NAME}" --arg email "${TEAM_TWO_EMAIL}" '{name:$name,contact_email:$email}')")"
 
@@ -203,30 +203,30 @@ team_one_id="$(printf '%s' "${team_one_response}" | jq -er '.id')"
 team_two_id="$(printf '%s' "${team_two_response}" | jq -er '.id')"
 
 curl_json "create team one player" -X POST "${API_URL}/api/v2/admin/players" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
-  -d "$(jq -nc \
+  --data-binary @<(jq -nc \
     --argjson team_id "${team_one_id}" \
     --arg display_name "Captain Alpha ${UNIQUE_SUFFIX}" \
     --arg email "${TEAM_ONE_PLAYER_EMAIL}" \
-    --arg password "${TEAM_ONE_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEAM_ONE_PASSWORD}") \
     --arg role "captain" \
-    '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}')" >/dev/null
+    '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}') >/dev/null
 
 curl_json "create team two player" -X POST "${API_URL}/api/v2/admin/players" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
-  -d "$(jq -nc \
+  --data-binary @<(jq -nc \
     --argjson team_id "${team_two_id}" \
     --arg display_name "Captain Beta ${UNIQUE_SUFFIX}" \
     --arg email "${TEAM_TWO_PLAYER_EMAIL}" \
-    --arg password "${TEAM_TWO_PASSWORD}" \
+    --rawfile password <(printf '%s' "${TEAM_TWO_PASSWORD}") \
     --arg role "captain" \
-    '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}')" >/dev/null
+    '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}') >/dev/null
 
 echo "creating challenge"
 challenge_response="$(curl_json "create challenge" -X POST "${API_URL}/api/v2/admin/challenges" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc \
     --arg name "${CHALLENGE_NAME}" \
@@ -238,25 +238,25 @@ challenge_response="$(curl_json "create challenge" -X POST "${API_URL}/api/v2/ad
 challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 
 curl_json "validate challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 curl_json "deploy challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/deploy" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 reconcile_response="$(curl_json "reconcile deployments" -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}")"
+  -H @<(bearer_header "${ADMIN_TOKEN}"))"
 printf '%s\n' "${reconcile_response}" | jq -c '{processed_jobs,processed_instances,completed_jobs}'
 
 team_one_token="$(
   curl_json "authenticate team one" -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${TEAM_ONE_PLAYER_EMAIL}" --arg password "${TEAM_ONE_PASSWORD}" '{email:$email,password:$password}')" |
+    --data-binary @<(jq -nc --arg email "${TEAM_ONE_PLAYER_EMAIL}" --rawfile password <(printf '%s' "${TEAM_ONE_PASSWORD}") '{email:$email,password:$password}') |
     jq -er '.token'
 )"
 
 team_one_state="$(
   curl_json "read team one services" "${API_URL}/api/v2/team/services" \
-    -H "Authorization: Bearer ${team_one_token}" |
+    -H @<(bearer_header "${team_one_token}") |
     jq -ec --argjson challenge_id "${challenge_id}" 'map(select(.challenge_id == $challenge_id)) | first'
 )"
 printf '%s\n' "${team_one_state}" | jq -c '{challenge_id,name,endpoint,status,checker}'
@@ -264,7 +264,7 @@ team_one_endpoint="$(printf '%s' "${team_one_state}" | jq -er '.endpoint')"
 
 public_services="$(
   curl_json "read service targets" "${API_URL}/api/v2/services" \
-    -H "Authorization: Bearer ${team_one_token}"
+    -H @<(bearer_header "${team_one_token}")
 )"
 team_two_endpoint="$(
   printf '%s\n' "${public_services}" |
@@ -289,29 +289,29 @@ PY
 fi
 
 curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 if [[ "${USE_SCHEDULER}" == "true" ]]; then
   if [[ -n "${SCHEDULER_INTERVAL_SECONDS}" ]]; then
     curl_json "update scheduler interval" -X PUT "${API_URL}/api/v2/admin/game/scheduler/interval" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "$(jq -nc --argjson interval_seconds "${SCHEDULER_INTERVAL_SECONDS}" '{interval_seconds:$interval_seconds}')" >/dev/null
   fi
 
   curl_json "start scheduler" -X POST "${API_URL}/api/v2/admin/game/scheduler/start" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+    -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
   status_response="$(wait_for_target_tick "${TARGET_TICKS}")"
   printf '%s\n' "${status_response}" | jq -c '{match:.match.state,scheduler:.scheduler.state,current_tick:(.current_tick.id // 0),total_checker_runs}'
   tick_id="$(printf '%s\n' "${status_response}" | jq -er '.current_tick.id')"
 
   curl_json "stop scheduler" -X POST "${API_URL}/api/v2/admin/game/scheduler/stop" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+    -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 else
   tick_response="$(
     curl_json "advance tick" -X POST "${API_URL}/api/v2/admin/game/ticks/advance" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
   printf '%s\n' "${tick_response}" | jq -c '{id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs}'
   tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
@@ -319,7 +319,7 @@ fi
 
 checker_runs_response="$(
   curl_json "checker runs" "${API_URL}/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=20" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${checker_runs_response}" | jq -c '{total_count,has_next}'
 
@@ -343,7 +343,7 @@ PY
 
 submit_response="$(
   curl_json "submit stolen flag" -X POST "${API_URL}/api/v2/submit" \
-    -H "Authorization: Bearer ${team_one_token}" \
+    -H @<(bearer_header "${team_one_token}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
@@ -354,16 +354,16 @@ if ! printf '%s\n' "${submit_response}" | jq -e '.results | length == 1 and .[0]
 fi
 
 curl_json "verify automatic SSH unlock" "${API_URL}/api/v2/team/services" \
-  -H "Authorization: Bearer ${team_one_token}" |
+  -H @<(bearer_header "${team_one_token}") |
   jq -e --argjson id "${challenge_id}" 'any(.[]; .challenge_id == $id and .unlocked == true)' >/dev/null
 
 curl_json "request SSH credential after capture" -X POST "${API_URL}/api/v2/services/${challenge_id}/ssh-session" \
-  -H "Authorization: Bearer ${team_one_token}" |
+  -H @<(bearer_header "${team_one_token}") |
   jq -e '.username == "root" and (.password | length > 0)' >/dev/null
 
 scoreboard_response="$(
   curl_json "recompute scoring" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {team,attack,defense,sla,total}'
 
@@ -400,8 +400,7 @@ printf 'organizer-created flow passed: challenge_id=%s attacker_team_id=%s victi
   "${challenge_id}" "${team_one_id}" "${team_two_id}" "${team_one_endpoint}"
 
 if [[ -n "${ARTIFACT_FILE}" ]]; then
-  mkdir -p "$(dirname "${ARTIFACT_FILE}")"
-  cat > "${ARTIFACT_FILE}" <<EOF
+  write_private_artifact "${ARTIFACT_FILE}" <<EOF
 SMOKE_CHALLENGE_ID=${challenge_id}
 SMOKE_TEAM_ONE_ID=${team_one_id}
 SMOKE_TEAM_TWO_ID=${team_two_id}

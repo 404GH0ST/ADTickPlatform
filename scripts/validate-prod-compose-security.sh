@@ -25,6 +25,8 @@ if ! jq -e '
   (($proxy.ports // []) | length == 0) and
   (($proxy.networks | keys) == ["docker-control"]) and
   (.services["controller-service"].environment.DOCKER_HOST == ("tcp://" + $proxy_ip + ":2375")) and
+  (.services["controller-service"].environment.CONTROLLER_REQUIRE_DISK_QUOTA == "true") and
+  (.services["controller-service"].environment.CONTROLLER_SERVICE_DISK_LIMIT_MIB | test("^[1-9][0-9]{0,11}$")) and
   (.services["controller-service"].environment.CONTROLLER_SERVICE_ADDR | test("^(0\\.0\\.0\\.0|:|\\[?::)") | not) and
   (.services["wireguard-gateway"].environment.WIREGUARD_GATEWAY_ADDR | test("^(0\\.0\\.0\\.0|:|\\[?::)") | not) and
   (.services.edge.environment.EDGE_SITE_ADDRESS | startswith("https://"))

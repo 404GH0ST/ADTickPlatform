@@ -256,7 +256,7 @@ participant_auth() {
 
   curl_json "authenticate ${email}" -X POST "${API_URL}/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg email "${email}" --arg password "${password}" '{email:$email,password:$password}')" |
+    --data-binary @<(jq -nc --arg email "${email}" --rawfile password <(printf '%s' "${password}") '{email:$email,password:$password}') |
     jq -er '.token'
 }
 
@@ -294,7 +294,7 @@ if [[ "${ATTACK_MAP_LOAD_RESET}" == "true" ]]; then
   BOOTSTRAP_CLEAR_TEAMS=true ./scripts/bootstrap-clean-match.sh >/dev/null
 fi
 
-existing_challenges="$(curl_json "list challenges" "${API_URL}/api/v2/admin/challenges" -H "Authorization: Bearer ${ADMIN_TOKEN}")"
+existing_challenges="$(curl_json "list challenges" "${API_URL}/api/v2/admin/challenges" -H @<(bearer_header "${ADMIN_TOKEN}"))"
 SERVICE_SUBNET_OCTET=""
 used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.[].service_subnet_octet')"
 for candidate in $(seq 50 254); do
@@ -319,26 +319,26 @@ for ((i = 0; i < TEAM_COUNT; i++)); do
   team_name="${TEAM_PREFIX} ${team_suffix}"
   contact_email="${prefix_slug}-${team_suffix}@${TEAM_EMAIL_DOMAIN}"
   player_email="captain.${prefix_slug}.${team_suffix}.${unique_suffix}@${TEAM_EMAIL_DOMAIN}"
-  player_password="${prefix_slug}-${team_suffix}-${unique_suffix}-secret"
+  player_password="$(random_secret)"
 
   team_response="$(
     curl_json "create team ${team_name}" -X POST "${API_URL}/api/v2/admin/teams" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "$(jq -nc --arg name "${team_name}" --arg email "${contact_email}" '{name:$name,contact_email:$email}')"
   )"
   team_id="$(printf '%s' "${team_response}" | jq -er '.id')"
 
   curl_json "create player ${player_email}" -X POST "${API_URL}/api/v2/admin/players" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc \
+    --data-binary @<(jq -nc \
       --argjson team_id "${team_id}" \
       --arg display_name "${team_name} Captain" \
       --arg email "${player_email}" \
-      --arg password "${player_password}" \
+      --rawfile password <(printf '%s' "${player_password}") \
       --arg role "captain" \
-      '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}')" >/dev/null
+      '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}') >/dev/null
 
   team_ids+=("${team_id}")
   team_names+=("${team_name}")
@@ -349,7 +349,7 @@ done
 echo "creating and deploying challenge ${CHALLENGE_NAME}"
 challenge_response="$(
   curl_json "create challenge" -X POST "${API_URL}/api/v2/admin/challenges" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc \
       --arg name "${CHALLENGE_NAME}" \
@@ -362,14 +362,14 @@ challenge_response="$(
 challenge_id="$(printf '%s' "${challenge_response}" | jq -er '.id')"
 
 curl_json "validate challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 curl_json "deploy challenge" -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/deploy" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 reconcile_response="$(
   curl_json "reconcile deployments" -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${reconcile_response}" | jq -c '{processed_jobs,processed_instances,completed_jobs}'
 
@@ -380,12 +380,12 @@ done
 
 public_services="$(
   curl_json "list public services" "${API_URL}/api/v2/services" \
-    -H "Authorization: Bearer ${participant_tokens[0]}"
+    -H @<(bearer_header "${participant_tokens[0]}")
 )"
 
 echo "starting match"
 curl_json "start match" -X POST "${API_URL}/api/v2/admin/game/match/start" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+  -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
 total_submissions=0
 last_submission_completed_ms="$(now_ms)"
@@ -396,7 +396,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
 
   tick_response="$(
     curl_json "advance tick round ${round}" -X POST "${API_URL}/api/v2/admin/game/ticks/advance" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
   tick_advance_latencies_ms+=("${CURL_LAST_TIME_MS}")
   tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
@@ -415,7 +415,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
     checker_runs_response="$(
       curl_json "checker runs for tick ${tick_id}" \
         "${API_URL}/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=${tick_total_checker_runs}" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}"
+        -H @<(bearer_header "${ADMIN_TOKEN}")
     )"
     if ! printf '%s\n' "${checker_runs_response}" | jq -e \
       --argjson expected_total "${tick_total_checker_runs}" '
@@ -452,7 +452,7 @@ for ((round = 1; round <= ATTACK_MAP_LOAD_ROUNDS; round++)); do
 
     submit_response="$(
       curl_json "submit stolen flag ${attacker_name} -> ${victim_name}" -X POST "${API_URL}/api/v2/submit" \
-        -H "Authorization: Bearer ${attacker_token}" \
+        -H @<(bearer_header "${attacker_token}") \
         -H 'Content-Type: application/json' \
         -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
     )"
@@ -475,7 +475,7 @@ submission_window_completed_ms="$(now_ms)"
 
 scoreboard_response="$(
   curl_json "recompute scoring" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 scoreboard_recompute_ms="${CURL_LAST_TIME_MS}"
 scoreboard_rows="$(printf '%s\n' "${scoreboard_response}" | jq 'length')"
@@ -487,7 +487,7 @@ attack_feed_response=""
 while true; do
   attack_feed_response="$(
     curl_json "attack feed summary" "${API_URL}/api/v2/attacks?service=${CHALLENGE_NAME}&limit=200" \
-      -H "Authorization: Bearer ${participant_tokens[0]}"
+      -H @<(bearer_header "${participant_tokens[0]}")
   )"
   attack_feed_count="$(printf '%s\n' "${attack_feed_response}" | jq -r '.total_count')"
   if [[ "${attack_feed_count}" == "${total_submissions}" ]]; then
@@ -698,7 +698,6 @@ printf '%s\n' "${summary_json}" | jq .
 echo "tip: increase organizer attack page size to 96 to see more teams in one slice."
 
 if [[ -n "${ATTACK_MAP_LOAD_ARTIFACT_FILE}" ]]; then
-  mkdir -p "$(dirname "${ATTACK_MAP_LOAD_ARTIFACT_FILE}")"
   {
     echo "SIM_CHALLENGE_ID=${challenge_id}"
     echo "SIM_TEAM_COUNT=${TEAM_COUNT}"
@@ -733,7 +732,7 @@ if [[ -n "${ATTACK_MAP_LOAD_ARTIFACT_FILE}" ]]; then
       printf 'SIM_TEAM_%02d_EMAIL=%q\n' "${idx}" "${player_emails[$i]}"
       printf 'SIM_TEAM_%02d_PASSWORD=%q\n' "${idx}" "${player_passwords[$i]}"
     done
-  } > "${ATTACK_MAP_LOAD_ARTIFACT_FILE}"
+  } | write_private_artifact "${ATTACK_MAP_LOAD_ARTIFACT_FILE}"
 fi
 
 if [[ -n "${ATTACK_MAP_LOAD_REPORT_FILE}" ]]; then

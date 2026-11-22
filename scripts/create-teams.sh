@@ -97,7 +97,7 @@ for ((i = 0; i < TEAM_COUNT; i++)); do
   response="$(
     curl_json "create team ${team_name}" \
       -X POST "${API_URL}/api/v2/admin/teams" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "$(jq -nc --arg name "${team_name}" --arg email "${contact_email}" '{name:$name,contact_email:$email}')"
   )"

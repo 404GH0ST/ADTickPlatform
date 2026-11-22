@@ -55,6 +55,8 @@ services:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$${CONTROLLER_SERVICE_ADDR}/healthz || exit 1"]
     environment:
       CONTROLLER_SERVICE_ADDR: ${HOST_CONTROL_BIND_ADDRESS:-172.17.0.1}:${CONTROLLER_SERVICE_PORT:-18084}
+      CONTROLLER_REQUIRE_DISK_QUOTA: "true"
+      CONTROLLER_SERVICE_DISK_LIMIT_MIB: ${CONTROLLER_SERVICE_DISK_LIMIT_MIB:-1024}
       POSTGRES_DSN: ${POSTGRES_DSN_HOST_ENFORCEMENT:-postgres://adplatform:change-this-postgres-password@127.0.0.1:15432/adplatform?sslmode=disable}
       CHECKER_RUNNER_INTERNAL_URL: ${CHECKER_RUNNER_INTERNAL_URL_HOST:-http://127.0.0.1:18083}
       CONTROLLER_ACCESS_MODE: ${CONTROLLER_ACCESS_MODE:-host}

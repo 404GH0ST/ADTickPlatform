@@ -10,6 +10,7 @@ require_bin wg
 require_bin nft
 require_bin ip
 require_bin ss
+require_bin findmnt
 
 PROD_ENV="${PROD_ENV:-deploy/compose/prod.env}"
 load_env_file "${PROD_ENV}"
@@ -66,6 +67,47 @@ check_host_interface() {
   fi
 }
 
+validate_challenge_storage() {
+  local limit="${CONTROLLER_SERVICE_DISK_LIMIT_MIB:-1024}"
+  if [[ ! "${limit}" =~ ^[1-9][0-9]{0,11}$ ]]; then
+    echo "CONTROLLER_SERVICE_DISK_LIMIT_MIB must specify a positive storage quota in MiB" >&2
+    return 1
+  fi
+  local size=$((limit * 1048576))
+  local driver docker_root
+  read -r driver docker_root < <(docker info --format '{{.Driver}} {{.DockerRootDir}}')
+  if [[ "${driver}" != overlay2 ]] ||
+     [[ "$(findmnt -n -o FSTYPE -T "${docker_root}/overlay2")" != xfs ]] ||
+     [[ ",$(findmnt -n -o OPTIONS -T "${docker_root}/overlay2")," != *,pquota,* &&
+        ",$(findmnt -n -o OPTIONS -T "${docker_root}/overlay2")," != *,prjquota,* ]]; then
+    echo "prod-host requires Docker overlay2 on XFS with project quotas for challenge writable layers" >&2
+    return 1
+  fi
+
+  local probe="adplatform-quota-probe-$(cat /proc/sys/kernel/random/uuid)"
+  if ! docker volume create --driver local --opt "size=${size}" "${probe}" >/dev/null; then
+    echo "Docker local volumes must support project quotas for challenge state" >&2
+    return 1
+  fi
+  docker volume rm "${probe}" >/dev/null
+
+  local containers container limits volume volume_options
+  containers="$(docker ps -aq --filter label=adplatform.team_id)"
+  for container in ${containers}; do
+    limits="$(docker inspect --format '{{index .HostConfig.StorageOpt "size"}} {{.HostConfig.LogConfig.Type}} {{index .HostConfig.LogConfig.Config "max-size"}} {{index .HostConfig.LogConfig.Config "max-file"}}' "${container}")"
+    volume="$(docker inspect --format '{{index .Config.Labels "adplatform.state_volume"}}' "${container}")"
+    if [[ "${limits}" != "${size} local 10m 3" || -z "${volume}" ]]; then
+      echo "challenge container ${container} requires offline recreation with storage limits" >&2
+      return 1
+    fi
+    volume_options="$(docker volume inspect --format '{{.Driver}} {{json .Options}}' "${volume}")"
+    if [[ "${volume_options}" != "local {\"size\":\"${size}\"}" ]]; then
+      echo "challenge volume ${volume} requires offline migration to a quota-managed volume" >&2
+      return 1
+    fi
+  done
+}
+
 require_secret_env ADMIN_API_TOKEN
 require_secret_env CONTROLLER_INTERNAL_TOKEN
 require_secret_env GAME_CORE_INTERNAL_TOKEN
@@ -113,8 +155,19 @@ docker compose version >/dev/null
 "${ROOT_DIR}/scripts/validate-prod-compose-security.sh" "${PROD_ENV}"
 wg help >/dev/null
 nft --version >/dev/null
+validate_challenge_storage
 
 check_host_interface "${WIREGUARD_INTERFACE}"
+internet_interface="${CONTROLLER_INTERNET_INTERFACE:-eth0}"
+check_host_interface "${internet_interface}"
+default_routes="$(ip -4 -o route show default)"
+if [[ -n "${default_routes}" ]] && ! awk -v uplink="${internet_interface}" '
+  { for (i = 1; i < NF; i++) if ($i == "dev" && $(i+1) == uplink) found = 1 }
+  END { exit !found }
+' <<< "${default_routes}"; then
+  echo "CONTROLLER_INTERNET_INTERFACE must select an IPv4 default-route interface on this host" >&2
+  exit 1
+fi
 
 assert_port_free "${POSTGRES_LOOPBACK_PORT}" "postgres loopback"
 assert_port_free "${CHECKER_RUNNER_LOOPBACK_PORT}" "checker-runner loopback"
@@ -123,6 +176,7 @@ assert_port_free "${WIREGUARD_HOST_PORT}" "wireguard-gateway host"
 
 echo "host enforcement preflight passed:"
 echo "  interface: ${WIREGUARD_INTERFACE}"
+echo "  internet interface: ${internet_interface}"
 echo "  private control bind: ${HOST_CONTROL_BIND_ADDRESS}"
 echo "  postgres loopback port: ${POSTGRES_LOOPBACK_PORT}"
 echo "  checker-runner loopback port: ${CHECKER_RUNNER_LOOPBACK_PORT}"

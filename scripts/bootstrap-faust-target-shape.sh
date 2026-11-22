@@ -213,12 +213,12 @@ for ((i = 0; i < TARGET_TEAM_COUNT; i++)); do
   team_name="${TARGET_TEAM_PREFIX} ${team_suffix}"
   contact_email="${prefix_slug}-${team_suffix}@${TARGET_TEAM_EMAIL_DOMAIN}"
   player_email="captain.${prefix_slug}.${team_suffix}@${TARGET_TEAM_EMAIL_DOMAIN}"
-  player_password="${prefix_slug}-${team_suffix}-secret"
+  player_password="$(random_secret)"
 
   team_response="$(
     curl_json "create team ${team_name}" \
       -X POST "${API_URL}/api/v2/admin/teams" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "$(jq -nc --arg name "${team_name}" --arg email "${contact_email}" '{name:$name,contact_email:$email}')"
   )"
@@ -226,15 +226,15 @@ for ((i = 0; i < TARGET_TEAM_COUNT; i++)); do
 
   curl_json "create player ${player_email}" \
     -X POST "${API_URL}/api/v2/admin/players" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
-    -d "$(jq -nc \
+    --data-binary @<(jq -nc \
       --argjson team_id "${team_id}" \
       --arg display_name "${team_name} Captain" \
       --arg email "${player_email}" \
-      --arg password "${player_password}" \
+      --rawfile password <(printf '%s' "${player_password}") \
       --arg role "captain" \
-      '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}')"
+      '{team_id:$team_id,display_name:$display_name,email:$email,password:$password,role:$role}')
 
   team_records+=(
     "$(jq -nc \
@@ -242,7 +242,7 @@ for ((i = 0; i < TARGET_TEAM_COUNT; i++)); do
       --arg name "${team_name}" \
       --arg contact_email "${contact_email}" \
       --arg player_email "${player_email}" \
-      --arg player_password "${player_password}" \
+      --rawfile player_password <(printf '%s' "${player_password}") \
       '{id:$id,name:$name,contact_email:$contact_email,player_email:$player_email,player_password:$player_password}')"
   )
 done
@@ -250,7 +250,7 @@ done
 existing_challenges="$(
   curl_json "list challenges" \
     "${API_URL}/api/v2/admin/challenges" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 used_subnets="$(printf '%s' "${existing_challenges}" | jq -r '.[].service_subnet_octet // empty')"
 ALLOCATED_SUBNET_OCTET=""
@@ -285,7 +285,7 @@ for ((i = 0; i < TARGET_SERVICE_COUNT; i++)); do
   challenge_response="$(
     curl_json "create challenge ${challenge_name}" \
       -X POST "${API_URL}/api/v2/admin/challenges" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H @<(bearer_header "${ADMIN_TOKEN}") \
       -H 'Content-Type: application/json' \
       -d "$(jq -nc \
         --arg name "${challenge_name}" \
@@ -299,11 +299,11 @@ for ((i = 0; i < TARGET_SERVICE_COUNT; i++)); do
 
   curl_json "validate challenge ${challenge_name}" \
     -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/validate" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+    -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
   curl_json "deploy challenge ${challenge_name}" \
     -X POST "${API_URL}/api/v2/admin/challenges/${challenge_id}/deploy" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+    -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
 
   challenge_records+=(
     "$(jq -nc \
@@ -321,13 +321,13 @@ echo "reconciling deployments"
 reconcile_response="$(
   curl_json_retry "reconcile deployments" 5 \
     -X POST "${API_URL}/api/v2/admin/deployments/reconcile" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
 deployment_rows="$(
   curl_json "list deployments" \
     "${API_URL}/api/v2/admin/deployments" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
 expected_ready="${TARGET_TEAM_COUNT}"
@@ -347,7 +347,7 @@ echo "configuring scheduler interval=${TARGET_TICK_INTERVAL_SECONDS}s"
 scheduler_response="$(
   curl_json "update scheduler interval" \
     -X PUT "${API_URL}/api/v2/admin/game/scheduler/interval" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --argjson interval_seconds "${TARGET_TICK_INTERVAL_SECONDS}" '{interval_seconds:$interval_seconds}')"
 )"
@@ -358,7 +358,7 @@ echo "configuring match window ${match_start_at} -> ${match_end_at}"
 match_schedule_response="$(
   curl_json "update match schedule" \
     -X PUT "${API_URL}/api/v2/admin/game/match/schedule" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg scheduled_start_at "${match_start_at}" --arg scheduled_end_at "${match_end_at}" '{scheduled_start_at:$scheduled_start_at,scheduled_end_at:$scheduled_end_at}')"
 )"
@@ -370,7 +370,7 @@ if [[ "${TARGET_START_MATCH}" == "true" ]]; then
   match_response="$(
     curl_json "start match" \
       -X POST "${API_URL}/api/v2/admin/game/match/start" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
 fi
 
@@ -379,14 +379,14 @@ if [[ "${TARGET_START_SCHEDULER}" == "true" ]]; then
   scheduler_start_response="$(
     curl_json "start scheduler" \
       -X POST "${API_URL}/api/v2/admin/game/scheduler/start" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
 fi
 
 game_status="$(
   curl_json "game status" \
     "${API_URL}/api/v2/admin/game/status" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
 jq -n \
@@ -402,7 +402,7 @@ jq -n \
   --argjson match_start "${match_response}" \
   --argjson scheduler_start "${scheduler_start_response}" \
   --argjson game_status "$(printf '%s' "${game_status}")" \
-  --argjson teams "$(printf '%s\n' "${team_records[@]}" | jq -s '.')" \
+  --slurpfile teams <(printf '%s\n' "${team_records[@]}") \
   --argjson challenges "$(printf '%s\n' "${challenge_records[@]}" | jq -s '.')" \
   '{
     generated_at: $generated_at,
@@ -425,7 +425,7 @@ jq -n \
     match_start: $match_start,
     scheduler_start: $scheduler_start,
     game_status: $game_status
-  }' > "${TARGET_ARTIFACT_FILE}"
+  }' | write_private_artifact "${TARGET_ARTIFACT_FILE}"
 
 echo "faust target-shape bootstrap completed"
 printf '  %s\n' \

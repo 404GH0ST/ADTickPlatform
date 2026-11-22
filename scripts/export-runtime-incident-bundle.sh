@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
@@ -48,7 +49,16 @@ if [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-mkdir -p "${INCIDENT_BUNDLE_OUTPUT_DIR}"
+if [[ -e "${INCIDENT_BUNDLE_OUTPUT_DIR}" || -L "${INCIDENT_BUNDLE_OUTPUT_DIR}" ]]; then
+  echo "incident bundle output directory already exists: ${INCIDENT_BUNDLE_OUTPUT_DIR}" >&2
+  exit 1
+fi
+if [[ -e "${INCIDENT_BUNDLE_ARCHIVE}" || -L "${INCIDENT_BUNDLE_ARCHIVE}" ]]; then
+  echo "incident bundle archive already exists: ${INCIDENT_BUNDLE_ARCHIVE}" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "${INCIDENT_BUNDLE_OUTPUT_DIR}")"
+mkdir -m 700 "${INCIDENT_BUNDLE_OUTPUT_DIR}"
 
 curl_json() {
   local output_file="$1"
@@ -58,10 +68,13 @@ curl_json() {
   response_file="$(mktemp)"
 
   local status
-  status="$(curl -sS -o "${response_file}" -w '%{http_code}' "$@")"
+  if ! status="$(curl -s -o "${response_file}" -w '%{http_code}' "$@")"; then
+    echo "request failed while fetching ${output_file##*/}" >&2
+    rm -f "${response_file}"
+    exit 1
+  fi
   if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
-    echo "request failed (status=${status}): $*" >&2
-    cat "${response_file}" >&2
+    echo "request for ${output_file##*/} failed (status=${status})" >&2
     rm -f "${response_file}"
     exit 1
   fi
@@ -85,34 +98,34 @@ wait_for_operator_surface "${API_URL}"
 
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/deployments.json" \
   "${API_URL}/api/v2/admin/deployments" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/access-status.json" \
   "${API_URL}/api/v2/admin/access/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/wireguard-status.json" \
   "${API_URL}/api/v2/admin/wireguard/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/operations-status.json" \
   "${API_URL}/api/v2/admin/operations/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/game-status.json" \
   "${API_URL}/api/v2/admin/game/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scheduler-status.json" \
   "${API_URL}/api/v2/admin/game/scheduler" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scheduler-events.json" \
   "${API_URL}/api/v2/admin/game/scheduler/events?limit=50" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/checker-runs.json" \
   "${API_URL}/api/v2/admin/game/checker-runs?limit=50" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scoreboard.json" \
   "${API_URL}/api/v2/admin/game/scoreboard" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/scoring-audit.json" \
   "${API_URL}/api/v2/admin/game/scoring/audit" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+  -H @<(bearer_header "${ADMIN_TOKEN}")
 curl_json "${INCIDENT_BUNDLE_OUTPUT_DIR}/attacks.json" \
   "${API_URL}/api/v2/attacks?limit=50"
 
@@ -162,7 +175,12 @@ jq -n \
     }
   }' > "${INCIDENT_BUNDLE_OUTPUT_DIR}/incident-summary.json"
 
-tar -czf "${INCIDENT_BUNDLE_ARCHIVE}" -C "$(dirname "${INCIDENT_BUNDLE_OUTPUT_DIR}")" "$(basename "${INCIDENT_BUNDLE_OUTPUT_DIR}")"
+archive_tmp="$(mktemp "${INCIDENT_BUNDLE_ARCHIVE}.XXXXXX")"
+trap 'rm -f -- "${archive_tmp}"' EXIT
+tar -czf "${archive_tmp}" -C "$(dirname "${INCIDENT_BUNDLE_OUTPUT_DIR}")" "$(basename "${INCIDENT_BUNDLE_OUTPUT_DIR}")"
+ln -- "${archive_tmp}" "${INCIDENT_BUNDLE_ARCHIVE}"
+rm -f -- "${archive_tmp}"
+trap - EXIT
 
 echo "runtime incident bundle written:"
 printf '  %s\n' "${INCIDENT_BUNDLE_OUTPUT_DIR}"

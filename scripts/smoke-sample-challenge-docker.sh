@@ -132,11 +132,11 @@ if [[ -z "${challenge_id}" || -z "${endpoint}" ]]; then
   exit 1
 fi
 
-auth_payload="$(jq -nc --arg email "${EMAIL}" --arg password "${PASSWORD}" '{email:$email,password:$password}')"
+auth_payload="$(jq -nc --arg email "${EMAIL}" --rawfile password <(printf '%s' "${PASSWORD}") '{email:$email,password:$password}')"
 team_token="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/authenticate" \
     -H 'Content-Type: application/json' \
-    -d "${auth_payload}" |
+    --data-binary @<(printf '%s' "${auth_payload}") |
     jq -er '.token'
 )"
 
@@ -158,13 +158,13 @@ PY
 fi
 echo "starting match"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/match/start" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" |
+  -H @<(bearer_header "${ADMIN_TOKEN}") |
   jq -c '{state,accepting_submissions,started_at}'
 
 echo "advancing authoritative game tick"
 tick_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/ticks/advance" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${tick_response}" | jq -c '{id,status,total_checker_runs,successful_checker_runs,failed_checker_runs,skipped_checker_runs,message}'
 
@@ -173,7 +173,7 @@ tick_id="$(printf '%s\n' "${tick_response}" | jq -er '.id')"
 echo "reading persisted checker runs for deployed challenge"
 checker_runs_response="$(
   curl -fsS "http://127.0.0.1:8080/api/v2/admin/game/checker-runs?tick_id=${tick_id}&challenge_id=${challenge_id}&limit=20" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${checker_runs_response}" | jq -c '{total_count,has_next}'
 
@@ -194,7 +194,7 @@ printf '%s\n' "${checker_runs_response}" | jq -c '.items[] | {team_id,phase,stat
 echo "recomputing scoreboard from authoritative tick state"
 scoreboard_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/scoring/recompute" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${scoreboard_response}" | jq -c '.[] | {rank,team,attack,defense,sla,total,delta}'
 
@@ -206,7 +206,7 @@ fi
 echo "stealing one live enemy flag through the sample vulnerability"
 public_services="$(
   curl -fsS "http://127.0.0.1:8080/api/v2/services" \
-    -H "Authorization: Bearer ${team_token}"
+    -H @<(bearer_header "${team_token}")
 )"
 victim_endpoint="$(
   printf '%s\n' "${public_services}" |
@@ -229,7 +229,7 @@ printf '  stolen_flag_prefix=%s...\n' "${stolen_flag:0:20}"
 echo "submitting the stolen flag through participant API"
 submit_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/submit" \
-    -H "Authorization: Bearer ${team_token}" \
+    -H @<(bearer_header "${team_token}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
@@ -241,18 +241,18 @@ fi
 
 echo "verifying capture automatically unlocked the matching service"
 curl -fsS "http://127.0.0.1:8080/api/v2/team/services" \
-  -H "Authorization: Bearer ${team_token}" |
+  -H @<(bearer_header "${team_token}") |
   jq -e --argjson id "${challenge_id}" 'any(.[]; .challenge_id == $id and .unlocked == true)' >/dev/null
 
 echo "requesting SSH credential after accepted capture"
 curl -fsS -X POST "http://127.0.0.1:8080/api/v2/services/${challenge_id}/ssh-session" \
-  -H "Authorization: Bearer ${team_token}" |
+  -H @<(bearer_header "${team_token}") |
   jq -e '.username == "root" and (.password | length > 0)' >/dev/null
 
 echo "verifying duplicate submission handling"
 duplicate_submit_response="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/submit" \
-    -H "Authorization: Bearer ${team_token}" \
+    -H @<(bearer_header "${team_token}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg flag "${stolen_flag}" '{flags:[$flag]}')"
 )"
@@ -281,7 +281,7 @@ fi
 echo "recomputing scoreboard after the accepted attack"
 post_submit_scoreboard="$(
   curl -fsS -X POST "http://127.0.0.1:8080/api/v2/admin/game/scoring/recompute" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 printf '%s\n' "${post_submit_scoreboard}" | jq -c '.[] | {rank,team,attack,defense,sla,total,delta}'
 

@@ -9,6 +9,19 @@
 		-X-Powered-By
 	}
 
+	@flagSubmission path /api/platform/submit /api/platform/submit/ /api/v2/submit
+	request_body @flagSubmission {
+		max_size 131072
+	}
+	@sessionRequests path /api/platform/session /api/platform/session/* /api/platform/services/* /api/v2/authenticate /api/v2/register /api/v2/me/team /api/v2/me/team/captain /api/v2/me/profile /api/v2/me/password
+	request_body @sessionRequests {
+		max_size 16384
+	}
+	@organizerRequests path /admin /admin/* /api/admin/* /api/v2/admin/*
+	request_body @organizerRequests {
+		max_size 1048576
+	}
+
 	@api path /api/v2/* /healthz
 	handle @api {
 		reverse_proxy api-gateway:8080

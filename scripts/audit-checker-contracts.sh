@@ -10,8 +10,8 @@ Usage: scripts/audit-checker-contracts.sh
 
 Verifies that every repository checker package advertises the explicit Faust
 service-state contract:
-  - validate emits ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}
-  - check can emit ADPLATFORM_SERVICE_STATE=...
+  - validate emits ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}
+  - check emits a service-state marker bound to AD_CHECKER_STATE_NONCE
 EOF
 }
 
@@ -51,13 +51,18 @@ fi
 missing=0
 
 for checker_file in "${checker_files[@]}"; do
-  if ! contains_text 'ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}' "${checker_file}"; then
+  if ! contains_text 'ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}' "${checker_file}"; then
     echo "missing service-state capability marker: ${checker_file}" >&2
     missing=1
   fi
 
   if ! contains_text 'ADPLATFORM_SERVICE_STATE=' "${checker_file}"; then
     echo "missing canonical service-state output: ${checker_file}" >&2
+    missing=1
+  fi
+
+  if ! contains_text 'AD_CHECKER_STATE_NONCE' "${checker_file}"; then
+    echo "missing service-state nonce binding: ${checker_file}" >&2
     missing=1
   fi
 done

@@ -87,7 +87,7 @@ wait_for_operator_surface "${API_URL}"
 scheduler_response="$(
   curl_json "update scheduler interval" \
     -X PUT "${API_URL}/api/v2/admin/game/scheduler/interval" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --argjson interval_seconds "${TARGET_TICK_INTERVAL_SECONDS}" '{interval_seconds:$interval_seconds}')"
 )"
@@ -97,7 +97,7 @@ match_end_at="$(date -u -d "+${TARGET_MATCH_DURATION_HOURS} hours" +"%Y-%m-%dT%H
 match_schedule_response="$(
   curl_json "update match schedule" \
     -X PUT "${API_URL}/api/v2/admin/game/match/schedule" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg scheduled_start_at "${match_start_at}" --arg scheduled_end_at "${match_end_at}" '{scheduled_start_at:$scheduled_start_at,scheduled_end_at:$scheduled_end_at}')"
 )"
@@ -109,7 +109,7 @@ if [[ "${TARGET_START_MATCH}" == "true" ]]; then
   match_response="$(
     curl_json "start match" \
       -X POST "${API_URL}/api/v2/admin/game/match/start" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
 fi
 
@@ -117,7 +117,7 @@ if [[ "${TARGET_START_SCHEDULER}" == "true" ]]; then
   scheduler_start_response="$(
     curl_json "start scheduler" \
       -X POST "${API_URL}/api/v2/admin/game/scheduler/start" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}"
+      -H @<(bearer_header "${ADMIN_TOKEN}")
   )"
 fi
 

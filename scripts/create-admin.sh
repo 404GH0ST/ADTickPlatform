@@ -9,7 +9,8 @@ source "${ROOT_DIR}/scripts/lib/common.sh"
 require_bin curl
 require_bin jq
 
-# Configuration from environment with defaults
+# An explicit environment override takes precedence over the saved password.
+password_override="${ADMIN_PASSWORD:-}"
 load_default_env_files
 PROD_ENV="${PROD_ENV:-${ROOT_DIR}/deploy/compose/prod.env}"
 load_env_file_override "${PROD_ENV}"
@@ -46,8 +47,7 @@ fi
 
 ADMIN_TOKEN="$(resolve_admin_api_token "${ROOT_DIR}/.runtime/backend-stack.env")"
 
-# User information from environment or positional arguments.
-# Empty positional args (e.g. from make) fall through to env/prod.env.
+# Empty display name and email arguments fall through to the environment.
 arg_or_default() {
   local arg="${1-}"
   local fallback="${2-}"
@@ -60,13 +60,17 @@ arg_or_default() {
 
 DISPLAY_NAME="$(arg_or_default "${1-}" "${ADMIN_DISPLAY_NAME:-Organizer}")"
 EMAIL="$(arg_or_default "${2-}" "${ADMIN_EMAIL:-admin@example.com}")"
-PASSWORD="$(arg_or_default "${3-}" "${ADMIN_PASSWORD:-}")"
-WIREGUARD_OUTPUT_DIR="$(arg_or_default "${4-}" "${ADMIN_WIREGUARD_OUTPUT_DIR:-${ROOT_DIR}/.runtime/admin-wireguard}")"
+PASSWORD="${password_override:-${ADMIN_PASSWORD:-}}"
+WIREGUARD_OUTPUT_DIR="${ADMIN_WIREGUARD_OUTPUT_DIR:-${ROOT_DIR}/.runtime/admin-wireguard}"
 AUTO_RECONCILE="${ADMIN_AUTO_RECONCILE:-true}"
 
+if (( $# > 2 )); then
+  echo "Pass the organizer password through ADMIN_PASSWORD or the private production environment file." >&2
+  exit 1
+fi
 if [[ -z "${PASSWORD}" ]]; then
   echo "Error: ADMIN_PASSWORD is required." >&2
-  echo "Set it in ${PROD_ENV} (make generate-prod-env) or pass: $0 [display_name] [email] [password]" >&2
+  echo "Set it in ${PROD_ENV} (make generate-prod-env) or export ADMIN_PASSWORD." >&2
   exit 1
 fi
 
@@ -81,10 +85,12 @@ curl_json() {
   response_file="$(mktemp)"
 
   local status
-  status="$(curl "${CURL_TLS_ARGS[@]}" -sS -o "${response_file}" -w '%{http_code}' "$@")"
+  if ! status="$(curl "${CURL_TLS_ARGS[@]}" -sS -o "${response_file}" -w '%{http_code}' "$@")"; then
+    rm -f "${response_file}"
+    return 1
+  fi
   if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
     echo "${label} failed (status=${status}):" >&2
-    cat "${response_file}" >&2
     rm -f "${response_file}"
     exit 1
   fi
@@ -95,15 +101,11 @@ curl_json() {
 
 RESPONSE="$(
   curl_json "create organizer" -X POST "${API_URL}/api/v2/admin/players" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H @<(bearer_header "${ADMIN_TOKEN}") \
     -H "Content-Type: application/json" \
-    -d "{
-      \"team_id\": 0,
-      \"display_name\": \"${DISPLAY_NAME}\",
-      \"email\": \"${EMAIL}\",
-      \"password\": \"${PASSWORD}\",
-      \"role\": \"organizer\"
-    }"
+    --data-binary @<(jq -nc --arg name "${DISPLAY_NAME}" --arg email "${EMAIL}" \
+      --rawfile password <(printf '%s' "${PASSWORD}") \
+      '{team_id:0, display_name:$name, email:$email, password:$password, role:"organizer"}')
 )"
 
 PLAYER_ID="$(echo "${RESPONSE}" | jq -r '.id // empty')"
@@ -116,23 +118,33 @@ fi
 echo "fetching WireGuard config for organizer player ${PLAYER_ID}..."
 WIREGUARD_RESPONSE="$(
   curl_json "fetch organizer wireguard" -X GET "${API_URL}/api/v2/admin/players/${PLAYER_ID}/wireguard" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}"
+    -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
-mkdir -p "${WIREGUARD_OUTPUT_DIR}"
 WIREGUARD_FILE_NAME="$(echo "${WIREGUARD_RESPONSE}" | jq -r '.download_name // empty')"
 if [[ -z "${WIREGUARD_FILE_NAME}" ]]; then
   WIREGUARD_FILE_NAME="organizer-player-${PLAYER_ID}.conf"
 fi
+if [[ ! "${WIREGUARD_FILE_NAME}" =~ ^[[:alnum:]_-][[:alnum:]_.-]*\.conf$ ]]; then
+  echo "invalid organizer WireGuard config filename" >&2
+  exit 1
+fi
 WIREGUARD_CONFIG_PATH="${WIREGUARD_OUTPUT_DIR}/${WIREGUARD_FILE_NAME}"
-echo "${WIREGUARD_RESPONSE}" | jq -r '.config' > "${WIREGUARD_CONFIG_PATH}"
+(
+  umask 077
+  mkdir -p -- "${WIREGUARD_OUTPUT_DIR}"
+  config_tmp="$(mktemp -- "${WIREGUARD_OUTPUT_DIR}/.wireguard.XXXXXXXX")"
+  trap 'rm -f -- "${config_tmp}"' EXIT
+  jq -er '.config | strings | select(length > 0)' <<< "${WIREGUARD_RESPONSE}" > "${config_tmp}"
+  mv -fT -- "${config_tmp}" "${WIREGUARD_CONFIG_PATH}"
+)
 
 if [[ "${AUTO_RECONCILE}" == "true" ]]; then
   echo "reconciling wireguard/access runtime state..."
-  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/wireguard/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
+  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/wireguard/reconcile" -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null; then
     echo "warning: wireguard reconcile request failed; run it manually from organizer dashboard or API." >&2
   fi
-  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/access/reconcile" -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null; then
+  if ! curl "${CURL_TLS_ARGS[@]}" -s -X POST "${API_URL}/api/v2/admin/access/reconcile" -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null; then
     echo "warning: access reconcile request failed; run it manually from organizer dashboard or API." >&2
   fi
 fi

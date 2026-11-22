@@ -122,7 +122,7 @@ echo
 echo "Organizer login (bootstrap with: make create-admin after the stack is up)"
 echo "  ADMIN_DISPLAY_NAME=${admin_display_name}"
 echo "  ADMIN_EMAIL=${admin_email}"
-echo "  ADMIN_PASSWORD=${admin_password}"
+echo "  Password stored in ${OUTPUT}."
 if [[ -n "${challenge_source_host_path}" ]]; then
   echo "  CHALLENGE_SOURCE_HOST_PATH=${challenge_source_host_path}"
 fi

@@ -19,7 +19,7 @@ COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-ad-platform-prod}"
 
 admin_get() {
   local path="$1"
-  curl -fsS -H "Authorization: Bearer ${ADMIN_TOKEN}" "${EDGE_BASE_URL}${path}"
+  curl -fsS -H @<(bearer_header "${ADMIN_TOKEN}") "${EDGE_BASE_URL}${path}"
 }
 
 compose_cmd() {
