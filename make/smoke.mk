@@ -3,6 +3,7 @@
 	smoke-admin-realtime-authz smoke-realtime-health smoke-admin-runtime \
 	smoke-sample-challenge-docker smoke-organizer-created smoke-prod-edge \
 	smoke-prod-host-enforcement smoke-prod-host-recovery smoke-prod-short-match \
+	smoke-prod-fleet-match \
 	smoke-prod-db-restore capture-prod-host-baseline capture-go-live-metrics \
 	summarize-validation-artifacts render-validation-report check-validation-alerts \
 	go-live-check validate-prod-release-candidate render-event-ready-note \
@@ -49,6 +50,9 @@ smoke-prod-host-recovery:
 
 smoke-prod-short-match:
 	./scripts/smoke-prod-short-match.sh
+
+smoke-prod-fleet-match:
+	./scripts/smoke-prod-fleet-match.sh
 
 smoke-prod-db-restore:
 	./scripts/smoke-prod-db-restore.sh

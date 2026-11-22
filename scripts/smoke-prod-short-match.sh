@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Production short-match smoke. This is the event-shaped production smoke:
+# 10 teams, a 3-minute (180s) scheduler tick, and 6 challenges (2 pwn + 1 crypto
+# over TCP, plus flask/nodejs/php web). It drives the live edge via the
+# scheduler and writes the short-match artifact that go-live-check and the
+# host-recovery smoke consume.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,19 +22,18 @@ EDGE_BASE_URL="${PROD_EDGE_BASE_URL:-$(derive_edge_base_url)}"
 POSTGRES_DSN="${POSTGRES_DSN_HOST_ENFORCEMENT:-${POSTGRES_DSN:-}}"
 
 if [[ -z "${POSTGRES_DSN}" ]]; then
-  echo "POSTGRES_DSN_HOST_ENFORCEMENT or POSTGRES_DSN must be set in ${PROD_ENV} for prod short-match smoke." >&2
+  echo "POSTGRES_DSN_HOST_ENFORCEMENT or POSTGRES_DSN must be set in ${PROD_ENV} for the prod short-match smoke." >&2
   exit 1
 fi
 
 export AD_PLATFORM_API_URL="${EDGE_BASE_URL}"
 export ORGANIZER_SMOKE_READY_URL="${EDGE_BASE_URL}/healthz"
-export ORGANIZER_SMOKE_SKIP_STACK_BOOTSTRAP=true
-export ORGANIZER_SMOKE_USE_SCHEDULER="${ORGANIZER_SMOKE_USE_SCHEDULER:-true}"
-export ORGANIZER_SMOKE_TARGET_TICKS="${ORGANIZER_SMOKE_TARGET_TICKS:-1}"
-export ORGANIZER_SMOKE_SCHEDULER_INTERVAL_SECONDS="${ORGANIZER_SMOKE_SCHEDULER_INTERVAL_SECONDS:-5}"
-export ORGANIZER_SMOKE_SCHEDULER_WAIT_SECONDS="${ORGANIZER_SMOKE_SCHEDULER_WAIT_SECONDS:-90}"
-export ORGANIZER_SMOKE_ARTIFACT_FILE="${ORGANIZER_SMOKE_ARTIFACT_FILE:-.runtime/last-prod-short-match.env}"
 export POSTGRES_DSN
+export FLEET_SMOKE_TEAM_COUNT="${FLEET_SMOKE_TEAM_COUNT:-10}"
+export FLEET_SMOKE_TICK_INTERVAL_SECONDS="${FLEET_SMOKE_TICK_INTERVAL_SECONDS:-180}"
+export FLEET_SMOKE_TARGET_TICKS="${FLEET_SMOKE_TARGET_TICKS:-1}"
+# Downstream smokes (go-live-check, host-recovery) read this path.
+export FLEET_SMOKE_ARTIFACT_FILE="${ORGANIZER_SMOKE_ARTIFACT_FILE:-.runtime/last-prod-short-match.env}"
 
-echo "production short match smoke: edge=${EDGE_BASE_URL} target_ticks=${ORGANIZER_SMOKE_TARGET_TICKS} interval=${ORGANIZER_SMOKE_SCHEDULER_INTERVAL_SECONDS}s"
-"${ROOT_DIR}/scripts/smoke-organizer-created-flow.sh"
+echo "production short match smoke (event shape): edge=${EDGE_BASE_URL} teams=${FLEET_SMOKE_TEAM_COUNT} interval=${FLEET_SMOKE_TICK_INTERVAL_SECONDS}s"
+"${ROOT_DIR}/scripts/smoke-organizer-fleet-flow.sh"
