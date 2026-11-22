@@ -251,8 +251,8 @@ func TestHTTPCheckerValidationClient(t *testing.T) {
 	}{
 		{200, `{"status":"valid","contract_ok":true}`, ""},
 		{200, `{bad`, "invalid"},
-		{502, `{"title":"t","detail":" docker down "}`, "docker down"},
-		{502, `{"title":" Runner "}`, "Runner"},
+		{502, `{"title":"t","detail":"private-token"}`, "status 502"},
+		{502, `{"title":"private-token"}`, "status 502"},
 		{502, `{}`, "status 502"},
 		{502, `oops`, "status 502"},
 	}
@@ -271,7 +271,7 @@ func TestHTTPCheckerValidationClient(t *testing.T) {
 			}
 			continue
 		}
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-token") {
 			t.Fatalf("status %d: want %q, got %v", tc.status, tc.want, err)
 		}
 	}

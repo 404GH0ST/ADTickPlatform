@@ -86,7 +86,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	if !slices.Contains(args, "--mount") || !slices.Contains(args, "type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state") {
 		t.Fatalf("expected state volume mount args, got %v", args)
 	}
-	if !slices.Contains(args, "AD_PLATFORM_SERVICE_IP=10.80.3.11") || !slices.Contains(args, "AD_PLATFORM_SERVICE_PORT=10003") || !slices.Contains(args, "AD_CHECKER_TOKEN=checker-secret-101-3") || !slices.Contains(args, "PORT=10003") {
+	if !slices.Contains(args, "AD_PLATFORM_SERVICE_IP=10.80.3.11") || !slices.Contains(args, "AD_PLATFORM_SERVICE_PORT=10003") || !slices.Contains(args, "AD_CHECKER_TOKEN") || !slices.Contains(args, "PORT=10003") {
 		t.Fatalf("expected service ip/port env args, got %v", args)
 	}
 	if args[len(args)-1] != task.BaselineImage {
@@ -94,6 +94,7 @@ func TestBuildDockerRunArgsWithNetworkAndIP(t *testing.T) {
 	}
 	assertArgSequence(t, args, []string{
 		"run", "-d", "--init", "--restart", "unless-stopped",
+		"--log-driver", "local", "--log-opt", "max-size=10m", "--log-opt", "max-file=3",
 		"--cap-drop", "ALL",
 		"--cap-add", "CHOWN",
 		"--cap-add", "DAC_OVERRIDE",
@@ -126,6 +127,93 @@ func TestBuildDockerRunArgsWithoutNetwork(t *testing.T) {
 
 	if slices.Contains(args, "--network") || slices.Contains(args, "--ip") || slices.Contains(args, "--mount") {
 		t.Fatalf("did not expect network, ip, or mount args, got %v", args)
+	}
+}
+
+func TestDockerRunArgsBlockExternalDNSForAirgappedService(t *testing.T) {
+	task := apigateway.ControllerRuntimeTask{
+		TeamID: 101, ChallengeID: 1, ContainerName: "svc-challenge-1-team-101",
+		BaselineImage: "img/svc:1", DisableExternalDNS: true,
+	}
+	args := buildDockerRunArgs("game", "/state", testServiceSecurity(), task)
+	if !strings.Contains(strings.Join(args, " "), "--dns 127.0.0.1") {
+		t.Fatalf("airgapped service needs a container-local DNS fallback: %v", args)
+	}
+	task.DisableExternalDNS = false
+	if slices.Contains(buildDockerRunArgs("game", "/state", testServiceSecurity(), task), "--dns") {
+		t.Fatal("egress-enabled service must keep ordinary DNS")
+	}
+}
+
+func TestExistingAirgappedContainerRequiresRestrictedDNS(t *testing.T) {
+	task := apigateway.ControllerRuntimeTask{ContainerName: "svc-101-1", DisableExternalDNS: true}
+	for _, tc := range []struct {
+		servers string
+		valid   bool
+	}{
+		{`["127.0.0.1"]`, true},
+		{`null`, false},
+		{`["8.8.8.8"]`, false},
+	} {
+		bin, _ := fakeCLI(t, on("inspect --format {{json .HostConfig.Dns}} svc-101-1", reply(tc.servers, 0)))
+		err := dockerExecutor(bin, time.Second).verifyContainerDNS(context.Background(), task)
+		if (err == nil) != tc.valid {
+			t.Fatalf("DNS %s: unexpected result %v", tc.servers, err)
+		}
+	}
+}
+
+func TestDockerOperationsRejectContainerOwnedByAnotherInstance(t *testing.T) {
+	task := apigateway.ControllerRuntimeTask{
+		TeamID: 101, ChallengeID: 2, RuntimeKind: "docker", ContainerName: "legacy-collision",
+		StateVolume: "volume-current", BaselineImage: "img/svc:1", SSHHost: "10.80.2.101",
+	}
+	inspect := `old-id {"adplatform.team_id":"101","adplatform.challenge_id":"1","adplatform.state_volume":"volume-other"}`
+	bin, calls := fakeCLI(t,
+		on("ps -a --filter name=^/legacy-collision$ *", reply("legacy-collision", 0)),
+		on("inspect --format {{.Id}} {{json .Config.Labels}} legacy-collision", reply(inspect, 0)),
+	)
+	e := dockerExecutor(bin, time.Second)
+	for _, operation := range []struct {
+		name string
+		run  func() error
+	}{
+		{"ensure", func() error { return e.EnsureService(context.Background(), task) }},
+		{"reset", func() error { return e.FactoryResetService(context.Background(), task) }},
+		{"restart", func() error { return e.RestartService(context.Background(), task) }},
+		{"credential", func() error {
+			return e.ApplySSHCredential(context.Background(), task, apigateway.ControllerSSHCredential{Password: "secret"})
+		}},
+	} {
+		err := operation.run()
+		if err == nil || !strings.Contains(err.Error(), "does not belong") {
+			t.Fatalf("%s accepted another service instance: %v", operation.name, err)
+		}
+		if operation.name == "reset" {
+			var preflight resetPreflightError
+			if !errors.As(err, &preflight) || preflight.runtimeMayHaveChanged {
+				t.Fatal("ownership rejection must not consume a factory reset")
+			}
+		}
+	}
+	for _, call := range calls() {
+		if strings.HasPrefix(call, "rm ") || strings.HasPrefix(call, "volume rm ") || strings.HasPrefix(call, "restart ") || strings.HasPrefix(call, "exec ") {
+			t.Fatalf("ownership failure changed the wrong container: %s", call)
+		}
+	}
+}
+
+func TestDockerRemovalUsesInspectedContainerID(t *testing.T) {
+	task := apigateway.ControllerRuntimeTask{TeamID: 101, ChallengeID: 1, ContainerName: "svc-101-1", StateVolume: "vol-101-1"}
+	bin, calls := fakeCLI(t,
+		on(psName, reply(task.ContainerName, 0)),
+		on("inspect --format {{.Id}} {{json .Config.Labels}} svc-101-1", reply(`immutable-id {"adplatform.team_id":"101","adplatform.challenge_id":"1","adplatform.state_volume":"vol-101-1"}`, 0)),
+	)
+	if err := dockerExecutor(bin, time.Second).removeTaskContainerIfExists(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if callsMatching(calls(), "rm -f immutable-id") != 1 || callsMatching(calls(), "rm -f svc-101-1") != 0 {
+		t.Fatalf("removal must use the inspected ID: %v", calls())
 	}
 }
 
@@ -171,6 +259,9 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"case \"$1\" in\n" +
 		"  ps)\n" +
 		"    printf '%s\\n' \"$DOCKER_CONTAINER_NAME\"\n" +
+		"    ;;\n" +
+		"  inspect)\n" +
+		"    printf '%s\\n' 'svc-storage-team-101 {\"adplatform.team_id\":\"101\",\"adplatform.challenge_id\":\"3\",\"adplatform.state_volume\":\"svc-storage-team-101-state\"}'\n" +
 		"    ;;\n" +
 		"  network)\n" +
 		"    if [ \"$2\" = \"inspect\" ]; then\n" +
@@ -225,8 +316,8 @@ func TestDockerFactoryResetRemovesVolumeAndRecreatesContainer(t *testing.T) {
 		"volume rm -f svc-storage-team-101-state",
 		"network inspect adplatform_game_svc_003",
 		"network create --label adplatform.game_network=true --label adplatform.network_layout=per-service --subnet 10.80.3.0/24 adplatform_game_svc_003",
-		"run -d --init --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT --cap-add AUDIT_WRITE --security-opt no-new-privileges:true --pids-limit 256 --memory 512m --cpus 1.0 --name svc-storage-team-101 --hostname svc-storage-team-101",
-		"-e AD_CHECKER_TOKEN=checker-secret-101-3",
+		"run -d --init --restart unless-stopped --log-driver local --log-opt max-size=10m --log-opt max-file=3 --cap-drop ALL",
+		"-e AD_CHECKER_TOKEN",
 		"--mount type=volume,src=svc-storage-team-101-state,dst=/opt/ad/state",
 		"--network adplatform_game_svc_003 --ip 10.80.3.11 registry.local/storage:baseline",
 	}
@@ -243,16 +334,12 @@ func TestBuildDockerSSHCredentialArgs(t *testing.T) {
 		ChallengeID:   1,
 		ContainerName: "svc-banking-team-101",
 	}
-	credential := apigateway.ControllerSSHCredential{
-		Password: "one-time-secret",
-	}
-
-	args := buildDockerSSHCredentialArgs(task, credential)
+	args := buildDockerSSHCredentialArgs(task)
 
 	expected := []string{
 		"exec",
 		"-e",
-		"AD_PLATFORM_ROOT_PASSWORD=one-time-secret",
+		"AD_PLATFORM_ROOT_PASSWORD",
 		"svc-banking-team-101",
 		"/bin/sh",
 		"-lc",
@@ -342,7 +429,7 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected checker validation script, got %q", args[len(args)-1])
 	}
-	assertArgSequence(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
+	assertArgSequence(t, args, []string{"run", "--rm", "--log-driver=none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func assertArgSequence(t *testing.T, args []string, expected []string) {
@@ -425,6 +512,9 @@ func TestDockerEnsureServiceRecreatesExistingContainer(t *testing.T) {
 		"case \"$1\" in\n" +
 		"  ps)\n" +
 		"    printf '%s\\n' svc-banking-team-101\n" +
+		"    ;;\n" +
+		"  inspect)\n" +
+		"    printf '%s\\n' 'svc-banking-team-101 {\"adplatform.team_id\":\"101\",\"adplatform.challenge_id\":\"1\",\"adplatform.state_volume\":\"\"}'\n" +
 		"    ;;\n" +
 		"  network)\n" +
 		"    if [ \"$2\" = \"inspect\" ]; then\n" +
@@ -664,6 +754,9 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 		"  ps)\n" +
 		"    printf '%s\\n' \"$DOCKER_CONTAINER_NAME\"\n" +
 		"    ;;\n" +
+		"  inspect)\n" +
+		"    printf 'fixture-container-id {\"adplatform.team_id\":\"101\",\"adplatform.challenge_id\":\"1\",\"adplatform.state_volume\":\"%s\"}\\n' \"$DOCKER_STATE_VOLUME\"\n" +
+		"    ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
@@ -673,6 +766,7 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 		TeamID:        101,
 		ChallengeID:   1,
 		ContainerName: "svc-banking-team-101",
+		StateVolume:   "banking-current-instance",
 		BaselineImage: "registry.local/banking:baseline",
 		Endpoint:      "10.80.1.11:10001",
 		SSHHost:       "10.80.1.11",
@@ -688,9 +782,16 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 	}
 	t.Setenv("DOCKER_LOG", logPath)
 	t.Setenv("DOCKER_CONTAINER_NAME", task.ContainerName)
+	t.Setenv("DOCKER_STATE_VOLUME", "banking-retired-instance")
+	if err := executor.ApplySSHCredential(context.Background(), task, apigateway.ControllerSSHCredential{
+		Password: "retired-secret", StateVolume: task.StateVolume,
+	}); err == nil {
+		t.Fatal("a stale container under the same name received an SSH credential")
+	}
+	t.Setenv("DOCKER_STATE_VOLUME", task.StateVolume)
 
 	if err := executor.ApplySSHCredential(context.Background(), task, apigateway.ControllerSSHCredential{
-		Password: "one-time-secret",
+		Password: "one-time-secret", StateVolume: task.StateVolume,
 	}); err != nil {
 		t.Fatalf("apply ssh credential failed: %v", err)
 	}
@@ -703,12 +804,15 @@ func TestDockerApplySSHCredentialVerifiesContractBeforePasswordSet(t *testing.T)
 	expected := []string{
 		"ps -a --filter name=^/svc-banking-team-101$ --format {{.Names}}",
 		"exec svc-banking-team-101 /bin/sh -lc",
-		"exec -e AD_PLATFORM_ROOT_PASSWORD=one-time-secret svc-banking-team-101 /bin/sh -lc",
+		"exec -e AD_PLATFORM_ROOT_PASSWORD fixture-container-id /bin/sh -lc",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(logOutput, fragment) {
 			t.Fatalf("expected log fragment %q in %q", fragment, logOutput)
 		}
+	}
+	if strings.Contains(logOutput, "retired-secret") {
+		t.Fatal("credential setter ran for the wrong service instance")
 	}
 }
 

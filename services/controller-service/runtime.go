@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,9 +25,11 @@ type runtimeExecutor interface {
 	ApplySSHCredential(ctx context.Context, task apigateway.ControllerRuntimeTask, credential apigateway.ControllerSSHCredential) error
 	ValidateChallengeRuntime(ctx context.Context, request apigateway.ChallengeValidationRequest) (apigateway.ChallengeValidationResult, error)
 	RemoveService(ctx context.Context, teamID, challengeID int) error
-	RemoveTeamServices(ctx context.Context, teamID int) error
+	RemoveTeamServices(ctx context.Context, teamID int, stateVolumes ...string) error
 	RemoveChallengeServices(ctx context.Context, challengeID int) error
 }
+
+var errContainerOwnership = errors.New("container does not belong to requested service instance")
 
 // These failures are known to occur before the state volume is removed. The
 // API may reverse its provisional penalty; it marks the service degraded when
@@ -47,10 +51,12 @@ func newRuntimeExecutor() runtimeExecutor {
 	switch strings.ToLower(config.String("CONTROLLER_RUNTIME_MODE", "dry-run")) {
 	case "docker":
 		return &dockerCLIExecutor{
-			binary:         config.String("CONTROLLER_DOCKER_BIN", "docker"),
-			network:        strings.TrimSpace(config.String("CONTROLLER_DOCKER_NETWORK", "adplatform_game")),
-			networkLayout:  gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
-			stateMountPath: strings.TrimSpace(config.String("CONTROLLER_STATE_MOUNT_PATH", "/opt/ad/state")),
+			binary:           config.String("CONTROLLER_DOCKER_BIN", "docker"),
+			network:          strings.TrimSpace(config.String("CONTROLLER_DOCKER_NETWORK", "adplatform_game")),
+			networkLayout:    gamenet.NormalizeLayout(config.String("AD_PLATFORM_NETWORK_LAYOUT", "per-service")),
+			stateMountPath:   strings.TrimSpace(config.String("CONTROLLER_STATE_MOUNT_PATH", "/opt/ad/state")),
+			requireDiskQuota: config.Bool("CONTROLLER_REQUIRE_DISK_QUOTA", false),
+			diskLimitMiB:     config.Int("CONTROLLER_SERVICE_DISK_LIMIT_MIB", 0),
 			serviceSecurity: dockerRunSecurity{
 				capDrop:     csvConfig("CONTROLLER_SERVICE_CAP_DROP", "ALL"),
 				capAdd:      csvConfig("CONTROLLER_SERVICE_CAP_ADD", "CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE,SYS_CHROOT,AUDIT_WRITE"),
@@ -113,7 +119,7 @@ func (dryRunExecutor) RemoveService(_ context.Context, _, _ int) error {
 	return nil
 }
 
-func (dryRunExecutor) RemoveTeamServices(_ context.Context, _ int) error {
+func (dryRunExecutor) RemoveTeamServices(_ context.Context, _ int, _ ...string) error {
 	return nil
 }
 
@@ -126,6 +132,8 @@ type dockerCLIExecutor struct {
 	network          string
 	networkLayout    string
 	stateMountPath   string
+	requireDiskQuota bool
+	diskLimitMiB     int
 	serviceSecurity  dockerRunSecurity
 	sshApplyMode     string
 	sshContractMode  string
@@ -233,10 +241,23 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 	// inspects or network creation don't starve later steps.
 	overallCtx, overallCancel := context.WithTimeout(ctx, e.timeout*3)
 	defer overallCancel()
+	if err := e.ensureStateVolume(overallCtx, task.StateVolume); err != nil {
+		return err
+	}
 
 	exists, err := e.containerExists(overallCtx, task.ContainerName)
 	if err != nil {
 		return err
+	}
+	var containerID string
+	if exists {
+		containerID, err = e.inspectTaskContainer(overallCtx, task)
+		if err != nil {
+			return err
+		}
+		if err := e.verifyContainerDiskLimits(overallCtx, task.ContainerName); err != nil {
+			return err
+		}
 	}
 
 	if exists && e.captureEnabled() {
@@ -245,22 +266,26 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 			return err
 		}
 		if len(info.Config.Entrypoint) == 1 && info.Config.Entrypoint[0] == captureGate {
-			if err = e.reconcileCapturedService(overallCtx, task); err != nil {
-				e.stopCapturedService(task.ContainerName)
-				return err
+			// Existing guarded containers without the DNS restriction must be
+			// recreated so the current egress policy actually applies.
+			if err := e.verifyContainerDNS(overallCtx, task); err == nil {
+				if err = e.reconcileCapturedService(overallCtx, task); err != nil {
+					e.stopCapturedService(task.ContainerName)
+					return err
+				}
+				return e.verifySSHContract(overallCtx, task)
 			}
-			return e.verifySSHContract(overallCtx, task)
 		}
 	}
 	if exists {
-		if err := e.removeContainerIfExists(overallCtx, task.ContainerName); err != nil {
+		if _, err := e.execDocker(overallCtx, "rm", "-f", containerID); err != nil {
 			return err
 		}
 	}
 
 	if err := e.runFreshContainer(overallCtx, task); err != nil {
 		// Clean up any partially created container on failure.
-		_ = e.removeContainerIfExists(context.Background(), task.ContainerName)
+		_ = e.removeTaskContainerIfExists(context.Background(), task)
 		return err
 	}
 	return e.verifySSHContract(overallCtx, task)
@@ -282,8 +307,8 @@ func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigat
 	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
-	if err := e.removeContainerIfExists(runCtx, task.ContainerName); err != nil {
-		return resetPreflightError{err: err, runtimeMayHaveChanged: true}
+	if err := e.removeTaskContainerIfExists(runCtx, task); err != nil {
+		return resetPreflightError{err: err, runtimeMayHaveChanged: !errors.Is(err, errContainerOwnership)}
 	}
 	if err := e.removeVolumeIfExists(runCtx, task.StateVolume); err != nil {
 		var lookup volumeLookupError
@@ -331,6 +356,19 @@ func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.
 		}
 		return e.verifySSHContract(runCtx, task)
 	}
+	containerID, err := e.inspectTaskContainer(runCtx, task)
+	if err != nil {
+		return err
+	}
+	if err := e.verifyContainerDiskLimits(runCtx, task.ContainerName); err != nil {
+		return err
+	}
+	if err := e.verifyContainerDNS(runCtx, task); err != nil {
+		return err
+	}
+	if err := e.ensureStateVolume(runCtx, task.StateVolume); err != nil {
+		return err
+	}
 
 	if e.captureEnabled() {
 		info, err := e.inspectCapture(runCtx, task.ContainerName)
@@ -342,7 +380,7 @@ func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.
 		}
 	}
 
-	if _, err := e.execDocker(runCtx, "restart", task.ContainerName); err != nil {
+	if _, err := e.execDocker(runCtx, "restart", containerID); err != nil {
 		return err
 	}
 	if e.captureEnabled() {
@@ -354,6 +392,9 @@ func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.
 }
 
 func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigateway.ControllerRuntimeTask, credential apigateway.ControllerSSHCredential) error {
+	if credential.StateVolume != "" && credential.StateVolume != task.StateVolume {
+		return fmt.Errorf("service instance changed before applying the SSH credential")
+	}
 	if err := e.validateCaptureConfig(); err != nil {
 		return err
 	}
@@ -379,6 +420,19 @@ func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigate
 		if err := e.runFreshContainer(runCtx, task); err != nil {
 			return err
 		}
+	} else {
+		if _, err := e.inspectTaskContainer(runCtx, task); err != nil {
+			return err
+		}
+		if err := e.verifyContainerDiskLimits(runCtx, task.ContainerName); err != nil {
+			return err
+		}
+		if err := e.verifyContainerDNS(runCtx, task); err != nil {
+			return err
+		}
+		if err := e.ensureStateVolume(runCtx, task.StateVolume); err != nil {
+			return err
+		}
 	}
 	if e.captureEnabled() {
 		if err := e.reconcileCapturedService(runCtx, task); err != nil {
@@ -389,8 +443,15 @@ func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigate
 	if err := e.verifySSHContract(runCtx, task); err != nil {
 		return err
 	}
+	// The container name can be reused between the contract probe and password
+	// update. Execute against the inspected immutable ID.
+	containerID, err := e.inspectTaskContainer(runCtx, task)
+	if err != nil {
+		return err
+	}
+	task.ContainerName = containerID
 
-	_, err = e.execDocker(runCtx, buildDockerSSHCredentialArgs(task, credential)...)
+	_, err = e.execDockerWithEnv(runCtx, []string{"AD_PLATFORM_ROOT_PASSWORD=" + credential.Password}, buildDockerSSHCredentialArgs(task)...)
 	return err
 }
 
@@ -431,11 +492,17 @@ func (e *dockerCLIExecutor) ValidateChallengeRuntime(ctx context.Context, reques
 	if e.checkerValidator != nil {
 		checkerResult, err := e.checkerValidator.Validate(runCtx, checkerRequest)
 		if err != nil {
-			return result, err
+			return result, errors.New("checker validation could not be completed")
 		}
 		if checkerResult.Status != "valid" || !checkerResult.ContractOK {
 			result.Status = "invalid"
-			result.Message = checkerResult.Message
+			switch checkerResult.Message {
+			case apigateway.CheckerCapabilityFailure, apigateway.CheckerOutputLimitFailure,
+				apigateway.CheckerTimeoutFailure, apigateway.CheckerCanceledFailure:
+				result.Message = checkerResult.Message
+			default:
+				result.Message = "checker image failed runner validation."
+			}
 			return result, nil
 		}
 		if !checkerResult.ServiceStateContractOK {
@@ -445,7 +512,7 @@ func (e *dockerCLIExecutor) ValidateChallengeRuntime(ctx context.Context, reques
 		}
 	} else if _, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(checkerRequest)...); err != nil {
 		result.Status = "invalid"
-		result.Message = err.Error()
+		result.Message = "checker image failed runtime validation."
 		return result, nil
 	}
 	result.CheckerContractOK = true
@@ -462,11 +529,11 @@ func (e *dockerCLIExecutor) RemoveService(ctx context.Context, teamID, challenge
 	return e.removeByFilter(runCtx, fmt.Sprintf("label=adplatform.team_id=%d,label=adplatform.challenge_id=%d", teamID, challengeID))
 }
 
-func (e *dockerCLIExecutor) RemoveTeamServices(ctx context.Context, teamID int) error {
+func (e *dockerCLIExecutor) RemoveTeamServices(ctx context.Context, teamID int, stateVolumes ...string) error {
 	runCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
-	return e.removeByFilter(runCtx, fmt.Sprintf("label=adplatform.team_id=%d", teamID))
+	return e.removeByFilter(runCtx, fmt.Sprintf("label=adplatform.team_id=%d", teamID), stateVolumes...)
 }
 
 func (e *dockerCLIExecutor) RemoveChallengeServices(ctx context.Context, challengeID int) error {
@@ -476,14 +543,18 @@ func (e *dockerCLIExecutor) RemoveChallengeServices(ctx context.Context, challen
 	return e.removeByFilter(runCtx, fmt.Sprintf("label=adplatform.challenge_id=%d", challengeID))
 }
 
-func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string) error {
+func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string, stateVolumes ...string) error {
 	output, err := e.execDocker(ctx, "ps", "-a", "--filter", filter, "--format", "{{.ID}} {{.Labels}}")
 	if err != nil {
 		return err
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var lastErr error
+	var cleanupErrors []error
+	volumes := make(map[string]struct{}, len(stateVolumes))
+	for _, name := range stateVolumes {
+		volumes[name] = struct{}{}
+	}
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -505,19 +576,19 @@ func (e *dockerCLIExecutor) removeByFilter(ctx context.Context, filter string) e
 		}
 
 		if _, err := e.execDocker(ctx, "rm", "-f", containerID); err != nil {
-			log.Printf("failed to remove container %q: %v", containerID, err)
-			lastErr = err
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove container %q: %w", containerID, err))
 			continue
 		}
 		if stateVolume != "" {
-			if err := e.removeVolumeIfExists(ctx, stateVolume); err != nil {
-				// We don't return error here to continue cleaning up other containers
-				log.Printf("failed to remove volume %q: %v", stateVolume, err)
-			}
+			volumes[stateVolume] = struct{}{}
 		}
 	}
-
-	return lastErr
+	for name := range volumes {
+		if err := e.removeVolumeIfExists(ctx, name); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove state volume %q: %w", name, err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 func (e *dockerCLIExecutor) verifySSHContract(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
@@ -567,15 +638,35 @@ func (e *dockerCLIExecutor) containerExists(ctx context.Context, containerName s
 	return false, nil
 }
 
-func (e *dockerCLIExecutor) removeContainerIfExists(ctx context.Context, containerName string) error {
-	exists, err := e.containerExists(ctx, containerName)
+func (e *dockerCLIExecutor) inspectTaskContainer(ctx context.Context, task apigateway.ControllerRuntimeTask) (string, error) {
+	output, err := e.execDocker(ctx, "inspect", "--format", `{{.Id}} {{json .Config.Labels}}`, task.ContainerName)
+	if err != nil {
+		return "", err
+	}
+	id, labelsJSON, ok := strings.Cut(strings.TrimSpace(string(output)), " ")
+	var labels map[string]string
+	if !ok || id == "" || json.Unmarshal([]byte(labelsJSON), &labels) != nil ||
+		labels["adplatform.team_id"] != strconv.Itoa(task.TeamID) ||
+		labels["adplatform.challenge_id"] != strconv.Itoa(task.ChallengeID) ||
+		labels["adplatform.state_volume"] != task.StateVolume {
+		return "", fmt.Errorf("container %s: %w", task.ContainerName, errContainerOwnership)
+	}
+	return id, nil
+}
+
+func (e *dockerCLIExecutor) removeTaskContainerIfExists(ctx context.Context, task apigateway.ControllerRuntimeTask) error {
+	exists, err := e.containerExists(ctx, task.ContainerName)
 	if err != nil {
 		return err
 	}
 	if !exists {
 		return nil
 	}
-	_, err = e.execDocker(ctx, "rm", "-f", containerName)
+	id, err := e.inspectTaskContainer(ctx, task)
+	if err != nil {
+		return err
+	}
+	_, err = e.execDocker(ctx, "rm", "-f", id)
 	return err
 }
 
@@ -585,6 +676,12 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 		return err
 	}
 	if err := e.refreshServiceImage(ctx, task.BaselineImage); err != nil {
+		return err
+	}
+	if err := e.verifyImageVolumes(ctx, task.BaselineImage); err != nil {
+		return err
+	}
+	if err := e.ensureStateVolume(ctx, task.StateVolume); err != nil {
 		return err
 	}
 	if err := e.ensureNetwork(ctx, plan); err != nil {
@@ -603,7 +700,12 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 		if !e.captureEnabled() {
 			args = buildDockerRunArgs(plan.Name, e.stateMountPath, e.serviceSecurity, task)
 		}
-		_, runErr = e.execDocker(ctx, args...)
+		if e.diskLimitMiB > 0 {
+			// Add options before the image, including when the guard supplies
+			// the original entrypoint and command as positional operands.
+			args = append([]string{"run", "--storage-opt", "size=" + e.diskQuotaBytes()}, args[1:]...)
+		}
+		_, runErr = e.execDockerWithEnv(ctx, []string{"AD_CHECKER_TOKEN=" + task.CheckerToken}, args...)
 		if runErr == nil {
 			if e.captureEnabled() {
 				return e.reconcileCapturedService(ctx, task)
@@ -615,7 +717,9 @@ func (e *dockerCLIExecutor) runFreshContainer(ctx context.Context, task apigatew
 		}
 		// Explicitly remove the conflicting container before retrying,
 		// otherwise every retry will fail with the same naming conflict.
-		_ = e.removeContainerIfExists(ctx, task.ContainerName)
+		if err := e.removeTaskContainerIfExists(ctx, task); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for container name release: %w", runErr)
@@ -656,9 +760,14 @@ func (e *dockerCLIExecutor) networkPlan(task apigateway.ControllerRuntimeTask) (
 }
 
 func (e *dockerCLIExecutor) execDocker(ctx context.Context, args ...string) ([]byte, error) {
+	return e.execDockerWithEnv(ctx, nil, args...)
+}
+
+func (e *dockerCLIExecutor) execDockerWithEnv(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	commandCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(commandCtx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
+	cmd.Env = append(cmd.Environ(), env...)
 	output := &boundedDockerOutput{limit: maxDockerCommandOutput, cancel: cancel}
 	cmd.Stdout, cmd.Stderr = output, output
 	err := cmd.Run()
@@ -672,6 +781,7 @@ func (e *dockerCLIExecutor) execDocker(ctx context.Context, args ...string) ([]b
 			operation = strings.TrimSpace(args[0])
 		}
 		detail := strings.TrimSpace(redactControllerDockerSecrets(string(buffer), args))
+		detail = redactControllerDockerSecrets(detail, env)
 		if detail == "" {
 			return nil, fmt.Errorf("%s %s failed: %w", e.binary, operation, err)
 		}
@@ -781,6 +891,9 @@ func buildDockerRunArgs(network, stateMountPath string, security dockerRunSecuri
 		"-d",
 		"--init",
 		"--restart", "unless-stopped",
+		"--log-driver", "local",
+		"--log-opt", "max-size=10m",
+		"--log-opt", "max-file=3",
 	}
 	args = append(args, security.dockerArgs()...)
 	args = append(args,
@@ -797,9 +910,14 @@ func buildDockerRunArgs(network, stateMountPath string, security dockerRunSecuri
 		"-e", fmt.Sprintf("AD_PLATFORM_SERVICE_IP=%s", serviceIP),
 		"-e", fmt.Sprintf("AD_PLATFORM_SERVICE_PORT=%d", servicePort),
 		"-e", fmt.Sprintf("AD_PLATFORM_ENDPOINT=%s", task.Endpoint),
-		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", task.CheckerToken),
+		"-e", "AD_CHECKER_TOKEN",
 		"-e", fmt.Sprintf("PORT=%d", servicePort),
 	)
+	if task.DisableExternalDNS {
+		// Keep Docker's embedded resolver for local names while disabling its
+		// external fallback through a resolver on container loopback.
+		args = append(args, "--dns", "127.0.0.1")
+	}
 	if strings.TrimSpace(task.StateVolume) != "" && strings.TrimSpace(stateMountPath) != "" {
 		args = append(args, "--mount", fmt.Sprintf("type=volume,src=%s,dst=%s", task.StateVolume, stateMountPath))
 	}
@@ -813,10 +931,10 @@ func buildDockerRunArgs(network, stateMountPath string, security dockerRunSecuri
 	return args
 }
 
-func buildDockerSSHCredentialArgs(task apigateway.ControllerRuntimeTask, credential apigateway.ControllerSSHCredential) []string {
+func buildDockerSSHCredentialArgs(task apigateway.ControllerRuntimeTask) []string {
 	return []string{
 		"exec",
-		"-e", fmt.Sprintf("AD_PLATFORM_ROOT_PASSWORD=%s", credential.Password),
+		"-e", "AD_PLATFORM_ROOT_PASSWORD",
 		task.ContainerName,
 		"/bin/sh",
 		"-lc",
@@ -889,6 +1007,7 @@ func buildDockerCheckerValidationArgs(request apigateway.CheckerValidationReques
 	args := []string{
 		"run",
 		"--rm",
+		"--log-driver=none",
 	}
 	args = append(args, defaultProbeSecurity().dockerArgs()...)
 	args = append(args,

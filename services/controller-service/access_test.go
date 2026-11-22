@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -131,6 +132,38 @@ func TestRenderControllerAccessRulesKeepsEgressDisabledWhenNetworkClosed(t *test
 	}
 }
 
+func TestMatchPauseRulesCloseBridgedAndRoutedServiceTraffic(t *testing.T) {
+	policy := apigateway.ControllerServiceAccessPolicy{
+		ServiceIP: "10.80.1.11", NetworkClosed: true, AllowedPeerAddresses: []string{"10.70.0.2"},
+	}
+	if rules, paused := renderMatchPauseRules("access", "wg0", []apigateway.ControllerServiceAccessPolicy{policy}); paused || strings.Contains(rules, "hook forward") {
+		t.Fatalf("pre-match warmup must not be blocked: %s", rules)
+	}
+	policy.MatchPaused = true
+	rules, paused := renderMatchPauseRules("access", "wg0", []apigateway.ControllerServiceAccessPolicy{policy})
+	if !paused || !strings.Contains(rules, "table bridge access_pause {") || !strings.Contains(rules, "table inet access_pause {") ||
+		strings.Count(rules, "ip daddr { 10.80.1.11 } drop") != 2 ||
+		!strings.Contains(rules, `iifname "wg0" ip saddr { 10.70.0.2 } ip daddr 10.80.1.11 accept`) ||
+		strings.Contains(rules, "hook output") {
+		t.Fatalf("pause must close both forwarding paths and retain operator access: %s", rules)
+	}
+	policy.MatchPaused = false
+	policy.PlayDeferred = true
+	rules, paused = renderMatchPauseRules("access", "wg0", []apigateway.ControllerServiceAccessPolicy{policy})
+	if !paused || strings.Count(rules, "ip daddr { 10.80.1.11 } drop") != 2 ||
+		!strings.Contains(rules, `iifname "wg0" ip saddr { 10.70.0.2 } ip daddr 10.80.1.11 accept`) {
+		t.Fatalf("deferred play must close both forwarding paths and retain operator access: %s", rules)
+	}
+	policy.PlayDeferred = false
+	policy.MatchFinished = true
+	rules, paused = renderMatchPauseRules("access", "wg0", []apigateway.ControllerServiceAccessPolicy{policy})
+	if !paused || !strings.Contains(rules, "table bridge access_pause {") ||
+		strings.Count(rules, "ip daddr { 10.80.1.11 } drop") != 2 ||
+		!strings.Contains(rules, `iifname "wg0" ip saddr { 10.70.0.2 } ip daddr 10.80.1.11 accept`) {
+		t.Fatalf("finished match must close bridged and routed service traffic: %s", rules)
+	}
+}
+
 func TestFileServiceAccessExecutorWritesArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	executor := &fileServiceAccessExecutor{
@@ -166,14 +199,10 @@ func TestHostServiceAccessExecutorRunsNft(t *testing.T) {
 	tmpDir := t.TempDir()
 	runner := &recordingControllerCommandRunner{
 		failCommands: map[string]error{
-			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
-			"iptables -S DOCKER-USER":                            nil,
 			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
 			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
 			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
 			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
-			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
-			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
 		},
 	}
 	executor := &hostServiceAccessExecutor{
@@ -205,59 +234,77 @@ func TestHostServiceAccessExecutorRunsNft(t *testing.T) {
 	if !containsControllerCommand(runner.commands, "iptables -S DOCKER") {
 		t.Fatalf("expected backend detection command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -t raw -I PREROUTING 1 -j ADPLATFORM-WG-RAW") {
+	if !containsControllerCommand(runner.rules, "-I PREROUTING 1 -j ADPLATFORM-WG-RAW") {
 		t.Fatalf("expected raw prerouting jump command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -t raw -A ADPLATFORM-WG-RAW -i wg0 -d 10.80.1.11/32 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-RAW -i wg0 -d 10.80.1.11/32 -j ACCEPT") {
 		t.Fatalf("expected raw service bypass command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "nft delete table inet adplatform_service_access") {
-		t.Fatalf("expected nft delete command %#v", runner.commands)
+	if containsControllerCommand(runner.commands, "nft delete table inet adplatform_service_access") {
+		t.Fatalf("nftables apply must replace the table in a single command: %v", runner.commands)
+	}
+	nftRules, err := os.ReadFile(executor.paths.rulesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(nftRules), "add table inet adplatform_service_access\ndelete table inet adplatform_service_access\ntable inet adplatform_service_access {") {
+		t.Fatalf("nftables replacement must be in the rules file: %s", nftRules)
+	}
+	if !slices.Equal(runner.tables, []string{"*filter", "*raw"}) {
+		t.Fatalf("expected one restore per table, with filter first: %v", runner.tables)
+	}
+	for _, rule := range []string{":ADPLATFORM-WG-SERVICES - [0:0]", ":ADPLATFORM-WG-RAW - [0:0]"} {
+		if !slices.Contains(runner.rules, rule) {
+			t.Fatalf("missing owned chain declaration %q in %v", rule, runner.rules)
+		}
+	}
+	if slices.Contains(runner.rules, ":DOCKER-USER - [0:0]") {
+		t.Fatalf("restoring an existing Docker chain would flush its rules: %v", runner.rules)
 	}
 	if !containsControllerCommand(runner.commands, "nft -f "+executor.paths.rulesPath) {
 		t.Fatalf("expected nft apply command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -I DOCKER-USER 1 -j ADPLATFORM-WG-SERVICES") {
+	if !containsControllerCommand(runner.rules, "-I DOCKER-USER 1 -j ADPLATFORM-WG-SERVICES") {
 		t.Fatalf("expected docker-user jump command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -I FORWARD 1 -j DOCKER-USER") {
+	if !containsControllerCommand(runner.rules, "-I FORWARD 1 -j DOCKER-USER") {
 		t.Fatalf("expected forward jump command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -I FORWARD 1 -j ADPLATFORM-WG-SERVICES") {
+	if !containsControllerCommand(runner.rules, "-I FORWARD 1 -j ADPLATFORM-WG-SERVICES") {
 		t.Fatalf("expected direct chain forward jump command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -p tcp --dport 10001 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -p tcp --dport 10001 -j ACCEPT") {
 		t.Fatalf("expected service accept command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 10001 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 10001 -j ACCEPT") {
 		t.Fatalf("expected service fallback accept command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") {
 		t.Fatalf("expected reverse service port accept command %#v", runner.commands)
 	}
 	// The interface-agnostic source-port accept must not be emitted (replies are
 	// covered by the global ESTABLISHED,RELATED accept; a bare version would let
 	// a service originate NEW packets past the SSH drop).
-	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") ||
-		containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
+	if containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -j ACCEPT") ||
+		containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -s 10.80.1.11/32 -p tcp --sport 10001 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
 		t.Fatalf("interface-agnostic reverse service-port accept must not be emitted %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -o wg0 -s 10.80.1.11/32 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT") {
 		t.Fatalf("expected reverse accept command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.70.11.20 -d 10.80.1.11/32 -p tcp --dport 22 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -s 10.70.11.20 -d 10.80.1.11/32 -p tcp --dport 22 -j ACCEPT") {
 		t.Fatalf("expected ssh fallback allowlist command %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP") {
 		t.Fatalf("expected ssh fallback drop command %#v", runner.commands)
 	}
-	allowSSH := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -s 10.70.11.20 -d 10.80.1.11/32 -p tcp --dport 22 -j ACCEPT")
-	denySSH := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP")
-	established := slices.Index(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT")
+	allowSSH := slices.Index(runner.rules, "-A ADPLATFORM-WG-SERVICES -s 10.70.11.20 -d 10.80.1.11/32 -p tcp --dport 22 -j ACCEPT")
+	denySSH := slices.Index(runner.rules, "-A ADPLATFORM-WG-SERVICES -d 10.80.1.11/32 -p tcp --dport 22 -j DROP")
+	established := slices.Index(runner.rules, "-A ADPLATFORM-WG-SERVICES -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT")
 	if allowSSH < 0 || denySSH <= allowSSH || established <= denySSH {
 		t.Fatalf("expected SSH allowlist and drop before accepting established traffic: %v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.11/32 -j DROP") {
 		t.Fatalf("expected residual WG default-deny for open service %#v", runner.commands)
 	}
 	if status.Mode != "host" || status.FirewallBackend != "nftables" {
@@ -302,14 +349,10 @@ func TestHostServiceAccessExecutorIptablesOnlyDeletesNftTable(t *testing.T) {
 	tmpDir := t.TempDir()
 	runner := &recordingControllerCommandRunner{
 		failCommands: map[string]error{
-			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
-			"iptables -S DOCKER-USER":                            nil,
 			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
 			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
 			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
 			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
-			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
-			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
 		},
 	}
 	executor := &hostServiceAccessExecutor{
@@ -342,26 +385,27 @@ func TestHostServiceAccessExecutorIptablesOnlyDeletesNftTable(t *testing.T) {
 	if !containsControllerCommand(runner.commands, "nft delete table inet adplatform_service_access") {
 		t.Fatalf("expected nft delete command when using iptables backend, got %#v", runner.commands)
 	}
-	// Must NOT apply nftables rules
-	for _, cmd := range runner.commands {
-		if strings.HasPrefix(cmd, "nft -f") {
-			t.Fatalf("expected no nft apply command when using iptables backend, got %q", cmd)
-		}
+	// The regular rules use iptables. nftables still owns the pause guard.
+	if containsControllerCommand(runner.commands, "nft -f "+executor.paths.rulesPath) ||
+		!containsControllerCommand(runner.commands, "nft -f "+executor.paths.rulesPath+".pause") {
+		t.Fatalf("unexpected nftables apply commands: %#v", runner.commands)
 	}
 	// SSH allowlist rules must still be applied via iptables
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.11.20 -d 10.80.2.12/32 -p tcp --dport 22 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.11.20 -d 10.80.2.12/32 -p tcp --dport 22 -j ACCEPT") {
 		t.Fatalf("expected ssh allowlist for organizer %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.12.22 -d 10.80.2.12/32 -p tcp --dport 22 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.12.22 -d 10.80.2.12/32 -p tcp --dport 22 -j ACCEPT") {
 		t.Fatalf("expected ssh allowlist for team member %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.2.12/32 -p tcp --dport 22 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.2.12/32 -p tcp --dport 22 -j DROP") {
 		t.Fatalf("expected ssh drop rule %#v", runner.commands)
 	}
 }
 
 type recordingControllerCommandRunner struct {
 	commands     []string
+	tables       []string
+	rules        []string
 	failCommands map[string]error
 }
 
@@ -370,6 +414,21 @@ func (r *recordingControllerCommandRunner) Run(_ context.Context, binary string,
 	r.commands = append(r.commands, command)
 	if err, ok := r.failCommands[command]; ok {
 		return err
+	}
+	if strings.HasSuffix(binary, "-restore") {
+		if len(args) != 3 || args[0] != "--wait" || args[1] != "--noflush" {
+			return fmt.Errorf("unexpected restore options: %v", args)
+		}
+		body, err := os.ReadFile(args[2])
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+		if lines[len(lines)-1] != "COMMIT" {
+			return fmt.Errorf("restore is missing COMMIT: %s", body)
+		}
+		r.tables = append(r.tables, lines[0])
+		r.rules = append(r.rules, lines[1:len(lines)-1]...)
 	}
 	return nil
 }
@@ -400,14 +459,10 @@ func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
 	tmpDir := t.TempDir()
 	runner := &recordingControllerCommandRunner{
 		failCommands: map[string]error{
-			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
-			"iptables -S DOCKER-USER":                            nil,
 			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
 			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
 			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
 			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
-			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
-			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
 		},
 	}
 	executor := &hostServiceAccessExecutor{
@@ -438,21 +493,21 @@ func TestHostServiceAccessExecutorIptablesDropsWhenNetworkClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected apply to succeed, got %v", err)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.0.2 -d 10.80.1.12/32 -j ACCEPT") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -s 10.70.0.2 -d 10.80.1.12/32 -j ACCEPT") {
 		t.Fatalf("expected organizer WireGuard accept while closed, got %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.12/32 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -i wg0 -d 10.80.1.12/32 -j DROP") {
 		t.Fatalf("expected WG-interface drop while closed, got %#v", runner.commands)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.1.12/32 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.1.12/32 -j DROP") {
 		t.Fatalf("expected egress drop while closed, got %#v", runner.commands)
 	}
 	// Full dest DROP would block host paths that hairpin through FORWARD.
-	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -j DROP") {
+	if containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -j DROP") {
 		t.Fatalf("did not expect full destination DROP while wg iif is set, got %#v", runner.commands)
 	}
 	// No public service-port ACCEPT for participants.
-	if containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -p tcp --dport 8160 -j ACCEPT") {
+	if containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -d 10.80.1.12/32 -p tcp --dport 8160 -j ACCEPT") {
 		t.Fatalf("did not expect public service ACCEPT while closed, got %#v", runner.commands)
 	}
 }
@@ -461,14 +516,10 @@ func TestHostServiceAccessExecutorIptablesDropsEgressWhenDisabled(t *testing.T) 
 	tmpDir := t.TempDir()
 	runner := &recordingControllerCommandRunner{
 		failCommands: map[string]error{
-			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
-			"iptables -S DOCKER-USER":                            nil,
 			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
 			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
 			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
 			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
-			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
-			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
 		},
 	}
 	executor := &hostServiceAccessExecutor{
@@ -496,7 +547,7 @@ func TestHostServiceAccessExecutorIptablesDropsEgressWhenDisabled(t *testing.T) 
 	if err != nil {
 		t.Fatalf("expected apply to succeed, got %v", err)
 	}
-	if !containsControllerCommand(runner.commands, "iptables -A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.7.11/32 -j DROP") {
+	if !containsControllerCommand(runner.rules, "-A ADPLATFORM-WG-SERVICES -o eth0 -s 10.80.7.11/32 -j DROP") {
 		t.Fatalf("expected iptables egress drop for airgapped service, got %#v", runner.commands)
 	}
 }
@@ -505,14 +556,10 @@ func TestHostServiceAccessExecutorIptablesSkipsEgressDropWithoutInternetInterfac
 	tmpDir := t.TempDir()
 	runner := &recordingControllerCommandRunner{
 		failCommands: map[string]error{
-			"iptables -N DOCKER-USER":                            errors.New("chain exists"),
-			"iptables -S DOCKER-USER":                            nil,
 			"iptables -C DOCKER-USER -j ADPLATFORM-WG-SERVICES":  errors.New("rule not found"),
 			"iptables -C FORWARD -j DOCKER-USER":                 errors.New("rule not found"),
 			"iptables -C FORWARD -j ADPLATFORM-WG-SERVICES":      errors.New("rule not found"),
 			"iptables -t raw -C PREROUTING -j ADPLATFORM-WG-RAW": errors.New("rule not found"),
-			"iptables -N ADPLATFORM-WG-SERVICES":                 errors.New("chain exists"),
-			"iptables -S ADPLATFORM-WG-SERVICES":                 nil,
 		},
 	}
 	executor := &hostServiceAccessExecutor{
@@ -539,8 +586,8 @@ func TestHostServiceAccessExecutorIptablesSkipsEgressDropWithoutInternetInterfac
 	if err != nil {
 		t.Fatalf("expected apply to succeed, got %v", err)
 	}
-	for _, cmd := range runner.commands {
-		if strings.HasPrefix(cmd, "iptables -A ADPLATFORM-WG-SERVICES -o eth0") {
+	for _, cmd := range runner.rules {
+		if strings.HasPrefix(cmd, "-A ADPLATFORM-WG-SERVICES -o eth0") {
 			t.Fatalf("expected no -o eth0 rule without internet interface, got %q", cmd)
 		}
 	}

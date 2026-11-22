@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"adplatform/internal/platform/config"
@@ -104,6 +105,7 @@ type controllerTrustedReconciler struct {
 	store     controllerReconcileStore
 	executor  runtimeExecutor
 	access    serviceAccessExecutor
+	accessMu  *sync.Mutex
 	wireGuard controllerWireGuardReconciler
 	now       func() time.Time
 }
@@ -215,6 +217,10 @@ func (r controllerTrustedReconciler) ReconcileWithOptions(ctx context.Context, o
 		return result, nil
 	}
 
+	if r.accessMu != nil {
+		r.accessMu.Lock()
+		defer r.accessMu.Unlock()
+	}
 	policies, err := r.store.ListControllerServiceAccessPolicies(ctx)
 	if err != nil {
 		return controllerDeploymentReconcileState{}, err

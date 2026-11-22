@@ -26,6 +26,41 @@ func dockerExecutor(bin string, timeout time.Duration) *dockerCLIExecutor {
 	return &dockerCLIExecutor{binary: bin, network: "adplatform_game", networkLayout: "per-service", stateMountPath: "/state", serviceSecurity: testServiceSecurity(), sshContractMode: "verify", sshApplyMode: "docker-exec", timeout: timeout}
 }
 
+func TestDockerExecutorQuotaManagedStorage(t *testing.T) {
+	ctx := context.Background()
+	task := apigateway.ControllerRuntimeTask{
+		TeamID: 101, ChallengeID: 1, ContainerName: "fixture-service",
+		BaselineImage: "fixture-image", StateVolume: "fixture-state", RuntimeKind: "docker",
+		SSHHost: "10.80.1.11", Endpoint: "10.80.1.11:10001",
+	}
+	for _, storage := range []struct {
+		name, options string
+		allowed       bool
+	}{
+		{"quota", `local {"size":"1073741824"}`, true},
+		{"legacy", "local null", false},
+	} {
+		t.Run(storage.name, func(t *testing.T) {
+			bin, calls := fakeCLI(t,
+				on("image inspect --format *", reply("null", 0)),
+				on("volume inspect --format *", reply(storage.options, 0)),
+			)
+			executor := dockerExecutor(bin, time.Second)
+			executor.requireDiskQuota = true
+			executor.diskLimitMiB = 1024
+			err := executor.EnsureService(ctx, task)
+			if storage.allowed {
+				if err != nil || callsMatching(calls(), "run --storage-opt size=1073741824") != 1 ||
+					callsMatching(calls(), "volume create --driver local --opt size=1073741824 -- fixture-state") == 0 {
+					t.Fatalf("expected quotas on the layer and volume, calls=%v err=%v", calls(), err)
+				}
+			} else if err == nil || callsMatching(calls(), "run ") != 0 || callsMatching(calls(), "volume rm") != 0 {
+				t.Fatalf("legacy data must remain available for offline migration, calls=%v err=%v", calls(), err)
+			}
+		})
+	}
+}
+
 func TestDockerEnsureServiceBranches(t *testing.T) {
 	ctx := context.Background()
 	task := runtimeTask()
@@ -251,7 +286,7 @@ func TestDockerRestartAndCredentialBranches(t *testing.T) {
 	if err := dockerExecutor(bin, time.Second).RestartService(ctx, task); err == nil {
 		t.Fatal("a failed restart must fail")
 	}
-	bin, _ = fakeCLI(t, on(psName, reply("svc-101-1", 0)), on("exec -e AD_PLATFORM_ROOT_PASSWORD=*", reply("chpasswd failed", 1)))
+	bin, _ = fakeCLI(t, on(psName, reply("svc-101-1", 0)), on("exec -e AD_PLATFORM_ROOT_PASSWORD *", reply("chpasswd failed", 1)))
 	if err := dockerExecutor(bin, time.Second).ApplySSHCredential(ctx, task, apigateway.ControllerSSHCredential{Password: "p"}); err == nil {
 		t.Fatal("a failed password set must fail")
 	}
@@ -281,8 +316,8 @@ func TestDockerValidateChallengeRuntimeBranches(t *testing.T) {
 	if result, _ := dockerExecutor(failing, time.Second).ValidateChallengeRuntime(ctx, request); result.Status != "invalid" || result.BaselineSSHContractOK {
 		t.Fatalf("a failing baseline probe is invalid: %+v", result)
 	}
-	baselineOnly, _ := fakeCLI(t, seq("run --rm *", reply("", 0), reply("no checker", 1)))
-	if result, _ := dockerExecutor(baselineOnly, time.Second).ValidateChallengeRuntime(ctx, request); result.Status != "invalid" || !result.BaselineSSHContractOK {
+	baselineOnly, _ := fakeCLI(t, seq("run --rm *", reply("", 0), reply("private-token", 1)))
+	if result, _ := dockerExecutor(baselineOnly, time.Second).ValidateChallengeRuntime(ctx, request); result.Status != "invalid" || !result.BaselineSSHContractOK || result.Message != "checker image failed runtime validation." {
 		t.Fatalf("a failing checker probe is invalid: %+v", result)
 	}
 	for name, tc := range map[string]struct {
@@ -290,8 +325,8 @@ func TestDockerValidateChallengeRuntimeBranches(t *testing.T) {
 		wantErr   bool
 		want      string
 	}{
-		"runner error": {scriptedValidator{err: errors.New("runner down")}, true, ""},
-		"invalid":      {scriptedValidator{result: apigateway.CheckerValidationResult{Status: "invalid", Message: "bad checker"}}, false, "invalid"},
+		"runner error": {scriptedValidator{err: errors.New("private-token")}, true, ""},
+		"invalid":      {scriptedValidator{result: apigateway.CheckerValidationResult{Status: "invalid", Message: "private-token"}}, false, "invalid"},
 		"no state":     {scriptedValidator{result: apigateway.CheckerValidationResult{Status: "valid", ContractOK: true}}, false, "invalid"},
 		"fully valid":  {scriptedValidator{result: apigateway.CheckerValidationResult{Status: "valid", ContractOK: true, ServiceStateContractOK: true}}, false, "valid"},
 	} {
@@ -300,6 +335,9 @@ func TestDockerValidateChallengeRuntimeBranches(t *testing.T) {
 		result, err := e.ValidateChallengeRuntime(ctx, request)
 		if (err != nil) != tc.wantErr || (!tc.wantErr && result.Status != tc.want) {
 			t.Fatalf("%s: %+v %v", name, result, err)
+		}
+		if strings.Contains(result.Message, "private-token") || (err != nil && strings.Contains(err.Error(), "private-token")) {
+			t.Fatalf("%s: checker validation exposed private diagnostics: %+v %v", name, result, err)
 		}
 	}
 }
@@ -324,6 +362,21 @@ func TestDockerRemoveByFilter(t *testing.T) {
 	e = dockerExecutor(bin, time.Second)
 	if e.RemoveService(ctx, 101, 1) != nil || e.RemoveChallengeServices(ctx, 1) != nil {
 		t.Fatal("no matching containers is a success")
+	}
+}
+
+func TestRemoveTeamServicesRequiresCleanupOfKnownOrphanVolume(t *testing.T) {
+	bin, calls := fakeCLI(t,
+		on("volume ls *", reply("orphaned-volume\n", 0)),
+		on("volume rm -f orphaned-volume", reply("cannot remove volume", 1)),
+	)
+	executor := dockerExecutor(bin, time.Second)
+	err := executor.RemoveTeamServices(context.Background(), 101, "orphaned-volume")
+	if err == nil || !strings.Contains(err.Error(), "remove state volume") {
+		t.Fatalf("cleanup failure must prevent team deletion: %v", err)
+	}
+	if callsMatching(calls(), "volume rm -f orphaned-volume") != 1 {
+		t.Fatalf("expected cleanup without a matching container: %v", calls())
 	}
 }
 

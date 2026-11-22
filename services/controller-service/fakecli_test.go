@@ -62,6 +62,9 @@ func fakeCLI(t *testing.T, rules ...cliRule) (string, func() []string) {
 		}
 		fmt.Fprintf(&script, "  %s) i=%d; len=%d ;;\n", shellGlob(rule.match), i, len(rule.outs))
 	}
+	// Most runtime fixtures use the same instance. Return a matching inspect
+	// record unless a test supplies an explicit ownership rule above.
+	script.WriteString("  'inspect --format {{.Id}} {{json .Config.Labels}} svc-101-1') printf '%s\\n' 'svc-101-1 {\"adplatform.team_id\":\"101\",\"adplatform.challenge_id\":\"1\",\"adplatform.state_volume\":\"vol-101-1\"}'; exit 0 ;;\n")
 	script.WriteString("  *) exit 0 ;;\nesac\n")
 	fmt.Fprintf(&script, "d='%s'\nn=$(cat \"$d/cnt.$i\" 2>/dev/null || echo 0); n=$((n+1)); echo $n > \"$d/cnt.$i\"\n", dir)
 	script.WriteString("k=$n; [ $k -gt $len ] && k=$len\ncat \"$d/out.$i.$k\"\nexit $(cat \"$d/code.$i.$k\")\n")

@@ -63,16 +63,6 @@ func (c *httpCheckerValidationClient) Validate(ctx context.Context, request apig
 		return payload, nil
 	}
 
-	var problem httpapi.ProblemDetails
-	if err := json.NewDecoder(resp.Body).Decode(&problem); err != nil {
-		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
-	}
-	if strings.TrimSpace(problem.Detail) != "" {
-		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed: %s", strings.TrimSpace(problem.Detail))
-	}
-	if strings.TrimSpace(problem.Title) != "" {
-		return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed: %s", strings.TrimSpace(problem.Title))
-	}
 	return apigateway.CheckerValidationResult{}, fmt.Errorf("checker-runner request failed with status %d", resp.StatusCode)
 }
 

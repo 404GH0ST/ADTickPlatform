@@ -104,8 +104,8 @@ func TestSelectIptablesBinaryFallbacks(t *testing.T) {
 	if status, err := e.Apply(ctx, accessPolicies(), time.Now()); err == nil || status.State != "error" {
 		t.Fatalf("apply without a backend: %+v %v", status, err)
 	}
-	if err := e.Teardown(ctx); err != nil {
-		t.Fatalf("teardown is best effort: %v", err)
+	if err := e.Teardown(ctx); err == nil || !strings.Contains(err.Error(), "rules.nft.pause") {
+		t.Fatalf("teardown must report a failed pause guard removal: %v", err)
 	}
 }
 

@@ -55,7 +55,9 @@ func (f *fakeRuntime) ValidateChallengeRuntime(context.Context, apigateway.Chall
 }
 
 func (f *fakeRuntime) RemoveService(context.Context, int, int) error { return f.record("remove") }
-func (f *fakeRuntime) RemoveTeamServices(context.Context, int) error { return f.record("remove-team") }
+func (f *fakeRuntime) RemoveTeamServices(context.Context, int, ...string) error {
+	return f.record("remove-team")
+}
 func (f *fakeRuntime) RemoveChallengeServices(context.Context, int) error {
 	return f.record("remove-challenge")
 }

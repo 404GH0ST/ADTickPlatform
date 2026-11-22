@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ type controllerServer struct {
 	store      apigateway.Store
 	executor   runtimeExecutor
 	access     serviceAccessExecutor
+	accessMu   sync.Mutex
 	wireGuard  controllerWireGuardReconciler
 	metrics    *controllerServiceMetrics
 	now        func() time.Time
@@ -134,13 +136,15 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 		return
 	}
 	started := time.Now()
-	result, err := newControllerTrustedReconciler(
+	reconciler := newControllerTrustedReconciler(
 		controllerReconcileStoreAdapter{store: s.store},
 		s.executor,
 		s.access,
 		s.wireGuard,
 		s.now,
-	).Reconcile(r.Context())
+	)
+	reconciler.accessMu = &s.accessMu
+	result, err := reconciler.Reconcile(r.Context())
 	if err != nil {
 		s.metrics.recordDeploymentReconcile(time.Since(started), result.ProcessedInstances, true)
 		var reconcileErr *controllerReconcilePhaseError
@@ -188,6 +192,8 @@ func (s *controllerServer) handleReconcileAccessPolicies(w http.ResponseWriter, 
 		return
 	}
 	started := time.Now()
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
 	policies, err := s.store.ListControllerServiceAccessPolicies(r.Context())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeGlobal, time.Since(started), 0, true)
@@ -224,6 +230,8 @@ func (s *controllerServer) handleTeardownAccessPolicies(w http.ResponseWriter, r
 		return
 	}
 	started := time.Now()
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
 	if err := s.access.Teardown(r.Context()); err != nil {
 		s.metrics.recordOperation(controllerOperationAccessTeardown, time.Since(started), true)
 		writeProblem(w, http.StatusInternalServerError, "Access teardown failed", err.Error())
@@ -261,6 +269,8 @@ func (s *controllerServer) handleReconcileServiceAccess(w http.ResponseWriter, r
 		writeProblem(w, status, "Request failed", message)
 		return
 	}
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
 	policies, err := s.store.ListControllerServiceAccessPolicies(r.Context())
 	if err != nil {
 		s.metrics.recordAccessReconcile(controllerAccessScopeService, time.Since(started), 0, true)
@@ -395,7 +405,13 @@ func (s *controllerServer) handleRemoveTeamServices(w http.ResponseWriter, r *ht
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "team id is invalid.")
 		return
 	}
-	if err := s.executor.RemoveTeamServices(r.Context(), teamID); err != nil {
+	volumes, err := s.store.ListControllerTeamStateVolumes(r.Context(), teamID)
+	if err != nil {
+		s.metrics.recordOperation(controllerOperationRemoveTeam, time.Since(started), true)
+		writeProblem(w, http.StatusInternalServerError, "Remove team services failed", "team state volumes could not be listed.")
+		return
+	}
+	if err := s.executor.RemoveTeamServices(r.Context(), teamID, volumes...); err != nil {
 		s.metrics.recordOperation(controllerOperationRemoveTeam, time.Since(started), true)
 		writeProblem(w, http.StatusInternalServerError, "Remove team services failed", err.Error())
 		return

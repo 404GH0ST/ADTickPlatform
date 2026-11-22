@@ -178,6 +178,17 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 
 	applyCtx, cancel := context.WithTimeout(ctx, e.applyTimeout)
 	defer cancel()
+	pauseRules, guarded := renderMatchPauseRules(e.firewallTable, e.interfaceName, policies)
+	// Close the bridge before changing the routed rules. On resume keep the
+	// pause guard until the ordinary access policy has been applied.
+	if guarded {
+		if err := e.applyMatchPauseRules(applyCtx, pauseRules); err != nil {
+			status.State = "error"
+			status.LastError = err.Error()
+			_ = writeControllerAccessStatus(e.paths.statusPath, status)
+			return status, err
+		}
+	}
 	iptablesBinary, err := e.selectIptablesBinary(applyCtx)
 	if err != nil {
 		status.State = "error"
@@ -189,41 +200,35 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 
 	if e.firewallBackend == "nftables" {
 		log.Printf("applying nftables rules from %s", e.paths.rulesPath)
-		_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
 		if err := e.runner.Run(applyCtx, e.nftBinary, "-f", e.paths.rulesPath); err != nil {
 			status.State = "error"
 			status.LastError = err.Error()
 			_ = writeControllerAccessStatus(e.paths.statusPath, status)
 			return status, err
 		}
-		// Docker traffic still traverses iptables raw/filter hooks on the host.
-		// Keep those jumps and bypass rules aligned even when nftables owns the
-		// service policy table itself.
-		if err := e.applyDockerRawRules(applyCtx, iptablesBinary, policies); err != nil {
-			status.State = "error"
-			status.LastError = err.Error()
-			_ = writeControllerAccessStatus(e.paths.statusPath, status)
-			return status, err
-		}
-		if err := e.applyDockerUserRules(applyCtx, iptablesBinary, policies); err != nil {
-			status.State = "error"
-			status.LastError = err.Error()
-			_ = writeControllerAccessStatus(e.paths.statusPath, status)
-			return status, err
-		}
-	} else {
-		// When using iptables backend, clean up any orphaned nftables table
-		// to prevent it from silently overriding iptables rules.
-		_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+	}
 
-		log.Printf("applying iptables rules")
-		if err := e.applyDockerRawRules(applyCtx, iptablesBinary, policies); err != nil {
-			status.State = "error"
-			status.LastError = err.Error()
-			_ = writeControllerAccessStatus(e.paths.statusPath, status)
-			return status, err
-		}
-		if err := e.applyDockerUserRules(applyCtx, iptablesBinary, policies); err != nil {
+	// Docker still uses the filter and raw hooks with either backend. Put the
+	// restrictive filter rules in place before updating the raw bypasses.
+	if err := e.applyDockerUserRules(applyCtx, iptablesBinary, policies); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
+	if err := e.applyDockerRawRules(applyCtx, iptablesBinary, policies); err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
+	if e.firewallBackend != "nftables" {
+		// Leave any previous nftables policy in place until its replacement
+		// is active, including when switching backends.
+		_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+	}
+	if !guarded {
+		if err := e.applyMatchPauseRules(applyCtx, pauseRules); err != nil {
 			status.State = "error"
 			status.LastError = err.Error()
 			_ = writeControllerAccessStatus(e.paths.statusPath, status)
@@ -237,6 +242,17 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 		return status, err
 	}
 	return status, nil
+}
+
+func (e *hostServiceAccessExecutor) applyMatchPauseRules(ctx context.Context, rules string) error {
+	path := e.paths.rulesPath + ".pause"
+	if err := ensureControllerParentDir(path); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(rules), 0o600); err != nil {
+		return err
+	}
+	return e.runner.Run(ctx, e.nftBinary, "-f", path)
 }
 
 func (e *hostServiceAccessExecutor) Teardown(ctx context.Context) error {
@@ -262,6 +278,11 @@ func (e *hostServiceAccessExecutor) Teardown(ctx context.Context) error {
 		_ = e.runner.Run(applyCtx, iptablesBinary, "-t", "raw", "-X", rawChain)
 	}
 
+	pauseRules, _ := renderMatchPauseRules(e.firewallTable, e.interfaceName, nil)
+	if err := e.applyMatchPauseRules(applyCtx, pauseRules); err != nil {
+		return err
+	}
+	_ = os.Remove(e.paths.rulesPath + ".pause")
 	return e.fileServiceAccessExecutor.Teardown(ctx)
 }
 
@@ -274,197 +295,129 @@ func (execControllerCommandRunner) Run(ctx context.Context, binary string, args 
 	return nil
 }
 
-func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, iptablesBinary string, policies []apigateway.ControllerServiceAccessPolicy) error {
-	const chainName = "ADPLATFORM-WG-RAW"
-
-	if err := e.ensureIptablesChain(ctx, iptablesBinary, "raw", chainName); err != nil {
-		return err
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-C", "PREROUTING", "-j", chainName); err != nil {
-		if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-I", "PREROUTING", "1", "-j", chainName); err != nil {
-			return err
-		}
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-F", chainName); err != nil {
-		return err
+func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, binary string, policies []apigateway.ControllerServiceAccessPolicy) error {
+	const chain = "ADPLATFORM-WG-RAW"
+	var rules strings.Builder
+	fmt.Fprintf(&rules, "*raw\n:%s - [0:0]\n", chain)
+	if err := e.runner.Run(ctx, binary, "-t", "raw", "-C", "PREROUTING", "-j", chain); err != nil {
+		fmt.Fprintf(&rules, "-I PREROUTING 1 -j %s\n", chain)
 	}
 	for _, policy := range policies {
-		if !isValidIP(policy.ServiceIP) {
-			continue
-		}
-		// Always accept in raw for docker/WG path quirks. Closed participant
-		// traffic is still dropped in filter; organizer peers are allowlisted.
-		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
-		if strings.TrimSpace(e.interfaceName) != "" {
-			if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-t", "raw", "-A", chainName, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
-			return err
+		if isValidIP(policy.ServiceIP) {
+			// Filter still drops participant traffic to closed services.
+			fmt.Fprintf(&rules, "-A %s%s -d %s/32 -j ACCEPT\n", chain, iptablesInterface("-i", e.interfaceName), policy.ServiceIP)
 		}
 	}
-	return nil
+	return e.restoreIptablesTable(ctx, binary, rules.String())
 }
 
-func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, iptablesBinary string, policies []apigateway.ControllerServiceAccessPolicy) error {
-	const chainName = "ADPLATFORM-WG-SERVICES"
-	const dockerUserChain = "DOCKER-USER"
+func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, binary string, policies []apigateway.ControllerServiceAccessPolicy) error {
+	const chain = "ADPLATFORM-WG-SERVICES"
+	const dockerUser = "DOCKER-USER"
 
-	if err := e.ensureIptablesChain(ctx, iptablesBinary, "filter", dockerUserChain); err != nil {
-		return err
+	var rules strings.Builder
+	fmt.Fprintf(&rules, "*filter\n:%s - [0:0]\n", chain)
+	if err := e.runner.Run(ctx, binary, "-S", dockerUser); err != nil {
+		// A declaration would flush any existing Docker-owned rules.
+		fmt.Fprintf(&rules, "-N %s\n", dockerUser)
 	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-C", "FORWARD", "-j", dockerUserChain); err != nil {
-		if err := e.runner.Run(ctx, iptablesBinary, "-I", "FORWARD", "1", "-j", dockerUserChain); err != nil {
-			return err
+	for _, jump := range [][2]string{{"FORWARD", dockerUser}, {dockerUser, chain}, {"FORWARD", chain}} {
+		if err := e.runner.Run(ctx, binary, "-C", jump[0], "-j", jump[1]); err != nil {
+			fmt.Fprintf(&rules, "-I %s 1 -j %s\n", jump[0], jump[1])
 		}
 	}
 
-	if err := e.ensureIptablesChain(ctx, iptablesBinary, "filter", chainName); err != nil {
-		return err
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-F", chainName); err != nil {
-		return err
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-C", dockerUserChain, "-j", chainName); err != nil {
-		if err := e.runner.Run(ctx, iptablesBinary, "-I", dockerUserChain, "1", "-j", chainName); err != nil {
-			return err
-		}
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-C", "FORWARD", "-j", chainName); err != nil {
-		if err := e.runner.Run(ctx, iptablesBinary, "-I", "FORWARD", "1", "-j", chainName); err != nil {
-			return err
-		}
-	}
-	// Closed services first (before ESTABLISHED): organizer WG peers may probe;
-	// other WG peers are dropped. Host-local paths (no WG iif) stay open for nc.
+	ingress := iptablesInterface("-i", e.interfaceName)
+	egress := iptablesInterface("-o", e.interfaceName)
+	// Closed services and SSH are checked before established connections.
 	for _, policy := range policies {
 		if !policy.NetworkClosed || !isValidIP(policy.ServiceIP) {
 			continue
 		}
-		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
 		for _, peer := range policy.AllowedPeerAddresses {
 			if !isValidIP(peer) {
 				continue
 			}
-			if strings.TrimSpace(e.interfaceName) != "" {
-				if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
-					return err
-				}
+			if ingress != "" {
+				fmt.Fprintf(&rules, "-A %s%s -s %s -d %s/32 -j ACCEPT\n", chain, ingress, peer, policy.ServiceIP)
 			}
-			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-s", peer, "-d", serviceCIDR, "-j", "ACCEPT"); err != nil {
-				return err
-			}
+			fmt.Fprintf(&rules, "-A %s -s %s -d %s/32 -j ACCEPT\n", chain, peer, policy.ServiceIP)
 		}
-		if strings.TrimSpace(e.interfaceName) != "" {
-			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
-				return err
-			}
-		} else {
-			// No WG interface configured: fall back to full dest drop (host path
-			// still works via OUTPUT, which is outside this FORWARD chain).
-			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
-				return err
-			}
-		}
+		fmt.Fprintf(&rules, "-A %s%s -d %s/32 -j DROP\n", chain, ingress, policy.ServiceIP)
 	}
-	if err := e.applyOpenServiceSSHRules(ctx, iptablesBinary, chainName, policies); err != nil {
-		return err
-	}
-	if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
-		return err
-	}
+	appendIptablesSSHAccessRules(&rules, chain, ingress, policies)
+	fmt.Fprintf(&rules, "-A %s -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n", chain)
 	for _, policy := range policies {
 		if !isValidIP(policy.ServiceIP) {
 			continue
 		}
-		serviceCIDR := fmt.Sprintf("%s/32", policy.ServiceIP)
-		if !policy.EgressEnabled && strings.TrimSpace(e.internetInterface) != "" {
-			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.internetInterface, "-s", serviceCIDR, "-j", "DROP"); err != nil {
-				return err
-			}
+		if !policy.EgressEnabled && e.internetInterface != "" {
+			fmt.Fprintf(&rules, "-A %s%s -s %s/32 -j DROP\n", chain, iptablesInterface("-o", e.internetInterface), policy.ServiceIP)
 		}
 		if policy.NetworkClosed {
 			continue
 		}
-		servicePort := fmt.Sprintf("%d", policy.ServicePort)
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
-			return err
+		if ingress != "" {
+			fmt.Fprintf(&rules, "-A %s%s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, ingress, policy.ServiceIP, policy.ServicePort)
 		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-d", serviceCIDR, "-p", "tcp", "--dport", servicePort, "-j", "ACCEPT"); err != nil {
-			return err
-		}
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-p", "tcp", "--sport", servicePort, "-j", "ACCEPT"); err != nil {
-			return err
-		}
-		// No interface-agnostic source-port accept here. Reply traffic is already
-		// covered by the global ESTABLISHED,RELATED accept at the top of this
-		// chain, so a bare `-s serviceIP --sport servicePort` accept would only
-		// ever add NEW packets the service originates itself (e.g. to another
-		// team's SSH port with a spoofed source port), bypassing the SSH DROP
-		// rules below. It is therefore omitted entirely.
-		if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-o", e.interfaceName, "-s", serviceCIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); err != nil {
-			return err
-		}
-		// Residual default-deny on the WG path for non-service ports.
-		if strings.TrimSpace(e.interfaceName) != "" {
-			if err := e.runner.Run(ctx, iptablesBinary, "-A", chainName, "-i", e.interfaceName, "-d", serviceCIDR, "-j", "DROP"); err != nil {
-				return err
-			}
+		fmt.Fprintf(&rules, "-A %s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, policy.ServiceIP, policy.ServicePort)
+		if egress != "" {
+			// A source-port accept without an interface would let services
+			// originate new packets using their service port as a bypass.
+			fmt.Fprintf(&rules, "-A %s%s -s %s/32 -p tcp --sport %d -j ACCEPT\n", chain, egress, policy.ServiceIP, policy.ServicePort)
+			fmt.Fprintf(&rules, "-A %s%s -s %s/32 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n", chain, egress, policy.ServiceIP)
+			fmt.Fprintf(&rules, "-A %s%s -d %s/32 -j DROP\n", chain, ingress, policy.ServiceIP)
 		}
 	}
-	return nil
+	return e.restoreIptablesTable(ctx, binary, rules.String())
 }
 
-// Check SSH ingress before conntrack accepts established sessions.
-func (e *hostServiceAccessExecutor) applyOpenServiceSSHRules(ctx context.Context, binary, chain string, policies []apigateway.ControllerServiceAccessPolicy) error {
+func appendIptablesSSHAccessRules(rules *strings.Builder, chain, ingress string, policies []apigateway.ControllerServiceAccessPolicy) {
 	for _, policy := range policies {
 		if policy.NetworkClosed || !isValidIP(policy.ServiceIP) || policy.SSHPort <= 0 {
 			continue
 		}
-		serviceCIDR := policy.ServiceIP + "/32"
-		sshPort := fmt.Sprintf("%d", policy.SSHPort)
 		if policy.SSHUnlocked {
 			for _, peer := range policy.AllowedPeerAddresses {
 				if !isValidIP(peer) {
 					continue
 				}
-				if e.interfaceName != "" {
-					if err := e.runner.Run(ctx, binary, "-A", chain, "-i", e.interfaceName, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
-						return err
-					}
+				if ingress != "" {
+					fmt.Fprintf(rules, "-A %s%s -s %s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, ingress, peer, policy.ServiceIP, policy.SSHPort)
 				}
-				if err := e.runner.Run(ctx, binary, "-A", chain, "-s", peer, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "ACCEPT"); err != nil {
-					return err
-				}
+				fmt.Fprintf(rules, "-A %s -s %s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, peer, policy.ServiceIP, policy.SSHPort)
 			}
 		}
-		if e.interfaceName != "" {
-			if err := e.runner.Run(ctx, binary, "-A", chain, "-i", e.interfaceName, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
-				return err
-			}
+		if ingress != "" {
+			fmt.Fprintf(rules, "-A %s%s -d %s/32 -p tcp --dport %d -j DROP\n", chain, ingress, policy.ServiceIP, policy.SSHPort)
 		}
-		if err := e.runner.Run(ctx, binary, "-A", chain, "-d", serviceCIDR, "-p", "tcp", "--dport", sshPort, "-j", "DROP"); err != nil {
-			return err
-		}
+		fmt.Fprintf(rules, "-A %s -d %s/32 -p tcp --dport %d -j DROP\n", chain, policy.ServiceIP, policy.SSHPort)
 	}
-	return nil
 }
 
-func (e *hostServiceAccessExecutor) ensureIptablesChain(ctx context.Context, iptablesBinary, tableName, chainName string) error {
-	createArgs := []string{"-N", chainName}
-	showArgs := []string{"-S", chainName}
-	if strings.TrimSpace(tableName) != "" {
-		createArgs = append([]string{"-t", tableName}, createArgs...)
-		showArgs = append([]string{"-t", tableName}, showArgs...)
+func iptablesInterface(flag, name string) string {
+	if name == "" {
+		return ""
 	}
-	if err := e.runner.Run(ctx, iptablesBinary, createArgs...); err != nil {
-		if err := e.runner.Run(ctx, iptablesBinary, showArgs...); err != nil {
-			return err
-		}
+	return " " + flag + " " + name
+}
+
+func (e *hostServiceAccessExecutor) restoreIptablesTable(ctx context.Context, binary, rules string) error {
+	file, err := os.CreateTemp(filepath.Dir(e.paths.rulesPath), ".iptables-restore-*")
+	if err != nil {
+		return err
 	}
-	return nil
+	defer os.Remove(file.Name())
+	_, writeErr := file.WriteString(rules + "COMMIT\n")
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	// --noflush preserves the rest of the table. Declaring our chain above
+	// replaces only that chain, with its new rules and any jumps in one commit.
+	return e.runner.Run(ctx, binary+"-restore", "--wait", "--noflush", file.Name())
 }
 
 func (e *hostServiceAccessExecutor) selectIptablesBinary(ctx context.Context) (string, error) {
@@ -513,7 +466,11 @@ func buildControllerAccessStatus(mode, interfaceName, internetInterface, firewal
 			allowedPeers[peer] = struct{}{}
 		}
 	}
-	rules := renderControllerAccessRules(sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access")), interfaceName, internetInterface, policies)
+	tableName := sanitizeControllerNftTableName(config.String("CONTROLLER_ACCESS_FIREWALL_TABLE", "adplatform_service_access"))
+	rules := renderControllerAccessRules(tableName, interfaceName, internetInterface, policies)
+	if pauseRules, paused := renderMatchPauseRules(tableName, interfaceName, policies); paused {
+		rules += pauseRules
+	}
 	return apigateway.ControllerAccessStatus{
 		State:                  "applied",
 		Mode:                   mode,
@@ -533,6 +490,7 @@ func buildControllerAccessStatus(mode, interfaceName, internetInterface, firewal
 
 func renderControllerAccessRules(tableName, interfaceName, internetInterface string, policies []apigateway.ControllerServiceAccessPolicy) string {
 	var builder strings.Builder
+	fmt.Fprintf(&builder, "add table inet %[1]s\ndelete table inet %[1]s\n", tableName)
 	builder.WriteString(fmt.Sprintf("table inet %s {\n", tableName))
 	// Forward: participant WG → services (closed = organizer allow + WG drop).
 	// Output: host-local probes (nc on the contest host) — always allowed so
@@ -554,6 +512,53 @@ func renderControllerAccessRules(tableName, interfaceName, internetInterface str
 	builder.WriteString("  }\n")
 	builder.WriteString("}\n")
 	return builder.String()
+}
+
+func renderMatchPauseRules(tableName, wireGuardInterface string, policies []apigateway.ControllerServiceAccessPolicy) (string, bool) {
+	pauseTable := tableName + "_pause"
+	var rules strings.Builder
+	// Adding an existing table is idempotent. Delete and recreate in the same
+	// transaction to replace the policy on older supported kernels too.
+	fmt.Fprintf(&rules, "add table bridge %[1]s\ndelete table bridge %[1]s\nadd table inet %[1]s\ndelete table inet %[1]s\n", pauseTable)
+	var destinations []string
+	for _, policy := range policies {
+		ip := net.ParseIP(policy.ServiceIP).To4()
+		if ip == nil {
+			continue
+		}
+		if policy.MatchPaused || policy.MatchFinished || policy.PlayDeferred {
+			destinations = append(destinations, ip.String())
+		}
+	}
+	if len(destinations) == 0 {
+		return rules.String(), false
+	}
+
+	// The bridge hook covers traffic switched between containers. Routed
+	// traffic has its own guard so it cannot use the Docker gateway to bypass
+	// the bridge hook. Host-originated probes remain available.
+	fmt.Fprintf(&rules, "table bridge %s {\n  chain forward {\n    type filter hook forward priority -5; policy accept;\n", pauseTable)
+	fmt.Fprintf(&rules, "    ip daddr { %s } drop\n  }\n}\n", strings.Join(destinations, ", "))
+	fmt.Fprintf(&rules, "table inet %s {\n  chain forward {\n    type filter hook forward priority -5; policy accept;\n", pauseTable)
+	if wireGuardInterface != "" {
+		for _, policy := range policies {
+			ip := net.ParseIP(policy.ServiceIP).To4()
+			if (!policy.MatchPaused && !policy.MatchFinished && !policy.PlayDeferred) || ip == nil {
+				continue
+			}
+			var organizers []string
+			for _, addr := range policy.AllowedPeerAddresses {
+				if peer := net.ParseIP(addr).To4(); peer != nil {
+					organizers = append(organizers, peer.String())
+				}
+			}
+			if len(organizers) > 0 {
+				fmt.Fprintf(&rules, "    iifname %q ip saddr { %s } ip daddr %s accept\n", wireGuardInterface, strings.Join(organizers, ", "), ip)
+			}
+		}
+	}
+	fmt.Fprintf(&rules, "    ip daddr { %s } drop\n  }\n}\n", strings.Join(destinations, ", "))
+	return rules.String(), true
 }
 
 func appendOpenServiceSSHAccessRules(builder *strings.Builder, interfaceName string, policies []apigateway.ControllerServiceAccessPolicy) {

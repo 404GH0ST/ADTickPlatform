@@ -70,7 +70,7 @@ func (*runtimeExecutorStub) RemoveService(context.Context, int, int) error {
 	return nil
 }
 
-func (*runtimeExecutorStub) RemoveTeamServices(context.Context, int) error {
+func (*runtimeExecutorStub) RemoveTeamServices(context.Context, int, ...string) error {
 	return nil
 }
 
