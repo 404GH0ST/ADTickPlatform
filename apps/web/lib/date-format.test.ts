@@ -1,7 +1,37 @@
 // @ts-expect-error Bun exposes its test module at runtime without bundled TypeScript types.
 import { describe, expect, test } from "bun:test";
 
-import { formatTimestampsInText } from "./date-format";
+import {
+  formatIndonesianDate,
+  formatTimestampsInText,
+  formatWibTime,
+  fromWibInputValue,
+  toWibInputValue,
+} from "./date-format";
+
+describe("WIB date and time fields", () => {
+  test("reads a typed time as WIB", () => {
+    expect(fromWibInputValue("2026-12-01T10:00")).toBe("2026-12-01T03:00:00.000Z");
+  });
+
+  test("shows an instant as WIB and survives a round trip across midnight", () => {
+    expect(toWibInputValue("2026-12-01T17:30:00Z")).toBe("2026-12-02T00:30");
+    expect(fromWibInputValue(toWibInputValue("2026-12-01T17:30:00Z"))).toBe("2026-12-01T17:30:00.000Z");
+  });
+
+  test("rejects incomplete and impossible values", () => {
+    for (const value of ["", "T", "2026-12-01T", "T10:00", "2026-02-31T10:00", "2026-12-01T25:00"]) {
+      expect(fromWibInputValue(value)).toBeUndefined();
+    }
+    expect(toWibInputValue("not a date")).toBe("");
+    expect(toWibInputValue(undefined)).toBe("");
+  });
+
+  test("formats midnight as 00, not 24", () => {
+    expect(formatIndonesianDate("2026-12-01T17:00:00Z")).toBe("2026-12-02 00:00:00 WIB");
+    expect(formatWibTime("2026-12-01T17:00:00Z")).toBe("00:00:00 WIB");
+  });
+});
 
 describe("formatTimestampsInText", () => {
   test("rewrites an ISO timestamp inside a sentence to WIB", () => {

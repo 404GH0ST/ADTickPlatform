@@ -19,6 +19,7 @@ export type ScoreRow = {
   total: number;
   delta: string;
   services?: ScoreServiceRow[];
+  disqualified?: boolean;
 };
 
 export type ServiceRow = {
@@ -106,4 +107,6 @@ export type PlatformOverview = {
   scoreboardFrozen?: boolean;
   scoreboardFreezeAt?: string;
   scoreboardUnfreezeAt?: string;
+  /** The server's clock when this page was built, to correct a wrong device clock. */
+  serverTime?: number;
 };

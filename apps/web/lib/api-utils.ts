@@ -2,6 +2,22 @@ import { parseRetryAfterSeconds } from "./service-actions";
 
 /** The session is gone, so the only way forward is signing in again. */
 export const SESSION_ENDED_MESSAGE = "Your session has ended. Sign in again to continue.";
+const ORGANIZER_ACCESS_LOST_MESSAGE =
+  "This account no longer has organizer access. Sign in with an organizer account to continue.";
+
+// The authorization layer's API wording, in terms an organizer can act on.
+const SIGN_IN_ERRORS = new Map([
+  ["please authenticate before accessing organizer routes.", SESSION_ENDED_MESSAGE],
+  ["please authenticate as organizer.", ORGANIZER_ACCESS_LOST_MESSAGE],
+]);
+
+/** True when the only way forward from this error is signing in. */
+export function errorNeedsSignIn(message: string): boolean {
+  return message === SESSION_ENDED_MESSAGE || message === ORGANIZER_ACCESS_LOST_MESSAGE;
+}
+
+// Seen when a proxy or captive portal answers with an HTML page and status 200.
+const UNREADABLE_RESPONSE_MESSAGE = "The platform sent a response that couldn't be read. Try again in a moment.";
 
 export type ProblemDetails = {
   type?: string;
@@ -51,6 +67,9 @@ export function upstreamErrorDetails(
       status: 504,
     };
   }
+  if (error instanceof SyntaxError) {
+    return { detail: UNREADABLE_RESPONSE_MESSAGE, status: 502 };
+  }
   // Node's fetch reports every connection failure with this one message.
   if (error instanceof TypeError && error.message === "fetch failed") {
     return {
@@ -66,11 +85,18 @@ export function upstreamErrorDetails(
 
 /** Message for a failed browser request. A browser fetch rejects with TypeError when the network fails. */
 export function browserRequestErrorMessage(error: unknown, fallback: string) {
+  const signInMessage = error instanceof Error ? SIGN_IN_ERRORS.get(error.message) : undefined;
+  if (signInMessage) {
+    return signInMessage;
+  }
   if (error instanceof TypeError) {
     return "Can't reach the platform. Check your connection and try again.";
   }
   if (errorName(error) === "TimeoutError") {
     return "The platform didn't respond in time. Try again in a moment.";
+  }
+  if (error instanceof SyntaxError) {
+    return UNREADABLE_RESPONSE_MESSAGE;
   }
   return error instanceof Error ? error.message : fallback;
 }

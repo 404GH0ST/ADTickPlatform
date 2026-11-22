@@ -48,9 +48,11 @@ export function computeCategoryLeaders(
   topN: number = DEFAULT_TOP_N,
 ): CategoryLeadersSummary {
   const limit = Math.max(0, topN);
+  // Disqualified teams keep their score but cannot win an award.
+  const eligibleRows = scoreRows.filter((row) => !row.disqualified);
 
   const pick = (select: (row: AdminGameScoreRow) => number): CategoryLeader[] => {
-    const sorted = [...scoreRows].sort((a, b) => {
+    const sorted = [...eligibleRows].sort((a, b) => {
       const diff = select(b) - select(a);
       if (diff !== 0) return diff;
       return a.team.localeCompare(b.team);

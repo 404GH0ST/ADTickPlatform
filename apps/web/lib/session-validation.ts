@@ -21,6 +21,16 @@ function apiBaseUrl() {
 // Every page waits on this check, so a silent gateway must not hold it open.
 const SESSION_CHECK_TIMEOUT_MS = 3_000;
 
+export async function revokeParticipantSession(token: string) {
+  const response = await fetch(`${apiBaseUrl()}/api/v2/session/logout`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error("Session revocation failed");
+}
+
 /**
  * "unavailable" means the gateway could not answer, not that the session is
  * bad. It grants nothing: callers must keep access closed, but should say the

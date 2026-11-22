@@ -5,6 +5,7 @@ import {
   authenticatedFetch,
   browserRequestErrorMessage,
   buildQueryString,
+  errorNeedsSignIn,
   firstForwardedAddress,
   parseApiError,
   parseTeamBody,
@@ -53,6 +54,27 @@ describe("network failures", () => {
       detail: "The platform API didn't respond in time. Try again in a moment.",
       status: 504,
     });
+  });
+
+  test("an unreadable response never exposes the parser error", () => {
+    const parserError = new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON");
+    expect(upstreamErrorDetails(parserError, "request failed")).toEqual({
+      detail: "The platform sent a response that couldn't be read. Try again in a moment.",
+      status: 502,
+    });
+    expect(browserRequestErrorMessage(parserError, "fallback")).toBe(
+      "The platform sent a response that couldn't be read. Try again in a moment.",
+    );
+  });
+
+  test("organizer authorization errors become sign-in guidance", () => {
+    const ended = browserRequestErrorMessage(new Error("please authenticate before accessing organizer routes."), "x");
+    const lost = browserRequestErrorMessage(new Error("please authenticate as organizer."), "x");
+    expect(ended).toBe("Your session has ended. Sign in again to continue.");
+    expect(lost).toContain("no longer has organizer access");
+    expect(errorNeedsSignIn(ended)).toBe(true);
+    expect(errorNeedsSignIn(lost)).toBe(true);
+    expect(errorNeedsSignIn("team create failed")).toBe(false);
   });
 
   test("browser messages replace network errors and keep API errors", () => {

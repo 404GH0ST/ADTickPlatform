@@ -289,6 +289,7 @@ export type AdminGameScoreRow = {
   total: number;
   delta: string;
   services?: AdminGameScoreServiceRow[];
+  disqualified?: boolean;
 };
 
 export type AdminScoringAuditMismatch = {
@@ -371,9 +372,20 @@ export type AdminAuditLogQuery = {
   status?: string;
 };
 
+/** Reads that failed on this load. Their contents are unknown, not empty. */
+export type AdminDataUnavailable = {
+  teams?: boolean;
+  players?: boolean;
+  challenges?: boolean;
+  deployments?: boolean;
+  scoreboard?: boolean;
+  gameStatus?: boolean;
+};
+
 export type AdminOverview = {
   source: 'live' | 'degraded';
   message?: string;
+  unavailable?: AdminDataUnavailable;
   operationsStatus?: AdminOperationsStatus;
   operationsAlertCount: number;
   teamCount: number;
@@ -520,4 +532,6 @@ export type SubmissionDeletion = {
   status: string;
   service: string;
   first_blood_cleared: boolean;
+  ssh_grant_revoked?: boolean;
+  access_reconcile_pending?: boolean;
 };

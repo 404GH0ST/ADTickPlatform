@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { registerParticipant } from "@/lib/platform-api";
+import { readSessionRequest } from "@/lib/session-request";
 
 type RegisterRequest = {
   displayName: string;
@@ -11,7 +12,13 @@ type RegisterRequest = {
 };
 
 export async function POST(request: Request) {
-  const registerRequest = await readRegisterRequest(request);
+  const body = await readSessionRequest(request);
+  if (body instanceof NextResponse) return body;
+  const registerRequest = {
+    displayName: trimmedString(body.display_name) || trimmedString(body.displayName),
+    email: trimmedString(body.email),
+    password: typeof body.password === "string" ? body.password : "",
+  };
   if (!hasRequiredFields(registerRequest)) {
     return problemResponse(
       400,
@@ -30,20 +37,8 @@ export async function POST(request: Request) {
   }
 }
 
-async function readRegisterRequest(request: Request): Promise<RegisterRequest> {
-  const body = (await request.json().catch(() => null)) as {
-    display_name?: string;
-    displayName?: string;
-    email?: string;
-    password?: string;
-  } | null;
-
-  return {
-    displayName:
-      body?.display_name?.trim() || body?.displayName?.trim() || "",
-    email: body?.email?.trim() ?? "",
-    password: body?.password ?? "",
-  };
+function trimmedString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function hasRequiredFields(request: RegisterRequest): boolean {

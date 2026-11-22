@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { authenticateParticipant } from "@/lib/platform-api";
+import { readSessionRequest } from "@/lib/session-request";
 
 type LoginCredentials = {
   email: string;
@@ -10,7 +11,12 @@ type LoginCredentials = {
 };
 
 export async function POST(request: Request) {
-  const credentials = await readLoginCredentials(request);
+  const body = await readSessionRequest(request);
+  if (body instanceof NextResponse) return body;
+  const credentials = {
+    email: typeof body.email === "string" ? body.email.trim() : "",
+    password: typeof body.password === "string" ? body.password : "",
+  };
   if (!hasRequiredCredentials(credentials)) {
     return missingCredentialsResponse();
   }
@@ -24,18 +30,6 @@ export async function POST(request: Request) {
   } catch (error) {
     return loginErrorResponse(error);
   }
-}
-
-async function readLoginCredentials(request: Request): Promise<LoginCredentials> {
-  const body = (await request.json().catch(() => null)) as {
-    email?: string;
-    password?: string;
-  } | null;
-
-  return {
-    email: body?.email?.trim() ?? "",
-    password: body?.password ?? "",
-  };
 }
 
 function hasRequiredCredentials(credentials: LoginCredentials): boolean {

@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 
 import { SESSION_ENDED_MESSAGE, upstreamErrorDetails } from "@/lib/api-utils";
 
+export function isSameOriginBrowserRequest(request: Request, allowMissingOrigin = true) {
+  if (request.headers.get("sec-fetch-site")?.toLowerCase() === "cross-site") {
+    return false;
+  }
+
+  const url = new URL(request.url);
+  const host = request.headers.get("host") ?? url.host;
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProto || url.protocol.replace(/:$/, "");
+  const source = request.headers.get("origin") ?? request.headers.get("referer");
+  if (source === null) {
+    return allowMissingOrigin;
+  }
+  try {
+    return new URL(source).origin === `${protocol}://${host}`;
+  } catch {
+    return false;
+  }
+}
+
 export async function handleAdminIdRoute<T>(
   context: { params: Promise<Record<string, string>> },
   idParamName: string,

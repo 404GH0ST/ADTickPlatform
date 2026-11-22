@@ -70,3 +70,60 @@ test("closing cancels a pending reconnect", async () => {
   await wait(15);
   expect(FakeEventSource.created).toHaveLength(1);
 });
+
+function fakeTabVisibility(protocol: string) {
+  const originalEntries = performance.getEntriesByType.bind(performance);
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  const listeners = new Set<() => void>();
+  const page = {
+    visibilityState: "visible",
+    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+  };
+  (globalThis as { document?: unknown }).document = page;
+  performance.getEntriesByType = (() => [{ nextHopProtocol: protocol }]) as unknown as typeof performance.getEntriesByType;
+  return {
+    listeners,
+    setVisibility(state: "visible" | "hidden") {
+      page.visibilityState = state;
+      for (const listener of listeners) listener();
+    },
+    restore() {
+      performance.getEntriesByType = originalEntries;
+      (globalThis as { document?: unknown }).document = originalDocument;
+    },
+  };
+}
+
+test("on HTTP/1.1 a hidden tab frees its connection and reconnects when shown", () => {
+  useFakeEventSource();
+  const tab = fakeTabVisibility("http/1.1");
+  try {
+    const stream = new LiveStream("/stream", 1);
+    let downs = 0;
+    stream.onerror = () => { downs += 1; };
+    tab.setVisibility("hidden");
+    expect(FakeEventSource.created[0].readyState).toBe(FakeEventSource.CLOSED);
+    expect(downs).toBe(1);
+    tab.setVisibility("visible");
+    expect(FakeEventSource.created).toHaveLength(2);
+    stream.close();
+    expect(tab.listeners.size).toBe(0);
+  } finally {
+    tab.restore();
+  }
+});
+
+test("on HTTP/2 a hidden tab keeps its stream", () => {
+  useFakeEventSource();
+  const tab = fakeTabVisibility("h2");
+  try {
+    const stream = new LiveStream("/stream", 1);
+    tab.setVisibility("hidden");
+    expect(FakeEventSource.created).toHaveLength(1);
+    expect(FakeEventSource.created[0].readyState).toBe(1);
+    stream.close();
+  } finally {
+    tab.restore();
+  }
+});

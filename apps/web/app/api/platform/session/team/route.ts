@@ -3,9 +3,12 @@ import { NextResponse } from "next/server";
 import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { joinCurrentParticipantTeam } from "@/lib/platform-api";
+import { readSessionRequest, sessionString } from "@/lib/session-request";
 
 export async function POST(request: Request) {
-  const teamKey = await readTeamKey(request);
+  const body = await readSessionRequest(request);
+  if (body instanceof NextResponse) return body;
+  const teamKey = sessionString(body.team_key).trim() || sessionString(body.teamKey).trim();
   if (teamKey === "") {
     return problemResponse(400, "Invalid request", "team key is required.");
   }
@@ -18,13 +21,4 @@ export async function POST(request: Request) {
   } catch (error) {
     return upstreamErrorResponse(error, "team join failed", "Team join failed");
   }
-}
-
-async function readTeamKey(request: Request): Promise<string> {
-  const body = (await request.json().catch(() => null)) as {
-    team_key?: string;
-    teamKey?: string;
-  } | null;
-
-  return body?.team_key?.trim() || body?.teamKey?.trim() || "";
 }

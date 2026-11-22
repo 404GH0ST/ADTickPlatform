@@ -3,9 +3,17 @@ import { NextResponse } from "next/server";
 import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { updateCurrentParticipantProfile } from "@/lib/platform-api";
+import { readSessionRequest, sessionString } from "@/lib/session-request";
 
 export async function PUT(request: Request) {
-  const profile = await readProfileUpdate(request);
+  const body = await readSessionRequest(request);
+  if (body instanceof NextResponse) return body;
+  const profile = {
+    displayName: sessionString(body.display_name).trim() || sessionString(body.displayName).trim(),
+    email: sessionString(body.email).trim(),
+    teamName: sessionString(body.team_name).trim() || sessionString(body.teamName).trim(),
+    teamContactEmail: sessionString(body.team_contact_email).trim() || sessionString(body.teamContactEmail).trim(),
+  };
   if (profile.displayName === "" || profile.email === "") {
     return problemResponse(
       400,
@@ -22,27 +30,4 @@ export async function PUT(request: Request) {
   } catch (error) {
     return upstreamErrorResponse(error, "profile update failed", "Profile update failed");
   }
-}
-
-async function readProfileUpdate(request: Request) {
-  const body = (await request.json().catch(() => null)) as {
-    display_name?: string;
-    displayName?: string;
-    email?: string;
-    team_name?: string;
-    teamName?: string;
-    team_contact_email?: string;
-    teamContactEmail?: string;
-  } | null;
-
-  return {
-    displayName:
-      body?.display_name?.trim() || body?.displayName?.trim() || "",
-    email: body?.email?.trim() ?? "",
-    teamName: body?.team_name?.trim() || body?.teamName?.trim() || "",
-    teamContactEmail:
-      body?.team_contact_email?.trim() ||
-      body?.teamContactEmail?.trim() ||
-      "",
-  };
 }

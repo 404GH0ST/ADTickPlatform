@@ -462,6 +462,12 @@ export async function updateAdminTeam(teamID: number, input: UpdateTeamInput) {
   });
 }
 
+export async function rotateAdminTeamJoinKey(teamID: number) {
+  return adminFetch<{ team_id: number; join_key: string }>(`/api/v2/admin/teams/${teamID}/join-key/rotate`, {
+    method: "POST",
+  });
+}
+
 export async function deactivateAdminTeam(teamID: number) {
   return adminFetch<AdminTeam>(`/api/v2/admin/teams/${teamID}/deactivate`, {
     method: "POST",

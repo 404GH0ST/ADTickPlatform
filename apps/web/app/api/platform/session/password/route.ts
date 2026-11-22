@@ -3,14 +3,13 @@ import { NextResponse } from "next/server";
 import { problemResponse, upstreamErrorResponse } from "@/lib/api-handler";
 import { participantSessionCookie } from "@/lib/participant-session-cookie";
 import { changeParticipantPassword } from "@/lib/platform-api";
+import { readSessionRequest, sessionString } from "@/lib/session-request";
 
 export async function PUT(request: Request) {
-  const body = (await request.json().catch(() => null)) as {
-    current_password?: string;
-    new_password?: string;
-  } | null;
-  const currentPassword = body?.current_password ?? "";
-  const newPassword = body?.new_password ?? "";
+  const body = await readSessionRequest(request);
+  if (body instanceof NextResponse) return body;
+  const currentPassword = sessionString(body.current_password);
+  const newPassword = sessionString(body.new_password);
   if (!currentPassword || !newPassword) {
     return problemResponse(
       400,

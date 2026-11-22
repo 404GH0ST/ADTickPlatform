@@ -1,4 +1,5 @@
 import type {
+  AdminDataUnavailable,
   AdminAttackFeedPage,
   AdminCheckerRunPage,
   AdminDeploymentJob,
@@ -40,6 +41,7 @@ export type AdminDashboardData = {
   scoreboard: AdminGameScoreRow[];
   serviceMetrics: AdminServiceMetricSnapshot | null;
   overview: AdminOverview;
+  unavailable: AdminDataUnavailable;
 };
 
 type AdminDashboardDataOptions = {
@@ -156,6 +158,14 @@ export async function loadAdminDashboardData(
   ]);
   const data = readAdminDashboardResults(results, options);
   const source = adminDashboardSource(results);
+  const unavailable: AdminDataUnavailable = {
+    teams: results.teamsResult.status === "rejected",
+    players: results.playersResult.status === "rejected",
+    challenges: results.challengesResult.status === "rejected",
+    deployments: results.deploymentsResult.status === "rejected",
+    scoreboard: results.scoreboardResult.status === "rejected",
+    gameStatus: results.gameStatusResult.status === "rejected",
+  };
 
   return {
     teams: data.teams,
@@ -168,7 +178,8 @@ export async function loadAdminDashboardData(
     attackPage: data.attackPage,
     scoreboard: data.scoreboard,
     serviceMetrics: data.serviceMetrics,
-    overview: buildAdminOverview(data, source, freeze?.frozen),
+    overview: { ...buildAdminOverview(data, source, freeze?.frozen), unavailable },
+    unavailable,
   };
 }
 

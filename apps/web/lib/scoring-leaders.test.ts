@@ -19,3 +19,11 @@ test('award categories rank independently with stable ties and preserve the scor
   expect(computeCategoryLeaders([...rows, score('Delta', 10, -2, 8)]).attacker).toHaveLength(3);
   expect(computeCategoryLeaders(rows, -1)).toEqual({ attacker: [], defender: [], availability: [] });
 });
+
+test('disqualified teams cannot lead an award category', () => {
+  const rows = [{ ...score('Cheater', 99, 99, 99), disqualified: true }, score('Fair', 1, 1, 1)];
+  const leaders = computeCategoryLeaders(rows);
+  expect(leaders.attacker.map(({ team }) => team)).toEqual(['Fair']);
+  expect(leaders.defender.map(({ team }) => team)).toEqual(['Fair']);
+  expect(leaders.availability.map(({ team }) => team)).toEqual(['Fair']);
+});

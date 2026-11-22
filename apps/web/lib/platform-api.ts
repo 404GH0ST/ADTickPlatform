@@ -296,7 +296,7 @@ export const getParticipantSession = cache(
   },
 );
 
-const getParticipantToken = cache(async () => {
+export const getParticipantToken = cache(async () => {
   const session = await getParticipantSession();
   if (session.reason === "unavailable") {
     throw new PlatformAPIError(
@@ -592,9 +592,10 @@ export type SubmissionResult = {
   rejected_count: number;
 };
 
-export async function submitFlags(flags: string[]) {
-  return participantFetch<SubmissionResult>("/api/v2/submit", {
+export async function submitFlags(token: string, flags: string[]) {
+  return authenticatedFetch<SubmissionResult>(apiBaseUrl(), "/api/v2/submit", token, {
     method: "POST",
+    headers: await platformRequestHeaders(),
     body: JSON.stringify({ flags }),
     signal: AbortSignal.timeout(FLAG_SUBMIT_TIMEOUT_MS),
   });

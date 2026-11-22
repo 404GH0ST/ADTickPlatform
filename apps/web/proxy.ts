@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { isSameOriginBrowserRequest } from "@/lib/api-handler";
 import { participantSessionCookieName } from "@/lib/participant-session-cookie";
 import { validateParticipantSessionWithAPI } from "@/lib/session-validation";
 import { verifyParticipantSessionToken } from "@/lib/session-token";
@@ -22,16 +23,8 @@ function isSafeMethod(method: string) {
 function isBrowserMutationRoute(pathname: string) {
   return (
     pathname.startsWith("/api/admin/") ||
-    pathname.startsWith("/api/platform/services/") ||
-    pathname.startsWith("/api/platform/session/")
+    pathname.startsWith("/api/platform/services/")
   );
-}
-
-function requestOrigin(request: NextRequest) {
-  const host = request.headers.get("host") ?? request.nextUrl.host;
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  const protocol = forwardedProto || request.nextUrl.protocol.replace(/:$/, "");
-  return `${protocol}://${host}`;
 }
 
 function sameOriginBrowserMutation(request: NextRequest) {
@@ -39,31 +32,7 @@ function sameOriginBrowserMutation(request: NextRequest) {
     return true;
   }
 
-  const expectedOrigin = requestOrigin(request);
-  const secFetchSite = request.headers.get("sec-fetch-site")?.toLowerCase();
-  if (secFetchSite === "cross-site") {
-    return false;
-  }
-
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      return new URL(origin).origin === expectedOrigin;
-    } catch {
-      return false;
-    }
-  }
-
-  const referer = request.headers.get("referer");
-  if (referer) {
-    try {
-      return new URL(referer).origin === expectedOrigin;
-    } catch {
-      return false;
-    }
-  }
-
-  return true;
+  return isSameOriginBrowserRequest(request);
 }
 
 async function organizerSession(request: NextRequest) {
@@ -146,6 +115,5 @@ export const config = {
     "/admin/:path*",
     "/api/admin/:path*",
     "/api/platform/services/:path*",
-    "/api/platform/session/:path*",
   ],
 };
