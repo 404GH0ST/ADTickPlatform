@@ -2275,16 +2275,16 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 	args := []any{}
 
 	if query.Attacker != "" {
-		args = append(args, "%"+query.Attacker+"%")
-		conditions = append(conditions, fmt.Sprintf("attacker ILIKE $%d", len(args)))
+		args = append(args, query.Attacker)
+		conditions = append(conditions, fmt.Sprintf("strpos(lower(attacker), lower($%d)) > 0", len(args)))
 	}
 	if query.Victim != "" {
-		args = append(args, "%"+query.Victim+"%")
-		conditions = append(conditions, fmt.Sprintf("victim ILIKE $%d", len(args)))
+		args = append(args, query.Victim)
+		conditions = append(conditions, fmt.Sprintf("strpos(lower(victim), lower($%d)) > 0", len(args)))
 	}
 	if query.Service != "" {
-		args = append(args, "%"+query.Service+"%")
-		conditions = append(conditions, fmt.Sprintf("service ILIKE $%d", len(args)))
+		args = append(args, query.Service)
+		conditions = append(conditions, fmt.Sprintf("strpos(lower(service), lower($%d)) > 0", len(args)))
 	}
 	if query.TickFrom > 0 {
 		args = append(args, query.TickFrom)
