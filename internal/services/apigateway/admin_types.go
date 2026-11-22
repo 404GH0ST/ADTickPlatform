@@ -58,6 +58,7 @@ type adminUpdateChallengeRequest struct {
 
 type adminTeam struct {
 	ID                 int    `json:"id"`
+	ScoreIdentity      string `json:"-"`
 	Name               string `json:"name"`
 	ContactEmail       string `json:"contact_email"`
 	Institution        string `json:"institution"`
@@ -335,13 +336,13 @@ func scoreboardFreezeStatusFrom(window scoreboardFreezeWindow, now time.Time) sc
 		Configured: window.FreezeAt != nil,
 	}
 	if window.FreezeAt != nil {
-		status.FreezeAt = window.FreezeAt.UTC().Format(time.RFC3339)
+		status.FreezeAt = window.FreezeAt.UTC().Format(time.RFC3339Nano)
 	}
 	if window.UnfreezeAt != nil {
-		status.UnfreezeAt = window.UnfreezeAt.UTC().Format(time.RFC3339)
+		status.UnfreezeAt = window.UnfreezeAt.UTC().Format(time.RFC3339Nano)
 	}
 	if window.SnapshotTakenAt != nil {
-		status.SnapshotTakenAt = window.SnapshotTakenAt.UTC().Format(time.RFC3339)
+		status.SnapshotTakenAt = window.SnapshotTakenAt.UTC().Format(time.RFC3339Nano)
 	}
 	return status
 }

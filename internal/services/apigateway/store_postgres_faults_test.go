@@ -181,7 +181,13 @@ func TestPostgresStoreSurvivesInjectedFaults(t *testing.T) {
 			return err
 		},
 		"ValidateServiceAction": func(int) error { return store.ValidateServiceAction(ctx, team.ID, challenge.ID) },
-		"UnlockService":         func(int) error { _, err := store.UnlockService(ctx, team.ID, challenge.ID); return err },
+		"UnlockService": func(int) error {
+			if _, err := db.ExecContext(ctx, `UPDATE team_service_states SET unlocked = TRUE WHERE team_id = $1 AND challenge_id = $2`, team.ID, challenge.ID); err != nil {
+				return err
+			}
+			_, err := store.UnlockService(ctx, team.ID, challenge.ID)
+			return err
+		},
 		"CreateSSHSession": func(int) error {
 			_, err := store.CreateSSHSession(ctx, team.ID, challenge.ID, now)
 			return err

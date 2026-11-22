@@ -1,5 +1,22 @@
 package apigateway
 
+import "fmt"
+
+const (
+	CheckerOutputLimitFailure  = "checker command output exceeded limit."
+	CheckerTimeoutFailure      = "checker command timed out"
+	CheckerCanceledFailure     = "checker command canceled"
+	CheckerBatchFramingFailure = "checker batch output framing failed."
+	CheckerCapabilityFailure   = "checker validate output did not advertise canonical service-state support."
+)
+
+func CheckerExitFailureMessage(exitCode int) string {
+	if exitCode > 0 && exitCode <= 255 {
+		return fmt.Sprintf("checker command exited with status %d", exitCode)
+	}
+	return "checker command failed"
+}
+
 type CheckerValidationRequest struct {
 	ChallengeID  int    `json:"challenge_id"`
 	Name         string `json:"name"`

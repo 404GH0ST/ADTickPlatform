@@ -11,10 +11,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// Account and contact fields must stay compatible with the sign-in limit.
+func validAccountEmail(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && len(value) <= maxAccountEmailBytes && strings.IndexFunc(value, unicode.IsControl) == -1
+}
 
 var (
 	ErrChallengeNotFound    = errors.New("challenge not found")
@@ -56,12 +64,16 @@ type authenticatedPlayer struct {
 	Email            string
 	Role             string
 	SessionVersion   int
+	sessionID        string
+	sessionExpiresAt int64
 }
 
 type Store interface {
 	AuthenticatePlayer(ctx context.Context, email, password string) (authenticatedPlayer, error)
 	RegisterPlayer(ctx context.Context, input participantRegisterRequest, now time.Time) (authenticatedPlayer, error)
 	ValidatePlayerSession(ctx context.Context, playerID, teamID int, role string, sessionVersion int) (authenticatedPlayer, error)
+	IsPlayerSessionRevoked(ctx context.Context, sessionID string) (bool, error)
+	RevokePlayerSession(ctx context.Context, sessionID string, expires, now time.Time) error
 	UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error)
 	ChangeParticipantPassword(ctx context.Context, playerID int, currentPassword, newPassword string) (int, error)
 	ListAnnouncements(ctx context.Context) ([]matchAnnouncement, error)
@@ -93,6 +105,7 @@ type Store interface {
 	ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 	CreateAdminTeam(ctx context.Context, input adminCreateTeamRequest) (adminTeam, error)
 	UpdateAdminTeam(ctx context.Context, teamID int, input adminUpdateTeamRequest) (adminTeam, error)
+	RotateAdminTeamJoinKey(ctx context.Context, teamID int) (string, error)
 	DeleteAdminTeam(ctx context.Context, teamID int) error
 	SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error)
 	RequeueTeamServices(ctx context.Context, teamID int) error
@@ -129,6 +142,7 @@ type Store interface {
 	ListAdminAuditLogs(ctx context.Context, query adminAuditLogQuery) (adminAuditLogPage, error)
 	AppendAdminAuditLog(ctx context.Context, entry adminAuditLogEntry) error
 	ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error)
+	ListControllerTeamStateVolumes(ctx context.Context, teamID int) ([]string, error)
 	GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (ControllerRuntimeTask, error)
 	ListControllerServiceAccessPolicies(ctx context.Context) ([]ControllerServiceAccessPolicy, error)
 	GetControllerServiceAccessPolicy(ctx context.Context, teamID, challengeID int) (ControllerServiceAccessPolicy, error)
@@ -211,13 +225,13 @@ func sshUsername() string {
 	return "root"
 }
 
-func stableRootPassword(secret string, teamID, challengeID int) string {
+func stableRootPassword(secret string, teamID, challengeID int, stateVolume string) string {
 	key := []byte(strings.TrimSpace(secret))
 	if len(key) == 0 {
 		panic("stableRootPassword requires a non-empty secret")
 	}
 	mac := hmac.New(sha256.New, key)
-	fmt.Fprintf(mac, "ssh-root:%d:%d", teamID, challengeID)
+	fmt.Fprintf(mac, "ssh-root:%d:%d:%s", teamID, challengeID, stateVolume)
 	encoded := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return fmt.Sprintf("Adp-%s-Aa1!", encoded[:18])
 }
@@ -340,11 +354,12 @@ func wireguardPeerName(teamID, playerID int) string {
 
 func newSubmissionResult(items []submissionVerdict) submissionResult {
 	result := submissionResult{
-		Results:       items,
+		Results:       slices.Clone(items),
 		RejectedCount: len(items),
 	}
-	for _, item := range items {
-		if item.Status == "accepted" {
+	for i := range items {
+		result.Results[i].CaptureID = 0
+		if items[i].Status == "accepted" {
 			result.AcceptedCount++
 			result.RejectedCount--
 		}
@@ -377,12 +392,14 @@ func defaultChallengeImages(name string) (string, string) {
 	return fmt.Sprintf("registry.local/%s:baseline", slug), fmt.Sprintf("registry.local/%s-checker:latest", slug)
 }
 
-func serviceContainerName(challengeName string, teamID int) string {
-	return fmt.Sprintf("svc-%s-team-%d", slugName(challengeName), teamID)
+func serviceContainerName(challengeName string, challengeID, teamID int) string {
+	return fmt.Sprintf("svc-%s-challenge-%d-team-%d", slugName(challengeName), challengeID, teamID)
 }
 
 func serviceStateVolumeName(challengeName string, teamID int) string {
-	return fmt.Sprintf("svc-%s-team-%d-state", slugName(challengeName), teamID)
+	// Network slots can be reassigned. The persistent volume belongs to this
+	// instance, even if an earlier tenant's cleanup left storage behind.
+	return fmt.Sprintf("svc-%s-team-%d-state-%x", slugName(challengeName), teamID, randomBytes(16))
 }
 
 func slugName(value string) string {

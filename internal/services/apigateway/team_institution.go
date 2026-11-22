@@ -57,6 +57,10 @@ func (s *Server) teamInstitutionsByName(ctx context.Context) map[string]string {
 		log.Printf("team institution lookup failed: %v", err)
 		return nil
 	}
+	return institutionsByName(teams)
+}
+
+func institutionsByName(teams []adminTeam) map[string]string {
 	institutions := make(map[string]string, len(teams))
 	for _, team := range teams {
 		if team.Institution != "" {
@@ -96,6 +100,29 @@ func withAttackInstitutions(events []attackEvent, institutions map[string]string
 
 func (s *Server) enrichScoreRows(ctx context.Context, rows []scoreRow) []scoreRow {
 	return withScoreInstitutions(rows, s.teamInstitutionsByName(ctx))
+}
+
+// enrichFrozenScoreRows is enrichScoreRows for a freeze snapshot, which also
+// needs the current disqualification status. A failed lookup serves the
+// snapshot as saved.
+func (s *Server) enrichFrozenScoreRows(ctx context.Context, rows []scoreRow) []scoreRow {
+	teams, err := s.store.ListAdminTeams(ctx)
+	if err != nil {
+		log.Printf("frozen scoreboard team lookup failed: %v", err)
+		return withScoreInstitutions(rows, nil)
+	}
+	return withCurrentDisqualifications(rows, teams)
+}
+
+// publicScoreRows keeps the identity used for frozen-board reconciliation out
+// of the unauthenticated API and realtime stream.
+func publicScoreRows(rows []scoreRow) []scoreRow {
+	out := make([]scoreRow, len(rows))
+	copy(out, rows)
+	for i := range out {
+		out[i].TeamIdentity = ""
+	}
+	return out
 }
 
 func (s *Server) enrichAttackFeedPage(ctx context.Context, page AttackFeedPage) AttackFeedPage {

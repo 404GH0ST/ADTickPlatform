@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -16,12 +17,13 @@ var ErrInvalidTeamToken = errors.New("invalid team token")
 type teamTokenClaims struct {
 	TeamID           int    `json:"team_id"`
 	PlayerID         int    `json:"player_id"`
-	TeamName         string `json:"team_name"`
-	TeamContactEmail string `json:"team_contact_email"`
-	DisplayName      string `json:"display_name"`
-	Email            string `json:"email"`
+	TeamName         string `json:"team_name,omitempty"`
+	TeamContactEmail string `json:"team_contact_email,omitempty"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Email            string `json:"email,omitempty"`
 	Role             string `json:"role"`
 	SessionVersion   int    `json:"session_version"`
+	SessionID        string `json:"jti"`
 	IssuedAt         int64  `json:"iat"`
 	ExpiresAt        int64  `json:"exp"`
 }
@@ -45,8 +47,15 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 	if sessionVersion < 1 {
 		sessionVersion = 1
 	}
+	if player.sessionID == "" {
+		player.sessionID = rand.Text()
+		player.sessionExpiresAt = now.Add(24 * time.Hour).Unix()
+	}
+	if player.sessionExpiresAt <= now.Unix() {
+		return "", ErrInvalidTeamToken
+	}
 	// The claims are plain strings and integers, which always marshal.
-	claimsJSON, _ := json.Marshal(teamTokenClaims{
+	claims := teamTokenClaims{
 		TeamID:           player.TeamID,
 		PlayerID:         player.PlayerID,
 		TeamName:         player.TeamName,
@@ -55,9 +64,21 @@ func issueTeamJWT(secret string, player authenticatedPlayer, now time.Time) (str
 		Email:            player.Email,
 		Role:             player.Role,
 		SessionVersion:   sessionVersion,
+		SessionID:        player.sessionID,
 		IssuedAt:         now.UTC().Unix(),
-		ExpiresAt:        now.UTC().Add(24 * time.Hour).Unix(),
-	})
+		ExpiresAt:        player.sessionExpiresAt,
+	}
+	claimsJSON, _ := json.Marshal(claims)
+	// A legacy profile can still exceed browser cookie limits after JSON
+	// escaping and base64. Session validation loads the current profile.
+	const maxCookieClaimsBytes = 2700
+	if len(claimsJSON) > maxCookieClaimsBytes {
+		claims.TeamName = ""
+		claims.TeamContactEmail = ""
+		claims.DisplayName = ""
+		claims.Email = ""
+		claimsJSON, _ = json.Marshal(claims)
+	}
 
 	claimsPart := base64.RawURLEncoding.EncodeToString(claimsJSON)
 	signingInput := teamJWTHeaderPart + "." + claimsPart
@@ -111,6 +132,11 @@ func verifyTeamJWT(secret, token string, now time.Time) (teamTokenClaims, error)
 	}
 	if claims.PlayerID <= 0 || claims.SessionVersion < 1 || claims.ExpiresAt <= now.UTC().Unix() {
 		return teamTokenClaims{}, ErrInvalidTeamToken
+	}
+	if claims.SessionID == "" {
+		// Sessions signed before jti was added can still be revoked. The
+		// signing input identifies the token even if its signature is re-encoded.
+		claims.SessionID = "legacy:" + hashSecret(signingInput)
 	}
 	if strings.EqualFold(strings.TrimSpace(claims.Role), "organizer") {
 		if claims.TeamID != 0 {

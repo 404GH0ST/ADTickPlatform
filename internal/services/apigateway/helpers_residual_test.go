@@ -116,7 +116,7 @@ func TestStoreHelpers(t *testing.T) {
 				t.Error("a root password needs a secret")
 			}
 		}()
-		stableRootPassword(" ", 1, 1)
+		stableRootPassword(" ", 1, 1, "instance")
 	}()
 	for raw, want := range map[string]string{"": "service", "!!!": "service", "Web App 2": "web-app-2"} {
 		if got := slugName(raw); got != want {

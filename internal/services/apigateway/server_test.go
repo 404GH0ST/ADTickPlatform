@@ -84,6 +84,16 @@ type testScoringClient struct {
 	err    error
 }
 
+type freezeStraddlingScoringClient struct {
+	testScoringClient
+	advanceClock func()
+}
+
+func (c freezeStraddlingScoringClient) Scoreboard(ctx context.Context) ([]scoreRow, error) {
+	c.advanceClock()
+	return c.testScoringClient.Scoreboard(ctx)
+}
+
 type testRateLimiter struct {
 	denyKeys   map[string]bool
 	retryAfter time.Duration
@@ -1010,8 +1020,11 @@ func TestScoreboardFreezeServesSnapshotToParticipantsButLiveToOrganizers(t *test
 	if _, err := store.SetScoreboardFreezeWindow(ctx, &past, nil, time.Now()); err != nil {
 		t.Fatalf("SetScoreboardFreezeWindow: %v", err)
 	}
+	if _, err := store.SaveFrozenScoreboardSnapshot(ctx, store.scoreboard, past.Add(-time.Second)); err != nil {
+		t.Fatalf("SaveFrozenScoreboardSnapshot: %v", err)
+	}
 
-	// First participant read captures the snapshot from the live board (10).
+	// The participant board uses the pre-freeze snapshot (10).
 	if got := participantScoreboardFirstTotal(t, mux); got != 10 {
 		t.Fatalf("expected snapshot total 10 on first read, got %v", got)
 	}
@@ -1057,16 +1070,72 @@ func TestScoreboardFreezeServesSnapshotToParticipantsButLiveToOrganizers(t *test
 	}
 }
 
+func TestScheduledScoreboardFreezeKeepsLastPreFreezeScore(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 10}}
+	now := time.Date(2026, time.November, 22, 10, 0, 0, 0, time.UTC)
+	server := NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{})
+	server.now = func() time.Time { return now }
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+
+	freezeAt := now.Add(10 * time.Second)
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/admin/game/scoreboard/freeze", strings.NewReader(`{"freeze_at":"`+freezeAt.Format(time.RFC3339)+`"}`))
+	request.Header.Set("Authorization", "Bearer dev-admin-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("set freeze: %d %s", response.Code, response.Body.String())
+	}
+
+	now = now.Add(5 * time.Second)
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 20}}
+	if got := participantScoreboardFirstTotal(t, mux); got != 20 {
+		t.Fatalf("pre-freeze score = %v, want 20", got)
+	}
+
+	now = freezeAt.Add(time.Second)
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 99}}
+	if got := participantScoreboardFirstTotal(t, mux); got != 20 {
+		t.Fatalf("post-freeze score leaked: got %v, want 20", got)
+	}
+	window, err := store.GetScoreboardFreeze(context.Background())
+	if err != nil || window.SnapshotTakenAt == nil || !window.SnapshotTakenAt.Before(freezeAt) {
+		t.Fatalf("snapshot was not taken before cutoff: %+v, %v", window, err)
+	}
+}
+
+func TestScoreboardRequestCrossingFreezeCutoffServesSnapshot(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	store.scoreboard = []scoreRow{{Rank: 1, Team: "Alpha", Total: 10}}
+	now := time.Date(2026, time.November, 22, 10, 0, 0, 0, time.UTC)
+	freezeAt := now.Add(10 * time.Second)
+	if _, err := store.SetScoreboardFreezeWindow(context.Background(), &freezeAt, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveFrozenScoreboardSnapshot(context.Background(), store.scoreboard, now); err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{})
+	server.now = func() time.Time { return now }
+	server.WithScoringClient(freezeStraddlingScoringClient{
+		testScoringClient: testScoringClient{scores: []ScoreRowAlias{{Rank: 1, Team: "Alpha", Total: 99}}},
+		advanceClock:      func() { now = freezeAt.Add(time.Second) },
+	})
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	server.RegisterRoutes(mux)
+	if got := participantScoreboardFirstTotal(t, mux); got != 10 {
+		t.Fatalf("scoreboard request crossing freeze cutoff leaked %v", got)
+	}
+}
+
 func TestScoreboardFreezeNeverFallsBackToLiveRowsOnStoreFailure(t *testing.T) {
 	tests := []struct {
-		name         string
-		getErr       error
-		saveErr      error
-		omitSnapshot bool
+		name   string
+		getErr error
 	}{
 		{name: "freeze state read fails", getErr: errors.New("freeze read failed")},
-		{name: "snapshot write fails", saveErr: errors.New("snapshot write failed")},
-		{name: "snapshot is not persisted", omitSnapshot: true},
+		{name: "snapshot is unavailable"},
 	}
 
 	for _, tc := range tests {
@@ -1076,9 +1145,7 @@ func TestScoreboardFreezeNeverFallsBackToLiveRowsOnStoreFailure(t *testing.T) {
 			if _, err := baseStore.SetScoreboardFreezeWindow(context.Background(), &past, nil, time.Now()); err != nil {
 				t.Fatalf("SetScoreboardFreezeWindow: %v", err)
 			}
-			store := &scoreboardFailingStore{
-				Store: baseStore, getErr: tc.getErr, saveErr: tc.saveErr, omitSnapshot: tc.omitSnapshot,
-			}
+			store := &scoreboardFailingStore{Store: baseStore, getErr: tc.getErr}
 			mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 			server := NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{})
 			server.WithScoringClient(testScoringClient{scores: []ScoreRowAlias{{Rank: 1, Team: "Live Secret", Total: 99}}})
@@ -1104,6 +1171,9 @@ func TestScoreboardFreezeCanPersistAnEmptySnapshot(t *testing.T) {
 	past := time.Now().Add(-time.Minute).UTC()
 	if _, err := store.SetScoreboardFreezeWindow(context.Background(), &past, nil, time.Now()); err != nil {
 		t.Fatalf("SetScoreboardFreezeWindow: %v", err)
+	}
+	if _, err := store.SaveFrozenScoreboardSnapshot(context.Background(), store.scoreboard, past.Add(-time.Second)); err != nil {
+		t.Fatalf("SaveFrozenScoreboardSnapshot: %v", err)
 	}
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
 	NewWithDeps("dev-team-token", "dev-admin-token", 101, store, testControllerClient{}, noopWireGuardClient{}).RegisterRoutes(mux)
@@ -1244,7 +1314,7 @@ func TestAuthenticateUsesIndependentClientAndEmailRateLimits(t *testing.T) {
 	}
 	wantKeys := []string{
 		"auth:client:198.51.100.20",
-		"auth:email:alpha.captain@example.com:ip:198.51.100.20",
+		"auth:email:d0a4825f536b331292d9a7324b76b2efa7bcec8ca0f120977163f28ad9de3dc5:ip:198.51.100.20",
 	}
 	if !slices.Equal(limiter.keys, wantKeys) {
 		t.Fatalf("expected independent authentication rate-limit keys %v, got %v", wantKeys, limiter.keys)
@@ -1343,10 +1413,38 @@ func TestParticipantRegistrationUsesIndependentIPAndEmailRateLimits(t *testing.T
 	}
 	wantKeys := []string{
 		"register:client:198.51.100.20",
-		"register:email:rate-limited@example.com",
+		"register:email:5de8d8a87ccce3c480f3d392dd0d9cd9af66c9063897095cd0045cdc00f34761",
 	}
 	if !slices.Equal(limiter.keys, wantKeys) {
 		t.Fatalf("expected independent registration rate-limit keys %v, got %v", wantKeys, limiter.keys)
+	}
+}
+
+func TestOversizedEmailDoesNotAllocateAnIdentityRateLimit(t *testing.T) {
+	for _, tc := range []struct {
+		path, clientKey string
+		status          int
+	}{
+		{"/api/v2/authenticate", "auth:client:198.51.100.20", http.StatusForbidden},
+		{"/api/v2/register", "register:client:198.51.100.20", http.StatusBadRequest},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			limiter := &recordingRateLimiter{}
+			email := strings.Repeat("é", 128)
+			body := fmt.Sprintf(
+				`{"email":%q,"password":"test-password"`, email,
+			)
+			if tc.path == "/api/v2/register" {
+				body += `,"display_name":"Test Player"`
+			}
+			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(body+"}"))
+			request.RemoteAddr = "198.51.100.20:44123"
+			response := httptest.NewRecorder()
+			newTestMuxWithLimiter(limiter).ServeHTTP(response, request)
+			if response.Code != tc.status || !slices.Equal(limiter.keys, []string{tc.clientKey}) {
+				t.Fatalf("status = %d, rate limit keys = %v", response.Code, limiter.keys)
+			}
+		})
 	}
 }
 
@@ -1835,7 +1933,7 @@ func TestRegisteredParticipantCanJoinExistingAccountToTeam(t *testing.T) {
 	}
 }
 
-func TestParticipantWireGuardDownloadReconcilesGateway(t *testing.T) {
+func TestParticipantWireGuardDownloadDoesNotReconcileGateway(t *testing.T) {
 	store := NewMemoryStore(101)
 	wireGuard := &recordingWireGuardClient{}
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
@@ -1866,12 +1964,15 @@ func TestParticipantWireGuardDownloadReconcilesGateway(t *testing.T) {
 	if vpnResponse.Code != http.StatusOK {
 		t.Fatalf("expected vpn 200, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
 	}
-	if wireGuard.reconcileCalls != 2 {
-		t.Fatalf("expected wireguard reconcile after join and download, got %d", wireGuard.reconcileCalls)
+	if wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected only the join to reconcile WireGuard, got %d", wireGuard.reconcileCalls)
+	}
+	if vpnResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("expected VPN credentials to be served with Cache-Control: no-store")
 	}
 }
 
-func TestParticipantWireGuardDownloadFailsWhenGatewayReconcileFails(t *testing.T) {
+func TestParticipantWireGuardDownloadSucceedsAfterGatewayFailure(t *testing.T) {
 	store := NewMemoryStore(101)
 	wireGuard := &recordingWireGuardClient{err: errors.New("wg apply failed")}
 	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
@@ -1899,11 +2000,11 @@ func TestParticipantWireGuardDownloadFailsWhenGatewayReconcileFails(t *testing.T
 	vpnRequest.Header.Set("Authorization", "Bearer "+joinPayload.Token)
 	vpnResponse := httptest.NewRecorder()
 	mux.ServeHTTP(vpnResponse, vpnRequest)
-	if vpnResponse.Code != http.StatusBadGateway {
-		t.Fatalf("expected vpn 502 when gateway reconcile fails, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
+	if vpnResponse.Code != http.StatusOK {
+		t.Fatalf("expected the saved config even after gateway failure, got %d: %s", vpnResponse.Code, vpnResponse.Body.String())
 	}
-	if wireGuard.reconcileCalls != 2 {
-		t.Fatalf("expected wireguard reconcile after join and download, got %d", wireGuard.reconcileCalls)
+	if wireGuard.reconcileCalls != 1 {
+		t.Fatalf("expected only the join to reconcile WireGuard, got %d", wireGuard.reconcileCalls)
 	}
 }
 
@@ -2497,6 +2598,20 @@ func TestSubmitRejectsOversizedBatch(t *testing.T) {
 	}
 }
 
+func TestSubmitRejectsFlagOverByteLimit(t *testing.T) {
+	body, err := json.Marshal(submitRequest{Flags: []string{strings.Repeat("é", MaxSubmittedFlagBytes/2+1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/submit", bytes.NewReader(body))
+	setTestTeamAuthHeader(t, request)
+	response := httptest.NewRecorder()
+	newTestMux().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "at most 512 bytes") {
+		t.Fatalf("unexpected submission response: %d %s", response.Code, response.Body)
+	}
+}
+
 func TestSubmitReturnsDuplicateVerdict(t *testing.T) {
 	mux := newTestMuxWithGameCore(testGameCoreClient{
 		submit: []SubmissionVerdictAlias{
@@ -2866,7 +2981,11 @@ func TestSSHSessionAppliesStableSSHCredential(t *testing.T) {
 	if controller.teamID != 101 || controller.challengeID != 1 {
 		t.Fatalf("unexpected credential target team=%d challenge=%d", controller.teamID, controller.challengeID)
 	}
-	if want := stableRootPassword("dev-team-token", 101, 1); controller.password != want {
+	task, err := store.GetControllerRuntimeTask(context.Background(), 101, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := stableRootPassword("dev-team-token", 101, 1, task.StateVolume); controller.password != want {
 		t.Fatalf("unexpected stable password %q, want %q", controller.password, want)
 	}
 }
@@ -2964,11 +3083,11 @@ func TestTeamServicesSuccessOverridesWarming(t *testing.T) {
 	}
 }
 
-func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
+func TestTeamServicesExposeSafeSLAFailureDetails(t *testing.T) {
 	mux := newTestMuxWithGameCore(testGameCoreClient{
 		runs: []GameCheckerRun{
 			{ID: 33, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "check", Status: "skipped", Message: "phase skipped after previous checker failure", CheckedAt: "2026-03-10T10:12:03Z"},
-			{ID: 32, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "get", Status: "failed", Message: "flag retrieval failed from service endpoint", CheckedAt: "2026-03-10T10:12:02Z"},
+			{ID: 32, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "get", Status: "failed", Message: "retrieval failed with private-token", CheckedAt: "2026-03-10T10:12:02Z"},
 			{ID: 31, TickID: 12, TeamID: 101, TeamName: "Team Alpha", ChallengeID: 1, ChallengeName: "college-http", Phase: "put", Status: "success", CheckedAt: "2026-03-10T10:12:01Z"},
 		},
 	})
@@ -2999,7 +3118,7 @@ func TestTeamServicesExposeLatestSLAFailureDetails(t *testing.T) {
 		if state.SLATickID != 12 {
 			t.Fatalf("expected SLA tick 12, got %d", state.SLATickID)
 		}
-		if state.SLAMessage != "flag retrieval failed from service endpoint" {
+		if state.SLAMessage != "checker could not retrieve the stored flag" {
 			t.Fatalf("unexpected SLA message %q", state.SLAMessage)
 		}
 		if state.Status != "degraded" {
@@ -3955,6 +4074,46 @@ func TestAdminDeactivateTeamAttemptsEveryRevocationAfterRuntimeFailure(t *testin
 	}
 	if audit.TotalCount != 1 {
 		t.Fatalf("expected deactivation audit despite reconciliation failure, got %+v", audit)
+	}
+}
+
+func TestAdminPlayerDemotionRetriesNetworkReconciliation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(101)
+	player, err := store.CreateAdminPlayer(ctx, adminCreatePlayerRequest{
+		DisplayName: "Event Organizer", Email: "event-organizer@example.test",
+		Password: "test-password", Role: "organizer",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessCalls := 0
+	wireGuard := &recordingWireGuardClient{err: errors.New("wireguard unavailable")}
+	mux := httpapi.NewBaseMux(httpapi.ServiceInfo{Name: "api-gateway", Version: "dev", Addr: ":0"})
+	NewWithDeps("dev-team-token", "dev-admin-token", 101, store,
+		testControllerClient{accessReconcileCalls: &accessCalls}, wireGuard).RegisterRoutes(mux)
+
+	updateRole := func() int {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v2/admin/players/%d", player.ID),
+			strings.NewReader(`{"display_name":"Event Organizer","email":"event-organizer@example.test","role":"member"}`))
+		setTestAdminAuthHeader(request)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response.Code
+	}
+	if status := updateRole(); status != http.StatusBadGateway {
+		t.Fatalf("expected initial reconciliation error, got %d", status)
+	}
+	if _, err := store.ValidatePlayerSession(ctx, player.ID, player.TeamID, "organizer", 1); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected old organizer session to be revoked, got %v", err)
+	}
+	wireGuard.err = nil
+	if status := updateRole(); status != http.StatusOK {
+		t.Fatalf("expected successful retry, got %d", status)
+	}
+	if accessCalls != 2 || wireGuard.reconcileCalls != 2 {
+		t.Fatalf("expected both network planes on each attempt, got access=%d wireguard=%d", accessCalls, wireGuard.reconcileCalls)
 	}
 }
 

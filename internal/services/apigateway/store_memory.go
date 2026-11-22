@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"slices"
 	"strings"
@@ -45,6 +46,8 @@ type memoryStore struct {
 	// so every existing construction site stays active-by-default without edits.
 	deactivatedTeams   map[int]bool
 	deactivatedPlayers map[int]bool
+	revokedSessions    map[string]time.Time
+	serviceCaptureIDs  map[[2]int]int64
 	// matchStarted is nil (treat as started) or explicitly false for pre-match tests.
 	matchStarted *bool
 	// matchPaused is nil/false unless set for pause-gate tests.
@@ -120,6 +123,7 @@ func NewMemoryStore(teamID int) Store {
 		store.scoreboard = append(store.scoreboard, scoreRow{Rank: len(store.scoreboard) + 1, Team: teamName, Attack: 0, Defense: 0, SLA: 0, Total: 0, Delta: "new"})
 	}
 	for id := range store.teams {
+		store.teams[id].ScoreIdentity = rand.Text()
 		store.seedReadyServicesLocked(id, now)
 	}
 
@@ -142,7 +146,7 @@ func (s *memoryStore) seedReadyServicesLocked(teamID int, now time.Time) {
 			ChallengeName: challenge.Name,
 			RuntimeKind:   "docker",
 			RuntimeStatus: "ready",
-			ContainerName: serviceContainerName(challenge.Name, teamID),
+			ContainerName: serviceContainerName(challenge.Name, challengeID, teamID),
 			StateVolume:   serviceStateVolumeName(challenge.Name, teamID),
 			BaselineImage: challenge.BaselineImage,
 			CheckerImage:  challenge.CheckerImage,
@@ -205,7 +209,7 @@ func (s *memoryStore) RegisterPlayer(_ context.Context, input participantRegiste
 
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
-	if displayName == "" || email == "" || !validPassword(input.Password) {
+	if displayName == "" || !validAccountEmail(email) || !validPassword(input.Password) {
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 	for _, record := range s.players {
@@ -258,19 +262,19 @@ func (s *memoryStore) ValidatePlayerSession(_ context.Context, playerID, teamID 
 	if strings.TrimSpace(record.Player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
+	organizer := strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer")
+	if !organizer && record.Player.TeamID == teamID && s.deactivatedTeams[teamID] {
+		return authenticatedPlayer{}, ErrAccountDeactivated
+	}
 	if sessionVersion != max(record.SessionVersion, 1) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	organizer := strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer")
 	if organizer {
 		if teamID != 0 {
 			return authenticatedPlayer{}, ErrInvalidCredentials
 		}
 	} else if record.Player.TeamID != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
-	}
-	if !organizer && s.deactivatedTeams[record.Player.TeamID] {
-		return authenticatedPlayer{}, ErrAccountDeactivated
 	}
 	teamName := teamNameForID(s.teamNames, record.Player.TeamID)
 	teamContactEmail := ""
@@ -305,7 +309,7 @@ func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, 
 
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
-	if displayName == "" || email == "" {
+	if displayName == "" || !validAccountEmail(email) {
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 	for id, candidate := range s.players {
@@ -325,7 +329,7 @@ func (s *memoryStore) UpdateParticipantProfile(_ context.Context, playerID int, 
 			oldTeamName := team.Name
 			teamName = strings.TrimSpace(input.TeamName)
 			teamContactEmail := strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
-			if teamName == "" || teamContactEmail == "" {
+			if teamName == "" || !validAccountEmail(teamContactEmail) {
 				return authenticatedPlayer{}, ErrDuplicateResource
 			}
 			for id, candidate := range s.teams {
@@ -466,8 +470,19 @@ func (s *memoryStore) ClearScoreboardFreeze(_ context.Context, _ time.Time) (sco
 func (s *memoryStore) SaveFrozenScoreboardSnapshot(_ context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.freeze.Snapshot == nil {
+	if s.freeze.FreezeAt != nil && !takenAt.After(*s.freeze.FreezeAt) &&
+		(s.freeze.SnapshotTakenAt == nil || takenAt.After(*s.freeze.SnapshotTakenAt)) {
 		s.freeze.Snapshot = append([]scoreRow{}, rows...)
+		identities := make(map[string]string, len(s.teams))
+		for _, team := range s.teams {
+			identities[team.Name] = team.ScoreIdentity
+		}
+		for i := range s.freeze.Snapshot {
+			row := &s.freeze.Snapshot[i]
+			if row.TeamIdentity == "" {
+				row.TeamIdentity = identities[row.Team]
+			}
+		}
 		t := takenAt.UTC()
 		s.freeze.SnapshotTakenAt = &t
 	}
@@ -596,25 +611,57 @@ func (s *memoryStore) validateServiceActionLocked(teamID, challengeID int) (*ser
 	return state, instance, nil
 }
 
-func (s *memoryStore) UnlockService(_ context.Context, teamID, challengeID int) (unlockData, error) {
+func (s *memoryStore) UnlockService(ctx context.Context, teamID, challengeID int) (unlockData, error) {
+	return s.applyServiceCapture(ctx, teamID, challengeID, 0)
+}
+
+func (s *memoryStore) applyServiceCapture(_ context.Context, teamID, challengeID int, captureID int64) (unlockData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, _, err := s.validateServiceActionLocked(teamID, challengeID)
+	state, instance, err := s.validateServiceActionLocked(teamID, challengeID)
 	if err != nil {
 		return unlockData{}, err
+	}
+	if captureID > 0 {
+		key := [2]int{teamID, challengeID}
+		if captureID <= s.serviceCaptureIDs[key] {
+			return unlockData{}, ErrServiceLocked
+		}
+		if s.serviceCaptureIDs == nil {
+			s.serviceCaptureIDs = make(map[[2]int]int64)
+		}
+		s.serviceCaptureIDs[key] = captureID
 	}
 	state.Unlocked = true
 	state.Status = demoteStatus(state.Status)
 	state.SSHHint = "enemy flag accepted; open SSH Access to view the team credential"
 	state.LastEvent = "SSH unlocked by accepted enemy flag"
 
-	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
+	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true, stateVolume: instance.StateVolume}, nil
+}
+
+func (s *memoryStore) revokeServiceCaptures(teamID, challengeID int, through int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := [2]int{teamID, challengeID}
+	if through < s.serviceCaptureIDs[key] {
+		return
+	}
+	if s.serviceCaptureIDs == nil {
+		s.serviceCaptureIDs = make(map[[2]int]int64)
+	}
+	s.serviceCaptureIDs[key] = through
+	if state := s.teamStates[teamID][challengeID]; state != nil {
+		state.Unlocked = false
+		state.SSHHint = "capture a flag to unlock SSH"
+		state.LastEvent = "SSH grant revoked because its qualifying captures were deleted"
+	}
 }
 
 func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, _, err := s.validateServiceActionLocked(teamID, challengeID)
+	state, instance, err := s.validateServiceActionLocked(teamID, challengeID)
 	if err != nil {
 		return sshSessionData{}, err
 	}
@@ -627,7 +674,7 @@ func (s *memoryStore) CreateSSHSession(_ context.Context, teamID, challengeID in
 	state.SSHHint = connectionHint
 	state.LastEvent = "team ssh credential retrieved"
 
-	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint}, nil
+	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint, stateVolume: instance.StateVolume}, nil
 }
 
 func (s *memoryStore) MarkSSHSessionApplyFailure(_ context.Context, teamID, challengeID int) error {
@@ -799,7 +846,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 	name := strings.TrimSpace(input.Name)
 	contactEmail := strings.TrimSpace(strings.ToLower(input.ContactEmail))
 	institution := storedTeamInstitution(input.Institution)
-	if name == "" || contactEmail == "" {
+	if name == "" || !validAccountEmail(contactEmail) {
 		return adminTeam{}, ErrDuplicateResource
 	}
 	for _, team := range s.teams {
@@ -813,7 +860,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 		return adminTeam{}, err
 	}
 	joinKey := NewTeamJoinKey()
-	team := &adminTeam{ID: id, Name: name, ContactEmail: contactEmail, Institution: institution, JoinKey: joinKey}
+	team := &adminTeam{ID: id, ScoreIdentity: rand.Text(), Name: name, ContactEmail: contactEmail, Institution: institution, JoinKey: joinKey}
 	s.teams[id] = team
 	s.teamNames[id] = name
 	s.teamStates[id] = make(map[int]*serviceState)
@@ -835,7 +882,7 @@ func (s *memoryStore) CreateAdminTeam(_ context.Context, input adminCreateTeamRe
 				ChallengeName: challenge.Name,
 				RuntimeKind:   "docker",
 				RuntimeStatus: "queued",
-				ContainerName: serviceContainerName(challenge.Name, id),
+				ContainerName: serviceContainerName(challenge.Name, challengeID, id),
 				StateVolume:   serviceStateVolumeName(challenge.Name, id),
 				BaselineImage: challenge.BaselineImage,
 				CheckerImage:  challenge.CheckerImage,
@@ -897,6 +944,9 @@ func (s *memoryStore) CreateAdminPlayer(_ context.Context, input adminCreatePlay
 		}
 	}
 	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if !validAccountEmail(email) {
+		return adminPlayer{}, ErrDuplicateResource
+	}
 	for _, record := range s.players {
 		if strings.EqualFold(record.Player.Email, email) {
 			return adminPlayer{}, ErrDuplicateResource
@@ -956,7 +1006,7 @@ func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, te
 	defer s.mu.Unlock()
 
 	record, ok := s.players[playerID]
-	if !ok {
+	if !ok || s.deactivatedPlayers[playerID] {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") || record.Player.TeamID > 0 {
@@ -970,7 +1020,7 @@ func (s *memoryStore) JoinExistingPlayerTeam(_ context.Context, playerID int, te
 			break
 		}
 	}
-	if team == nil {
+	if team == nil || s.deactivatedTeams[team.ID] {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 	if s.teamMemberLimitReachedLocked(team.ID) {
@@ -1212,8 +1262,11 @@ func (s *memoryStore) ListWireGuardGatewayPeers(_ context.Context) ([]WireGuardG
 		if record.Player.TeamID <= 0 && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && s.deactivatedTeams[record.Player.TeamID] {
-			continue
+		if !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+			team := s.teams[record.Player.TeamID]
+			if team == nil || s.deactivatedTeams[team.ID] || team.PlayFromTick > 0 {
+				continue
+			}
 		}
 		record.WireGuard.TeamName = teamNameForID(s.teamNames, record.Player.TeamID)
 		if strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") && record.Player.TeamID == 0 {
@@ -1386,7 +1439,7 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 			RuntimeKind:     "docker",
 			RuntimeStatus:   "queued",
 			DeploymentJobID: jobID,
-			ContainerName:   serviceContainerName(challenge.Name, teamID),
+			ContainerName:   serviceContainerName(challenge.Name, challengeID, teamID),
 			StateVolume:     serviceStateVolumeName(challenge.Name, teamID),
 			BaselineImage:   challenge.BaselineImage,
 			CheckerImage:    challenge.CheckerImage,
@@ -1395,6 +1448,9 @@ func (s *memoryStore) DeployAdminChallenge(_ context.Context, challengeID int) (
 			SSHHost:         ServiceIP(challenge.ServiceSubnetOctet, teamID),
 			ServicePort:     challenge.ServicePort,
 			UpdatedAt:       createdAt,
+		}
+		if existing := s.instances[teamID][challengeID]; existing != nil && existing.StateVolume != "" {
+			instance.StateVolume = existing.StateVolume
 		}
 		s.instances[teamID][challengeID] = instance
 		s.teamStates[teamID][challengeID] = &serviceState{
@@ -1634,6 +1690,9 @@ func (s *memoryStore) ListControllerRuntimeTasks(_ context.Context) ([]Controlle
 
 	tasks := make([]ControllerRuntimeTask, 0)
 	for teamID, challengeInstances := range s.instances {
+		if s.deactivatedTeams[teamID] {
+			continue
+		}
 		for challengeID, instance := range challengeInstances {
 			if instance.RuntimeStatus != "queued" {
 				continue
@@ -1667,19 +1726,34 @@ func (s *memoryStore) GetControllerRuntimeTask(_ context.Context, teamID, challe
 
 func (s *memoryStore) controllerRuntimeTaskLocked(teamID, challengeID int, instance *serviceInstanceRecord) ControllerRuntimeTask {
 	return ControllerRuntimeTask{
-		DeploymentJobID: instance.DeploymentJobID,
-		TeamID:          teamID,
-		ChallengeID:     challengeID,
-		ChallengeName:   instance.ChallengeName,
-		RuntimeKind:     instance.RuntimeKind,
-		ContainerName:   instance.ContainerName,
-		StateVolume:     instance.StateVolume,
-		BaselineImage:   instance.BaselineImage,
-		CheckerToken:    instance.CheckerToken,
-		Endpoint:        instance.Endpoint,
-		SSHHost:         instance.SSHHost,
-		ServicePort:     instance.ServicePort,
+		DeploymentJobID:    instance.DeploymentJobID,
+		TeamID:             teamID,
+		ChallengeID:        challengeID,
+		ChallengeName:      instance.ChallengeName,
+		RuntimeKind:        instance.RuntimeKind,
+		ContainerName:      instance.ContainerName,
+		StateVolume:        instance.StateVolume,
+		BaselineImage:      instance.BaselineImage,
+		CheckerToken:       instance.CheckerToken,
+		Endpoint:           instance.Endpoint,
+		SSHHost:            instance.SSHHost,
+		ServicePort:        instance.ServicePort,
+		DisableExternalDNS: s.challenges[challengeID] != nil && !s.challenges[challengeID].EgressEnabled,
 	}
+}
+
+func (s *memoryStore) ListControllerTeamStateVolumes(_ context.Context, teamID int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var volumes []string
+	for _, instance := range s.instances[teamID] {
+		if instance.StateVolume != "" {
+			volumes = append(volumes, instance.StateVolume)
+		}
+	}
+	slices.Sort(volumes)
+	return slices.Compact(volumes), nil
 }
 
 func (s *memoryStore) ListControllerServiceAccessPolicies(_ context.Context) ([]ControllerServiceAccessPolicy, error) {
@@ -1720,7 +1794,8 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 	if s.matchStarted != nil && !*s.matchStarted {
 		networkClosed = true
 	}
-	if s.matchPaused != nil && *s.matchPaused {
+	matchPaused := s.matchPaused != nil && *s.matchPaused
+	if matchPaused {
 		networkClosed = true
 	}
 	if team, ok := s.teams[teamID]; ok && team != nil && team.PlayFromTick > 0 {
@@ -1777,6 +1852,8 @@ func (s *memoryStore) buildAccessPolicyLocked(teamID, challengeID int, state *se
 		AllowedPeerAddresses: allowedPeers,
 		EgressEnabled:        egressEnabled,
 		NetworkClosed:        networkClosed,
+		MatchPaused:          matchPaused,
+		PlayDeferred:         (s.teams[teamID] != nil && s.teams[teamID].PlayFromTick > 0) || (s.challenges[challengeID] != nil && s.challenges[challengeID].PlayFromTick > 0),
 	}
 }
 
@@ -1940,7 +2017,7 @@ func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input admin
 	// taken by another team.
 	name := strings.TrimSpace(input.Name)
 	email := strings.ToLower(strings.TrimSpace(input.ContactEmail))
-	if name == "" || email == "" {
+	if name == "" || !validAccountEmail(email) {
 		return adminTeam{}, fmt.Errorf("%w: name and contact_email are required", ErrDuplicateResource)
 	}
 	for id, other := range s.teams {
@@ -1962,6 +2039,17 @@ func (s *memoryStore) UpdateAdminTeam(_ context.Context, teamID int, input admin
 	return *team, nil
 }
 
+func (s *memoryStore) RotateAdminTeamJoinKey(_ context.Context, teamID int) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team := s.teams[teamID]
+	if team == nil {
+		return "", ErrTeamNotFound
+	}
+	team.JoinKey = NewTeamJoinKey()
+	return team.JoinKey, nil
+}
+
 func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, _ time.Time) (adminTeam, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1971,6 +2059,13 @@ func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, 
 	}
 	if s.deactivatedTeams == nil {
 		s.deactivatedTeams = make(map[int]bool)
+	}
+	if s.deactivatedTeams[teamID] == active {
+		for _, record := range s.players {
+			if record.Player.TeamID == teamID && !strings.EqualFold(strings.TrimSpace(record.Player.Role), "organizer") {
+				record.SessionVersion = max(record.SessionVersion, 1) + 1
+			}
+		}
 	}
 	clone := *team
 	if active {
@@ -1984,15 +2079,13 @@ func (s *memoryStore) SetTeamActive(_ context.Context, teamID int, active bool, 
 		s.deactivatedTeams[teamID] = true
 		clone.Active = false
 		clone.PlayFromTick = 0
-		// Drop the team off the in-memory leaderboard immediately.
-		filtered := s.scoreboard[:0]
-		for _, row := range s.scoreboard {
-			if row.Team != team.Name {
-				filtered = append(filtered, row)
-			}
-		}
-		s.scoreboard = filtered
 	}
+	for index := range s.scoreboard {
+		if s.scoreboard[index].Team == team.Name {
+			s.scoreboard[index].Disqualified = !active
+		}
+	}
+	rankScoreRows(s.scoreboard)
 	*team = clone
 	clone.PlayerCount = s.playerCountForTeamLocked(teamID)
 	clone.DeployedChallenges = len(s.teamStates[teamID])
@@ -2106,7 +2199,7 @@ func (s *memoryStore) UpdateAdminPlayer(_ context.Context, playerID int, input a
 	// not belong to another player.
 	name := strings.TrimSpace(input.DisplayName)
 	email := strings.ToLower(strings.TrimSpace(input.Email))
-	if name == "" || email == "" {
+	if name == "" || !validAccountEmail(email) {
 		return adminPlayer{}, fmt.Errorf("%w: display_name and email are required", ErrDuplicateResource)
 	}
 	for id, other := range s.players {
@@ -2116,7 +2209,10 @@ func (s *memoryStore) UpdateAdminPlayer(_ context.Context, playerID int, input a
 	}
 	record.Player.DisplayName = name
 	record.Player.Email = email
-	record.Player.Role = normalizedRole(input.Role)
+	if role := normalizedRole(input.Role); record.Player.Role != role {
+		record.Player.Role = role
+		record.SessionVersion = max(record.SessionVersion, 1) + 1
+	}
 	s.players[playerID] = record
 	return record.Player, nil
 }
@@ -2130,6 +2226,9 @@ func (s *memoryStore) SetPlayerActive(_ context.Context, playerID int, active bo
 	}
 	if s.deactivatedPlayers == nil {
 		s.deactivatedPlayers = make(map[int]bool)
+	}
+	if s.deactivatedPlayers[playerID] == active {
+		record.SessionVersion = max(record.SessionVersion, 1) + 1
 	}
 	clone := record.Player
 	if active {
@@ -2184,6 +2283,13 @@ func (s *memoryStore) UpdateAdminChallenge(_ context.Context, challengeID int, i
 	for id, other := range s.challenges {
 		if id != challengeID && strings.EqualFold(other.Name, name) {
 			return adminChallenge{}, ErrDuplicateResource
+		}
+	}
+	if input.EgressEnabled != nil && *input.EgressEnabled != challenge.EgressEnabled && !challenge.Maintenance {
+		for _, instances := range s.instances {
+			if instances[challengeID] != nil {
+				return adminChallenge{}, fmt.Errorf("%w: put the challenge under maintenance before changing egress_enabled", ErrInvalidRuntimeConfig)
+			}
 		}
 	}
 	challenge.Name = name

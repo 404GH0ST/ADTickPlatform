@@ -96,6 +96,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/me/team/captain", s.handleTransferTeamCaptain)
 	mux.HandleFunc("PUT /api/v2/me/profile", s.handleUpdateParticipantProfile)
 	mux.HandleFunc("GET /api/v2/session", s.handleSession)
+	mux.HandleFunc("POST /api/v2/session/logout", s.handleLogout)
 	s.registerOpsFeatureRoutes(mux)
 	mux.HandleFunc("GET /api/v2/me/wireguard", s.handleParticipantWireGuardConfig)
 	mux.HandleFunc("GET /api/v2/challenges", s.handleChallenges)
@@ -117,6 +118,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v2/admin/teams/{team_id}", s.handleAdminDeleteTeam)
 	mux.HandleFunc("POST /api/v2/admin/teams/{team_id}/deactivate", s.handleAdminDeactivateTeam)
 	mux.HandleFunc("POST /api/v2/admin/teams/{team_id}/reactivate", s.handleAdminReactivateTeam)
+	mux.HandleFunc("POST /api/v2/admin/teams/{team_id}/join-key/rotate", s.handleAdminRotateTeamJoinKey)
 	mux.HandleFunc("GET /api/v2/admin/players", s.handleAdminListPlayers)
 	mux.HandleFunc("POST /api/v2/admin/players", s.handleAdminCreatePlayer)
 	mux.HandleFunc("PUT /api/v2/admin/players/{player_id}", s.handleAdminUpdatePlayer)
@@ -174,6 +176,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/admin/platform/settings/reload", s.handleAdminReloadFlagFormat)
 }
 
+const maxAccountEmailBytes = 254
+
 func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	var req authenticateRequest
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
@@ -184,6 +188,10 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 	decision, allowed := s.allowRateLimit(r.Context(), rateLimitClientKey("auth", clientRateLimitKey(r)), authClientRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
+		return
+	}
+	if len(strings.TrimSpace(req.Email)) > maxAccountEmailBytes {
+		writeProblem(w, http.StatusForbidden, "Authentication failed", "email or password is wrong.")
 		return
 	}
 	// Per-(email, client) throttle, enforced before the password is checked so a
@@ -265,6 +273,10 @@ func (s *Server) handleRegisterPlayer(w http.ResponseWriter, r *http.Request) {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
 		return
 	}
+	if !validAccountEmail(strings.ToLower(req.Email)) {
+		writeProblem(w, http.StatusBadRequest, "Registration failed", "email must be 1-254 bytes.")
+		return
+	}
 	decision, allowed = s.allowRateLimit(r.Context(), rateLimitRegistrationEmailKey(req.Email), registrationEmailRateLimitPolicy)
 	if !allowed {
 		writeRateLimitFailure(w, decision, defaultRateLimit429Message)
@@ -324,6 +336,7 @@ func (s *Server) handleJoinExistingTeam(w http.ResponseWriter, r *http.Request) 
 	}
 	s.reconcileWireGuardGatewayBestEffort(r.Context(), "participant team join")
 
+	updatedPlayer.sessionID, updatedPlayer.sessionExpiresAt = player.sessionID, player.sessionExpiresAt
 	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Team join failed", "team authentication token could not be issued.")
@@ -374,6 +387,7 @@ func (s *Server) handleTransferTeamCaptain(w http.ResponseWriter, r *http.Reques
 		"to_player_id":   req.PlayerID,
 		"team_id":        player.TeamID,
 	})
+	updatedPlayer.sessionID, updatedPlayer.sessionExpiresAt = player.sessionID, player.sessionExpiresAt
 	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		// The transfer already committed and invalidated the caller's previous
@@ -455,6 +469,11 @@ func (s *Server) handleUpdateParticipantProfile(w http.ResponseWriter, r *http.R
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "display name and team name must be 1-96 characters with no control characters.")
 		return
 	}
+	if !validAccountEmail(strings.ToLower(req.Email)) ||
+		(player.Role == "captain" && !validAccountEmail(strings.ToLower(req.TeamContactEmail))) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "email addresses must be 1-254 bytes with no control characters.")
+		return
+	}
 
 	updatedPlayer, err := s.store.UpdateParticipantProfile(r.Context(), player.PlayerID, req)
 	if err != nil {
@@ -469,6 +488,7 @@ func (s *Server) handleUpdateParticipantProfile(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	updatedPlayer.sessionID, updatedPlayer.sessionExpiresAt = player.sessionID, player.sessionExpiresAt
 	token, err := issueToken(s.teamTokenSecret, updatedPlayer, s.now())
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, "Profile update failed", "team authentication token could not be issued.")
@@ -484,9 +504,8 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// During a freeze the participant-facing board serves the snapshot captured
-	// when the window first became active. Organizers keep hitting the live board
-	// via the admin endpoint, which never consults the freeze window.
+	// The participant board serves the last snapshot taken before freeze_at.
+	// Organizers keep hitting the live board via the admin endpoint.
 	now := s.now()
 	freeze, err := s.store.GetScoreboardFreeze(r.Context())
 	if err != nil {
@@ -494,8 +513,8 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	frozen := freeze.activeAt(now)
-	if frozen && freeze.Snapshot != nil {
-		writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), freeze.Snapshot))
+	if frozen {
+		s.writeFrozenScoreboard(w, r, freeze)
 		return
 	}
 
@@ -503,22 +522,39 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if frozen {
-		// First read after freeze_at: capture the live board as the snapshot.
-		// SaveFrozenScoreboardSnapshot only writes when none exists yet, so
-		// concurrent first-reads converge on one snapshot.
-		saved, err := s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, now)
+	// A scoreboard read can straddle the cutoff. Re-read the window after the
+	// upstream call so that such a request cannot serve post-freeze scores.
+	capturedAt := s.now()
+	freeze, err = s.store.GetScoreboardFreeze(r.Context())
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	if freeze.activeAt(capturedAt) {
+		s.writeFrozenScoreboard(w, r, freeze)
+		return
+	}
+	if freeze.FreezeAt != nil && capturedAt.Before(*freeze.FreezeAt) {
+		saved, err := s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, capturedAt)
 		if err != nil {
 			writeStoreFailure(w, err)
 			return
 		}
-		if saved.Snapshot == nil {
-			writeStoreFailure(w, errors.New("scoreboard freeze snapshot was not persisted"))
-			return
-		}
-		rows = saved.Snapshot
+		freeze = saved
 	}
-	writeData(w, http.StatusOK, s.enrichScoreRows(r.Context(), rows))
+	if freeze.activeAt(s.now()) {
+		s.writeFrozenScoreboard(w, r, freeze)
+		return
+	}
+	writeData(w, http.StatusOK, publicScoreRows(s.enrichScoreRows(r.Context(), rows)))
+}
+
+func (s *Server) writeFrozenScoreboard(w http.ResponseWriter, r *http.Request, freeze scoreboardFreezeWindow) {
+	if freeze.Snapshot == nil {
+		writeStoreFailure(w, errors.New("scoreboard freeze snapshot is unavailable"))
+		return
+	}
+	writeData(w, http.StatusOK, publicScoreRows(s.enrichFrozenScoreRows(r.Context(), freeze.Snapshot)))
 }
 
 // fetchLiveScoreboard returns the current live board, preferring scoring-worker,
@@ -799,8 +835,8 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "request body is invalid.")
 		return
 	}
-	if len(req.Flags) > maxSubmitFlagsPerRequest {
-		writeProblem(w, http.StatusBadRequest, "Submission rejected", "too many flags in one request.")
+	if err := ValidateSubmittedFlags(req.Flags); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Submission rejected", err.Error())
 		return
 	}
 
@@ -862,12 +898,20 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 // applying the credential.
 func (s *Server) applyAcceptedFlagAccess(ctx context.Context, teamID int, results []submissionVerdict) {
 	seen := map[int]bool{}
-	for _, result := range results {
+	for i := len(results) - 1; i >= 0; i-- {
+		result := results[i]
 		if result.Status != "accepted" || result.ChallengeID <= 0 || seen[result.ChallengeID] {
 			continue
 		}
 		seen[result.ChallengeID] = true
-		if _, err := s.store.UnlockService(ctx, teamID, result.ChallengeID); err != nil {
+		var grant unlockData
+		var err error
+		if store, ok := s.store.(*memoryStore); ok && result.CaptureID > 0 {
+			grant, err = store.applyServiceCapture(ctx, teamID, result.ChallengeID, result.CaptureID)
+		} else {
+			grant, err = s.store.UnlockService(ctx, teamID, result.ChallengeID)
+		}
+		if err != nil {
 			log.Printf("automatic SSH unlock team=%d challenge=%d: %v", teamID, result.ChallengeID, err)
 			continue
 		}
@@ -876,7 +920,8 @@ func (s *Server) applyAcceptedFlagAccess(ctx context.Context, teamID int, result
 			continue
 		}
 		if err := s.controller.ApplySSHCredential(ctx, teamID, result.ChallengeID, ControllerSSHCredential{
-			Password: stableRootPassword(s.sshCredentialSecret, teamID, result.ChallengeID),
+			Password:    stableRootPassword(s.sshCredentialSecret, teamID, result.ChallengeID, grant.stateVolume),
+			StateVolume: grant.stateVolume,
 		}); err != nil {
 			_ = s.store.MarkSSHSessionApplyFailure(ctx, teamID, result.ChallengeID)
 		}
@@ -1029,9 +1074,6 @@ func fallbackSLAMessage(checker string) string {
 func (s *Server) sanitizeParticipantServiceStates(ctx context.Context, states []serviceState) {
 	markers := s.sensitiveCheckerMarkers(ctx)
 	for i := range states {
-		if !containsSensitiveCheckerDetail(states[i].SLAMessage, markers...) {
-			continue
-		}
 		states[i].SLAMessage = sanitizeParticipantSLAMessage(GameServiceStateSummary{
 			Status:  states[i].SLAStatus,
 			Phase:   states[i].SLAPhase,
@@ -1042,6 +1084,9 @@ func (s *Server) sanitizeParticipantServiceStates(ctx context.Context, states []
 }
 
 func sanitizeParticipantSLAMessage(summary GameServiceStateSummary, extraMarkers ...string) string {
+	if message := CheckerServiceFailureMessage(summary.Status); message != "" {
+		return message
+	}
 	message := strings.TrimSpace(summary.Message)
 	if message != "" && !containsSensitiveCheckerDetail(message, extraMarkers...) {
 		return message
@@ -1057,14 +1102,6 @@ func sanitizeParticipantSLAMessage(summary GameServiceStateSummary, extraMarkers
 	switch strings.ToLower(strings.TrimSpace(summary.Status)) {
 	case "ok":
 		return "service passed storage, retrieval, and functionality checks"
-	case "recovering":
-		return "flag storage failed but retrieval and functionality still passed"
-	case "flag_not_found":
-		return "checker could not retrieve the stored flag"
-	case "faulty":
-		return "service functionality check failed"
-	case "down":
-		return "service did not complete the latest checker cycle"
 	}
 	return "service state detail unavailable"
 }
@@ -1157,10 +1194,11 @@ func (s *Server) handleSSHSession(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "service access reconcile failed.")
 		return
 	}
-	data.Password = stableRootPassword(s.sshCredentialSecret, teamID, challengeID)
+	data.Password = stableRootPassword(s.sshCredentialSecret, teamID, challengeID, data.stateVolume)
 	data.PasswordMode = "stable"
 	if err := s.controller.ApplySSHCredential(r.Context(), teamID, challengeID, ControllerSSHCredential{
-		Password: data.Password,
+		Password:    data.Password,
+		StateVolume: data.stateVolume,
 	}); err != nil {
 		_ = s.store.MarkSSHSessionApplyFailure(r.Context(), teamID, challengeID)
 		writeProblem(w, http.StatusBadGateway, "SSH access unavailable", "ssh credential runtime apply failed.")
@@ -1378,6 +1416,16 @@ func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, messa
 		writeProblem(w, http.StatusForbidden, "Authentication required", message)
 		return authenticatedPlayer{}, false
 	}
+	revoked, err := s.store.IsPlayerSessionRevoked(r.Context(), claims.SessionID)
+	if err != nil {
+		writeStoreFailure(w, err)
+		return authenticatedPlayer{}, false
+	}
+	if revoked {
+		writeProblem(w, http.StatusForbidden, "Authentication required", message)
+		return authenticatedPlayer{}, false
+	}
+	player.sessionID, player.sessionExpiresAt = claims.SessionID, claims.ExpiresAt
 	return player, true
 }
 

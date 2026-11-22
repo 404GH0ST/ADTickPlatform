@@ -117,7 +117,7 @@ func (s *postgresStore) RegisterPlayer(ctx context.Context, input participantReg
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	password := input.Password
-	if displayName == "" || email == "" || !validPassword(password) {
+	if displayName == "" || !validAccountEmail(email) || !validPassword(password) {
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 
@@ -190,11 +190,14 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	if strings.TrimSpace(player.Role) != strings.TrimSpace(role) {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
+	normalizedRole := strings.TrimSpace(strings.ToLower(player.Role))
+	if normalizedRole != "organizer" && currentTeamID.Valid && int(currentTeamID.Int64) == teamID && !teamActive {
+		return authenticatedPlayer{}, ErrAccountDeactivated
+	}
 	if player.SessionVersion != sessionVersion {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
 
-	normalizedRole := strings.TrimSpace(strings.ToLower(player.Role))
 	if normalizedRole == "organizer" {
 		if teamID != 0 {
 			return authenticatedPlayer{}, ErrInvalidCredentials
@@ -213,9 +216,6 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 	if int(currentTeamID.Int64) != teamID {
 		return authenticatedPlayer{}, ErrInvalidCredentials
 	}
-	if !teamActive {
-		return authenticatedPlayer{}, ErrAccountDeactivated
-	}
 	player.TeamID = teamID
 	if currentTeamName.Valid {
 		player.TeamName = currentTeamName.String
@@ -229,7 +229,7 @@ func (s *postgresStore) ValidatePlayerSession(ctx context.Context, playerID, tea
 func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (authenticatedPlayer, error) {
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
-	if displayName == "" || email == "" {
+	if displayName == "" || !validAccountEmail(email) {
 		return authenticatedPlayer{}, ErrDuplicateResource
 	}
 
@@ -278,7 +278,7 @@ func (s *postgresStore) UpdateParticipantProfile(ctx context.Context, playerID i
 		if strings.EqualFold(strings.TrimSpace(player.Role), "captain") {
 			teamName = strings.TrimSpace(input.TeamName)
 			teamContactEmail = strings.TrimSpace(strings.ToLower(input.TeamContactEmail))
-			if teamName == "" || teamContactEmail == "" {
+			if teamName == "" || !validAccountEmail(teamContactEmail) {
 				return authenticatedPlayer{}, ErrDuplicateResource
 			}
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE (LOWER(name) = LOWER($1) OR LOWER(email) = LOWER($2)) AND id != $3)`, teamName, teamContactEmail, teamID).Scan(&duplicate); err != nil {
@@ -428,9 +428,10 @@ func (s *postgresStore) ListPublicServices(ctx context.Context) (map[string]map[
 
 func (s *postgresStore) ListScoreboard(ctx context.Context) ([]scoreRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT rank, team_name, attack_points, defense_points, sla_points, total_points, delta
-		FROM scoreboard_entries
-		ORDER BY rank
+		SELECT se.rank, se.team_name, se.attack_points, se.defense_points, se.sla_points, se.total_points, se.delta, NOT t.active, t.score_identity::text
+		FROM scoreboard_entries se
+		JOIN teams t ON t.id = se.team_id
+		ORDER BY se.rank
 	`)
 	if err != nil {
 		return nil, err
@@ -440,7 +441,7 @@ func (s *postgresStore) ListScoreboard(ctx context.Context) ([]scoreRow, error) 
 	result := make([]scoreRow, 0)
 	for rows.Next() {
 		var row scoreRow
-		if err := rows.Scan(&row.Rank, &row.Team, &row.Attack, &row.Defense, &row.SLA, &row.Total, &row.Delta); err != nil {
+		if err := rows.Scan(&row.Rank, &row.Team, &row.Attack, &row.Defense, &row.SLA, &row.Total, &row.Delta, &row.Disqualified, &row.TeamIdentity); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -468,8 +469,8 @@ func (s *postgresStore) GetScoreboardFreeze(ctx context.Context) (scoreboardFree
 }
 
 func (s *postgresStore) SetScoreboardFreezeWindow(ctx context.Context, freezeAt, unfreezeAt *time.Time, now time.Time) (scoreboardFreezeWindow, error) {
-	// Reset the snapshot whenever the window changes so the next read after the
-	// (new) freeze_at re-captures the live board at that moment.
+	// Reset the snapshot whenever the window changes. The caller seeds it with a
+	// board read before freeze_at, and later pre-freeze reads may refresh it.
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO scoreboard_freeze (id, freeze_at, unfreeze_at, snapshot, snapshot_taken_at, updated_at)
 		VALUES (1, $1, $2, NULL, NULL, $3)
@@ -497,16 +498,20 @@ func (s *postgresStore) ClearScoreboardFreeze(ctx context.Context, now time.Time
 }
 
 func (s *postgresStore) SaveFrozenScoreboardSnapshot(ctx context.Context, rows []scoreRow, takenAt time.Time) (scoreboardFreezeWindow, error) {
+	if rows == nil {
+		rows = []scoreRow{}
+	}
 	payload, err := json.Marshal(rows)
 	if err != nil {
 		return scoreboardFreezeWindow{}, err
 	}
-	// Capture only once per window: the guard `snapshot IS NULL` makes concurrent
-	// first-reads after freeze_at converge on a single snapshot.
+	// Only a pre-freeze read can replace the snapshot. Ordering by capture time
+	// prevents a slow, older read from overwriting a newer one.
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE scoreboard_freeze
 		SET snapshot = $1, snapshot_taken_at = $2
-		WHERE id = 1 AND snapshot IS NULL
+		WHERE id = 1 AND freeze_at IS NOT NULL AND $2 <= freeze_at
+		  AND (snapshot_taken_at IS NULL OR snapshot_taken_at < $2)
 	`, payload, takenAt.UTC()); err != nil {
 		return scoreboardFreezeWindow{}, err
 	}
@@ -696,34 +701,28 @@ func (s *postgresStore) UnlockService(ctx context.Context, teamID, challengeID i
 	if err := s.ValidateServiceAction(ctx, teamID, challengeID); err != nil {
 		return unlockData{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE team_service_states
-		SET unlocked = TRUE,
-		    status = CASE WHEN status = 'degraded' THEN 'warming' ELSE status END,
-		    ssh_hint = 'enemy flag accepted; open SSH Access to view the team credential',
-		    last_event = 'SSH unlocked by accepted enemy flag'
-		WHERE team_id = $1 AND challenge_id = $2
-		  AND EXISTS (
-			SELECT 1
-			FROM challenges c
-			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
-			JOIN teams t ON t.id = team_service_states.team_id
-			WHERE c.id = team_service_states.challenge_id
-			  AND c.published = TRUE
-			  AND c.maintenance = FALSE
-			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-			  AND t.active = TRUE
-			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-			  AND si.runtime_status = 'ready'
-		  )
-	`, teamID, challengeID)
+	// Game-core owns the grant. A delayed submission response must never
+	// restore access that was revoked after the scoring transaction.
+	var volume string
+	err := s.db.QueryRowContext(ctx, `
+		UPDATE team_service_states AS state
+		SET status = CASE WHEN status = 'degraded' THEN 'warming' ELSE status END
+		FROM service_instances si, teams t, challenges c
+		WHERE state.team_id = $1 AND state.challenge_id = $2 AND state.unlocked
+		  AND si.team_id = state.team_id AND si.challenge_id = state.challenge_id
+		  AND t.id = state.team_id AND c.id = state.challenge_id
+		  AND si.runtime_status = 'ready'
+		  AND c.published AND NOT c.maintenance AND t.active
+		  AND GREATEST(COALESCE(c.play_from_tick, 0), COALESCE(t.play_from_tick, 0)) <= COALESCE((SELECT MAX(id) FROM game_ticks), 0)
+		RETURNING si.state_volume
+	`, teamID, challengeID).Scan(&volume)
+	if errors.Is(err, sql.ErrNoRows) {
+		return unlockData{}, ErrServiceLocked
+	}
 	if err != nil {
 		return unlockData{}, err
 	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return unlockData{}, ErrChallengeNotFound
-	}
-	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true}, nil
+	return unlockData{ChallengeID: challengeID, TeamID: teamID, Unlocked: true, stateVolume: volume}, nil
 }
 
 func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeID int, _ time.Time) (sshSessionData, error) {
@@ -737,26 +736,18 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 	defer tx.Rollback()
 
 	var unlocked bool
-	var endpoint string
+	var endpoint, volume string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT unlocked, endpoint
-		FROM team_service_states
-		WHERE team_id = $1 AND challenge_id = $2
-		  AND EXISTS (
-			SELECT 1
-			FROM challenges c
-			JOIN service_instances si ON si.team_id = team_service_states.team_id AND si.challenge_id = team_service_states.challenge_id
-			JOIN teams t ON t.id = team_service_states.team_id
-			WHERE c.id = team_service_states.challenge_id
-			  AND c.published = TRUE
-			  AND c.maintenance = FALSE
-			  AND (c.play_from_tick IS NULL OR c.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-			  AND t.active = TRUE
-			  AND (t.play_from_tick IS NULL OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-			  AND si.runtime_status = 'ready'
-		  )
-		FOR UPDATE
-	`, teamID, challengeID).Scan(&unlocked, &endpoint); err != nil {
+		SELECT state.unlocked, state.endpoint, si.state_volume
+		FROM team_service_states state
+		JOIN service_instances si ON si.team_id = state.team_id AND si.challenge_id = state.challenge_id
+		JOIN challenges c ON c.id = state.challenge_id
+		JOIN teams t ON t.id = state.team_id
+		WHERE state.team_id = $1 AND state.challenge_id = $2 AND si.runtime_status = 'ready'
+		  AND c.published AND NOT c.maintenance AND t.active
+		  AND GREATEST(COALESCE(c.play_from_tick, 0), COALESCE(t.play_from_tick, 0)) <= COALESCE((SELECT MAX(id) FROM game_ticks), 0)
+		FOR UPDATE OF state
+	`, teamID, challengeID).Scan(&unlocked, &endpoint, &volume); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sshSessionData{}, ErrChallengeNotFound
 		}
@@ -780,7 +771,7 @@ func (s *postgresStore) CreateSSHSession(ctx context.Context, teamID, challengeI
 		return sshSessionData{}, err
 	}
 
-	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint}, nil
+	return sshSessionData{ChallengeID: challengeID, Host: host, Port: 22, Username: sshUsername(), PasswordMode: "stable", ConnectionHint: connectionHint, stateVolume: volume}, nil
 }
 
 func (s *postgresStore) MarkSSHSessionApplyFailure(ctx context.Context, teamID, challengeID int) error {
@@ -1110,7 +1101,7 @@ func (s *postgresStore) RestartService(ctx context.Context, teamID, challengeID 
 
 func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.email, t.institution, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at, t.play_from_tick
+		SELECT t.id, t.name, t.email, t.institution, COALESCE(t.join_key, ''), COUNT(DISTINCT p.id) AS player_count, COUNT(DISTINCT tss.challenge_id) AS deployed_challenges, t.active, t.deactivated_at, t.play_from_tick, t.score_identity::text
 		FROM teams t
 		LEFT JOIN players p ON p.team_id = t.id
 		LEFT JOIN team_service_states tss ON tss.team_id = t.id
@@ -1127,7 +1118,7 @@ func (s *postgresStore) ListAdminTeams(ctx context.Context) ([]adminTeam, error)
 		var team adminTeam
 		var deactivatedAt sql.NullTime
 		var playFromTick sql.NullInt64
-		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.Institution, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt, &playFromTick); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.ContactEmail, &team.Institution, &team.JoinKey, &team.PlayerCount, &team.DeployedChallenges, &team.Active, &deactivatedAt, &playFromTick, &team.ScoreIdentity); err != nil {
 			return nil, err
 		}
 		if deactivatedAt.Valid {
@@ -1146,7 +1137,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 		name := strings.TrimSpace(input.Name)
 		contactEmail := strings.TrimSpace(strings.ToLower(input.ContactEmail))
 		institution := storedTeamInstitution(input.Institution)
-		if name == "" || contactEmail == "" {
+		if name == "" || !validAccountEmail(contactEmail) {
 			return adminTeam{}, ErrDuplicateResource
 		}
 
@@ -1241,7 +1232,7 @@ func (s *postgresStore) CreateAdminTeam(ctx context.Context, input adminCreateTe
 			if _, err := tx.ExecContext(ctx, `
 					INSERT INTO service_instances (team_id, challenge_id, deployment_job_id, runtime_kind, runtime_status, container_name, state_volume, baseline_image, checker_image, checker_token, endpoint, ssh_host, created_at, updated_at)
 					VALUES ($1, $2, NULL, 'docker', 'queued', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-				`, teamID, challengeConfig.ID, serviceContainerName(challengeConfig.Name, teamID), serviceStateVolumeName(challengeConfig.Name, teamID), challengeConfig.BaselineImage, challengeConfig.CheckerImage, checkerToken, state.Endpoint, ServiceIP(challengeConfig.ServiceSubnetOctet, teamID)); err != nil {
+				`, teamID, challengeConfig.ID, serviceContainerName(challengeConfig.Name, challengeConfig.ID, teamID), serviceStateVolumeName(challengeConfig.Name, teamID), challengeConfig.BaselineImage, challengeConfig.CheckerImage, checkerToken, state.Endpoint, ServiceIP(challengeConfig.ServiceSubnetOctet, teamID)); err != nil {
 				return adminTeam{}, fmt.Errorf("insert service instance for challenge %d: %w", challengeConfig.ID, err)
 			}
 			deployedChallenges++
@@ -1351,6 +1342,9 @@ func (s *postgresStore) CreateAdminPlayer(ctx context.Context, input adminCreate
 		}
 	}
 	email := strings.TrimSpace(strings.ToLower(input.Email))
+	if !validAccountEmail(email) {
+		return adminPlayer{}, ErrDuplicateResource
+	}
 	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1))`, email)
 	if err != nil {
 		return adminPlayer{}, err
@@ -1461,7 +1455,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT id, team_id, display_name, email, role, session_version
 		FROM players
-		WHERE id = $1
+		WHERE id = $1 AND active
 		FOR UPDATE
 	`, playerID).Scan(
 		&player.PlayerID,
@@ -1488,7 +1482,7 @@ func (s *postgresStore) JoinExistingPlayerTeam(ctx context.Context, playerID int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT id, name, email
 		FROM teams
-		WHERE join_key = $1
+		WHERE join_key = $1 AND active
 		FOR UPDATE
 	`, key).Scan(&teamID, &teamName, &teamContactEmail); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1814,7 +1808,10 @@ func (s *postgresStore) ListWireGuardGatewayPeers(ctx context.Context) ([]WireGu
 		WHERE p.active = TRUE
 		  AND (
 			LOWER(p.role) = 'organizer'
-			OR (p.team_id IS NOT NULL AND COALESCE(t.active, FALSE) = TRUE)
+				OR (t.active AND (t.play_from_tick IS NULL
+						OR t.play_from_tick <= COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+						AND COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') <> 'finished'
+						AND COALESCE((SELECT scheduled_end_at > NOW() FROM game_match_state LIMIT 1), TRUE))
 		  )
 		ORDER BY p.id
 	`)
@@ -2077,7 +2074,7 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 		value := storedTeamInstitution(*input.Institution)
 		institution = &value
 	}
-	if name == "" || contactEmail == "" {
+	if name == "" || !validAccountEmail(contactEmail) {
 		return adminTeam{}, fmt.Errorf("%w: name and contact_email are required", ErrDuplicateResource)
 	}
 	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM teams WHERE (LOWER(name) = LOWER($1) OR LOWER(email) = LOWER($2)) AND id != $3)`, name, contactEmail, teamID)
@@ -2108,12 +2105,38 @@ func (s *postgresStore) UpdateAdminTeam(ctx context.Context, teamID int, input a
 	return team, nil
 }
 
+func (s *postgresStore) RotateAdminTeamJoinKey(ctx context.Context, teamID int) (string, error) {
+	var key string
+	err := s.db.QueryRowContext(ctx, `UPDATE teams SET join_key = $2 WHERE id = $1 RETURNING join_key`, teamID, NewTeamJoinKey()).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrTeamNotFound
+	}
+	return key, err
+}
+
 func (s *postgresStore) SetTeamActive(ctx context.Context, teamID int, active bool, now time.Time) (adminTeam, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return adminTeam{}, err
 	}
 	defer tx.Rollback()
+
+	// Serialize team state changes before reading active or locking players.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(48145, $1::integer)`, teamID); err != nil {
+		return adminTeam{}, fmt.Errorf("lock team activation state: %w", err)
+	}
+
+	// Revoke on both transitions, including reactivation of teams disabled
+	// before we started revoking their sessions. Lock players before the team,
+	// matching the order used by participant membership changes.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE players
+		SET session_version = session_version + 1
+		WHERE team_id = $1 AND LOWER(TRIM(role)) <> 'organizer'
+		  AND EXISTS (SELECT 1 FROM teams WHERE id = $1 AND active <> $2)
+	`, teamID, active); err != nil {
+		return adminTeam{}, fmt.Errorf("revoke team sessions: %w", err)
+	}
 
 	if active {
 		// Resume mid-match: defer network/checker until next tick so warm
@@ -2147,13 +2170,26 @@ func (s *postgresStore) SetTeamActive(ctx context.Context, teamID int, active bo
 		`, teamID, now.UTC()); err != nil {
 			return adminTeam{}, fmt.Errorf("deactivate team: %w", err)
 		}
-		// Drop the team off the leaderboard immediately. buildScoreboard upserts
-		// only active teams, so without this its stale row would linger until the
-		// next recompute. Historical rows (flags, captures, checker runs) are kept
-		// so reactivation restores the team cleanly.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM scoreboard_entries WHERE team_id = $1`, teamID); err != nil {
-			return adminTeam{}, fmt.Errorf("remove team from scoreboard: %w", err)
-		}
+	}
+	// Keep stored ranks in step with DQ status. Waiting out any running
+	// recompute first stops the two multi-row updates from deadlocking.
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE scoreboard_entries IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return adminTeam{}, fmt.Errorf("lock scoreboard: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE scoreboard_entries entry
+		SET rank = ranked.position
+		FROM (
+			SELECT se.team_id,
+			       ROW_NUMBER() OVER (
+			           ORDER BY NOT t.active, se.total_points DESC, se.attack_points DESC, se.defense_points DESC, se.team_name COLLATE "C"
+			       ) AS position
+			FROM scoreboard_entries se
+			JOIN teams t ON t.id = se.team_id
+		) ranked
+		WHERE entry.team_id = ranked.team_id AND entry.rank <> ranked.position
+	`); err != nil {
+		return adminTeam{}, fmt.Errorf("rerank scoreboard: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return adminTeam{}, err
@@ -2339,7 +2375,7 @@ func (s *postgresStore) UpdateAdminPlayer(ctx context.Context, playerID int, inp
 	displayName := strings.TrimSpace(input.DisplayName)
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	role := normalizedRole(input.Role)
-	if displayName == "" || email == "" {
+	if displayName == "" || !validAccountEmail(email) {
 		return adminPlayer{}, fmt.Errorf("%w: display_name and email are required", ErrDuplicateResource)
 	}
 	duplicate, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM players WHERE LOWER(email) = LOWER($1) AND id != $2)`, email, playerID)
@@ -2349,7 +2385,11 @@ func (s *postgresStore) UpdateAdminPlayer(ctx context.Context, playerID int, inp
 	if duplicate {
 		return adminPlayer{}, ErrDuplicateResource
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE players SET display_name = $2, email = $3, role = $4 WHERE id = $1`, playerID, displayName, email, role); err != nil {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE players SET display_name = $2, email = $3, role = $4,
+		    session_version = session_version + CASE WHEN role <> $4 THEN 1 ELSE 0 END
+		WHERE id = $1
+	`, playerID, displayName, email, role); err != nil {
 		return adminPlayer{}, fmt.Errorf("update player: %w", err)
 	}
 	players, err := s.ListAdminPlayers(ctx)
@@ -2372,7 +2412,11 @@ func (s *postgresStore) SetPlayerActive(ctx context.Context, playerID int, activ
 	defer tx.Rollback()
 
 	if active {
-		if _, err := tx.ExecContext(ctx, `UPDATE players SET active = TRUE, deactivated_at = NULL WHERE id = $1`, playerID); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE players SET active = TRUE, deactivated_at = NULL,
+			    session_version = session_version + CASE WHEN active THEN 0 ELSE 1 END
+			WHERE id = $1
+		`, playerID); err != nil {
 			return adminPlayer{}, fmt.Errorf("reactivate player: %w", err)
 		}
 		// Reactivating a former captain must not create a second captain: if the
@@ -2382,7 +2426,11 @@ func (s *postgresStore) SetPlayerActive(ctx context.Context, playerID int, activ
 			return adminPlayer{}, err
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE players SET active = FALSE, deactivated_at = $2 WHERE id = $1`, playerID, now.UTC()); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE players SET active = FALSE, deactivated_at = $2,
+			    session_version = session_version + CASE WHEN active THEN 1 ELSE 0 END
+			WHERE id = $1
+		`, playerID, now.UTC()); err != nil {
 			return adminPlayer{}, fmt.Errorf("deactivate player: %w", err)
 		}
 	}
@@ -2469,6 +2517,24 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if duplicate {
 		return adminChallenge{}, ErrDuplicateResource
 	}
+	if input.EgressEnabled != nil {
+		var currentEgress, maintenance bool
+		if err := s.db.QueryRowContext(ctx, `SELECT egress_enabled, maintenance FROM challenges WHERE id = $1`, challengeID).Scan(&currentEgress, &maintenance); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return adminChallenge{}, ErrChallengeNotFound
+			}
+			return adminChallenge{}, err
+		}
+		if currentEgress != *input.EgressEnabled && !maintenance {
+			hasInstances, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM service_instances WHERE challenge_id = $1)`, challengeID)
+			if err != nil {
+				return adminChallenge{}, err
+			}
+			if hasInstances {
+				return adminChallenge{}, fmt.Errorf("%w: put the challenge under maintenance before changing egress_enabled", ErrInvalidRuntimeConfig)
+			}
+		}
+	}
 	var category, protocol sql.NullString
 	if input.Category != nil {
 		category = sql.NullString{String: storedChallengeCategory(*input.Category), Valid: true}
@@ -2476,7 +2542,7 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if input.Protocol != nil {
 		protocol = sql.NullString{String: storedChallengeProtocol(*input.Protocol), Valid: true}
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 		UPDATE challenges
 		SET name = $2,
 		    baseline_image = $3,
@@ -2492,8 +2558,16 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 		    last_validation_checked_at = NULL,
 		    last_validation_message = NULL
 		WHERE id = $1
-	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, input.EgressEnabled, category, protocol); err != nil {
+		  AND ($6::boolean IS NULL OR egress_enabled = $6::boolean OR maintenance
+		       OR NOT EXISTS (SELECT 1 FROM service_instances WHERE challenge_id = $1))
+	`, challengeID, name, baselineImage, checkerImage, sourceBundlePath, input.EgressEnabled, category, protocol)
+	if err != nil {
 		return adminChallenge{}, fmt.Errorf("update challenge: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return adminChallenge{}, fmt.Errorf("check challenge update: %w", err)
+	} else if affected == 0 {
+		return adminChallenge{}, fmt.Errorf("%w: put the challenge under maintenance before changing egress_enabled", ErrInvalidRuntimeConfig)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)
 	if err != nil {
@@ -2616,14 +2690,14 @@ func (s *postgresStore) DeployAdminChallenge(ctx context.Context, challengeID in
 					runtime_kind = EXCLUDED.runtime_kind,
 					runtime_status = EXCLUDED.runtime_status,
 					container_name = EXCLUDED.container_name,
-					state_volume = EXCLUDED.state_volume,
+					state_volume = COALESCE(NULLIF(service_instances.state_volume, ''), EXCLUDED.state_volume),
 					baseline_image = EXCLUDED.baseline_image,
 					checker_image = EXCLUDED.checker_image,
 					checker_token = EXCLUDED.checker_token,
 					endpoint = EXCLUDED.endpoint,
 					ssh_host = EXCLUDED.ssh_host,
 					updated_at = EXCLUDED.updated_at
-			`, teamID, challengeID, jobID, serviceContainerName(challengeName, teamID), serviceStateVolumeName(challengeName, teamID), baselineImage, checkerImage, checkerToken, ServiceEndpointFor(serviceSubnetOctet, servicePort, teamID), ServiceIP(serviceSubnetOctet, teamID), createdAt); err != nil {
+			`, teamID, challengeID, jobID, serviceContainerName(challengeName, challengeID, teamID), serviceStateVolumeName(challengeName, teamID), baselineImage, checkerImage, checkerToken, ServiceEndpointFor(serviceSubnetOctet, servicePort, teamID), ServiceIP(serviceSubnetOctet, teamID), createdAt); err != nil {
 			return adminDeployment{}, err
 		}
 		queuedCount++
@@ -3001,11 +3075,13 @@ func (s *postgresStore) SetPlatformTheme(ctx context.Context, themeID string, ac
 
 func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]ControllerRuntimeTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, NOT c.egress_enabled
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
+		JOIN teams t ON t.id = si.team_id
 		LEFT JOIN deployment_jobs dj ON dj.id = si.deployment_job_id
 		WHERE si.runtime_status = 'queued' AND COALESCE(dj.status, 'queued') IN ('queued', 'running')
+		  AND t.active = TRUE
 		ORDER BY si.deployment_job_id, si.challenge_id, si.team_id
 	`)
 	if err != nil {
@@ -3029,6 +3105,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 			&task.Endpoint,
 			&task.SSHHost,
 			&task.ServicePort,
+			&task.DisableExternalDNS,
 		); err != nil {
 			return nil, err
 		}
@@ -3040,7 +3117,7 @@ func (s *postgresStore) ListControllerRuntimeTasks(ctx context.Context) ([]Contr
 func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (ControllerRuntimeTask, error) {
 	var task ControllerRuntimeTask
 	if err := s.db.QueryRowContext(ctx, `
-			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port
+			SELECT COALESCE(si.deployment_job_id, 0), si.team_id, si.challenge_id, c.name, si.runtime_kind, si.container_name, si.state_volume, si.baseline_image, si.checker_token, si.endpoint, si.ssh_host, c.service_port, NOT c.egress_enabled
 		FROM service_instances si
 		JOIN challenges c ON c.id = si.challenge_id
 		WHERE si.team_id = $1 AND si.challenge_id = $2
@@ -3057,6 +3134,7 @@ func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, ch
 		&task.Endpoint,
 		&task.SSHHost,
 		&task.ServicePort,
+		&task.DisableExternalDNS,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ControllerRuntimeTask{}, ErrChallengeNotFound
@@ -3064,6 +3142,29 @@ func (s *postgresStore) GetControllerRuntimeTask(ctx context.Context, teamID, ch
 		return ControllerRuntimeTask{}, err
 	}
 	return task, nil
+}
+
+func (s *postgresStore) ListControllerTeamStateVolumes(ctx context.Context, teamID int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT state_volume
+		FROM service_instances
+		WHERE team_id = $1 AND state_volume <> ''
+		ORDER BY state_volume
+	`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var volumes []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		volumes = append(volumes, name)
+	}
+	return volumes, rows.Err()
 }
 
 func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context) ([]ControllerServiceAccessPolicy, error) {
@@ -3095,7 +3196,8 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 							OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 							OR t.active = FALSE
 							OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-							OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+								OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') <> 'running'
+								OR COALESCE((SELECT scheduled_end_at <= NOW() FROM game_match_state LIMIT 1), FALSE)
 						)
 					)
 				  )
@@ -3105,8 +3207,13 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 				OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 				OR t.active = FALSE
 				OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
-			) AS network_closed
+				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') <> 'running'
+				OR COALESCE((SELECT scheduled_end_at <= NOW() FROM game_match_state LIMIT 1), FALSE)
+			) AS network_closed,
+			COALESCE((SELECT state = 'paused' FROM game_match_state LIMIT 1), FALSE) AS match_paused,
+			COALESCE((SELECT state = 'finished' FROM game_match_state LIMIT 1), FALSE) AS match_finished,
+			((c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+			 OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS play_deferred
 		FROM team_service_states tss
 		JOIN teams t ON t.id = tss.team_id
 		JOIN challenges c ON c.id = tss.challenge_id
@@ -3133,6 +3240,9 @@ func (s *postgresStore) ListControllerServiceAccessPolicies(ctx context.Context)
 			&policy.EgressEnabled,
 			&allowedPeersCSV,
 			&policy.NetworkClosed,
+			&policy.MatchPaused,
+			&policy.MatchFinished,
+			&policy.PlayDeferred,
 		); err != nil {
 			return nil, err
 		}
@@ -3179,7 +3289,8 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 							OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 							OR t.active = FALSE
 							OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-							OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
+								OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') <> 'running'
+								OR COALESCE((SELECT scheduled_end_at <= NOW() FROM game_match_state LIMIT 1), FALSE)
 						)
 					)
 				  )
@@ -3189,8 +3300,13 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 				OR (c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
 				OR t.active = FALSE
 				OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
-				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') IN ('not_started', 'paused')
-			) AS network_closed
+				OR COALESCE((SELECT state FROM game_match_state LIMIT 1), 'not_started') <> 'running'
+				OR COALESCE((SELECT scheduled_end_at <= NOW() FROM game_match_state LIMIT 1), FALSE)
+		) AS network_closed,
+		COALESCE((SELECT state = 'paused' FROM game_match_state LIMIT 1), FALSE) AS match_paused,
+		COALESCE((SELECT state = 'finished' FROM game_match_state LIMIT 1), FALSE) AS match_finished,
+		((c.play_from_tick IS NOT NULL AND c.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))
+		 OR (t.play_from_tick IS NOT NULL AND t.play_from_tick > COALESCE((SELECT MAX(id) FROM game_ticks), 0))) AS play_deferred
 		FROM team_service_states tss
 		JOIN teams t ON t.id = tss.team_id
 		JOIN challenges c ON c.id = tss.challenge_id
@@ -3206,6 +3322,9 @@ func (s *postgresStore) GetControllerServiceAccessPolicy(ctx context.Context, te
 		&policy.EgressEnabled,
 		&allowedPeersCSV,
 		&policy.NetworkClosed,
+		&policy.MatchPaused,
+		&policy.MatchFinished,
+		&policy.PlayDeferred,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ControllerServiceAccessPolicy{}, ErrChallengeNotFound

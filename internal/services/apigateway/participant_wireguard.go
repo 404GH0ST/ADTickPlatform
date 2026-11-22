@@ -27,11 +27,6 @@ func (s *Server) handleParticipantWireGuardConfig(w http.ResponseWriter, r *http
 		writeDomainFailure(w, err)
 		return
 	}
-	if err := s.reconcileWireGuardGateway(r.Context()); err != nil {
-		writeProblem(w, http.StatusBadGateway, "WireGuard unavailable", "wireguard gateway reconcile failed.")
-		return
-	}
-
 	config := strings.TrimSpace(peer.Config)
 	if config == "" {
 		writeProblem(w, http.StatusNotFound, "VPN config unavailable", "wireguard config is not available yet.")
@@ -49,6 +44,7 @@ func (s *Server) handleParticipantWireGuardConfig(w http.ResponseWriter, r *http
 		})
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", peer.DownloadName))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(peer.Config)))
 	w.WriteHeader(http.StatusOK)

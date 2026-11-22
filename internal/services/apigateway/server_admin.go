@@ -122,10 +122,31 @@ func (s *Server) handleAdminUpdateTeam(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, team)
 }
 
-// handleAdminDeactivateTeam removes a team from play mid-match: it is dropped
-// from the leaderboard and checker targets (via teams.active), its instances are
-// torn down, and the auth gate refuses all of its players. Unlike team deletion
-// this is reversible and is allowed while the match is running.
+func (s *Server) handleAdminRotateTeamJoinKey(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	teamID, ok := parseTeamID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	joinKey, err := s.store.RotateAdminTeamJoinKey(ctx, teamID)
+	if err != nil {
+		writeDomainFailure(w, err)
+		return
+	}
+	s.recordAdminAudit(ctx, "team.join_key.rotate", "team", fmt.Sprintf("team:%d", teamID), "rotated team join key", map[string]any{"team_id": teamID})
+	w.Header().Set("Cache-Control", "no-store")
+	writeData(w, http.StatusOK, map[string]any{"team_id": teamID, "join_key": joinKey})
+}
+
+// handleAdminDeactivateTeam disqualifies a team mid-match: it stays on the
+// leaderboard as DQ below every eligible team, leaves the checker targets (via
+// teams.active), has its instances torn down and its network closed, and the
+// auth gate refuses all of its players. Unlike team deletion this is reversible
+// and is allowed while the match is running.
 func (s *Server) handleAdminDeactivateTeam(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -168,8 +189,8 @@ func (s *Server) handleAdminDeactivateTeam(w http.ResponseWriter, r *http.Reques
 // handleAdminReactivateTeam restores a deactivated team and re-queues its
 // instances so the controller reconcile loop boots them back to ready. While
 // ticks exist, play is deferred to the next tick (teams.play_from_tick) so warm
-// redeploy cannot leak placeholder flags mid-window. The team reappears on the
-// leaderboard on the next scoreboard recompute after it is active.
+// redeploy cannot leak placeholder flags mid-window. Its DQ status clears and it
+// returns to its score-based rank as soon as it is active.
 func (s *Server) handleAdminReactivateTeam(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
@@ -290,17 +311,26 @@ func (s *Server) handleAdminUpdatePlayer(w http.ResponseWriter, r *http.Request)
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "player update request is invalid.")
 		return
 	}
-	player, err := s.store.UpdateAdminPlayer(r.Context(), playerID, req)
+	ctx, cancel := lifecycleOperationContext(r.Context())
+	defer cancel()
+	player, err := s.store.UpdateAdminPlayer(ctx, playerID, req)
 	if err != nil {
 		writeDomainFailure(w, err)
 		return
 	}
-	s.recordAdminAudit(r.Context(), "player.update", "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), "updated player", map[string]any{
+	s.recordAdminAudit(ctx, "player.update", "player", fmt.Sprintf("player:%d %s", player.ID, player.DisplayName), "updated player", map[string]any{
 		"player_id":    player.ID,
 		"display_name": player.DisplayName,
 		"email":        player.Email,
 		"role":         player.Role,
 	})
+	// The update includes the player's role. Reapply on retries too, even
+	// when the database already has that role from a previous attempt.
+	if err := s.reconcileParticipantNetworkAccess(ctx); err != nil {
+		log.Printf("player %d update network reconciliation failed: %v", playerID, err)
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "player was updated, but network access could not be reconciled; retry the update.")
+		return
+	}
 	writeData(w, http.StatusOK, player)
 }
 
@@ -961,6 +991,13 @@ func (s *Server) handleAdminStopGameMatch(w http.ResponseWriter, r *http.Request
 		"state":                 status.State,
 		"accepting_submissions": status.AcceptingSubmissions,
 	})
+	operationContext, cancelAccess := lifecycleOperationContext(stopContext)
+	defer cancelAccess()
+	if err := s.reconcileParticipantNetworkAccess(operationContext); err != nil {
+		log.Printf("match stop network reconciliation failed: %s", strconv.Quote(err.Error()))
+		writeProblem(w, http.StatusBadGateway, "Access reconciliation failed", "match stopped, but network access did not converge; retry the operation.")
+		return
+	}
 	writeData(w, http.StatusOK, status)
 }
 
@@ -1208,6 +1245,7 @@ func (s *Server) handleAdminSetScoreboardFreeze(w http.ResponseWriter, r *http.R
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "freeze_at must be an RFC3339 timestamp.")
 		return
 	}
+	immediate := !freezeAt.After(s.now())
 	var unfreezeAt *time.Time
 	if strings.TrimSpace(req.UnfreezeAt) != "" {
 		parsed, ok := parseRFC3339UTC(req.UnfreezeAt)
@@ -1221,13 +1259,39 @@ func (s *Server) handleAdminSetScoreboardFreeze(w http.ResponseWriter, r *http.R
 		}
 		unfreezeAt = &parsed
 	}
-	window, err := s.store.SetScoreboardFreezeWindow(r.Context(), &freezeAt, unfreezeAt, s.now())
+	// Seed the snapshot before opening the freeze window. Later public reads
+	// refresh it only while they are still before the cutoff.
+	rows, ok := s.fetchLiveScoreboard(w, r)
+	if !ok {
+		return
+	}
+	capturedAt := s.now().UTC()
+	if immediate {
+		freezeAt = capturedAt
+	} else if !capturedAt.Before(freezeAt) {
+		writeProblem(w, http.StatusConflict, "Freeze time passed", "freeze_at passed before the scoreboard could be captured; choose a later time.")
+		return
+	}
+	if unfreezeAt != nil && !unfreezeAt.After(freezeAt) {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", "unfreeze_at must be later than the effective freeze time.")
+		return
+	}
+	window, err := s.store.SetScoreboardFreezeWindow(r.Context(), &freezeAt, unfreezeAt, capturedAt)
 	if err != nil {
 		writeStoreFailure(w, err)
 		return
 	}
+	window, err = s.store.SaveFrozenScoreboardSnapshot(r.Context(), rows, capturedAt)
+	if err != nil {
+		writeStoreFailure(w, err)
+		return
+	}
+	if window.Snapshot == nil {
+		writeStoreFailure(w, errors.New("scoreboard freeze baseline was not persisted"))
+		return
+	}
 	s.recordAdminAudit(r.Context(), "scoreboard.freeze", "scoreboard", "public-scoreboard", "set scoreboard freeze window", map[string]any{
-		"freeze_at":   req.FreezeAt,
+		"freeze_at":   freezeAt.Format(time.RFC3339Nano),
 		"unfreeze_at": req.UnfreezeAt,
 	})
 	writeData(w, http.StatusOK, scoreboardFreezeStatusFrom(window, s.now()))
@@ -1317,6 +1381,10 @@ func (s *Server) handleAdminUpdatePlatformSettings(w http.ResponseWriter, r *htt
 	}
 	if strings.TrimSpace(req.FlagFormatPrefix) == "" || (req.MaxTeamMembers != nil && *req.MaxTeamMembers < 0) {
 		writeProblem(w, http.StatusBadRequest, "Invalid request", "flag_format_prefix must not be empty and max_team_members must not be negative.")
+		return
+	}
+	if len(strings.TrimSpace(req.FlagFormatPrefix)) > MaxFlagFormatPrefixBytes {
+		writeProblem(w, http.StatusBadRequest, "Invalid request", fmt.Sprintf("flag_format_prefix must be at most %d bytes.", MaxFlagFormatPrefixBytes))
 		return
 	}
 	settings, err := s.store.UpdatePlatformSettings(r.Context(), req, "organizer", time.Now().UTC())

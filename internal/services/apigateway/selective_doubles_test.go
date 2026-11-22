@@ -39,6 +39,20 @@ func (s selStore) ValidatePlayerSession(ctx context.Context, playerID, teamID in
 	return s.inner.ValidatePlayerSession(ctx, playerID, teamID, role, sessionVersion)
 }
 
+func (s selStore) IsPlayerSessionRevoked(ctx context.Context, sessionID string) (bool, error) {
+	if err := s.fail["IsPlayerSessionRevoked"]; err != nil {
+		return false, err
+	}
+	return s.inner.IsPlayerSessionRevoked(ctx, sessionID)
+}
+
+func (s selStore) RevokePlayerSession(ctx context.Context, sessionID string, expires, now time.Time) error {
+	if err := s.fail["RevokePlayerSession"]; err != nil {
+		return err
+	}
+	return s.inner.RevokePlayerSession(ctx, sessionID, expires, now)
+}
+
 func (s selStore) UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (r0 authenticatedPlayer, err error) {
 	if err = s.fail["UpdateParticipantProfile"]; err != nil {
 		return
@@ -256,6 +270,13 @@ func (s selStore) UpdateAdminTeam(ctx context.Context, teamID int, input adminUp
 	return s.inner.UpdateAdminTeam(ctx, teamID, input)
 }
 
+func (s selStore) RotateAdminTeamJoinKey(ctx context.Context, teamID int) (string, error) {
+	if err := s.fail["RotateAdminTeamJoinKey"]; err != nil {
+		return "", err
+	}
+	return s.inner.RotateAdminTeamJoinKey(ctx, teamID)
+}
+
 func (s selStore) DeleteAdminTeam(ctx context.Context, teamID int) (err error) {
 	if err = s.fail["DeleteAdminTeam"]; err != nil {
 		return
@@ -471,6 +492,13 @@ func (s selStore) ListControllerRuntimeTasks(ctx context.Context) (r0 []Controll
 		return
 	}
 	return s.inner.ListControllerRuntimeTasks(ctx)
+}
+
+func (s selStore) ListControllerTeamStateVolumes(ctx context.Context, teamID int) ([]string, error) {
+	if err := s.fail["ListControllerTeamStateVolumes"]; err != nil {
+		return nil, err
+	}
+	return s.inner.ListControllerTeamStateVolumes(ctx, teamID)
 }
 
 func (s selStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (r0 ControllerRuntimeTask, err error) {

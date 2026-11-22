@@ -1,18 +1,19 @@
 package apigateway
 
 type ControllerRuntimeTask struct {
-	DeploymentJobID int    `json:"deployment_job_id"`
-	TeamID          int    `json:"team_id"`
-	ChallengeID     int    `json:"challenge_id"`
-	ChallengeName   string `json:"challenge_name"`
-	RuntimeKind     string `json:"runtime_kind"`
-	ContainerName   string `json:"container_name"`
-	StateVolume     string `json:"state_volume"`
-	BaselineImage   string `json:"baseline_image"`
-	CheckerToken    string `json:"checker_token,omitempty"`
-	Endpoint        string `json:"endpoint"`
-	SSHHost         string `json:"ssh_host"`
-	ServicePort     int    `json:"service_port"`
+	DeploymentJobID    int    `json:"deployment_job_id"`
+	TeamID             int    `json:"team_id"`
+	ChallengeID        int    `json:"challenge_id"`
+	ChallengeName      string `json:"challenge_name"`
+	RuntimeKind        string `json:"runtime_kind"`
+	ContainerName      string `json:"container_name"`
+	StateVolume        string `json:"state_volume"`
+	BaselineImage      string `json:"baseline_image"`
+	CheckerToken       string `json:"checker_token,omitempty"`
+	Endpoint           string `json:"endpoint"`
+	SSHHost            string `json:"ssh_host"`
+	ServicePort        int    `json:"service_port"`
+	DisableExternalDNS bool   `json:"disable_external_dns,omitempty"`
 }
 
 type ControllerServiceAccessPolicy struct {
@@ -27,10 +28,13 @@ type ControllerServiceAccessPolicy struct {
 	AllowedPeerAddresses []string `json:"allowed_peer_addresses"`
 	EgressEnabled        bool     `json:"egress_enabled"`
 	// NetworkClosed blocks participant traffic to the service IP. True while the
-	// match is not started or paused, the challenge is under maintenance, the
+	// match is not started, paused or finished, the challenge is under maintenance, the
 	// team is inactive or deferred (play_from_tick). Organizer WireGuard peers
 	// listed in AllowedPeerAddresses still reach service + SSH for ops checks.
 	NetworkClosed bool `json:"network_closed"`
+	MatchPaused   bool `json:"match_paused"`
+	MatchFinished bool `json:"match_finished"`
+	PlayDeferred  bool `json:"play_deferred"`
 }
 
 type ControllerAccessStatus struct {
@@ -52,5 +56,6 @@ type ControllerAccessStatus struct {
 }
 
 type ControllerSSHCredential struct {
-	Password string `json:"password"`
+	Password    string `json:"password"`
+	StateVolume string `json:"state_volume,omitempty"`
 }

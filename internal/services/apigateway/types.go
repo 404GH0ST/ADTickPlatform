@@ -29,6 +29,7 @@ type authenticateResponse struct {
 
 type SubmissionVerdictAlias struct {
 	ChallengeID int    `json:"challenge_id,omitempty"`
+	CaptureID   int64  `json:"capture_id,omitempty"`
 	Flag        string `json:"flag"`
 	Status      string `json:"status"`
 	Detail      string `json:"detail,omitempty"`
@@ -46,6 +47,7 @@ type unlockData struct {
 	ChallengeID int  `json:"challenge_id"`
 	TeamID      int  `json:"team_id"`
 	Unlocked    bool `json:"unlocked"`
+	stateVolume string
 }
 
 type sshSessionData struct {
@@ -56,6 +58,7 @@ type sshSessionData struct {
 	Password       string `json:"password"`
 	PasswordMode   string `json:"password_mode,omitempty"`
 	ConnectionHint string `json:"connection_hint"`
+	stateVolume    string
 }
 
 type resetData struct {
@@ -94,14 +97,19 @@ type serviceState struct {
 }
 
 type ScoreRowAlias struct {
-	Rank     int                          `json:"rank"`
-	Team     string                       `json:"team"`
-	Attack   float64                      `json:"attack"`
-	Defense  float64                      `json:"defense"`
-	SLA      float64                      `json:"sla"`
-	Total    float64                      `json:"total"`
-	Delta    string                       `json:"delta"`
-	Services []ServiceScoreBreakdownAlias `json:"services,omitempty"`
+	Rank         int                          `json:"rank"`
+	Team         string                       `json:"team"`
+	TeamIdentity string                       `json:"team_identity,omitempty"`
+	Attack       float64                      `json:"attack"`
+	Defense      float64                      `json:"defense"`
+	SLA          float64                      `json:"sla"`
+	Total        float64                      `json:"total"`
+	Delta        string                       `json:"delta"`
+	Services     []ServiceScoreBreakdownAlias `json:"services,omitempty"`
+
+	// Disqualified marks a team an organizer removed from play. It keeps its
+	// score but always ranks below every eligible team.
+	Disqualified bool `json:"disqualified,omitempty"`
 
 	// Institution is display-only metadata api-gateway joins in on read;
 	// upstream scorers never set it.

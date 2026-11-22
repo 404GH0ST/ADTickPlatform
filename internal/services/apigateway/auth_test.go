@@ -1,9 +1,26 @@
 package apigateway
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestLegacyProfileCannotOversizeSessionCookie(t *testing.T) {
+	now := time.Now()
+	player := authenticatedPlayer{
+		PlayerID: 1, TeamID: 101, Role: "member",
+		TeamContactEmail: strings.Repeat("x", 4000),
+	}
+	token, err := issueTeamJWT("fixture-session-key", player, now)
+	if err != nil || len(token) >= 4096 {
+		t.Fatalf("expected a browser-sized token, length=%d err=%v", len(token), err)
+	}
+	claims, err := verifyTeamJWT("fixture-session-key", token, now)
+	if err != nil || claims.PlayerID != player.PlayerID || claims.TeamID != player.TeamID || claims.SessionID == "" {
+		t.Fatalf("expected the original authorization claims, err=%v", err)
+	}
+}
 
 func TestIssueAndVerifyTeamJWT(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)

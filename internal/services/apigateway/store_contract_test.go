@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -159,6 +160,70 @@ func buildWorld(t *testing.T, s contractStore) contractWorld {
 	return w
 }
 
+func TestStoreContractDeferredTeamPeers(t *testing.T) {
+	forEachStore(t, func(t *testing.T, s contractStore) {
+		ctx := context.Background()
+		w := buildWorld(t, s)
+		s.deferTeam(w.teamA.ID, true)
+		hasCaptainPeer := func() bool {
+			peers, err := s.ListWireGuardGatewayPeers(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return slices.ContainsFunc(peers, func(peer WireGuardGatewayPeer) bool {
+				return peer.PlayerID == w.captain.ID
+			})
+		}
+		if hasCaptainPeer() {
+			t.Fatal("a deferred team has an active participant peer")
+		}
+		if s.db == nil {
+			s.deferTeam(w.teamA.ID, false)
+		} else if _, err := s.db.ExecContext(ctx, `INSERT INTO game_ticks(id,status) VALUES(99,'running')`); err != nil {
+			t.Fatal(err)
+		}
+		if !hasCaptainPeer() {
+			t.Fatal("the peer should be active after deferral ends")
+		}
+	})
+}
+
+func TestStoreContractTeamJoinKeyRotation(t *testing.T) {
+	forEachStore(t, func(t *testing.T, s contractStore) {
+		ctx := context.Background()
+		now := time.Now()
+		w := buildWorld(t, s)
+		player, err := s.RegisterPlayer(ctx, participantRegisterRequest{DisplayName: "Solo", Email: "rotation-solo@example.test", Password: "contract-password"}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.SetTeamActive(ctx, w.teamA.ID, false, now); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.JoinExistingPlayerTeam(ctx, player.PlayerID, w.teamA.JoinKey, now)
+		expectErr(t, "join an inactive team", err, ErrInvalidCredentials)
+
+		newKey, err := s.RotateAdminTeamJoinKey(ctx, w.teamA.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if newKey == "" || newKey == w.teamA.JoinKey {
+			t.Fatal("rotation did not issue a new key")
+		}
+		_, err = s.JoinExistingPlayerTeam(ctx, player.PlayerID, newKey, now)
+		expectErr(t, "join an inactive team after rotation", err, ErrInvalidCredentials)
+		if _, err := s.SetTeamActive(ctx, w.teamA.ID, true, now); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.JoinExistingPlayerTeam(ctx, player.PlayerID, w.teamA.JoinKey, now)
+		expectErr(t, "join with a rotated key", err, ErrInvalidCredentials)
+		joined, err := s.JoinExistingPlayerTeam(ctx, player.PlayerID, newKey, now)
+		if err != nil || joined.TeamID != w.teamA.ID || joined.Role != "member" {
+			t.Fatalf("join with the replacement key: team=%d role=%q err=%v", joined.TeamID, joined.Role, err)
+		}
+	})
+}
+
 func TestStoreContractParticipantRules(t *testing.T) {
 	forEachStore(t, func(t *testing.T, s contractStore) {
 		ctx := context.Background()
@@ -260,11 +325,35 @@ func TestStoreContractParticipantRules(t *testing.T) {
 		if _, err := s.SetPlayerActive(ctx, w.captain.ID, true, now); err != nil {
 			t.Fatal(err)
 		}
+		_, err = s.ValidatePlayerSession(ctx, w.captain.ID, w.teamA.ID, "captain", 1)
+		expectErr(t, "old session after player reactivation", err, ErrInvalidCredentials)
+		captain, err := s.AuthenticatePlayer(ctx, "contract-cap@example.test", "contract-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ValidatePlayerSession(ctx, captain.PlayerID, captain.TeamID, captain.Role, captain.SessionVersion); err != nil {
+			t.Fatalf("fresh session after player reactivation: %v", err)
+		}
 		if _, err := s.SetTeamActive(ctx, w.teamB.ID, false, now); err != nil {
 			t.Fatal(err)
 		}
 		_, err = s.ValidatePlayerSession(ctx, w.other.ID, w.teamB.ID, "captain", 1)
 		expectErr(t, "session on a deactivated team", err, ErrAccountDeactivated)
+		if _, err := s.SetTeamActive(ctx, w.teamB.ID, true, now); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.ValidatePlayerSession(ctx, w.other.ID, w.teamB.ID, "captain", 1)
+		expectErr(t, "old session after team reactivation", err, ErrInvalidCredentials)
+
+		for _, role := range []string{"member", "organizer"} {
+			if _, err := s.UpdateAdminPlayer(ctx, w.organizer.ID, adminUpdatePlayerRequest{
+				DisplayName: w.organizer.DisplayName, Email: w.organizer.Email, Role: role,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err = s.ValidatePlayerSession(ctx, w.organizer.ID, 0, "organizer", 1)
+		expectErr(t, "old session after organizer role restored", err, ErrInvalidCredentials)
 	})
 }
 
@@ -605,6 +694,11 @@ func TestStoreContractClosedNetworksAndEdits(t *testing.T) {
 		expectErr(t, "renaming onto another challenge", err, ErrDuplicateResource)
 
 		// With the network closed, only organizers stay allowlisted.
+		if s.db != nil {
+			if _, err := s.db.ExecContext(ctx, `UPDATE team_service_states SET unlocked = TRUE WHERE team_id = $1 AND challenge_id = $2`, w.teamA.ID, w.challenge.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := s.UnlockService(ctx, w.teamA.ID, w.challenge.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -623,12 +717,26 @@ func TestStoreContractClosedNetworksAndEdits(t *testing.T) {
 				continue
 			}
 			checked = true
-			if !policy.NetworkClosed || len(policy.AllowedPeerAddresses) != 1 || policy.AllowedPeerAddresses[0] != organizerPeer.Address {
+			if !policy.NetworkClosed || policy.MatchPaused || len(policy.AllowedPeerAddresses) != 1 || policy.AllowedPeerAddresses[0] != organizerPeer.Address {
 				t.Errorf("a closed network admits only organizers: %+v (organizer %s)", policy, organizerPeer.Address)
 			}
 		}
 		if !checked {
 			t.Fatal("the unlocked service has no policy")
+		}
+		s.setMatch(true, true)
+		policy, err := s.GetControllerServiceAccessPolicy(ctx, w.teamA.ID, w.challenge.ID)
+		if err != nil || !policy.NetworkClosed || !policy.MatchPaused {
+			t.Fatalf("a paused match must enable bridge isolation: %+v %v", policy, err)
+		}
+		policies, err = s.ListControllerServiceAccessPolicies(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, policy := range policies {
+			if !policy.NetworkClosed || !policy.MatchPaused {
+				t.Errorf("global pause reconciliation must close this service: %+v", policy)
+			}
 		}
 		s.setMatch(true, false)
 
@@ -637,5 +745,38 @@ func TestStoreContractClosedNetworksAndEdits(t *testing.T) {
 			t.Fatal(err)
 		}
 		expectErr(t, "deleting a deployment with queued instances", s.DeleteAdminDeployment(ctx, deployment.JobID), ErrDeploymentActive)
+	})
+}
+
+func TestStoreContractVolumeFollowsInstanceRatherThanNetworkSlot(t *testing.T) {
+	forEachStore(t, func(t *testing.T, s contractStore) {
+		ctx := context.Background()
+		world := buildWorld(t, s)
+		original, err := s.GetControllerRuntimeTask(ctx, world.teamA.ID, world.challenge.ID)
+		if err != nil || original.StateVolume == "" {
+			t.Fatalf("missing initial volume: %+v %v", original, err)
+		}
+		if _, err := s.DeployAdminChallenge(ctx, world.challenge.ID); err != nil {
+			t.Fatal(err)
+		}
+		redeployed, err := s.GetControllerRuntimeTask(ctx, world.teamA.ID, world.challenge.ID)
+		if err != nil || redeployed.StateVolume != original.StateVolume {
+			t.Fatalf("redeploy changed existing storage: %+v %v", redeployed, err)
+		}
+		if err := s.DeleteAdminTeam(ctx, world.teamA.ID); err != nil {
+			t.Fatal(err)
+		}
+		replacement, err := s.CreateAdminTeam(ctx, adminCreateTeamRequest{Name: "Replacement", ContactEmail: "replacement@example.test"})
+		if err != nil || replacement.ID != world.teamA.ID {
+			t.Fatalf("expected a reused network slot: %+v %v", replacement, err)
+		}
+		task, err := s.GetControllerRuntimeTask(ctx, replacement.ID, world.challenge.ID)
+		if err != nil || task.StateVolume == "" || task.StateVolume == original.StateVolume {
+			t.Fatalf("replacement inherited storage: %+v %v", task, err)
+		}
+		volumes, err := s.ListControllerTeamStateVolumes(ctx, replacement.ID)
+		if err != nil || !slices.Contains(volumes, task.StateVolume) || slices.Contains(volumes, original.StateVolume) {
+			t.Fatalf("unexpected authoritative volume list: %v %v", volumes, err)
+		}
 	})
 }

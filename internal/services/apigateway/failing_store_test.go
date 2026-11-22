@@ -31,6 +31,14 @@ func (failingStore) ValidatePlayerSession(ctx context.Context, playerID, teamID 
 	return
 }
 
+func (failingStore) IsPlayerSessionRevoked(context.Context, string) (bool, error) {
+	return false, errStoreDown
+}
+
+func (failingStore) RevokePlayerSession(context.Context, string, time.Time, time.Time) error {
+	return errStoreDown
+}
+
 func (failingStore) UpdateParticipantProfile(ctx context.Context, playerID int, input participantUpdateProfileRequest) (r0 authenticatedPlayer, err error) {
 	err = errStoreDown
 	return
@@ -186,6 +194,10 @@ func (failingStore) UpdateAdminTeam(ctx context.Context, teamID int, input admin
 	return
 }
 
+func (failingStore) RotateAdminTeamJoinKey(context.Context, int) (string, error) {
+	return "", errStoreDown
+}
+
 func (failingStore) DeleteAdminTeam(ctx context.Context, teamID int) (err error) {
 	err = errStoreDown
 	return
@@ -339,6 +351,10 @@ func (failingStore) AppendAdminAuditLog(ctx context.Context, entry adminAuditLog
 func (failingStore) ListControllerRuntimeTasks(ctx context.Context) (r0 []ControllerRuntimeTask, err error) {
 	err = errStoreDown
 	return
+}
+
+func (failingStore) ListControllerTeamStateVolumes(context.Context, int) ([]string, error) {
+	return nil, errStoreDown
 }
 
 func (failingStore) GetControllerRuntimeTask(ctx context.Context, teamID, challengeID int) (r0 ControllerRuntimeTask, err error) {

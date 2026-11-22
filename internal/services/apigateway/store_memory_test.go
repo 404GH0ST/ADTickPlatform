@@ -156,6 +156,10 @@ func TestMemoryStoreReusesDeletedTeamNetworkID(t *testing.T) {
 	if created.ID != 105 {
 		t.Fatalf("expected first free team network id 105, got %d", created.ID)
 	}
+	retiredInstance, err := store.GetControllerRuntimeTask(ctx, created.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.DeleteAdminTeam(ctx, created.ID); err != nil {
 		t.Fatalf("delete temporary team: %v", err)
 	}
@@ -165,6 +169,36 @@ func TestMemoryStoreReusesDeletedTeamNetworkID(t *testing.T) {
 	}
 	if replacement.ID != created.ID {
 		t.Fatalf("expected deleted network id %d to be reused, got %d", created.ID, replacement.ID)
+	}
+	newInstance, err := store.GetControllerRuntimeTask(ctx, replacement.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stableRootPassword("test-secret", created.ID, 1, retiredInstance.StateVolume) ==
+		stableRootPassword("test-secret", replacement.ID, 1, newInstance.StateVolume) {
+		t.Fatal("a recycled team slot reused the retired instance's credential")
+	}
+}
+
+func TestMemoryGrantRevocationFencesDelayedVerdicts(t *testing.T) {
+	store := NewMemoryStore(101).(*memoryStore)
+	ctx := context.Background()
+	if _, err := store.applyServiceCapture(ctx, 101, 1, 8); err != nil {
+		t.Fatal(err)
+	}
+	store.revokeServiceCaptures(101, 1, 10)
+	if _, err := store.applyServiceCapture(ctx, 101, 1, 9); !errors.Is(err, ErrServiceLocked) {
+		t.Fatalf("delayed verdict restored a revoked grant: %v", err)
+	}
+	if _, err := store.CreateSSHSession(ctx, 101, 1, time.Now()); !errors.Is(err, ErrServiceLocked) {
+		t.Fatalf("SSH credential after revocation: %v", err)
+	}
+	if _, err := store.applyServiceCapture(ctx, 101, 1, 11); err != nil {
+		t.Fatal(err)
+	}
+	store.revokeServiceCaptures(101, 1, 10)
+	if _, err := store.CreateSSHSession(ctx, 101, 1, time.Now()); err != nil {
+		t.Fatalf("delayed revocation cleared a fresh grant: %v", err)
 	}
 }
 

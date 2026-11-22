@@ -85,6 +85,22 @@ func NormalizeServiceStateStatus(value string) string {
 	}
 }
 
+// CheckerServiceFailureMessage describes a degraded state without checker diagnostics.
+func CheckerServiceFailureMessage(status string) string {
+	switch NormalizeServiceStateStatus(status) {
+	case "recovering":
+		return "flag storage failed but retrieval and functionality still passed"
+	case "flag_not_found":
+		return "checker could not retrieve the stored flag"
+	case "faulty":
+		return "service functionality check failed"
+	case "down":
+		return "service did not complete the latest checker cycle"
+	default:
+		return ""
+	}
+}
+
 func collectTickPhaseStates(runs []GameCheckerRun) map[string]tickPhaseState {
 	phases := map[string]tickPhaseState{}
 	for i := range runs {

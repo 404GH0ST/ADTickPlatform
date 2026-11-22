@@ -28,9 +28,10 @@ func TestPostgresScoreboardFreezePersistsEachWindow(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Team != "Test Team" || rows[0].Total != 0 {
 		t.Fatalf("initial scoreboard: %+v, %v", rows, err)
 	}
-	unfreezeAt := now.Add(time.Hour)
-	window, err := store.SetScoreboardFreezeWindow(ctx, &now, &unfreezeAt, now)
-	if err != nil || window.FreezeAt == nil || !window.FreezeAt.Equal(now) || window.UnfreezeAt == nil || !window.UnfreezeAt.Equal(unfreezeAt) {
+	freezeAt := now.Add(time.Hour)
+	unfreezeAt := now.Add(2 * time.Hour)
+	window, err := store.SetScoreboardFreezeWindow(ctx, &freezeAt, &unfreezeAt, now)
+	if err != nil || window.FreezeAt == nil || !window.FreezeAt.Equal(freezeAt) || window.UnfreezeAt == nil || !window.UnfreezeAt.Equal(unfreezeAt) {
 		t.Fatalf("scheduled freeze window: %+v, %v", window, err)
 	}
 	first, err := store.SaveFrozenScoreboardSnapshot(ctx, rows, now)
@@ -39,8 +40,12 @@ func TestPostgresScoreboardFreezePersistsEachWindow(t *testing.T) {
 	}
 	updated := []scoreRow{{Team: "Test Team", Rank: 1, Total: 42}}
 	saved, err := store.SaveFrozenScoreboardSnapshot(ctx, updated, now.Add(time.Minute))
-	if err != nil || !reflect.DeepEqual(saved.Snapshot, rows) || saved.SnapshotTakenAt == nil || !saved.SnapshotTakenAt.Equal(now) {
-		t.Fatalf("original snapshot should remain until the window changes: %+v, %v", saved, err)
+	if err != nil || !reflect.DeepEqual(saved.Snapshot, updated) || saved.SnapshotTakenAt == nil || !saved.SnapshotTakenAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("newer pre-freeze snapshot should replace the baseline: %+v, %v", saved, err)
+	}
+	saved, err = store.SaveFrozenScoreboardSnapshot(ctx, rows, freezeAt.Add(time.Second))
+	if err != nil || !reflect.DeepEqual(saved.Snapshot, updated) {
+		t.Fatalf("post-freeze snapshot must not replace the baseline: %+v, %v", saved, err)
 	}
 	nextFreeze := now.Add(2 * time.Hour)
 	if window, err := store.SetScoreboardFreezeWindow(ctx, &nextFreeze, nil, now); err != nil || window.UnfreezeAt != nil || window.SnapshotTakenAt != nil || window.Snapshot != nil {

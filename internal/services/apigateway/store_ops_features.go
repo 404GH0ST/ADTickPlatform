@@ -123,7 +123,7 @@ func (s *postgresStore) ImportAdminTeams(ctx context.Context, teams []adminBulkI
 	for index, teamInput := range teams {
 		name := strings.TrimSpace(teamInput.Name)
 		email := strings.TrimSpace(teamInput.ContactEmail)
-		if name == "" || email == "" {
+		if name == "" || !validAccountEmail(email) {
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d: team name and contact_email are required", index+1))
 			continue
 		}
@@ -167,7 +167,7 @@ func validateBulkImportRoster(teamIndex int, rows []adminBulkImportPlayer) ([]ad
 	for playerIndex, row := range rows {
 		displayName := strings.TrimSpace(row.DisplayName)
 		playerEmail := strings.TrimSpace(row.Email)
-		if displayName == "" || playerEmail == "" || !validPassword(row.Password) {
+		if displayName == "" || !validAccountEmail(playerEmail) || !validPassword(row.Password) {
 			return nil, fmt.Sprintf("row %d player %d: display_name and email are required, and password must be at least %d characters", teamIndex+1, playerIndex+1, minimumPasswordLength)
 		}
 		role := strings.ToLower(strings.TrimSpace(row.Role))
@@ -290,7 +290,7 @@ func (s *memoryStore) ImportAdminTeams(ctx context.Context, teams []adminBulkImp
 	for index, teamInput := range teams {
 		name := strings.TrimSpace(teamInput.Name)
 		email := strings.TrimSpace(teamInput.ContactEmail)
-		if name == "" || email == "" {
+		if name == "" || !validAccountEmail(email) {
 			result.Errors = append(result.Errors, fmt.Sprintf("row %d: team name and contact_email are required", index+1))
 			continue
 		}

@@ -399,7 +399,11 @@ func gatewayParticipantLifecycle(t *testing.T, b e2eBackend) {
 	c.expect(http.StatusBadRequest, http.MethodPost, sshPath, formerCaptain, nil) // locked until a capture
 	b.unlock(teamID, challengeID)
 	ssh := c.expect(http.StatusOK, http.MethodPost, sshPath, formerCaptain, nil)
-	if ssh["password"] != stableRootPassword("e2e-ssh-secret", teamID, challengeID) {
+	task, err := b.store.GetControllerRuntimeTask(context.Background(), teamID, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ssh["password"] != stableRootPassword("e2e-ssh-secret", teamID, challengeID, task.StateVolume) {
 		t.Fatalf("ssh credential must derive from the ssh secret, got %v", ssh["password"])
 	}
 	c.expect(http.StatusOK, http.MethodPost, fmt.Sprintf("/api/v2/services/%d/reset/restart", challengeID), formerCaptain, nil)
@@ -411,7 +415,18 @@ func gatewayParticipantLifecycle(t *testing.T, b e2eBackend) {
 	}
 	c.expect(http.StatusForbidden, http.MethodPost, "/api/v2/authenticate", "", authenticateRequest{Email: "cleo@example.test", Password: "new-participant-password"})
 	c.expect(http.StatusOK, http.MethodPost, fmt.Sprintf("/api/v2/admin/teams/%d/reactivate", teamID), admin, nil)
-	c.expect(http.StatusOK, http.MethodGet, "/api/v2/session", formerCaptain, nil)
+	c.expect(http.StatusForbidden, http.MethodGet, "/api/v2/session", formerCaptain, nil)
+	login := c.expect(http.StatusOK, http.MethodPost, "/api/v2/authenticate", "", authenticateRequest{Email: "cleo@example.test", Password: "new-participant-password"})
+	reactivated, _ := login["token"].(string)
+	c.expect(http.StatusOK, http.MethodGet, "/api/v2/session", reactivated, nil)
+	secondLogin := c.expect(http.StatusOK, http.MethodPost, "/api/v2/authenticate", "", authenticateRequest{Email: "cleo@example.test", Password: "new-participant-password"})
+	otherSession, _ := secondLogin["token"].(string)
+	profile := c.expect(http.StatusOK, http.MethodPut, "/api/v2/me/profile", reactivated, participantUpdateProfileRequest{DisplayName: "Cleo Updated", Email: "cleo@example.test"})
+	renewed, _ := profile["token"].(string)
+	c.expect(http.StatusNoContent, http.MethodPost, "/api/v2/session/logout", reactivated, nil)
+	c.expect(http.StatusForbidden, http.MethodGet, "/api/v2/session", renewed, nil)
+	c.expect(http.StatusForbidden, http.MethodGet, "/api/v2/session", reactivated, nil)
+	c.expect(http.StatusOK, http.MethodGet, "/api/v2/session", otherSession, nil)
 }
 
 func containsID(items []map[string]any, key string, id int) bool {

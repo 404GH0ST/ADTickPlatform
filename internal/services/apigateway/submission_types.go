@@ -1,6 +1,30 @@
 package apigateway
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+const (
+	maxSubmitFlagsPerRequest = 128
+	MaxSubmittedFlagBytes    = 512
+	MaxFlagFormatPrefixBytes = 256
+)
+
+func ValidateSubmittedFlags(flags []string) error {
+	if len(flags) == 0 {
+		return fmt.Errorf("at least one flag is required.")
+	}
+	if len(flags) > maxSubmitFlagsPerRequest {
+		return fmt.Errorf("too many flags in one request.")
+	}
+	for _, flag := range flags {
+		if len(flag) > MaxSubmittedFlagBytes {
+			return fmt.Errorf("each flag must be at most %d bytes.", MaxSubmittedFlagBytes)
+		}
+	}
+	return nil
+}
 
 type AdminSubmission struct {
 	ID          int64     `json:"id"`
@@ -31,8 +55,13 @@ type SubmissionPage struct {
 	HasNext    bool              `json:"has_next"`
 }
 type SubmissionDeletion struct {
-	ID                int64  `json:"id"`
-	Status            string `json:"status"`
-	Service           string `json:"service"`
-	FirstBloodCleared bool   `json:"first_blood_cleared"`
+	ID                     int64  `json:"id"`
+	Status                 string `json:"status"`
+	Service                string `json:"service"`
+	FirstBloodCleared      bool   `json:"first_blood_cleared"`
+	TeamID                 int    `json:"team_id,omitempty"`
+	ChallengeID            int    `json:"challenge_id,omitempty"`
+	SSHGrantRevoked        bool   `json:"ssh_grant_revoked,omitempty"`
+	RevokedThrough         int64  `json:"revoked_through,omitempty"`
+	AccessReconcilePending bool   `json:"access_reconcile_pending,omitempty"`
 }

@@ -114,6 +114,12 @@ func TestPostgresChallengeDeploymentLifecycle(t *testing.T) {
 	if _, err := store.CreateSSHSession(ctx, team.ID, challenge.ID, now); !errors.Is(err, ErrServiceLocked) {
 		t.Fatalf("locked service credential request returned %v", err)
 	}
+	if _, err := store.UnlockService(ctx, team.ID, challenge.ID); !errors.Is(err, ErrServiceLocked) {
+		t.Fatalf("gateway must not create a grant without a committed capture: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE team_service_states SET unlocked = TRUE WHERE team_id = $1 AND challenge_id = $2`, team.ID, challenge.ID); err != nil {
+		t.Fatal(err)
+	}
 	if grant, err := store.UnlockService(ctx, team.ID, challenge.ID); err != nil || !grant.Unlocked {
 		t.Fatalf("record a valid service unlock: %+v, %v", grant, err)
 	}
@@ -147,7 +153,55 @@ func TestPostgresChallengeDeploymentLifecycle(t *testing.T) {
 	if err != nil || len(policies) != 1 || policies[0].NetworkClosed || policies[0].SSHUnlocked {
 		t.Fatalf("resumed challenge policy before a fresh grant: %+v, %v", policies, err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE team_service_states SET unlocked = TRUE WHERE team_id = $1 AND challenge_id = $2`, team.ID, challenge.ID); err != nil {
+		t.Fatal(err)
+	}
 	if grant, err := store.UnlockService(ctx, team.ID, challenge.ID); err != nil || !grant.Unlocked {
 		t.Fatalf("grant service access after resumption: %+v, %v", grant, err)
+	}
+	participant, err := store.CreateAdminPlayer(ctx, adminCreatePlayerRequest{
+		TeamID: team.ID, DisplayName: "Finished Match Participant", Email: "finished-participant@example.test",
+		Password: "participant-password", Role: "member",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	organizer, err := store.CreateAdminPlayer(ctx, adminCreatePlayerRequest{
+		DisplayName: "Finished Match Organizer", Email: "finished-organizer@example.test",
+		Password: "organizer-password", Role: "organizer",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers, err := store.ListWireGuardGatewayPeers(ctx)
+	if err != nil || !slices.ContainsFunc(peers, func(peer WireGuardGatewayPeer) bool { return peer.PlayerID == participant.ID }) {
+		t.Fatalf("active match participant peer missing: %+v, %v", peers, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE game_match_state SET state = 'finished' WHERE singleton = TRUE`); err != nil {
+		t.Fatal(err)
+	}
+	peers, err = store.ListWireGuardGatewayPeers(ctx)
+	if err != nil || slices.ContainsFunc(peers, func(peer WireGuardGatewayPeer) bool { return peer.PlayerID == participant.ID }) ||
+		!slices.ContainsFunc(peers, func(peer WireGuardGatewayPeer) bool { return peer.PlayerID == organizer.ID }) {
+		t.Fatalf("finished match should retain only organizer peers: %+v, %v", peers, err)
+	}
+	finishedPolicy, err := store.GetControllerServiceAccessPolicy(ctx, team.ID, challenge.ID)
+	if err != nil || !finishedPolicy.NetworkClosed || finishedPolicy.MatchPaused || !finishedPolicy.MatchFinished {
+		t.Fatalf("finished match must close service access: %+v, %v", finishedPolicy, err)
+	}
+	finishedPolicies, err := store.ListControllerServiceAccessPolicies(ctx)
+	if err != nil || len(finishedPolicies) != 1 || !finishedPolicies[0].NetworkClosed || !finishedPolicies[0].MatchFinished {
+		t.Fatalf("finished match must close global service access: %+v, %v", finishedPolicies, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE game_match_state SET state = 'running', scheduled_end_at = NOW() - INTERVAL '1 second' WHERE singleton = TRUE`); err != nil {
+		t.Fatal(err)
+	}
+	endedBySchedule, err := store.GetControllerServiceAccessPolicy(ctx, team.ID, challenge.ID)
+	if err != nil || !endedBySchedule.NetworkClosed || endedBySchedule.MatchFinished {
+		t.Fatalf("elapsed match schedule must close service access: %+v, %v", endedBySchedule, err)
+	}
+	peers, err = store.ListWireGuardGatewayPeers(ctx)
+	if err != nil || slices.ContainsFunc(peers, func(peer WireGuardGatewayPeer) bool { return peer.PlayerID == participant.ID }) {
+		t.Fatalf("elapsed match schedule must remove participant peer: %+v, %v", peers, err)
 	}
 }
