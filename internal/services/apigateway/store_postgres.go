@@ -2567,6 +2567,14 @@ func (s *postgresStore) UpdateAdminChallenge(ctx context.Context, challengeID in
 	if affected, err := result.RowsAffected(); err != nil {
 		return adminChallenge{}, fmt.Errorf("check challenge update: %w", err)
 	} else if affected == 0 {
+		// The guarded update also matches nothing when the challenge is gone.
+		exists, err := s.exists(ctx, `SELECT EXISTS(SELECT 1 FROM challenges WHERE id = $1)`, challengeID)
+		if err != nil {
+			return adminChallenge{}, fmt.Errorf("check challenge update: %w", err)
+		}
+		if !exists {
+			return adminChallenge{}, ErrChallengeNotFound
+		}
 		return adminChallenge{}, fmt.Errorf("%w: put the challenge under maintenance before changing egress_enabled", ErrInvalidRuntimeConfig)
 	}
 	challenges, err := s.ListAdminChallenges(ctx)
