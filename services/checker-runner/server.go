@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -141,7 +142,7 @@ func (s *checkerRunnerServer) handleValidateChecker(w http.ResponseWriter, r *ht
 	if err != nil {
 		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
 			Title:  "Checker validation failed",
-			Detail: err.Error(),
+			Detail: "checker validation could not be completed.",
 		})
 		return
 	}
@@ -167,7 +168,7 @@ func (s *checkerRunnerServer) handleExecuteChecker(w http.ResponseWriter, r *htt
 	if err != nil {
 		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
 			Title:  "Checker execution failed",
-			Detail: err.Error(),
+			Detail: "checker execution could not be completed.",
 		})
 		return
 	}
@@ -193,7 +194,7 @@ func (s *checkerRunnerServer) handleExecuteCheckerBatch(w http.ResponseWriter, r
 	if err != nil {
 		httpapi.WriteProblem(w, http.StatusInternalServerError, httpapi.ProblemDetails{
 			Title:  "Checker execution failed",
-			Detail: err.Error(),
+			Detail: "checker batch execution could not be completed.",
 		})
 		return
 	}
@@ -309,20 +310,19 @@ func (e *dockerCheckerExecutor) ValidateChecker(ctx context.Context, request api
 	}
 
 	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerValidationArgs(e.security, request)...)
-	trimmedOutput, serviceStateContractOK := parseCheckerValidationOutput(output)
 	if err != nil {
 		result.Status = "invalid"
-		result.Message = commandFailureMessage(err, []byte(trimmedOutput), exitCode)
+		result.Message = commandFailureMessage(err, exitCode)
 		return result, nil
 	}
 
 	result.Status = "valid"
 	result.ContractOK = true
-	result.ServiceStateContractOK = serviceStateContractOK
-	if !serviceStateContractOK {
+	result.ServiceStateContractOK = parseCheckerValidationOutput(output)
+	if !result.ServiceStateContractOK {
 		result.Status = "invalid"
 		result.ContractOK = false
-		result.Message = "checker validate output did not advertise canonical service-state support."
+		result.Message = apigateway.CheckerCapabilityFailure
 		return result, nil
 	}
 	result.Message = "checker image satisfies runner contract."
@@ -343,30 +343,30 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 		return apigateway.CheckerExecutionResult{}, err
 	}
 	name := dockerRunName("adchk", request.ChallengeID, request.TeamID, request.TickID)
-	output, exitCode, err := e.execDocker(runCtx, buildDockerCheckerExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	stateNonce := rand.Text()
+	env := checkerRunEnv(request.Flag, request.Metadata, request.CheckerToken, stateNonce)
+	output, exitCode, err := e.execDockerWithEnv(runCtx, env, buildDockerCheckerExecuteArgs(networkPlan.Name, name, e.security, request)...)
 	if runCtx.Err() != nil {
 		e.forceRemove(name)
 	}
-	allowReportedState := err == nil && strings.EqualFold(request.Phase, "check")
-	trimmedOutput, serviceState, stateMessage := parseCheckerServiceStateOutput(output, allowReportedState)
-	trimmedOutput = truncateOutput(trimmedOutput, 65536)
 	result := apigateway.CheckerExecutionResult{
-		ChallengeID:  request.ChallengeID,
-		TeamID:       request.TeamID,
-		Phase:        request.Phase,
-		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
-		Output:       trimmedOutput,
-		ExitCode:     exitCode,
-		ServiceState: serviceState,
-		StateMessage: stateMessage,
+		ChallengeID: request.ChallengeID,
+		TeamID:      request.TeamID,
+		Phase:       request.Phase,
+		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
+		ExitCode:    exitCode,
 	}
 	if err != nil {
 		result.Status = "failed"
-		result.Message = commandFailureMessage(err, []byte(trimmedOutput), exitCode)
+		result.Message = commandFailureMessage(err, exitCode)
 		return result, nil
 	}
 	result.Status = "success"
 	result.Message = "checker phase completed successfully."
+	filtered, serviceState, stateMessage := parseCheckerServiceStateOutput(output, strings.EqualFold(request.Phase, "check"), stateNonce)
+	result.Output = truncateOutput(filtered, 65536)
+	result.ServiceState = serviceState
+	result.StateMessage = stateMessage
 	return result, nil
 }
 
@@ -392,7 +392,9 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 	}
 
 	name := dockerRunName("adchkb", request.ChallengeID, request.TeamID, request.TickID)
-	output, _, execErr := e.execDocker(runCtx, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	stateNonce := rand.Text()
+	env := checkerRunEnv(request.Flag, request.Metadata, request.CheckerToken, stateNonce)
+	output, _, execErr := e.execDockerWithEnv(runCtx, env, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, name, e.security, request)...)
 	if runCtx.Err() != nil {
 		e.forceRemove(name)
 	}
@@ -403,7 +405,7 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 			Status:    "failed",
 			ExitCode:  -1,
 			CheckedAt: checkedAt,
-			Message:   commandFailureMessage(execErr, output, -1),
+			Message:   commandFailureMessage(execErr, -1),
 		})
 		return result, nil
 	}
@@ -414,7 +416,7 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 			Status:    "failed",
 			ExitCode:  -1,
 			CheckedAt: checkedAt,
-			Message:   "checker batch output framing failed.",
+			Message:   apigateway.CheckerBatchFramingFailure,
 		})
 		return result, nil
 	}
@@ -428,27 +430,24 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 			// the caller marks them skipped.
 			break
 		}
-		allowReportedState := frame.exitCode == 0 && strings.EqualFold(phase, "check")
-		filtered, serviceState, stateMessage := parseCheckerServiceStateOutput([]byte(frame.output), allowReportedState)
 		pr := apigateway.CheckerPhaseResult{
-			Phase:        phase,
-			ExitCode:     frame.exitCode,
-			CheckedAt:    checkedAt,
-			Output:       truncateOutput(filtered, 65536),
-			ServiceState: serviceState,
-			StateMessage: stateMessage,
+			Phase:     phase,
+			ExitCode:  frame.exitCode,
+			CheckedAt: checkedAt,
 		}
-		if frame.exitCode == 0 {
-			pr.Status = "success"
-			pr.Message = "checker phase completed successfully."
-		} else {
-			pr.Status = "failed"
-			pr.Message = commandFailureMessage(fmt.Errorf("checker phase %s failed", phase), []byte(filtered), frame.exitCode)
-		}
-		result.Phases = append(result.Phases, pr)
 		if frame.exitCode != 0 {
+			pr.Status = "failed"
+			pr.Message = apigateway.CheckerExitFailureMessage(frame.exitCode)
+			result.Phases = append(result.Phases, pr)
 			break
 		}
+		filtered, serviceState, stateMessage := parseCheckerServiceStateOutput([]byte(frame.output), strings.EqualFold(phase, "check"), stateNonce)
+		pr.Status = "success"
+		pr.Message = "checker phase completed successfully."
+		pr.Output = truncateOutput(filtered, 65536)
+		pr.ServiceState = serviceState
+		pr.StateMessage = stateMessage
+		result.Phases = append(result.Phases, pr)
 	}
 
 	return result, nil
@@ -487,33 +486,42 @@ func (e *dockerCheckerExecutor) forceRemove(name string) {
 }
 
 func (e *dockerCheckerExecutor) execDocker(ctx context.Context, args ...string) ([]byte, int, error) {
+	return e.execDockerWithEnv(ctx, nil, args...)
+}
+
+func checkerRunEnv(flag, metadata, token, stateNonce string) []string {
+	return []string{"AD_FLAG=" + flag, "AD_METADATA=" + metadata, "AD_CHECKER_TOKEN=" + token, "AD_CHECKER_STATE_NONCE=" + stateNonce}
+}
+
+func (e *dockerCheckerExecutor) execDockerWithEnv(ctx context.Context, env []string, args ...string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, e.binary, args...) // #nosec G204,G702 -- docker binary is host operator configuration; args are passed without shell expansion.
+	cmd.Env = append(cmd.Environ(), env...)
 	output, outputExceeded, err := runCommandWithBoundedOutput(cmd, maxCheckerProcessOutputBytes)
 
-	exitCode := -1
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		exitCode = exitErr.ExitCode()
-	}
-	// Never join argv into the error: docker run args include AD_FLAG and
-	// AD_CHECKER_TOKEN, and those strings flow into warmup/SLA surfaces.
-	op := "run"
-	if len(args) > 0 {
-		op = args[0]
-	}
 	if outputExceeded {
-		return output, -1, fmt.Errorf("%s %s failed: %w", e.binary, op, errCheckerOutputLimit)
+		return nil, -1, errCheckerOutputLimit
 	}
 	if err == nil {
 		return output, 0, nil
 	}
-	return output, exitCode, fmt.Errorf("%s %s failed: %w", e.binary, op, err)
+	if ctx.Err() != nil {
+		return nil, -1, ctx.Err()
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil, exitErr.ExitCode(), err
+	}
+	return nil, -1, err
 }
+
+// Capture attached output for the checker protocol without sending it to the Docker log driver.
+const checkerDockerLogArg = "--log-driver=none"
 
 func buildDockerCheckerValidationArgs(security checkerDockerSecurity, request apigateway.CheckerValidationRequest) []string {
 	args := []string{
 		"run",
 		"--rm",
+		checkerDockerLogArg,
 	}
 	args = append(args, security.dockerArgs()...)
 	args = append(args,
@@ -530,6 +538,7 @@ func buildDockerCheckerExecuteArgs(network, name string, security checkerDockerS
 	args := []string{
 		"run",
 		"--rm",
+		checkerDockerLogArg,
 		// Checker images are built locally on the runner host; never reach out to a
 		// registry on the hot per-tick path.
 		"--pull=never",
@@ -552,9 +561,10 @@ func buildDockerCheckerExecuteArgs(network, name string, security checkerDockerS
 		"-e", fmt.Sprintf("AD_TARGET_IP=%s", request.TargetIP),
 		"-e", fmt.Sprintf("AD_TARGET_PORT=%d", request.TargetPort),
 		"-e", fmt.Sprintf("AD_TICK_ID=%d", request.TickID),
-		"-e", fmt.Sprintf("AD_FLAG=%s", request.Flag),
-		"-e", fmt.Sprintf("AD_METADATA=%s", request.Metadata),
-		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", request.CheckerToken),
+		"-e", "AD_FLAG",
+		"-e", "AD_METADATA",
+		"-e", "AD_CHECKER_TOKEN",
+		"-e", "AD_CHECKER_STATE_NONCE",
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,
@@ -568,6 +578,7 @@ func buildDockerCheckerBatchExecuteArgs(network, name string, security checkerDo
 	args := []string{
 		"run",
 		"--rm",
+		checkerDockerLogArg,
 		// Checker images are built locally on the runner host; never reach out to a
 		// registry on the hot per-tick path.
 		"--pull=never",
@@ -590,9 +601,10 @@ func buildDockerCheckerBatchExecuteArgs(network, name string, security checkerDo
 		"-e", fmt.Sprintf("AD_TARGET_IP=%s", request.TargetIP),
 		"-e", fmt.Sprintf("AD_TARGET_PORT=%d", request.TargetPort),
 		"-e", fmt.Sprintf("AD_TICK_ID=%d", request.TickID),
-		"-e", fmt.Sprintf("AD_FLAG=%s", request.Flag),
-		"-e", fmt.Sprintf("AD_METADATA=%s", request.Metadata),
-		"-e", fmt.Sprintf("AD_CHECKER_TOKEN=%s", request.CheckerToken),
+		"-e", "AD_FLAG",
+		"-e", "AD_METADATA",
+		"-e", "AD_CHECKER_TOKEN",
+		"-e", "AD_CHECKER_STATE_NONCE",
 		"--entrypoint",
 		"/bin/sh",
 		request.CheckerImage,
@@ -818,74 +830,31 @@ func normalizeCheckerPhases(phases []string) ([]string, bool) {
 	return normalized, true
 }
 
-func commandFailureMessage(err error, output []byte, exitCode int) string {
-	if errors.Is(err, errCheckerOutputLimit) {
-		return "checker command output exceeded limit."
+func commandFailureMessage(err error, exitCode int) string {
+	switch {
+	case errors.Is(err, errCheckerOutputLimit):
+		return apigateway.CheckerOutputLimitFailure
+	case errors.Is(err, context.DeadlineExceeded):
+		return apigateway.CheckerTimeoutFailure
+	case errors.Is(err, context.Canceled):
+		return apigateway.CheckerCanceledFailure
+	default:
+		return apigateway.CheckerExitFailureMessage(exitCode)
 	}
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed != "" {
-		return redactCheckerSecretMaterial(trimmed)
-	}
-	if exitCode >= 0 {
-		return fmt.Sprintf("checker command exited with status %d", exitCode)
-	}
-	// Avoid returning err.Error(): older code paths embedded docker argv
-	// (including secrets) in the wrapped error text.
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		return "checker command timed out"
-	}
-	if err != nil && errors.Is(err, context.Canceled) {
-		return "checker command canceled"
-	}
-	return "checker command failed"
-}
-
-// redactCheckerSecretMaterial strips known secret-bearing fragments from
-// checker stdout/stderr before it is stored or returned to callers.
-func redactCheckerSecretMaterial(message string) string {
-	if message == "" {
-		return message
-	}
-	redacted := message
-	// Case-insensitive scan; keep a single canonical marker per secret family so
-	// later lowercase variants do not re-process already-redacted tokens.
-	for _, marker := range []string{
-		"AD_FLAG=",
-		"AD_CHECKER_TOKEN=",
-		"AD_METADATA=",
-	} {
-		lowerMarker := strings.ToLower(marker)
-		searchFrom := 0
-		for {
-			lowered := strings.ToLower(redacted)
-			rel := strings.Index(lowered[searchFrom:], lowerMarker)
-			if rel < 0 {
-				break
-			}
-			idx := searchFrom + rel
-			// Replace from marker through the next whitespace (env-style tokens).
-			end := idx + len(marker)
-			for end < len(redacted) && redacted[end] != ' ' && redacted[end] != '\n' && redacted[end] != '\t' && redacted[end] != '\r' {
-				end++
-			}
-			replacement := marker + "[redacted]"
-			redacted = redacted[:idx] + replacement + redacted[end:]
-			searchFrom = idx + len(replacement)
-		}
-	}
-	return redacted
 }
 
 type checkerReportedServiceState struct {
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+	Nonce   string `json:"nonce,omitempty"`
 }
 
 type checkerCapabilities struct {
 	ServiceState bool `json:"service_state"`
+	StateNonce   bool `json:"state_nonce"`
 }
 
-func parseCheckerServiceStateOutput(output []byte, allowReportedState bool) (string, string, string) {
+func parseCheckerServiceStateOutput(output []byte, allowReportedState bool, stateNonce string) (string, string, string) {
 	lines := strings.Split(string(output), "\n")
 	filtered := make([]string, 0, len(lines))
 	reportedStatus := ""
@@ -921,19 +890,10 @@ func parseCheckerServiceStateOutput(output []byte, allowReportedState bool) (str
 		if !allowReportedState {
 			continue
 		}
-
-		// Honor only the FIRST reported-state line. This hardens the documented
-		// checker pattern (emit the verdict line, then echo target output): a
-		// malicious service echoing an ADPLATFORM_SERVICE_STATE= marker later in
-		// the merged stdout/stderr stream can no longer override a verdict the
-		// checker already printed.
-		//
-		// NOTE: this is ordering-dependent, not a hard trust boundary. A checker
-		// that prints target-derived output BEFORE its own verdict could still be
-		// spoofed, because checker and service text share one stream. The robust
-		// fix is to bind the marker to the run — e.g. require the per-run
-		// AD_CHECKER_TOKEN (which the target never sees) in the marker, or emit
-		// state on a dedicated fd/file. See docs/challenge-runtime.md.
+		if stateNonce == "" || payload.Nonce != stateNonce {
+			continue
+		}
+		// Only the first authenticated marker can set the service state.
 		if reportedStatus == "" {
 			reportedStatus = normalized
 			reportedMessage = strings.TrimSpace(payload.Message)
@@ -943,15 +903,13 @@ func parseCheckerServiceStateOutput(output []byte, allowReportedState bool) (str
 	return strings.TrimSpace(strings.Join(filtered, "\n")), reportedStatus, reportedMessage
 }
 
-func parseCheckerValidationOutput(output []byte) (string, bool) {
+func parseCheckerValidationOutput(output []byte) bool {
 	lines := strings.Split(string(output), "\n")
-	filtered := make([]string, 0, len(lines))
 	serviceStateContractOK := false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "ADPLATFORM_CHECKER_CAPABILITIES=") {
-			filtered = append(filtered, line)
 			continue
 		}
 
@@ -962,13 +920,12 @@ func parseCheckerValidationOutput(output []byte) (string, bool) {
 
 		var payload checkerCapabilities
 		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-			filtered = append(filtered, line)
 			continue
 		}
-		serviceStateContractOK = payload.ServiceState
+		serviceStateContractOK = payload.ServiceState && payload.StateNonce
 	}
 
-	return strings.TrimSpace(strings.Join(filtered, "\n")), serviceStateContractOK
+	return serviceStateContractOK
 }
 
 func firstNonEmpty(values ...string) string {

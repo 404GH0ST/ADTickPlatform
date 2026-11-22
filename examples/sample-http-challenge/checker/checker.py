@@ -35,7 +35,7 @@ def main() -> int:
 
     phase = sys.argv[1]
     if phase == "validate":
-        print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}')
+        print('ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true,"state_nonce":true}')
         print("ok")
         return 0
 
@@ -78,7 +78,7 @@ def main() -> int:
             if status != 200:
                 print(body, file=sys.stderr)
                 return 1
-            print('ADPLATFORM_SERVICE_STATE={"status":"ok","message":"sample-http checker verified the public health route"}')
+            print('ADPLATFORM_SERVICE_STATE=' + json.dumps({"status": "ok", "message": "sample-http checker verified the public health route", "nonce": os.environ["AD_CHECKER_STATE_NONCE"]}))
             print(body)
             return 0
     except HTTPError as exc:

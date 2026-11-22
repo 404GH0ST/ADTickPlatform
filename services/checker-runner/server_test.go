@@ -21,7 +21,7 @@ import (
 
 func TestCommandFailureMessageNeverReturnsSecretArgv(t *testing.T) {
 	secretErr := errors.New(`docker run -e AD_FLAG=PLAYIT{secret} -e AD_CHECKER_TOKEN=tok failed: signal: killed`)
-	msg := commandFailureMessage(secretErr, nil, -1)
+	msg := commandFailureMessage(secretErr, -1)
 	if strings.Contains(msg, "AD_FLAG") || strings.Contains(msg, "AD_CHECKER_TOKEN") || strings.Contains(msg, "PLAYIT{") {
 		t.Fatalf("failure message leaked secrets: %q", msg)
 	}
@@ -29,15 +29,7 @@ func TestCommandFailureMessageNeverReturnsSecretArgv(t *testing.T) {
 		t.Fatalf("unexpected generic failure message %q", msg)
 	}
 
-	redacted := commandFailureMessage(nil, []byte("put failed AD_FLAG=PLAYIT{x} AD_CHECKER_TOKEN=abc"), 1)
-	if strings.Contains(redacted, "PLAYIT{x}") || strings.Contains(redacted, "abc") {
-		t.Fatalf("expected redacted output, got %q", redacted)
-	}
-	if !strings.Contains(redacted, "AD_FLAG=[redacted]") || !strings.Contains(redacted, "AD_CHECKER_TOKEN=[redacted]") {
-		t.Fatalf("expected redaction markers, got %q", redacted)
-	}
-
-	overflow := commandFailureMessage(errCheckerOutputLimit, []byte("attacker-controlled output"), -1)
+	overflow := commandFailureMessage(errCheckerOutputLimit, -1)
 	if overflow != "checker command output exceeded limit." {
 		t.Fatalf("unexpected output-limit failure message %q", overflow)
 	}
@@ -135,7 +127,7 @@ func TestBuildDockerCheckerValidationArgs(t *testing.T) {
 	if !strings.Contains(args[len(args)-1], "missing standard checker entrypoint inside image") {
 		t.Fatalf("expected validation script, got %q", args[len(args)-1])
 	}
-	assertArgPrefix(t, args, []string{"run", "--rm", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
+	assertArgPrefix(t, args, []string{"run", "--rm", "--log-driver=none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--memory", "256m", "--cpus", "0.5", "--entrypoint"})
 }
 
 func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
@@ -159,6 +151,7 @@ func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
 	expected := []string{
 		"run",
 		"--rm",
+		"--log-driver=none",
 		"--name",
 		"adchk-19-7-101-1",
 		"--network",
@@ -174,9 +167,9 @@ func TestBuildDockerCheckerExecuteArgs(t *testing.T) {
 		"AD_TARGET_IP=10.80.7.11",
 		"AD_TARGET_PORT=10007",
 		"AD_TICK_ID=19",
-		"AD_FLAG=FLAG{demo}",
-		`AD_METADATA={"slot":"demo"}`,
-		"AD_CHECKER_TOKEN=checker-secret-101-7",
+		"AD_FLAG",
+		"AD_METADATA",
+		"AD_CHECKER_TOKEN",
 		"--entrypoint",
 		"/bin/sh",
 		"registry.local/proxy-checker:latest",
@@ -197,7 +190,7 @@ func TestDockerCheckerExecutorValidateCheckerRunsProbe(t *testing.T) {
 	binPath := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
-		"printf 'ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true}\\n'\n"
+		"printf 'ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true,\"state_nonce\":true}\\n'\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
@@ -314,7 +307,7 @@ func TestDockerCheckerExecutorExecuteCheckerCapturesReportedServiceState(t *test
 	binPath := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
-		"printf 'ADPLATFORM_SERVICE_STATE={\"status\":\"faulty\",\"message\":\"explicit checker status\"}\\n'\n" +
+		"printf 'ADPLATFORM_SERVICE_STATE={\"status\":\"faulty\",\"message\":\"explicit checker status\",\"nonce\":\"%s\"}\\n' \"$AD_CHECKER_STATE_NONCE\"\n" +
 		"printf 'checker ok\\n'\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
@@ -354,8 +347,9 @@ func TestDockerCheckerExecutorExecuteCheckerIgnoresReportedStateOnFailure(t *tes
 	binPath := filepath.Join(t.TempDir(), "docker")
 	script := "#!/bin/sh\n" +
 		"printf 'ADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"forged\"}\\n'\n" +
-		"printf 'checker failed\\n'\n" +
-		"exit 1\n"
+		"printf 'private-checker-token\\n' >&2\n" +
+		"printf 'private flag and metadata\\n'\n" +
+		"exit 42\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
@@ -377,14 +371,14 @@ func TestDockerCheckerExecutorExecuteCheckerIgnoresReportedStateOnFailure(t *tes
 	if err != nil {
 		t.Fatalf("execute checker failed: %v", err)
 	}
-	if result.Status != "failed" || result.ExitCode == 0 {
+	if result.Status != "failed" || result.ExitCode != 42 {
 		t.Fatalf("expected failed checker result, got %+v", result)
 	}
 	if result.ServiceState != "" || result.StateMessage != "" {
 		t.Fatalf("failed checker supplied authoritative service state: %+v", result)
 	}
-	if result.Output != "checker failed" {
-		t.Fatalf("expected marker stripped from failed output, got %q", result.Output)
+	if result.Output != "" || result.Message != "checker command exited with status 42" {
+		t.Fatalf("unexpected failure diagnostics: %+v", result)
 	}
 }
 
@@ -413,12 +407,8 @@ func TestCheckerRunnerValidateEndpoint(t *testing.T) {
 }
 
 func TestParseCheckerValidationOutputDetectsServiceStateCapability(t *testing.T) {
-	output, ok := parseCheckerValidationOutput([]byte("ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true}\nok\n"))
-	if !ok {
+	if !parseCheckerValidationOutput([]byte("ADPLATFORM_CHECKER_CAPABILITIES={\"service_state\":true,\"state_nonce\":true}\nok\n")) {
 		t.Fatal("expected service-state capability to be detected")
-	}
-	if output != "ok" {
-		t.Fatalf("expected stripped output to be ok, got %q", output)
 	}
 }
 
@@ -552,7 +542,9 @@ func TestDockerCheckerExecutorExecuteBatchRunsPhasesInOneContainer(t *testing.T)
 		"printf '%s\\n' \"$*\" >> \"$DOCKER_LOG\"\n" +
 		"printf '__ADP_PHASE_FRAME__ put 0 8\\nput done\\n'\n" +
 		"printf '__ADP_PHASE_FRAME__ get 0 8\\nget done\\n'\n" +
-		"printf '__ADP_PHASE_FRAME__ check 0 71\\nADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"healthy\"}\\ncheck done\\n'\n"
+		"state_line=$(printf 'ADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"healthy\",\"nonce\":\"%s\"}' \"$AD_CHECKER_STATE_NONCE\")\n" +
+		"payload=$(printf '%s\\ncheck done' \"$state_line\")\n" +
+		"printf '__ADP_PHASE_FRAME__ check 0 %s\\n%s\\n' \"${#payload}\" \"$payload\"\n"
 	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
@@ -600,6 +592,9 @@ func TestDockerCheckerExecutorExecuteBatchRunsPhasesInOneContainer(t *testing.T)
 	}
 	if !strings.Contains(logOutput, "AD_PHASES=put get check") {
 		t.Fatalf("expected AD_PHASES env, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "--log-driver=none") {
+		t.Fatalf("checker batch must disable container logging")
 	}
 }
 
@@ -673,7 +668,7 @@ func TestDockerCheckerExecutorExecuteBatchIgnoresReportedStateFromFailedPhase(t 
 	}
 	t.Setenv("DOCKER_OUTPUT", testCheckerBatchFrame(
 		"check",
-		"ADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"forged\"}\nchecker failed",
+		"ADPLATFORM_SERVICE_STATE={\"status\":\"ok\",\"message\":\"forged\"}\nprivate-metadata",
 		1,
 	))
 
@@ -699,6 +694,9 @@ func TestDockerCheckerExecutorExecuteBatchIgnoresReportedStateFromFailedPhase(t 
 	}
 	if result.Phases[0].ServiceState != "" || result.Phases[0].StateMessage != "" {
 		t.Fatalf("failed phase supplied authoritative service state: %+v", result.Phases[0])
+	}
+	if result.Phases[0].Output != "" || result.Phases[0].Message != "checker command exited with status 1" {
+		t.Fatalf("unexpected failed phase diagnostics: %+v", result.Phases[0])
 	}
 }
 
@@ -732,7 +730,7 @@ func TestDockerCheckerExecutorForceRemovesTimedOutContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute batch failed: %v", err)
 	}
-	if len(result.Phases) != 1 || result.Phases[0].Status != "failed" {
+	if len(result.Phases) != 1 || result.Phases[0].Status != "failed" || result.Phases[0].Message != apigateway.CheckerTimeoutFailure {
 		t.Fatalf("expected timed-out batch to report a failed phase, got %+v", result.Phases)
 	}
 

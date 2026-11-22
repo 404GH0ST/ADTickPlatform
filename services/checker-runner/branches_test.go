@@ -92,6 +92,9 @@ func TestCheckerRunnerHandlerFailures(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer runner-token")
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, request)
+		if strings.Contains(recorder.Body.String(), "exploded") {
+			t.Fatalf("response exposed executor error: %s", recorder.Body)
+		}
 		return recorder.Code
 	}
 	if code := call("/internal/v1/checkers/validate", `not json`); code != http.StatusBadRequest {
@@ -115,7 +118,7 @@ func TestDockerValidateCheckerBranches(t *testing.T) {
 		t.Fatalf("blank image: %+v %v", result, err)
 	}
 	result, err = executor.ValidateChecker(context.Background(), apigateway.CheckerValidationRequest{ChallengeID: 1, CheckerImage: "img"})
-	if err != nil || result.Status != "invalid" || result.Message != "nope" {
+	if err != nil || result.Status != "invalid" || result.Message != "checker command exited with status 4" {
 		t.Fatalf("failing probe: %+v %v", result, err)
 	}
 }
@@ -147,8 +150,8 @@ func TestDockerExecuteBatchBranches(t *testing.T) {
 	}
 
 	flood := &dockerCheckerExecutor{binary: fakeDocker(t, "head -c 2000000 /dev/zero\n"), network: "adplatform_game", networkLayout: "per-service", timeout: 5 * time.Second}
-	if _, _, err := flood.execDocker(context.Background(), "run"); !errors.Is(err, errCheckerOutputLimit) {
-		t.Fatalf("oversized output must hit the limit, got %v", err)
+	if output, _, err := flood.execDocker(context.Background(), "run"); len(output) != 0 || !errors.Is(err, errCheckerOutputLimit) {
+		t.Fatalf("oversized output must hit the limit and be discarded, got %d bytes and %v", len(output), err)
 	}
 	if _, _, err := flood.execDocker(context.Background()); !errors.Is(err, errCheckerOutputLimit) {
 		t.Fatalf("argument-less exec must still report the limit, got %v", err)
@@ -193,24 +196,19 @@ func TestTruncateOutputKeepsValidUTF8(t *testing.T) {
 func TestCommandFailureMessageBranches(t *testing.T) {
 	cases := []struct {
 		err      error
-		output   string
 		exitCode int
 		want     string
 	}{
-		{errCheckerOutputLimit, "x", 1, "output exceeded limit"},
-		{errors.New("x"), "", 3, "exited with status 3"},
-		{context.DeadlineExceeded, "", -1, "timed out"},
-		{context.Canceled, "", -1, "canceled"},
-		{errors.New("x"), "", -1, "checker command failed"},
-		{nil, "  AD_FLAG=secret tail", -1, "AD_FLAG=[redacted] tail"},
+		{errCheckerOutputLimit, 1, "output exceeded limit"},
+		{errors.New("x"), 3, "exited with status 3"},
+		{context.DeadlineExceeded, -1, "timed out"},
+		{context.Canceled, -1, "canceled"},
+		{errors.New("x"), -1, "checker command failed"},
 	}
 	for _, tc := range cases {
-		if got := commandFailureMessage(tc.err, []byte(tc.output), tc.exitCode); !strings.Contains(got, tc.want) {
-			t.Errorf("commandFailureMessage(%v, %q, %d) = %q, want %q", tc.err, tc.output, tc.exitCode, got, tc.want)
+		if got := commandFailureMessage(tc.err, tc.exitCode); !strings.Contains(got, tc.want) {
+			t.Errorf("commandFailureMessage(%v, %d) = %q, want %q", tc.err, tc.exitCode, got, tc.want)
 		}
-	}
-	if redactCheckerSecretMaterial("") != "" {
-		t.Fatal("empty message")
 	}
 }
 
@@ -220,25 +218,42 @@ func TestParseCheckerOutputBranches(t *testing.T) {
 		"ADPLATFORM_SERVICE_STATE=",
 		"ADPLATFORM_SERVICE_STATE={broken",
 		"ADPLATFORM_SERVICE_STATE=mystery",
-		"ADPLATFORM_SERVICE_STATE=ok",
+		`ADPLATFORM_SERVICE_STATE={"status":"ok","nonce":"runner-value"}`,
 		`ADPLATFORM_SERVICE_STATE={"status":"faulty","message":"later lines cannot override"}`,
 	}, "\n")
-	filtered, status, message := parseCheckerServiceStateOutput([]byte(output), true)
+	filtered, status, message := parseCheckerServiceStateOutput([]byte(output), true, "runner-value")
 	if status != "ok" || message != "" {
 		t.Fatalf("first valid verdict must win, got %q %q", status, message)
 	}
-	if !strings.Contains(filtered, "{broken") || !strings.Contains(filtered, "mystery") || strings.Contains(filtered, "=ok") {
+	if !strings.Contains(filtered, "{broken") || !strings.Contains(filtered, "mystery") || strings.Contains(filtered, `"nonce":"runner-value"`) {
 		t.Fatalf("unparseable markers stay in output, valid ones are removed: %q", filtered)
 	}
-	if _, status, _ := parseCheckerServiceStateOutput([]byte("ADPLATFORM_SERVICE_STATE=ok"), false); status != "" {
+	if _, status, _ := parseCheckerServiceStateOutput([]byte("ADPLATFORM_SERVICE_STATE=ok"), false, "runner-value"); status != "" {
 		t.Fatal("reported state must be ignored when not allowed")
 	}
-	filtered, ok := parseCheckerValidationOutput([]byte("hello\nADPLATFORM_CHECKER_CAPABILITIES=\nADPLATFORM_CHECKER_CAPABILITIES={bad\n"))
-	if ok || !strings.Contains(filtered, "{bad") {
-		t.Fatalf("invalid capability lines: %q %v", filtered, ok)
+	if parseCheckerValidationOutput([]byte("hello\nADPLATFORM_CHECKER_CAPABILITIES=\nADPLATFORM_CHECKER_CAPABILITIES={bad\n")) {
+		t.Fatal("invalid capability lines must be ignored")
 	}
 	if firstNonEmpty(" ", "") != "" {
 		t.Fatal("firstNonEmpty of blanks")
+	}
+}
+
+func TestCheckerStateMarkerRequiresRunNonce(t *testing.T) {
+	output := strings.Join([]string{
+		`ADPLATFORM_SERVICE_STATE={"status":"ok","nonce":"attacker-value"}`,
+		`ADPLATFORM_SERVICE_STATE={"status":"faulty","nonce":"runner-value"}`,
+	}, "\n")
+	_, status, _ := parseCheckerServiceStateOutput([]byte(output), true, "runner-value")
+	if status != "faulty" {
+		t.Fatalf("target-controlled marker overrode checker state: %q", status)
+	}
+	_, status, _ = parseCheckerServiceStateOutput([]byte(output), true, "different-run")
+	if status != "" {
+		t.Fatalf("marker from another run was accepted: %q", status)
+	}
+	if parseCheckerValidationOutput([]byte(`ADPLATFORM_CHECKER_CAPABILITIES={"service_state":true}`)) {
+		t.Fatal("checker without nonce support passed validation")
 	}
 }
 
