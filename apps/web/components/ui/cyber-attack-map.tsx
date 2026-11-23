@@ -238,6 +238,11 @@ const LONGITUDE_LINES = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180
 }));
 
 const NO_FIRST_BLOODS: CyberAttackEvent[] = [];
+// Gives a remounted map's audio context time to start before its first cue.
+const FIRST_BLOOD_RESUME_DELAY_MS = 300;
+
+/** Carries first-blood turns across a remount, such as maximizing the map. */
+export type FirstBloodHandoff = { announced: Set<string>; pending: CyberAttackEvent[] };
 
 function firstBloodTimelineVars(timeline: FirstBloodTimeline): CSSProperties {
   return {
@@ -253,6 +258,7 @@ function firstBloodTimelineVars(timeline: FirstBloodTimeline): CSSProperties {
 export function CyberAttackMap({
   attacks,
   firstBloods = NO_FIRST_BLOODS,
+  firstBloodHandoff,
   autoCameraPreference = null,
   highlightedAttackIDs = [],
   liveAttackIDs = [],
@@ -273,6 +279,7 @@ export function CyberAttackMap({
   attacks: CyberAttackEvent[];
   /** Every first blood in capture order, including any outside `attacks`. */
   firstBloods?: CyberAttackEvent[];
+  firstBloodHandoff?: FirstBloodHandoff;
   autoCameraPreference?: boolean | null;
   highlightedAttackIDs?: string[];
   liveAttackIDs?: string[];
@@ -318,7 +325,8 @@ export function CyberAttackMap({
   const closingRef = useRef<ClosingFirstBlood | null>(null);
   const sequenceBusyRef = useRef(false);
   const sequenceQueueRef = useRef<CyberAttackEvent[]>([]);
-  const announcedFirstBloodIdsRef = useRef<Set<string>>(new Set());
+  const handoffRef = useRef<FirstBloodHandoff>(firstBloodHandoff ?? { announced: new Set(), pending: [] });
+  const announcedFirstBloodIdsRef = useRef<Set<string>>(handoffRef.current.announced);
   // Set when a viewer takes the camera mid-queue: later turns play without moving it.
   const cameraHeldRef = useRef(false);
   const sequenceTimersRef = useRef<Set<number>>(new Set());
@@ -658,6 +666,10 @@ export function CyberAttackMap({
   useEffect(() => {
     const timers = freshAttackTimersRef.current;
     return () => {
+      // A turn whose banner has not appeared yet replays on the next surface.
+      const unfinished = sequenceRef.current && !closingRef.current ? [sequenceRef.current.attack] : [];
+      handoffRef.current.pending = [...unfinished, ...sequenceQueueRef.current];
+      sequenceQueueRef.current = [];
       timers.forEach((handle) => window.clearTimeout(handle));
       timers.clear();
       sequenceTimersRef.current.forEach((timer) => window.clearTimeout(timer));
@@ -668,6 +680,21 @@ export function CyberAttackMap({
         freshFrameTimeoutRef.current = null;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const handoff = handoffRef.current;
+    const ids = new Set([...attacks, ...firstBloods].map((attack) => attack.id));
+    const resumed = handoff.pending.filter((attack) => ids.has(attack.id));
+    handoff.pending = [];
+    if (resumed.length === 0) return;
+    sequenceQueueRef.current = [...resumed, ...sequenceQueueRef.current];
+    sequenceBusyRef.current = true;
+    setFreshAttackIds((current) => new Set([...current, ...resumed.map((attack) => attack.id)]));
+    scheduleSequence(() => {
+      sequenceBusyRef.current = false;
+      startNextFirstBlood(true);
+    }, FIRST_BLOOD_RESUME_DELAY_MS);
   }, []);
 
   useEffect(() => {

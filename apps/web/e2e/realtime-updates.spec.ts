@@ -520,6 +520,23 @@ test('the maximized map plays first blood sound after the click that opened it',
   await expect.poll(async () => (await scoreVoices(page)).some((voice) => voice.kind === 'sample')).toBe(true);
 });
 
+test('maximizing during a burst keeps every queued first blood', async ({ page, request }) => {
+  test.setTimeout(45_000);
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
+  await page.goto('/attacks');
+  const inline = page.getByTestId('cyber-attack-map');
+  await revealGlobe(inline);
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-burst' } });
+  await expect(inline).toHaveAttribute('data-first-blood-stage', 'charge');
+  await page.getByRole('button', { name: 'Maximize' }).click();
+  const globe = page.getByRole('dialog').getByTestId('cyber-attack-map');
+  const team = globe.getByTestId('first-blood-banner').getByTestId('first-blood-banner-team');
+  // The interrupted turn replays, then the team behind it still gets its own.
+  await expect(team).toHaveText('College Gamma', { timeout: 8000 });
+  await expect(team).toHaveText('College Alpha', { timeout: 10_000 });
+});
+
 test('a plain click on the globe during first blood keeps the sequence running', async ({ page, request }) => {
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
   await installMockAttackSfx(page);

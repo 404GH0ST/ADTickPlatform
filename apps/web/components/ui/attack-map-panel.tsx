@@ -34,6 +34,8 @@ import { Input } from '@/components/ui/input';
 import { ScrollableRegion } from '@/components/ui/scrollable-region';
 import { cn } from '@/lib/utils';
 
+import type { FirstBloodHandoff } from './cyber-attack-map';
+
 const CyberAttackMap = lazy(async () => {
   const { CyberAttackMap } = await import('./cyber-attack-map');
   return { default: CyberAttackMap };
@@ -145,6 +147,8 @@ export function AttackMapPanel({
   const previewAttackSfx = useAttackSfxPreview();
   const replayTimeoutRef = useRef<number | null>(null);
   const replayFrameRef = useRef<number | null>(null);
+  // Maximizing swaps the map instance; queued first bloods must survive that.
+  const firstBloodHandoff = useRef<FirstBloodHandoff>({ announced: new Set(), pending: [] });
 
   useEffect(() => {
     try {
@@ -609,6 +613,7 @@ export function AttackMapPanel({
           <CyberAttackMap
             attacks={visibleRows}
             firstBloods={visibleFirstBloods}
+            firstBloodHandoff={firstBloodHandoff.current}
             autoCameraPreference={autoCameraPreference}
             className={mapSize}
             expanded={expandedView}
