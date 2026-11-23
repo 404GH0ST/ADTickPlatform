@@ -584,6 +584,50 @@ read -r resumed_code resumed_acc < <(submit_http "${pause_tok}" "$(jq -nc --arg 
 (( resumed_acc == 1 )) || { echo "the same capture was not accepted after resume (code=${resumed_code} acc=${resumed_acc})" >&2; exit 1; }
 echo "  paused submission rejected; identical capture accepted after resume"
 
+echo "scenario: scoreboard freeze snapshots public standings while the attack feed stays live"
+board_sig() { curl_json "public scoreboard" "${API_URL}/api/v2/scoreboard" | jq -cS 'sort_by(.team) | map({team, total})'; }
+feed_total() { curl_json "attack feed" "${API_URL}/api/v2/attacks?limit=2000" | jq '.total_count // (.items | length)'; }
+curl_json "recompute (pre-freeze)" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
+freeze_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+curl_json "freeze" -X POST "${API_URL}/api/v2/admin/game/scoreboard/freeze" \
+  -H @<(bearer_header "${ADMIN_TOKEN}") -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg t "${freeze_at}" '{freeze_at:$t}')" >/dev/null
+sleep 1
+frozen_sig="$(board_sig)"; feed_before="$(feed_total)"
+# Make a fresh capture that changes scores and adds an attack-feed entry.
+fr_flag="$(leak_current "${TEAM_IDS[0]}" 3 "${TEAM_IDS[7]}")"
+[[ -n "${fr_flag}" ]] || { echo "could not leak a flag for the freeze scenario" >&2; exit 1; }
+[[ "$(submit_one "$(team_token 0)" "${fr_flag}")" == "accepted" ]] || { echo "freeze-scenario capture was not accepted" >&2; exit 1; }
+curl_json "recompute (during freeze)" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
+sleep 1
+during_sig="$(board_sig)"; feed_after="$(feed_total)"
+if [[ "${during_sig}" != "${frozen_sig}" ]]; then
+  echo "public scoreboard changed while frozen (freeze did not hold standings)" >&2; exit 1
+fi
+if (( feed_after <= feed_before )); then
+  echo "attack feed did not stay live during freeze (${feed_before} -> ${feed_after})" >&2; exit 1
+fi
+curl_json "unfreeze" -X POST "${API_URL}/api/v2/admin/game/scoreboard/unfreeze" -H @<(bearer_header "${ADMIN_TOKEN}") >/dev/null
+sleep 1
+live_sig="$(board_sig)"
+if [[ "${live_sig}" == "${frozen_sig}" ]]; then
+  echo "public scoreboard did not update after unfreeze" >&2; exit 1
+fi
+echo "  frozen board held standings; attack feed stayed live (${feed_before}->${feed_after}); unfreeze updated the board"
+
+echo "scenario: factory reset with an outstanding flag forfeits SLA and takes a defense penalty"
+fr_idx=8; fr_cid="${CHAL_IDS[0]}"; fr_team="${TEAM_IDS[$fr_idx]}"
+fr_issue_tick="$(advance_tick)"   # issue a fresh flag so one is outstanding when we reset
+fr_tok="$(team_token "${fr_idx}")"
+curl_json "factory reset" -X POST "${API_URL}/api/v2/services/${fr_cid}/reset/factory" -H @<(bearer_header "${fr_tok}") >/dev/null
+reset_penalty="$(postgres_cli -At -c "SELECT COALESCE(MAX(penalty_points),0) FROM flag_retention_failures WHERE team_id=${fr_team} AND challenge_id=${fr_cid} AND tick_id=${fr_issue_tick}")"
+if ! [[ "${reset_penalty}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || (( $(printf '%.0f' "${reset_penalty}") <= 0 )); then
+  echo "factory reset did not record a flag-loss defense penalty (got '${reset_penalty}')" >&2; exit 1
+fi
+reset_event="$(curl_json "team services (reset)" "${API_URL}/api/v2/team/services" -H @<(bearer_header "${fr_tok}") \
+  | jq -r --argjson id "${fr_cid}" '.[] | select(.challenge_id == $id) | .last_event // ""')"
+echo "  outstanding-flag factory reset took a ${reset_penalty}-point penalty; last_event: ${reset_event}"
+
 echo "recomputing scoreboard"
 scoreboard="$(curl_json "recompute scoring" -X POST "${API_URL}/api/v2/admin/game/scoring/recompute" \
   -H @<(bearer_header "${ADMIN_TOKEN}"))"
