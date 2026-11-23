@@ -210,7 +210,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      # Startup restores every team service before the health endpoint opens.
+      start_period: 120s
     environment:
       CONTROLLER_SERVICE_ADDR: ${CONTROLLER_SERVICE_ADDR:-:8084}
       CONTROLLER_STATE_BACKEND: postgres
