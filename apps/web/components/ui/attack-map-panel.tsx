@@ -69,8 +69,29 @@ const PLAYBACK_SPEEDS = [
   { label: 'Slow', value: 2300 },
 ];
 
+function filterRowsForView<T extends { tick: number }>(rows: T[], viewMode: ViewMode, selectedTick: number): T[] {
+  if (rows.length === 0 || selectedTick === 0) {
+    return rows;
+  }
+
+  switch (viewMode) {
+    case 'current':
+      return rows.filter((row) => row.tick === selectedTick);
+    case 'recent': {
+      const windowStart = Math.max(0, selectedTick - (RECENT_TICK_WINDOW - 1));
+      return rows.filter((row) => row.tick >= windowStart && row.tick <= selectedTick);
+    }
+    case 'all':
+    default:
+      return rows;
+  }
+}
+
+const NO_FIRST_BLOODS: AttackMapEvent[] = [];
+
 export function AttackMapPanel({
   attackRows,
+  firstBloods,
   className,
   description = 'Directional attack flow across teams, services, and match ticks.',
   highlightedAttackIDs = [],
@@ -79,6 +100,8 @@ export function AttackMapPanel({
   onVisibleRowsChange,
 }: {
   attackRows: AttackMapEvent[];
+  /** Every first blood in capture order, including any outside `attackRows`. */
+  firstBloods?: AttackMapEvent[] | null;
   /**
    * Every team in the match (the scoreboard). Teams are placed on the globe
    * from this full roster up front, so a team appearing in or dropping out of
@@ -195,25 +218,14 @@ export function AttackMapPanel({
     };
   }, [latestTick, playbackRunning, playbackSpeed, selectedTickValue, tickValues]);
 
-  const visibleRows = useMemo(() => {
-    if (attackRows.length === 0 || selectedTickValue === 0) {
-      return attackRows;
-    }
-
-    switch (viewMode) {
-      case 'current':
-        return attackRows.filter((row) => row.tick === selectedTickValue);
-      case 'recent': {
-        const windowStart = Math.max(0, selectedTickValue - (RECENT_TICK_WINDOW - 1));
-        return attackRows.filter(
-          (row) => row.tick >= windowStart && row.tick <= selectedTickValue,
-        );
-      }
-      case 'all':
-      default:
-        return attackRows;
-    }
-  }, [attackRows, selectedTickValue, viewMode]);
+  const visibleRows = useMemo(
+    () => filterRowsForView(attackRows, viewMode, selectedTickValue),
+    [attackRows, selectedTickValue, viewMode],
+  );
+  const visibleFirstBloods = useMemo(
+    () => filterRowsForView(firstBloods ?? NO_FIRST_BLOODS, viewMode, selectedTickValue),
+    [firstBloods, selectedTickValue, viewMode],
+  );
 
   useEffect(() => {
     onVisibleRowsChange?.(visibleRows);
@@ -247,7 +259,8 @@ export function AttackMapPanel({
   );
   // Key on content, not identity: callers rebuild the roster array each
   // render, and the globe restarts auto-rotation when this list changes.
-  const placementKey = Array.from(new Set([...teamRoster, ...allTeams])).sort().join('\u0000');
+  const firstBloodTeams = (firstBloods ?? NO_FIRST_BLOODS).flatMap((row) => [row.attacker, row.victim]);
+  const placementKey = Array.from(new Set([...teamRoster, ...allTeams, ...firstBloodTeams])).sort().join('\u0000');
   const placementTeams = useMemo(
     () => (placementKey === '' ? [] : placementKey.split('\u0000')),
     [placementKey],
@@ -595,6 +608,7 @@ export function AttackMapPanel({
         >
           <CyberAttackMap
             attacks={visibleRows}
+            firstBloods={visibleFirstBloods}
             autoCameraPreference={autoCameraPreference}
             className={mapSize}
             expanded={expandedView}

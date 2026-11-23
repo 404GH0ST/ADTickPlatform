@@ -4,6 +4,7 @@ import {
   FIRST_BLOOD_INTRO_MS,
   FIRST_BLOOD_FLIGHT_MS,
   FIRST_BLOOD_IMPACT_MS,
+  FIRST_BLOOD_QUICK,
   FIRST_BLOOD_RECOVER_MS,
 } from './first-blood';
 
@@ -646,6 +647,155 @@ export function playFirstBloodScore(
       .finally(() => {
         if (announcerPending) {
           announcerPending = false;
+          remaining -= 1;
+          cleanup();
+        }
+      });
+  }
+  options.signal?.addEventListener('abort', stop, { once: true });
+  return {
+    stop,
+    finished,
+    setVolume(volume) {
+      if (stopped) return;
+      master.gain.setTargetAtTime(
+        Math.max(0, Math.min(1, volume)) * 0.8,
+        context.currentTime,
+        0.025,
+      );
+    },
+  };
+}
+
+/**
+ * The short cue for a first blood that waited its turn: strike, hit and the
+ * announcer, on the quick timeline.
+ */
+export function playFirstBloodStinger(
+  context: BaseAudioContext,
+  options: ScoreOptions,
+): FirstBloodSound {
+  if (options.signal?.aborted)
+    return { setVolume() {}, stop() {}, finished: Promise.resolve() };
+  const launch = FIRST_BLOOD_QUICK.introMs / 1000;
+  const impact = FIRST_BLOOD_QUICK.hitAtMs / 1000;
+  const voiceAt = FIRST_BLOOD_QUICK.announcerAtMs / 1000;
+  const voiceLatest = FIRST_BLOOD_QUICK.bannerAtMs / 1000;
+  const start = context.currentTime + 0.02;
+  const from = clampPan(options.attackerPan ?? -0.5);
+  const to = clampPan(options.victimPan ?? 0.5);
+  const master = context.createGain();
+  master.gain.value = Math.max(0, Math.min(1, options.volume)) * 0.8;
+  master.connect(context.destination);
+  const nodes: AudioNode[] = [master];
+  const sources: AudioScheduledSourceNode[] = [];
+  let stopped = false;
+  let remaining = 0;
+  let voicePending = false;
+  let resolveFinished: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    resolveFinished = resolve;
+  });
+
+  function cleanup() {
+    if (remaining !== 0) return;
+    options.signal?.removeEventListener('abort', stop);
+    nodes.forEach((node) => node.disconnect());
+    resolveFinished();
+  }
+
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    const now = context.currentTime;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(master.gain.value, now);
+    master.gain.linearRampToValueAtTime(0, now + 0.025);
+    if (voicePending) {
+      voicePending = false;
+      remaining -= 1;
+    }
+    sources.forEach((source) => {
+      try {
+        source.stop(now + 0.03);
+      } catch {
+        /* Already ended. */
+      }
+    });
+    cleanup();
+  }
+
+  function play(
+    source: OscillatorNode | AudioBufferSourceNode,
+    at: number,
+    length: number,
+    peak: number,
+    pan: number,
+    { lowpass, sustain = false }: { lowpass?: number; sustain?: boolean } = {},
+  ) {
+    const gain = context.createGain();
+    const panner = context.createStereoPanner();
+    const time = start + at;
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(peak, time + 0.006);
+    if (sustain) gain.gain.linearRampToValueAtTime(peak, time + Math.max(0.007, length - 0.025));
+    gain.gain.linearRampToValueAtTime(0, time + length);
+    panner.pan.setValueAtTime(pan, time);
+    if (lowpass) {
+      const filter = context.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(lowpass, time);
+      filter.frequency.linearRampToValueAtTime(90, time + length);
+      source.connect(filter);
+      filter.connect(gain);
+      nodes.push(filter);
+    } else source.connect(gain);
+    gain.connect(panner);
+    panner.connect(master);
+    nodes.push(source, gain, panner);
+    sources.push(source);
+    remaining += 1;
+    source.onended = () => {
+      remaining -= 1;
+      cleanup();
+    };
+    source.start(time);
+    source.stop(time + length);
+  }
+
+  const laser = context.createOscillator();
+  laser.type = 'sine';
+  laser.frequency.setValueAtTime(1500, start + launch);
+  laser.frequency.linearRampToValueAtTime(420, start + impact);
+  play(laser, launch, impact - launch + 0.06, 0.09, (from + to) / 2);
+  const punch = context.createOscillator();
+  punch.type = 'sine';
+  punch.frequency.setValueAtTime(160, start + impact);
+  punch.frequency.linearRampToValueAtTime(54, start + impact + 0.05);
+  play(punch, impact, 0.5, 0.55, to * 0.4);
+  const boom = context.createBufferSource();
+  boom.buffer = getNoiseBuffer(context);
+  boom.loop = true;
+  play(boom, impact, 0.7, 0.5, to * 0.5, { lowpass: 1100 });
+
+  if (options.announcer) {
+    voicePending = true;
+    remaining += 1;
+    void options.announcer
+      .then((buffer) => {
+        if (stopped || context.state === 'closed') return;
+        const at = Math.max(voiceAt, context.currentTime - start + 0.005);
+        if (at > voiceLatest) return;
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        play(source, at, buffer.duration, 0.8, 0, { sustain: true });
+      })
+      .catch(() => {
+        // The strike and hit still play if the announcer cannot load.
+      })
+      .finally(() => {
+        if (voicePending) {
+          voicePending = false;
           remaining -= 1;
           cleanup();
         }

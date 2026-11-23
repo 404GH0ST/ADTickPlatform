@@ -686,6 +686,7 @@ export function AttacksPanel({
         <AttackSliceSummaryGrid rows={visibleRows} />
         <AttackMapPanel
           attackRows={attackRows}
+          firstBloods={attackPage.first_bloods}
           description="Accepted submissions rendered as directional team flow for the current paginated slice."
           highlightedAttackIDs={highlightedAttackIDs}
           teamRoster={teamOptions}

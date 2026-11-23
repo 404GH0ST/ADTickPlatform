@@ -4912,6 +4912,7 @@ export function GameAttacksCard({
         <AttackSliceSummaryGrid rows={attackRows} />
         <AttackMapPanel
           attackRows={attackRows}
+          firstBloods={attackPage.first_bloods}
           highlightedAttackIDs={highlightedAttackIDs}
           description="Accepted submissions rendered as directional team flow for the current organizer slice."
           teamRoster={teamRoster}

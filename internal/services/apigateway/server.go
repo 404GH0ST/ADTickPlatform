@@ -719,10 +719,11 @@ func paginateAttackFeed(events []attackEvent, query AttackFeedQuery) AttackFeedP
 	}
 
 	page := AttackFeedPage{
-		Limit:      limit,
-		Offset:     offset,
-		TotalCount: len(filtered),
-		HasPrev:    offset > 0,
+		FirstBloods: FirstBloodsInCaptureOrder(events),
+		Limit:       limit,
+		Offset:      offset,
+		TotalCount:  len(filtered),
+		HasPrev:     offset > 0,
 	}
 	if offset >= len(filtered) {
 		page.Items = []attackEvent{}

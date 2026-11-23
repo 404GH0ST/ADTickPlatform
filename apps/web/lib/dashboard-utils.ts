@@ -1,6 +1,7 @@
 type BaseAttackFeedPage<T extends { id: string }> = {
   revision?: number;
   items: T[];
+  first_bloods?: T[] | null;
   limit: number;
   offset: number;
   total_count: number;
@@ -114,11 +115,8 @@ export function handleRealtimeAttackMessage<T extends { id: string; first_blood?
         opts.currentPage(), nextPage, opts.limitStr,
       );
       const nextHighlights = collectNewAttackIDs(opts.currentPage(), mergedPage);
-      if (nextHighlights.length > 0) {
-        const knownIds = new Set(opts.currentPage().items.map((item) => item.id));
-        const firstBloodIds = mergedPage.items
-          .filter((item) => item.first_blood && !knownIds.has(item.id))
-          .map((item) => item.id);
+      const firstBloodIds = collectNewFirstBloodIDs(opts.currentPage(), mergedPage);
+      if (nextHighlights.length > 0 || firstBloodIds.length > 0) {
         opts.scheduleHighlights(nextHighlights, firstBloodIds);
       }
       opts.setPage(mergedPage);
@@ -154,6 +152,20 @@ function collectNewAttackIDs<T extends { id: string }>(currentPage: BaseAttackFe
     .filter((item) => !currentIDs.has(item.id))
     .map((item) => item.id)
     .slice(0, 4);
+}
+
+function collectNewFirstBloodIDs<T extends { id: string; first_blood?: boolean }>(
+  currentPage: BaseAttackFeedPage<T>,
+  nextPage: BaseAttackFeedPage<T>,
+): string[] {
+  const knownItems = new Set(currentPage.items.map((item) => item.id));
+  const knownAwards = new Set((currentPage.first_bloods ?? []).map((item) => item.id));
+  // Without an earlier list there is no baseline, so history must not replay.
+  const awards = currentPage.first_bloods ? nextPage.first_bloods ?? [] : [];
+  const arrivals = nextPage.items.filter((item) => item.first_blood && !knownItems.has(item.id));
+  return [...new Set([...awards, ...arrivals]
+    .filter((item) => !knownAwards.has(item.id))
+    .map((item) => item.id))];
 }
 
 function mergeRealtimeAttackPage<T extends { id: string }>(

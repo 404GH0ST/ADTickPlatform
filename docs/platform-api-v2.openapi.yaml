@@ -1173,6 +1173,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AttackEvent'
+        first_bloods:
+          type: array
+          description: Every first blood in capture order, independent of the page window and filters.
+          items:
+            $ref: '#/components/schemas/AttackEvent'
         limit:
           type: integer
           minimum: 1

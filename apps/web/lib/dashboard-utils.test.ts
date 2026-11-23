@@ -29,6 +29,56 @@ test('first blood is notified beyond the normal sound cap and never repeated by 
   expect(calls[0][1]).toEqual(['winner']);
 });
 
+test('a first blood pushed past the live window is still announced, once', () => {
+  type Event = { id: string; first_blood?: boolean };
+  let page = { items: [] as Event[], first_bloods: [] as Event[], limit: 12, offset: 0, total_count: 0, has_prev: false, has_next: false };
+  const calls: string[][] = [];
+  const handler = handleRealtimeAttackMessage({
+    isLive: () => true,
+    currentPage: () => page,
+    limitStr: '12',
+    setPage: (next) => { page = next as typeof page; },
+    scheduleHighlights: (_ids, milestones) => calls.push(milestones),
+  });
+  const items = Array.from({ length: 12 }, (_, i) => ({ id: `flood-${i}` }));
+  const frame = { data: JSON.stringify({ ...page, items, first_bloods: [{ id: 'winner', first_blood: true }], total_count: 13, has_next: true }) } as MessageEvent;
+  handler(frame);
+  handler(frame);
+  expect(calls).toEqual([['winner']]);
+});
+
+test('first bloods already on the page are never replayed by a later frame', () => {
+  type Event = { id: string; first_blood?: boolean };
+  const award = { id: 'old-winner', first_blood: true };
+  let page = { items: [] as Event[], first_bloods: [award] as Event[], limit: 12, offset: 0, total_count: 1, has_prev: false, has_next: false };
+  const calls: string[][] = [];
+  const handler = handleRealtimeAttackMessage({
+    isLive: () => true,
+    currentPage: () => page,
+    limitStr: '12',
+    setPage: (next) => { page = next as typeof page; },
+    scheduleHighlights: (_ids, milestones) => calls.push(milestones),
+  });
+  // An older row re-entering the window after a deletion is not a new award.
+  handler({ data: JSON.stringify({ ...page, items: [award] }) } as MessageEvent);
+  expect(calls).toEqual([[]]);
+});
+
+test('a page without a first-blood list does not replay history', () => {
+  type Event = { id: string; first_blood?: boolean };
+  let page = { items: [{ id: 'row' }] as Event[], limit: 12, offset: 0, total_count: 1, has_prev: false, has_next: false };
+  const calls: string[][] = [];
+  const handler = handleRealtimeAttackMessage({
+    isLive: () => true,
+    currentPage: () => page,
+    limitStr: '12',
+    setPage: (next) => { page = next; },
+    scheduleHighlights: (_ids, milestones) => calls.push(milestones),
+  });
+  handler({ data: JSON.stringify({ ...page, first_bloods: [{ id: 'old-winner', first_blood: true }] }) } as MessageEvent);
+  expect(calls).toEqual([]);
+});
+
 test('a capture deletion invalidates the full attack slice without replaying sounds', () => {
   let page = { items: [{ id: 'removed' }, { id: 'retained' }], limit: 1000, offset: 0, total_count: 2, has_prev: false, has_next: false, revision: 0 };
   let reloads = 0;

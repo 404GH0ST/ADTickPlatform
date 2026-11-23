@@ -71,6 +71,7 @@ type AttackFeedQuery = {
 type AttackFeedPage = {
   revision?: number;
   items: AttackEvent[];
+  first_bloods?: AttackEvent[] | null;
   limit: number;
   offset: number;
   total_count: number;

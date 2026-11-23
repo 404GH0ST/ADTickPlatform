@@ -64,4 +64,12 @@ func TestPostgresFirstBloodConcurrentAccepts(t *testing.T) {
 	if len(page.Items) != 8 || winners != 1 {
 		t.Fatalf("expected eight attacks and one winner: %+v", page)
 	}
+	// The winner is reported even when the page window cannot hold it.
+	narrow, err := store.ListAttackFeed(ctx, apigateway.AttackFeedQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(narrow.Items) != 1 || len(narrow.FirstBloods) != 1 || !narrow.FirstBloods[0].FirstBlood {
+		t.Fatalf("expected one row and the winner outside the window: %+v", narrow)
+	}
 }

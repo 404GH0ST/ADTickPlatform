@@ -444,7 +444,8 @@ test('reduced motion keeps first blood legible without zoom, shake or fragments'
   await expect(banner).toHaveCount(0, { timeout: 6000 });
 });
 
-test('simultaneous first bloods share one sequence, one announcer and one banner', async ({ page, request }) => {
+test('simultaneous first bloods each get their own strike, announcer and banner', async ({ page, request }) => {
+  test.setTimeout(45_000);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
   await installMockAttackSfx(page);
   await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
@@ -453,20 +454,70 @@ test('simultaneous first bloods share one sequence, one announcer and one banner
   await revealGlobe(globe);
   await page.mouse.click(24, 24);
   await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-burst' } });
+  // The earliest capture plays the full cinematic.
   await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-13');
+  await expect(globe).toHaveAttribute('data-first-blood-pace', 'full');
   await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact', { timeout: 6000 });
   await expect(globe.locator('[data-first-blood-effect]')).toHaveCount(1);
   const banner = globe.getByTestId('first-blood-banner');
   await expect(banner).toBeVisible();
-  await expect(banner.getByRole('heading')).toHaveText('2 first bloods');
+  await expect(banner.getByRole('heading')).toHaveText('First blood');
+  await expect(banner.getByTestId('first-blood-banner-team')).toHaveText('College Gamma');
   await expect(banner.getByTestId('first-blood-banner-challenge')).toHaveText('college-http');
-  await expect(banner.getByTestId('first-blood-banner-extra')).toHaveText('College Alpha first on college-vault');
+  // The next team then gets its own shorter turn rather than a line in that banner.
+  await expect(globe).toHaveAttribute('data-first-blood-pace', 'quick', { timeout: 12_000 });
+  await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-14');
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact', { timeout: 3000 });
+  await expect(banner.getByTestId('first-blood-banner-team')).toHaveText('College Alpha', { timeout: 3000 });
+  await expect(banner.getByTestId('first-blood-banner-challenge')).toHaveText('college-vault');
+  await expect(banner).toHaveCount(0, { timeout: 5000 });
   await expect(globe).not.toHaveAttribute('data-first-blood-stage');
-  await expect(banner).toHaveCount(0, { timeout: 8000 });
-  // The second capture never replays as a stale, separate cinematic.
-  await page.waitForTimeout(1200);
-  await expect(globe).not.toHaveAttribute('data-first-blood-stage');
-  expect((await scoreVoices(page)).filter((voice) => voice.kind === 'sample')).toHaveLength(1);
+  expect((await scoreVoices(page)).filter((voice) => voice.kind === 'sample')).toHaveLength(2);
+});
+
+test('a first blood pushed out of a busy live frame still plays', async ({ page, request }) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
+  await page.goto('/attacks');
+  const globe = page.getByTestId('cyber-attack-map');
+  await revealGlobe(globe);
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-overflow' } });
+  await expect(globe).toHaveAttribute('data-featured-attack-id', 'atk-13');
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact', { timeout: 6000 });
+  await expect(globe.locator('[data-first-blood-effect]')).toHaveCount(1);
+  const banner = globe.getByTestId('first-blood-banner');
+  await expect(banner.getByTestId('first-blood-banner-team')).toHaveText('College Gamma');
+  await expect(banner.getByTestId('first-blood-banner-challenge')).toHaveText('college-http');
+});
+
+test('taking the camera during a burst still gives the next team its turn', async ({ page, request }) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'off'));
+  await page.goto('/attacks');
+  const globe = page.getByTestId('cyber-attack-map');
+  await revealGlobe(globe);
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-burst' } });
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'charge');
+  await globe.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(globe).toHaveAttribute('data-first-blood-pace', 'quick');
+  await expect(globe).toHaveAttribute('data-zoom', '1.350');
+  const banner = globe.getByTestId('first-blood-banner');
+  await expect(banner.getByTestId('first-blood-banner-team')).toHaveText('College Alpha', { timeout: 4000 });
+  // The viewer keeps the camera for the rest of the queue.
+  await expect(globe).toHaveAttribute('data-zoom', '1.350');
+});
+
+test('the maximized map plays first blood sound after the click that opened it', async ({ page, request }) => {
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'empty-attacks' } });
+  await installMockAttackSfx(page);
+  await page.addInitScript(() => localStorage.setItem('ad-platform-attack-sfx-enabled', 'on'));
+  await page.goto('/attacks');
+  await page.getByRole('button', { name: 'Maximize' }).click();
+  const globe = page.getByRole('dialog').getByTestId('cyber-attack-map');
+  await expect(globe).toBeVisible();
+  await request.post(`${mockApiBaseUrl}/__reset`, { data: { scenario: 'realtime-first-blood-empty' } });
+  await expect(globe).toHaveAttribute('data-first-blood-stage', 'impact', { timeout: 8000 });
+  await expect.poll(async () => (await scoreVoices(page)).some((voice) => voice.kind === 'sample')).toBe(true);
 });
 
 test('a plain click on the globe during first blood keeps the sequence running', async ({ page, request }) => {

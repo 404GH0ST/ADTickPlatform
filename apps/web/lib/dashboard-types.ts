@@ -64,6 +64,8 @@ export type AttackEvent = {
 export type AttackFeedPage = {
   revision?: number;
   items: AttackEvent[];
+  /** Every first blood in capture order, independent of the page window. */
+  first_bloods?: AttackEvent[] | null;
   limit: number;
   offset: number;
   total_count: number;

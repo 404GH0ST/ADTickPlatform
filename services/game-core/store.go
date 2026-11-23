@@ -643,11 +643,12 @@ func (s *memoryGameStore) ListAttackFeed(_ context.Context, query apigateway.Att
 		offset = 0
 	}
 	page := apigateway.AttackFeedPage{
-		Revision:   s.attackFeedRevision,
-		Limit:      limit,
-		Offset:     offset,
-		TotalCount: len(filtered),
-		HasPrev:    offset > 0,
+		Revision:    s.attackFeedRevision,
+		FirstBloods: apigateway.FirstBloodsInCaptureOrder(s.attackFeed),
+		Limit:       limit,
+		Offset:      offset,
+		TotalCount:  len(filtered),
+		HasPrev:     offset > 0,
 	}
 	if offset >= len(filtered) {
 		page.Items = []apigateway.AttackEventAlias{}
@@ -2327,15 +2328,45 @@ func (s *postgresGameStore) ListAttackFeed(ctx context.Context, query apigateway
 	if err := rows.Err(); err != nil {
 		return apigateway.AttackFeedPage{}, err
 	}
+	firstBloods, err := s.listFirstBloods(ctx)
+	if err != nil {
+		return apigateway.AttackFeedPage{}, err
+	}
 	return apigateway.AttackFeedPage{
-		Revision:   revision,
-		Items:      result,
-		Limit:      limit,
-		Offset:     offset,
-		TotalCount: totalCount,
-		HasPrev:    offset > 0,
-		HasNext:    offset+len(result) < totalCount,
+		Revision:    revision,
+		Items:       result,
+		FirstBloods: firstBloods,
+		Limit:       limit,
+		Offset:      offset,
+		TotalCount:  totalCount,
+		HasPrev:     offset > 0,
+		HasNext:     offset+len(result) < totalCount,
 	}, nil
+}
+
+// listFirstBloods reads at most one row per challenge through the partial
+// first-blood index, in capture order.
+func (s *postgresGameStore) listFirstBloods(ctx context.Context) ([]apigateway.AttackEventAlias, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, attacker, victim, service, tick, verdict, created_at, first_blood
+		FROM attack_events
+		WHERE first_blood AND challenge_id IS NOT NULL
+		ORDER BY created_at ASC, id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]apigateway.AttackEventAlias, 0)
+	for rows.Next() {
+		var item apigateway.AttackEventAlias
+		if err := rows.Scan(&item.ID, &item.Attacker, &item.Victim, &item.Service, &item.Tick, &item.Verdict, &item.CreatedAt, &item.FirstBlood); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func filterAttackFeedRows(events []apigateway.AttackEventAlias, query apigateway.AttackFeedQuery) []apigateway.AttackEventAlias {

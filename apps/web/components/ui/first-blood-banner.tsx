@@ -3,36 +3,27 @@
 import { useId, type ReactElement } from 'react';
 import { X } from 'lucide-react';
 
-import {
-  FIRST_BLOOD_BANNER_EXIT_MS,
-  FIRST_BLOOD_BANNER_MAX_ROWS,
-} from '@/lib/first-blood';
+import { FIRST_BLOOD_BANNER_EXIT_MS } from '@/lib/first-blood';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { CyberAttackEvent } from './cyber-attack-map';
 
 export function FirstBloodBanner({
-  attacks,
+  attack,
   leaving,
   reducedMotion,
   retained,
   onDismiss,
 }: {
-  /** The lead capture first; simultaneous first bloods follow as compact rows. */
-  attacks: CyberAttackEvent[];
+  attack: CyberAttackEvent;
   leaving: boolean;
   reducedMotion: boolean;
   retained: boolean;
   onDismiss: () => void;
 }): ReactElement | null {
   const headingId = useId();
-  const [attack, ...others] = attacks;
-  if (!attack) return null;
-  const extras = others.slice(0, FIRST_BLOOD_BANNER_MAX_ROWS - 1);
-  const hidden = others.length - extras.length;
   const institution = attack.attacker_institution?.trim() ?? '';
   const dense =
-    others.length > 0 ||
     attack.attacker.length + attack.service.length + institution.length / 2 > 100;
   return (
     <div
@@ -82,7 +73,7 @@ export function FirstBloodBanner({
             )}
             style={{ color: 'var(--signal-negative)' }}
           >
-            {attacks.length > 1 ? `${attacks.length} first bloods` : 'First blood'}
+            First blood
           </h3>
           <Button
             type="button"
@@ -151,33 +142,6 @@ export function FirstBloodBanner({
             ) : null}
             <span aria-hidden="true"> · </span>Tick #{attack.tick}
           </p>
-          {extras.length > 0 ? (
-            <ul
-              className="space-y-1 border-t pt-2 text-xs leading-snug sm:text-sm"
-              style={{ borderColor: 'var(--attack-map-legend-border)' }}
-            >
-              {extras.map((entry) => (
-                <li
-                  key={entry.id}
-                  data-testid="first-blood-banner-extra"
-                  className="[overflow-wrap:anywhere]"
-                >
-                  <span className="font-semibold">{entry.attacker}</span>
-                  {entry.attacker_institution ? (
-                    <span
-                      data-first-blood-banner-extra-institution
-                      style={{ color: 'var(--attack-map-legend-foreground)' }}
-                    >
-                      {' '}· {entry.attacker_institution}
-                    </span>
-                  ) : null}
-                  {' '}first on{' '}
-                  <strong className="font-semibold">{entry.service}</strong>
-                </li>
-              ))}
-              {hidden > 0 ? <li>and {hidden} more</li> : null}
-            </ul>
-          ) : null}
         </div>
       </div>
       <style>{`

@@ -126,6 +126,8 @@ func publicScoreRows(rows []scoreRow) []scoreRow {
 }
 
 func (s *Server) enrichAttackFeedPage(ctx context.Context, page AttackFeedPage) AttackFeedPage {
-	page.Items = withAttackInstitutions(page.Items, s.teamInstitutionsByName(ctx))
+	institutions := s.teamInstitutionsByName(ctx)
+	page.Items = withAttackInstitutions(page.Items, institutions)
+	page.FirstBloods = withAttackInstitutions(page.FirstBloods, institutions)
 	return page
 }

@@ -55,8 +55,11 @@ when sound is muted or unavailable. Long team and challenge names wrap within
 the mobile banner.
 
 Ordinary captures retain their existing sound. First bloods that arrive
-together (or while another is playing) share one sequence: the earliest
-capture leads the animation and the banner lists the others.
+together, or while another is playing, each get their own turn in capture
+order. The first plays in full. Each one waiting behind it plays a shorter
+version of about 5.5 seconds with its own camera move, strike, announcer, and
+full banner. If a viewer moves the camera during a burst, the remaining turns
+still play without taking the camera back.
 Later captures use the normal animation; loading history, reloading the page,
 and highlighting a tick do not replay a first blood. Reduced motion keeps the capture status without animated
 zoom, shake, or fragments.

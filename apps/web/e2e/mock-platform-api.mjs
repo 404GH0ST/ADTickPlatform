@@ -975,9 +975,9 @@ function createStateForScenario(scenario = "default") {
     ];
   }
 
-  if (scenario === "realtime-updates" || scenario === "realtime-first-blood" || scenario === "realtime-after-first-blood" || scenario === "realtime-first-blood-empty" || scenario === "realtime-first-blood-burst" || scenario === "realtime-first-blood-long-names") {
+  if (scenario === "realtime-updates" || scenario === "realtime-first-blood" || scenario === "realtime-after-first-blood" || scenario === "realtime-first-blood-empty" || scenario === "realtime-first-blood-burst" || scenario === "realtime-first-blood-overflow" || scenario === "realtime-first-blood-long-names") {
     nextState.streamScenario = scenario;
-    if (scenario === 'realtime-first-blood-empty' || scenario === 'realtime-first-blood-burst' || scenario === 'realtime-first-blood-long-names') nextState.attackItems = [];
+    if (scenario === 'realtime-first-blood-empty' || scenario === 'realtime-first-blood-burst' || scenario === 'realtime-first-blood-overflow' || scenario === 'realtime-first-blood-long-names') nextState.attackItems = [];
     if (scenario === 'realtime-after-first-blood') {
       nextState.attackItems.unshift({ id: 'atk-13', first_blood: true, attacker: 'College Gamma', victim: 'College Alpha', service: 'college-http', tick: 13, verdict: 'first valid submission accepted' });
     }
@@ -1302,14 +1302,21 @@ function writeSSE(res, data) {
   res.on("close", () => closeSSE(res));
 }
 
+// Like the real feed: every first blood in capture order, whatever the page holds.
+function withFirstBloods(page, allItems) {
+  return { ...page, first_bloods: allItems.filter((item) => item.first_blood).reverse() };
+}
+
 function makeRealtimeAttackPage() {
   // Newest first, like the real feed (ORDER BY created_at DESC): in the burst,
   // atk-14 was captured after atk-13 and is listed before it.
   const items = [
+    // Twelve newer captures fill the frame and push the first blood out of it.
+    ...(state.streamScenario === 'realtime-first-blood-overflow' ? Array.from({ length: 12 }, (_, index) => ({ id: `atk-flood-${index}`, first_blood: false, attacker: 'College Beta', victim: 'College Gamma', service: 'college-http', tick: 13, verdict: 'first valid submission accepted' })) : []),
     ...(state.streamScenario === 'realtime-first-blood-burst' ? [{ id: 'atk-14', first_blood: true, attacker: 'College Alpha', victim: 'College Gamma', service: 'college-vault', tick: 13, verdict: 'first valid submission accepted' }] : []),
     {
       id: state.streamScenario === "realtime-after-first-blood" ? "atk-14" : "atk-13",
-      first_blood: state.streamScenario === "realtime-first-blood" || state.streamScenario === "realtime-first-blood-empty" || state.streamScenario === "realtime-first-blood-burst" || state.streamScenario === "realtime-first-blood-long-names",
+      first_blood: state.streamScenario === "realtime-first-blood" || state.streamScenario === "realtime-first-blood-empty" || state.streamScenario === "realtime-first-blood-burst" || state.streamScenario === "realtime-first-blood-overflow" || state.streamScenario === "realtime-first-blood-long-names",
       attacker: state.streamScenario === 'realtime-first-blood-long-names' ? 'International Cyber Defense Research and Incident Response Alliance' : 'College Gamma',
       victim: "College Alpha",
       service: state.streamScenario === 'realtime-first-blood-long-names' ? 'HyperconvergedIdentityAndAccessManagementChallengeServiceWithRegionalReplicasAndSecondaryFailover' : 'college-http',
@@ -1319,7 +1326,7 @@ function makeRealtimeAttackPage() {
     ...state.attackItems,
   ];
 
-  return paginate(items, new URLSearchParams("limit=12&offset=0"));
+  return withFirstBloods(paginate(items, new URLSearchParams("limit=12&offset=0")), items);
 }
 
 function makeRealtimeScoreboard() {
@@ -1352,7 +1359,7 @@ function makeRealtimeGameStatus() {
 function writeScenarioSSE(res, pathname, initialData) {
   writeSSE(res, initialData);
 
-  if (!["realtime-updates", "realtime-first-blood", "realtime-after-first-blood", "realtime-first-blood-empty", "realtime-first-blood-burst", "realtime-first-blood-long-names"].includes(state.streamScenario)) {
+  if (!["realtime-updates", "realtime-first-blood", "realtime-after-first-blood", "realtime-first-blood-empty", "realtime-first-blood-burst", "realtime-first-blood-overflow", "realtime-first-blood-long-names"].includes(state.streamScenario)) {
     return;
   }
 
@@ -1432,7 +1439,11 @@ function withTeamInstitutions(value) {
   };
   if (Array.isArray(value)) return value.map(decorate);
   if (value && typeof value === "object" && Array.isArray(value.items)) {
-    return { ...value, items: value.items.map(decorate) };
+    return {
+      ...value,
+      items: value.items.map(decorate),
+      ...(Array.isArray(value.first_bloods) ? { first_bloods: value.first_bloods.map(decorate) } : {}),
+    };
   }
   return value;
 }
@@ -1826,7 +1837,7 @@ async function handleParticipantRoutes(ctx) {
 
   if (method === "GET" && url.pathname === "/api/v2/attacks") {
     const filtered = filterAttackItems(state.attackItems, url.searchParams);
-    return writeSuccess(res, paginate(filtered, url.searchParams));
+    return writeSuccess(res, withFirstBloods(paginate(filtered, url.searchParams), state.attackItems));
   }
 
   if (method === "POST" && url.pathname === "/api/v2/submit") {
@@ -2715,7 +2726,7 @@ async function handleAdminGameRoutes(ctx) {
 
   if (method === "GET" && url.pathname === "/api/v2/admin/game/attacks") {
     const filtered = filterAttackItems(state.attackItems, url.searchParams);
-    return writeSuccess(res, paginate(filtered, url.searchParams));
+    return writeSuccess(res, withFirstBloods(paginate(filtered, url.searchParams), state.attackItems));
   }
 
   if (method === "GET" && url.pathname === "/api/v2/admin/game/scheduler/events") {
@@ -2994,7 +3005,7 @@ function handleStreamRoutes({ res, url, method }) {
       writeScenarioSSE(
         response,
         pathname,
-        paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
+        withFirstBloods(paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")), state.attackItems),
       ),
     "/admin/v1/game/status/stream": (response, pathname) =>
       writeScenarioSSE(response, pathname, state.gameStatus),
@@ -3004,7 +3015,7 @@ function handleStreamRoutes({ res, url, method }) {
       writeScenarioSSE(
         response,
         pathname,
-        paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")),
+        withFirstBloods(paginate(state.attackItems, new URLSearchParams("limit=12&offset=0")), state.attackItems),
       ),
     "/admin/v1/game/checker-runs/stream": (response) =>
       writeSSE(

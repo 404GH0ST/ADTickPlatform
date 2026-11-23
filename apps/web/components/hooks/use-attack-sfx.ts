@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
-import { playFirstBloodScore, type FirstBloodSound } from '@/lib/first-blood-audio';
+import { playFirstBloodScore, playFirstBloodStinger, type FirstBloodSound } from '@/lib/first-blood-audio';
 
 declare global {
   interface Window {
@@ -117,6 +117,10 @@ export function useAttackSfxPreferences() {
   return { preferences, setEnabled, setVolume, toggleEnabled };
 }
 
+// Browsers keep a page's audio permission after the first gesture, but each map
+// instance has its own context. Maximizing remounts the map after that gesture.
+let pageAudioActivated = false;
+
 export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: boolean } = {}) {
   const armedRef = useRef(false);
   const audioContextRef = useRef<BrowserAudioContext | null>(null);
@@ -154,6 +158,7 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
 
   useEffect(() => {
     function armAudio() {
+      pageAudioActivated = true;
       armedRef.current = true;
       const context = getAudioContext();
       if (firstBloodOnly && context && preferencesRef.current.enabled) {
@@ -166,6 +171,7 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
       }
     }
 
+    if (pageAudioActivated || navigator.userActivation?.hasBeenActive) armAudio();
     window.addEventListener('pointerdown', armAudio, { passive: true });
     window.addEventListener('keydown', armAudio);
     return () => {
@@ -185,7 +191,7 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
     }
   }, []);
 
-  return useCallback((attackIds: string[], firstBloodIds: string[] = [], signal?: AbortSignal, spatial?: { attackerPan: number; victimPan: number }) => {
+  return useCallback((attackIds: string[], firstBloodIds: string[] = [], signal?: AbortSignal, spatial?: { attackerPan: number; victimPan: number; quick?: boolean }) => {
     // Milestone sound belongs to the globe's actual sequence. The feed handles
     // ordinary arrivals, so neither remounts nor queued captures double the audio.
     const firstBloodSet = new Set(firstBloodIds);
@@ -222,11 +228,13 @@ export function useAttackSfx({ firstBloodOnly = false }: { firstBloodOnly?: bool
         return;
       }
       playingMilestoneRef.current?.stop();
-      playingMilestoneRef.current = playFirstBloodScore(context, {
+      const playCue = spatial?.quick ? playFirstBloodStinger : playFirstBloodScore;
+      playingMilestoneRef.current = playCue(context, {
         volume: preferences.volume,
         signal,
         announcer: getFirstBloodAnnouncerBuffer(context),
-        ...spatial,
+        attackerPan: spatial?.attackerPan,
+        victimPan: spatial?.victimPan,
       });
       return playingMilestoneRef.current;
     }

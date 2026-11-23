@@ -2182,10 +2182,6 @@
   box-shadow: 3px 3px 0 var(--nb-ink);
 }
 
-:root[data-scheme="neubrutalism"] [data-first-blood-banner-extra-institution] {
-  color: color-mix(in oklab, var(--nb-ink) 72%, var(--nb-cream)) !important;
-}
-
 :root[data-scheme="neubrutalism"] [data-first-blood-banner-panel] {
   overflow: visible;
   border: 3px solid var(--nb-ink) !important;

@@ -324,6 +324,8 @@ export type AdminAttackEvent = {
 export type AdminAttackFeedPage = {
   revision?: number;
   items: AdminAttackEvent[];
+  /** Every first blood in capture order, independent of the page window. */
+  first_bloods?: AdminAttackEvent[] | null;
   limit: number;
   offset: number;
   total_count: number;

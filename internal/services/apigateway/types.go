@@ -192,13 +192,27 @@ type AttackFeedQuery struct {
 }
 
 type AttackFeedPage struct {
-	Revision   int64              `json:"revision"`
-	Items      []AttackEventAlias `json:"items"`
-	Limit      int                `json:"limit"`
-	Offset     int                `json:"offset"`
-	TotalCount int                `json:"total_count"`
-	HasPrev    bool               `json:"has_prev"`
-	HasNext    bool               `json:"has_next"`
+	Revision int64              `json:"revision"`
+	Items    []AttackEventAlias `json:"items"`
+	// FirstBloods lists every first blood in capture order, regardless of the
+	// page window or filters, so a busy tick cannot push one out of a live frame.
+	FirstBloods []AttackEventAlias `json:"first_bloods"`
+	Limit       int                `json:"limit"`
+	Offset      int                `json:"offset"`
+	TotalCount  int                `json:"total_count"`
+	HasPrev     bool               `json:"has_prev"`
+	HasNext     bool               `json:"has_next"`
+}
+
+// FirstBloodsInCaptureOrder picks the first bloods out of a newest-first feed.
+func FirstBloodsInCaptureOrder(events []AttackEventAlias) []AttackEventAlias {
+	out := make([]AttackEventAlias, 0)
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].FirstBlood {
+			out = append(out, events[index])
+		}
+	}
+	return out
 }
 
 type scoreRow = ScoreRowAlias
