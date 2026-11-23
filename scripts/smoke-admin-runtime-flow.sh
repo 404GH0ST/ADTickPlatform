@@ -55,11 +55,17 @@ cleanup_runtime_smoke() {
   fi
 
   echo "cleanup:"
-  if curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+  local delete_status
+  delete_status="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
     "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
-    -H @<(bearer_header "${ADMIN_TOKEN}") |
-    grep -qx '204'; then
+    -H @<(bearer_header "${ADMIN_TOKEN}"))" || delete_status="000"
+  if [[ "${delete_status}" == "204" ]]; then
     echo "  deleted challenge_id=${challenge_id}"
+  elif [[ "${delete_status}" == "409" ]] && curl -fsS -o /dev/null -X POST \
+    "${API_URL}/api/v2/admin/challenges/${challenge_id}/maintenance" \
+    -H @<(bearer_header "${ADMIN_TOKEN}"); then
+    # Challenges cannot be deleted during an active match, so stop its runtime.
+    echo "  match is active; moved challenge_id=${challenge_id} to maintenance"
   else
     echo "  failed to delete challenge_id=${challenge_id}" >&2
     cleanup_status=1

@@ -1,4 +1,4 @@
-.PHONY: firewall-cleanup prod-runtime-cleanup generate-prod-env setup-prod-env compose-config validate-prod-env validate-prod-compose-security prod-config prod-host-config preflight-prod-host \
+.PHONY: firewall-cleanup prod-runtime-cleanup generate-prod-env setup-prod-env compose-config validate-prod-env validate-prod-compose-security prod-config prod-host-config preflight-prod-host provision-docker-xfs \
 	wg-host-keygen wg-host-render wg-host-install wg-host-up wg-host-down \
 	wg-host-show wg-host-setup up-prod up-prod-host down-prod down-prod-host down-prod-host-clean \
 	logs-prod logs-prod-host prod-config-arm64 prod-host-config-arm64 \
@@ -79,6 +79,15 @@ prod-host-config-arm64: validate-prod-compose-security
 
 preflight-prod-host:
 	PROD_ENV="$(PROD_ENV)" ./scripts/preflight-prod-host.sh
+
+# Provision Docker's data-root on overlay2 + XFS with project quotas so
+# preflight-prod-host's challenge-storage check passes. Loop-backed XFS image;
+# no real partition is reformatted. Dry-run by default; apply with CONFIRM=yes.
+#   sudo make provision-docker-xfs CONFIRM=yes
+provision-docker-xfs:
+	CONFIRM="$(CONFIRM)" DOCKER_XFS_IMAGE="$(DOCKER_XFS_IMAGE)" DOCKER_XFS_MOUNT="$(DOCKER_XFS_MOUNT)" \
+		DOCKER_XFS_SIZE="$(DOCKER_XFS_SIZE)" MIGRATE_VOLUMES="$(MIGRATE_VOLUMES)" \
+		./scripts/provision-docker-xfs.sh
 
 wg-host-keygen:
 	./scripts/host-wireguard.sh keygen

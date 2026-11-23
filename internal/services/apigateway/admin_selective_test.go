@@ -35,6 +35,8 @@ func TestAdminRoutesReachLaterFailureBranches(t *testing.T) {
 			controller: failSet{"ReconcileAccessPolicies": errUpstreamDown}, want: http.StatusBadGateway},
 		{name: "rotate then gateway fails", method: http.MethodPost, path: "/api/v2/admin/players/1/wireguard/rotate",
 			wireGuard: failSet{"Reconcile": errUpstreamDown}, want: http.StatusBadGateway},
+		{name: "rotate then access reconcile fails", method: http.MethodPost, path: "/api/v2/admin/players/1/wireguard/rotate",
+			controller: failSet{"ReconcileAccessPolicies": errUpstreamDown}, want: http.StatusBadGateway},
 		{name: "revoke then gateway fails", method: http.MethodPost, path: "/api/v2/admin/players/1/wireguard/revoke",
 			wireGuard: failSet{"Reconcile": errUpstreamDown}, want: http.StatusBadGateway},
 		{name: "gateway reconcile", method: http.MethodPost, path: "/api/v2/admin/wireguard/reconcile", want: http.StatusOK},

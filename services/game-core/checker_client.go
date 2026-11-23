@@ -50,6 +50,7 @@ func executeBatchViaSingle(
 			Metadata:       metadata,
 			CheckerToken:   request.CheckerToken,
 			TimeoutSeconds: request.TimeoutSeconds,
+			SourceIP:       request.SourceIP,
 		})
 		if err != nil {
 			return result, err

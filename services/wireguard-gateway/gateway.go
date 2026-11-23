@@ -674,8 +674,31 @@ func renderNftablesRulesWithForwardCIDRs(tableName, interfaceName, serverIP stri
 	builder.WriteString("  chain forward {\n")
 	builder.WriteString("    type filter hook forward priority filter;\n")
 	builder.WriteString("    policy accept;\n")
+	// VPN clients are participants' own machines. Peers cannot reach each other
+	// through the gateway, even when the allowlist below covers the VPN subnet.
+	builder.WriteString(fmt.Sprintf("    iifname \"%s\" oifname \"%s\" drop\n", interfaceName, interfaceName))
 	builder.WriteString("    ct state established,related accept\n")
+	// Game services may call back to players on any port, as reverse shells do.
+	// Organizer machines and sources outside the game networks stay unreachable.
+	var organizers []string
+	for _, peer := range peers {
+		if peer.Organizer {
+			organizers = append(organizers, peer.Address)
+		}
+	}
+	if len(organizers) > 0 {
+		builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip daddr { %s } drop\n", interfaceName, strings.Join(organizers, ", ")))
+	}
+	if len(forwardCIDRs) > 0 {
+		builder.WriteString(fmt.Sprintf("    oifname \"%s\" ip saddr { %s } accept\n", interfaceName, strings.Join(forwardCIDRs, ", ")))
+	}
+	builder.WriteString(fmt.Sprintf("    oifname \"%s\" drop\n", interfaceName))
 	builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip saddr != @active_peers drop\n", interfaceName))
+	if strings.TrimSpace(serverIP) != "" {
+		// Docker DNATs the published edge ports before the input hook, so the
+		// platform on the VPN address is forwarded to the edge container.
+		builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip saddr @active_peers ct status dnat ct original ip daddr %s meta l4proto tcp ct original proto-dst { 80, 443 } accept\n", interfaceName, serverIP))
+	}
 	if len(forwardCIDRs) > 0 {
 		builder.WriteString(fmt.Sprintf("    iifname \"%s\" ip saddr @active_peers ip daddr { %s } accept\n", interfaceName, strings.Join(forwardCIDRs, ", ")))
 	}

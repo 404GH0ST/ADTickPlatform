@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"adplatform/internal/platform/config"
+	"adplatform/internal/platform/gamenet"
 	"adplatform/internal/services/apigateway"
 )
 
@@ -178,6 +179,19 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 
 	applyCtx, cancel := context.WithTimeout(ctx, e.applyTimeout)
 	defer cancel()
+	// The isolation boundary goes first so a failure later in this apply cannot
+	// leave game containers without it.
+	gameCIDRs, err := gameNetworkCIDRs(policies)
+	if err == nil {
+		isolationRules := renderGameIsolationRules(gameIsolationTableName(e.firewallTable), e.interfaceName, gameCIDRs, policies)
+		err = e.applyNftRulesFile(applyCtx, e.paths.rulesPath+".isolation", isolationRules)
+	}
+	if err != nil {
+		status.State = "error"
+		status.LastError = err.Error()
+		_ = writeControllerAccessStatus(e.paths.statusPath, status)
+		return status, err
+	}
 	pauseRules, guarded := renderMatchPauseRules(e.firewallTable, e.interfaceName, policies)
 	// Close the bridge before changing the routed rules. On resume keep the
 	// pause guard until the ordinary access policy has been applied.
@@ -245,7 +259,10 @@ func (e *hostServiceAccessExecutor) Apply(ctx context.Context, policies []apigat
 }
 
 func (e *hostServiceAccessExecutor) applyMatchPauseRules(ctx context.Context, rules string) error {
-	path := e.paths.rulesPath + ".pause"
+	return e.applyNftRulesFile(ctx, e.paths.rulesPath+".pause", rules)
+}
+
+func (e *hostServiceAccessExecutor) applyNftRulesFile(ctx context.Context, path, rules string) error {
 	if err := ensureControllerParentDir(path); err != nil {
 		return err
 	}
@@ -261,6 +278,10 @@ func (e *hostServiceAccessExecutor) Teardown(ctx context.Context) error {
 
 	// Always clean up nftables table to prevent orphaned rules from conflicting.
 	_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", e.firewallTable)
+	isolationTable := gameIsolationTableName(e.firewallTable)
+	_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "inet", isolationTable)
+	_ = e.runner.Run(applyCtx, e.nftBinary, "delete", "table", "bridge", isolationTable)
+	_ = os.Remove(e.paths.rulesPath + ".isolation")
 
 	iptablesBinary, err := e.selectIptablesBinary(applyCtx)
 	if err == nil {
@@ -306,6 +327,7 @@ func (e *hostServiceAccessExecutor) applyDockerRawRules(ctx context.Context, bin
 		if isValidIP(policy.ServiceIP) {
 			// Filter still drops participant traffic to closed services.
 			fmt.Fprintf(&rules, "-A %s%s -d %s/32 -j ACCEPT\n", chain, iptablesInterface("-i", e.interfaceName), policy.ServiceIP)
+			fmt.Fprintf(&rules, "-A %s -i %s -d %s/32 -j ACCEPT\n", chain, gamenet.CheckerBridgeName, policy.ServiceIP)
 		}
 	}
 	return e.restoreIptablesTable(ctx, binary, rules.String())
@@ -329,6 +351,13 @@ func (e *hostServiceAccessExecutor) applyDockerUserRules(ctx context.Context, bi
 
 	ingress := iptablesInterface("-i", e.interfaceName)
 	egress := iptablesInterface("-o", e.interfaceName)
+	// Checkers keep reaching service ports during pre-match warmup, when players
+	// are closed out. The match pause guard still stops them while play is halted.
+	for _, policy := range policies {
+		if isValidIP(policy.ServiceIP) && policy.ServicePort > 0 {
+			fmt.Fprintf(&rules, "-A %s -i %s -d %s/32 -p tcp --dport %d -j ACCEPT\n", chain, gamenet.CheckerBridgeName, policy.ServiceIP, policy.ServicePort)
+		}
+	}
 	// Closed services and SSH are checked before established connections.
 	for _, policy := range policies {
 		if !policy.NetworkClosed || !isValidIP(policy.ServiceIP) {
@@ -470,6 +499,9 @@ func buildControllerAccessStatus(mode, interfaceName, internetInterface, firewal
 	rules := renderControllerAccessRules(tableName, interfaceName, internetInterface, policies)
 	if pauseRules, paused := renderMatchPauseRules(tableName, interfaceName, policies); paused {
 		rules += pauseRules
+	}
+	if gameCIDRs, err := gameNetworkCIDRs(policies); err == nil {
+		rules += renderGameIsolationRules(gameIsolationTableName(tableName), interfaceName, gameCIDRs, policies)
 	}
 	return apigateway.ControllerAccessStatus{
 		State:                  "applied",

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -40,6 +41,8 @@ type dockerCheckerExecutor struct {
 	networkLayout string
 	security      checkerDockerSecurity
 	timeout       time.Duration
+
+	checkerNetworkMu sync.Mutex
 }
 
 type checkerDockerSecurity struct {
@@ -342,10 +345,17 @@ func (e *dockerCheckerExecutor) ExecuteChecker(ctx context.Context, request apig
 	if err != nil {
 		return apigateway.CheckerExecutionResult{}, err
 	}
+	runNetwork, sourceIP := e.resolveRunNetwork(runCtx, networkPlan.Name, request.SourceIP)
+	request.SourceIP = sourceIP
 	name := dockerRunName("adchk", request.ChallengeID, request.TeamID, request.TickID)
 	stateNonce := rand.Text()
 	env := checkerRunEnv(request.Flag, request.Metadata, request.CheckerToken, stateNonce)
-	output, exitCode, err := e.execDockerWithEnv(runCtx, env, buildDockerCheckerExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	output, exitCode, err := e.execDockerWithEnv(runCtx, env, buildDockerCheckerExecuteArgs(runNetwork, name, e.security, request)...)
+	if retryOnServiceNetwork(runCtx, exitCode, request.SourceIP) {
+		e.forceRemove(name)
+		request.SourceIP = ""
+		output, exitCode, err = e.execDockerWithEnv(runCtx, env, buildDockerCheckerExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	}
 	if runCtx.Err() != nil {
 		e.forceRemove(name)
 	}
@@ -391,10 +401,17 @@ func (e *dockerCheckerExecutor) ExecuteCheckerBatch(ctx context.Context, request
 		return result, err
 	}
 
+	runNetwork, sourceIP := e.resolveRunNetwork(runCtx, networkPlan.Name, request.SourceIP)
+	request.SourceIP = sourceIP
 	name := dockerRunName("adchkb", request.ChallengeID, request.TeamID, request.TickID)
 	stateNonce := rand.Text()
 	env := checkerRunEnv(request.Flag, request.Metadata, request.CheckerToken, stateNonce)
-	output, _, execErr := e.execDockerWithEnv(runCtx, env, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	output, exitCode, execErr := e.execDockerWithEnv(runCtx, env, buildDockerCheckerBatchExecuteArgs(runNetwork, name, e.security, request)...)
+	if retryOnServiceNetwork(runCtx, exitCode, request.SourceIP) {
+		e.forceRemove(name)
+		request.SourceIP = ""
+		output, _, execErr = e.execDockerWithEnv(runCtx, env, buildDockerCheckerBatchExecuteArgs(networkPlan.Name, name, e.security, request)...)
+	}
 	if runCtx.Err() != nil {
 		e.forceRemove(name)
 	}
@@ -547,9 +564,7 @@ func buildDockerCheckerExecuteArgs(network, name string, security checkerDockerS
 		args = append(args, "--name", name)
 	}
 	args = append(args, security.dockerArgs()...)
-	if strings.TrimSpace(network) != "" {
-		args = append(args, "--network", network)
-	}
+	args = appendCheckerNetworkArgs(args, network, request.SourceIP)
 	args = append(args,
 		"-e", fmt.Sprintf("AD_PHASE=%s", request.Phase),
 		"-e", fmt.Sprintf("AD_TEAM_ID=%d", request.TeamID),
@@ -587,9 +602,7 @@ func buildDockerCheckerBatchExecuteArgs(network, name string, security checkerDo
 		args = append(args, "--name", name)
 	}
 	args = append(args, security.dockerArgs()...)
-	if strings.TrimSpace(network) != "" {
-		args = append(args, "--network", network)
-	}
+	args = appendCheckerNetworkArgs(args, network, request.SourceIP)
 	args = append(args,
 		"-e", fmt.Sprintf("AD_PHASES=%s", strings.Join(request.Phases, " ")),
 		"-e", fmt.Sprintf("AD_TEAM_ID=%d", request.TeamID),

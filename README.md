@@ -165,7 +165,7 @@ Production runs behind Caddy with automatic database migrations and host network
    make up-prod-host
    make create-admin   # reads ADMIN_* from prod.env (or exported ADMIN_PASSWORD)
    ```
-   Host inspection commands need root or `sudo` with `NOPASSWD`. `preflight-prod-host` also verifies XFS project quotas (`overlay2` + local volume quotas for `CONTROLLER_SERVICE_DISK_LIMIT_MIB`) and the configured IPv4 uplink interface (`CONTROLLER_INTERNET_INTERFACE`).
+   Host inspection commands need root or `sudo` with `NOPASSWD`. `preflight-prod-host` also verifies XFS project quotas (`overlay2` + local volume quotas for `CONTROLLER_SERVICE_DISK_LIMIT_MIB`) and the configured IPv4 uplink interface (`CONTROLLER_INTERNET_INTERFACE`). If the XFS project-quota check fails, provision it with `sudo make provision-docker-xfs CONFIRM=yes` (loop-backed XFS data-root, no partition reformat — see the host guide).
 
 > **Packet capture:** guarded live capture needs BPF LSM, kernel BTF, cgroup v2 and local rootful Docker. Setup enables it unless you choose a mode, and preflight rejects hosts that can't support it. Read [capture deployment and migration](deploy/security/direct-capture/README.md) before upgrading existing challenges. Use `CAPTURE_MODE=disabled` for offline PCAP analysis only.
 

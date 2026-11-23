@@ -147,7 +147,10 @@ type dockerCLIExecutor struct {
 	captureProcRoot      string
 	captureNetnsRoot     string
 	captureNetnsHostRoot string
-	captureMu            sync.Mutex
+	// captureMu guards captureSeen only. Instance operations run commands inside
+	// participant containers, so they hold a per-instance lock from captureLocks.
+	captureMu    sync.Mutex
+	captureLocks sync.Map
 	// captureSweepInterval spaces guard re-verification sweeps; zero means 2s.
 	captureSweepInterval time.Duration
 	captureSeen          map[string]captureStamp
@@ -229,8 +232,7 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 		return err
 	}
 	if e.captureEnabled() {
-		e.captureMu.Lock()
-		defer e.captureMu.Unlock()
+		defer e.lockCaptureInstance(task.ContainerName)()
 	}
 
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
@@ -296,8 +298,7 @@ func (e *dockerCLIExecutor) FactoryResetService(ctx context.Context, task apigat
 		return resetPreflightError{err: err}
 	}
 	if e.captureEnabled() {
-		e.captureMu.Lock()
-		defer e.captureMu.Unlock()
+		defer e.lockCaptureInstance(task.ContainerName)()
 	}
 
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
@@ -335,8 +336,7 @@ func (e *dockerCLIExecutor) RestartService(ctx context.Context, task apigateway.
 		return err
 	}
 	if e.captureEnabled() {
-		e.captureMu.Lock()
-		defer e.captureMu.Unlock()
+		defer e.lockCaptureInstance(task.ContainerName)()
 	}
 
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
@@ -399,8 +399,7 @@ func (e *dockerCLIExecutor) ApplySSHCredential(ctx context.Context, task apigate
 		return err
 	}
 	if e.captureEnabled() {
-		e.captureMu.Lock()
-		defer e.captureMu.Unlock()
+		defer e.lockCaptureInstance(task.ContainerName)()
 	}
 	if task.RuntimeKind != "" && task.RuntimeKind != "docker" {
 		return fmt.Errorf("unsupported runtime kind %q for %s", task.RuntimeKind, task.ContainerName)
@@ -872,6 +871,12 @@ func (e *dockerCLIExecutor) ensureNetwork(ctx context.Context, plan gamenet.Dock
 	}
 	args = append(args, plan.Name)
 	_, err := e.execDocker(ctx, args...)
+	if err != nil {
+		// Another instance of the same challenge may have created it first.
+		if _, inspectErr := e.execDocker(ctx, "network", "inspect", plan.Name); inspectErr == nil {
+			return nil
+		}
+	}
 	return err
 }
 

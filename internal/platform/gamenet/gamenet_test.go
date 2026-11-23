@@ -43,3 +43,17 @@ func TestSharedNetworkNamesAreCanonical(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckerContainerIP(t *testing.T) {
+	if got, err := CheckerContainerIP(" 10.70.3.44 "); err != nil || got != "10.79.3.44" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	for _, invalid := range []string{"", "bad", "10.80.1.2", "10.70.0.1", "10.70.1.0", "10.70.1.255", "fd00::1"} {
+		if _, err := CheckerContainerIP(invalid); err == nil {
+			t.Fatalf("%q must be rejected", invalid)
+		}
+	}
+	if got := CheckerNetworkName("adplatform_prod_game"); got != "adplatform_prod_game_checker" {
+		t.Fatalf("network name: %q", got)
+	}
+}

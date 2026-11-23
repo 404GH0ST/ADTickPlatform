@@ -87,7 +87,7 @@ challenges_body="$(http_body "${EDGE_BASE_URL}/api/v2/challenges")"
 assert_jq \
   "public challenges" \
   "${challenges_body}" \
-  'type == "array" and all(.[]; ((keys_unsorted - ["id","name","has_source_download"]) | length) == 0)'
+  'type == "array" and all(.[]; ((keys_unsorted - ["id","name","has_source_download","maintenance","category","protocol"]) | length) == 0)'
 assert_no_forbidden_keys "public challenges" "${challenges_body}" "${forbidden_fields[@]}"
 echo "public challenges surface is minimal"
 
@@ -95,7 +95,7 @@ scoreboard_body="$(http_body "${EDGE_BASE_URL}/api/v2/scoreboard")"
 assert_jq \
   "public scoreboard" \
   "${scoreboard_body}" \
-  'type == "array" and all(.[]; ((keys_unsorted - ["rank","team","attack","defense","sla","total","delta","services"]) | length) == 0 and (((.services // []) | all(.[]; ((keys_unsorted - ["challenge_id","service","attack","defense","sla","total"]) | length) == 0))))'
+  'type == "array" and all(.[]; ((keys_unsorted - ["rank","team","attack","defense","sla","total","delta","services","disqualified","institution"]) | length) == 0 and (((.services // []) | all(.[]; ((keys_unsorted - ["challenge_id","service","attack","defense","sla","total"]) | length) == 0))))'
 assert_no_forbidden_keys "public scoreboard" "${scoreboard_body}" "${forbidden_fields[@]}"
 echo "public scoreboard surface is minimal"
 
@@ -105,7 +105,8 @@ assert_jq \
   "${game_status_body}" \
   'type == "object"
    and ((keys_unsorted - ["match","current_tick","scheduler","total_ticks","total_checker_runs","successful_checker_runs","failed_checker_runs","skipped_checker_runs"]) | length) == 0
-   and ((.match == null) or (((.match | keys_unsorted) - ["state","started_at","ended_at","scheduled_start_at","scheduled_end_at","schedule_configured","accepting_submissions"]) | length) == 0)
+   and ((.match == null) or (((.match | keys_unsorted) - ["state","started_at","ended_at","scheduled_start_at","scheduled_end_at","schedule_configured","accepting_submissions","warmup"]) | length) == 0)
+   and ((.match.warmup == null) or (((.match.warmup | keys_unsorted) - ["status","started_at","completed_at","total_targets","put_success","put_failed","success_rate","message"]) | length) == 0)
    and ((.current_tick == null) or (((.current_tick | keys_unsorted) - ["id","status","total_checker_runs","successful_checker_runs","failed_checker_runs","skipped_checker_runs","started_at","completed_at","message"]) | length) == 0)
    and ((.scheduler == null) or (((.scheduler | keys_unsorted) - ["state","interval_seconds","last_run_at","next_run_at","last_tick_id","last_error"]) | length) == 0)'
 assert_no_forbidden_keys "public game status" "${game_status_body}" "${forbidden_fields[@]}"
@@ -116,8 +117,8 @@ assert_jq \
   "public attacks" \
   "${attacks_body}" \
   'type == "object"
-   and ((keys_unsorted - ["items","limit","offset","total_count","has_prev","has_next"]) | length) == 0
-   and ((.items // []) | all(.[]; ((keys_unsorted - ["id","attacker","victim","service","tick","verdict"]) | length) == 0))'
+   and ((keys_unsorted - ["revision","items","limit","offset","total_count","has_prev","has_next"]) | length) == 0
+   and ((.items // []) | all(.[]; ((keys_unsorted - ["id","attacker","victim","service","tick","verdict","first_blood","attacker_institution","victim_institution"]) | length) == 0))'
 assert_no_forbidden_keys "public attacks" "${attacks_body}" "${forbidden_fields[@]}"
 echo "public attacks surface is minimal"
 
@@ -133,7 +134,7 @@ if [[ "${scoreboard_stream_status}" == "200" ]]; then
   assert_jq \
     "public realtime scoreboard" \
     "${scoreboard_stream_payload}" \
-    'type == "array" and all(.[]; ((keys_unsorted - ["rank","team","attack","defense","sla","total","delta","services"]) | length) == 0 and (((.services // []) | all(.[]; ((keys_unsorted - ["challenge_id","service","attack","defense","sla","total"]) | length) == 0))))'
+    'type == "array" and all(.[]; ((keys_unsorted - ["rank","team","attack","defense","sla","total","delta","services","disqualified","institution"]) | length) == 0 and (((.services // []) | all(.[]; ((keys_unsorted - ["challenge_id","service","attack","defense","sla","total"]) | length) == 0))))'
   assert_no_forbidden_keys "public realtime scoreboard" "${scoreboard_stream_payload}" "${forbidden_fields[@]}"
   echo "public realtime scoreboard surface is minimal"
 elif [[ "${scoreboard_stream_status}" == "502" ]]; then
@@ -162,8 +163,8 @@ if [[ "${attacks_stream_status}" == "200" ]]; then
     "public realtime attacks" \
     "${attacks_stream_payload}" \
     'type == "object"
-     and ((keys_unsorted - ["items","limit","offset","total_count","has_prev","has_next"]) | length) == 0
-     and ((.items // []) | all(.[]; ((keys_unsorted - ["id","attacker","victim","service","tick","verdict"]) | length) == 0))'
+     and ((keys_unsorted - ["revision","items","limit","offset","total_count","has_prev","has_next"]) | length) == 0
+     and ((.items // []) | all(.[]; ((keys_unsorted - ["id","attacker","victim","service","tick","verdict","first_blood","attacker_institution","victim_institution"]) | length) == 0))'
   assert_no_forbidden_keys "public realtime attacks" "${attacks_stream_payload}" "${forbidden_fields[@]}"
   echo "public realtime attacks surface is minimal"
 elif [[ "${attacks_stream_status}" == "502" ]]; then

@@ -340,7 +340,22 @@ func (e *dockerCLIExecutor) reconcileCapturedService(ctx context.Context, task a
 	e.rememberCapture(after)
 	return nil
 }
+func (e *dockerCLIExecutor) captureInstanceLock(name string) *sync.Mutex {
+	value, _ := e.captureLocks.LoadOrStore(name, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
+// lockCaptureInstance serializes operations on one instance. A team controls
+// the shell inside its container, so a hung command must not stall other teams.
+func (e *dockerCLIExecutor) lockCaptureInstance(name string) func() {
+	lock := e.captureInstanceLock(name)
+	lock.Lock()
+	return lock.Unlock
+}
+
 func (e *dockerCLIExecutor) rememberCapture(info captureInspect) {
+	e.captureMu.Lock()
+	defer e.captureMu.Unlock()
 	if e.captureSeen == nil {
 		e.captureSeen = map[string]captureStamp{}
 	}
@@ -355,10 +370,16 @@ func (e *dockerCLIExecutor) sweepCapture(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		e.captureMu.Lock()
+		// A busy instance is already being reconciled by its current operation.
+		lock := e.captureInstanceLock(name)
+		if !lock.TryLock() {
+			continue
+		}
 		info, err := e.inspectCapture(ctx, name)
 		if err == nil {
+			e.captureMu.Lock()
 			stamp := e.captureSeen[info.ID]
+			e.captureMu.Unlock()
 			if stamp.Started != info.State.StartedAt || time.Since(stamp.Verified) > 30*time.Second {
 				team, _ := strconv.Atoi(info.Config.Labels["adplatform.team_id"])
 				challenge, _ := strconv.Atoi(info.Config.Labels["adplatform.challenge_id"])
@@ -369,7 +390,7 @@ func (e *dockerCLIExecutor) sweepCapture(ctx context.Context) error {
 		if err != nil {
 			e.stopCapturedService(name)
 		}
-		e.captureMu.Unlock()
+		lock.Unlock()
 		if err != nil {
 			return fmt.Errorf("capture guard recovery for %s: %w", name, err)
 		}

@@ -134,6 +134,10 @@ services:
       GAME_CORE_CHECKER_PHASES: ${GAME_CORE_CHECKER_PHASES:-put,get,check}
       GAME_CORE_CHECKER_TIMEOUT_SECONDS: ${GAME_CORE_CHECKER_TIMEOUT_SECONDS:-15}
       GAME_CORE_CHECKER_PARALLELISM: ${GAME_CORE_CHECKER_PARALLELISM:-16}
+      # Checker fan-out is capped at ~half the DB pool ((maxOpen-1)/2). Raise the
+      # game-core pool so parallelism above 12 (the default-25-pool cap) takes
+      # effect. Other services leave DB_MAX_OPEN_CONNS unset and keep 25.
+      DB_MAX_OPEN_CONNS: ${GAME_CORE_DB_MAX_OPEN_CONNS:-25}
       GAME_CORE_TICK_TIMEOUT: ${GAME_CORE_TICK_TIMEOUT:-180s}
       GAME_CORE_SCORING_DEBOUNCE: ${GAME_CORE_SCORING_DEBOUNCE:-1s}
       GAME_CORE_SCORING_RETRY_DELAY: ${GAME_CORE_SCORING_RETRY_DELAY:-5s}

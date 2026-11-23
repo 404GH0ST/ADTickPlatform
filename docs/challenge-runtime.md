@@ -185,9 +185,10 @@ By default, service containers are allowed to reach the public internet
 that legitimately call external services). The organizer can disable egress
 per challenge by setting `egress_enabled = false` on the challenge model.
 
-When `egress_enabled = false`, the controller renders an extra rule in the
-service access table that drops outbound traffic from that challenge's service
-containers to the host's internet interface:
+When `egress_enabled = false`, the controller drops new connections from that
+challenge's service containers to every destination outside the game networks
+and VPN clients, on any host interface. The service access table also keeps an explicit drop for
+the host's internet interface:
 
 - nftables: `oifname "<internet-iface>" ip saddr <service-ip> drop`
 - iptables: `-A ADPLATFORM-WG-SERVICES -o <internet-iface> -s <service-ip>/32 -j DROP`
@@ -208,6 +209,27 @@ configured interface against the host routing table.
 Existing established/related connections (conntrack) are still allowed by the
 chain's first rule, so the DROP only blocks new outbound connections — return
 traffic for an existing connection is unaffected.
+
+## Game Network Isolation
+
+In host access mode, the controller applies an `<access-table>_isolation`
+nftables policy with either firewall backend. It enforces these boundaries for
+every challenge, regardless of `egress_enabled`:
+
+- Game networks cannot open connections to the host, including the controller
+  and WireGuard APIs on the Docker bridge address and any port Docker publishes
+  on the host.
+- Game services can open connections to players' VPN addresses on any port, so
+  reverse shells work on every challenge while the match is running. Organizer
+  machines are not reachable, and VPN clients cannot reach each other through
+  the gateway.
+- One service instance can open a connection to another only on an open service
+  port. SSH, unlisted ports, non-TCP traffic, and closed services are blocked,
+  including inside a shared Docker bridge without `br_netfilter`.
+
+Checkers are not service addresses, so warmup and SLA checks still reach closed
+and open services. `AD_PLATFORM_GAME_NETWORK_SUBNET` must be a valid IPv4 CIDR.
+If it is invalid, access apply fails before changing the firewall.
 
 A working reference package is included in:
 

@@ -307,3 +307,19 @@ func TestPostgresSchedulerRejectsBadNextRun(t *testing.T) {
 		t.Fatal("an unparseable next run must be rejected")
 	}
 }
+
+func TestPostgresAttackFeedFiltersTreatWildcardsLiterally(t *testing.T) {
+	ctx := context.Background()
+	db := migratedGameDB(t, "gc_attack_filter", true)
+	for _, row := range [][2]string{{"filter-1", "Alpha_Team"}, {"filter-2", "AlphaXTeam"}} {
+		mustExec(t, db, `INSERT INTO attack_events (id, attacker, victim, service, tick, verdict, created_at, challenge_id)
+			VALUES ($1, $2, 'Victim', 'svc', 1, 'ok', NOW(), (SELECT MIN(id) FROM challenges))`, row[0], row[1])
+	}
+	store := newPostgresGameStore(db)
+	for filter, want := range map[string]int{"alpha": 2, "Alpha_Team": 1, "%": 0, "A%a": 0, `\`: 0} {
+		feed, err := store.ListAttackFeed(ctx, apigateway.AttackFeedQuery{Limit: 10, Attacker: filter})
+		if err != nil || feed.TotalCount != want {
+			t.Fatalf("filter %q: got %d rows, want %d: %v", filter, feed.TotalCount, want, err)
+		}
+	}
+}

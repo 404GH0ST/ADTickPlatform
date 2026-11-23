@@ -2,6 +2,7 @@ package apigateway
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,11 @@ func ValidateSubmittedFlags(flags []string) error {
 	for _, flag := range flags {
 		if len(flag) > MaxSubmittedFlagBytes {
 			return fmt.Errorf("each flag must be at most %d bytes.", MaxSubmittedFlagBytes)
+		}
+		// PostgreSQL text cannot store NUL, so one such value would otherwise
+		// fail the whole rejected-attempt history write for its batch.
+		if strings.ContainsRune(flag, 0) {
+			return fmt.Errorf("flags must not contain NUL bytes.")
 		}
 	}
 	return nil

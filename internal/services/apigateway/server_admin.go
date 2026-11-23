@@ -450,6 +450,11 @@ func (s *Server) handleAdminRotatePlayerWireGuard(w http.ResponseWriter, r *http
 		"peer":      peer.WireGuardPeer,
 		"status":    peer.Status,
 	})
+	// Rotation can change the peer address that SSH allowlists are built from.
+	if _, err := s.controller.ReconcileAccessPolicies(r.Context()); err != nil && !errors.Is(err, errControllerDisabled) {
+		writeProblem(w, http.StatusBadGateway, "Access unavailable", "service access reconcile failed.")
+		return
+	}
 	writeData(w, http.StatusOK, peer)
 }
 

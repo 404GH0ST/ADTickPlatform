@@ -239,6 +239,24 @@ Checker outputs should include:
 
 The platform should treat checker timeouts as explicit failures.
 
+## 6.1 Fair Play And Checker Traffic
+
+Teams must defend by fixing vulnerabilities. Do not block, allowlist, rate-limit,
+or otherwise treat traffic differently based on source IP, team, or whether it
+looks like the checker. This applies to firewalls, application code, proxies,
+and any other filtering method. Organizers may penalize or disqualify violations.
+
+In host-enforced deployments, each checker run reaches the service from a random
+unused address in the player VPN range, with the same TTL and TCP MSS as a VPN
+client. A service that rejects player traffic can therefore fail its checker and
+lose SLA for that tick. Real players keep their real VPN addresses in service
+logs and packet captures.
+
+New VPN peers receive random addresses from the whole player pool, so an address
+range cannot separate players from checkers. Peers issued by an older release may
+still use sequential addresses. Rotate them before the match, then have those
+players download their new WireGuard config.
+
 ## 7. Unlocking Patch Access
 
 ## 7.1 Intent

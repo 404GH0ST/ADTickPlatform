@@ -2,9 +2,11 @@ package apigateway
 
 import (
 	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"net"
 	"net/url"
 	"strings"
@@ -182,6 +184,36 @@ func wireGuardPeerAddress(_ int, playerID int) string {
 
 func wireGuardPeerAddressAt(index int) string {
 	return fmt.Sprintf("10.70.%d.%d", (index/200)+1, (index%200)+20)
+}
+
+// RandomUnassignedPlayerAddress picks uniformly from the free player VPN pool.
+// Players and checker runs share this distribution, so an address range cannot
+// separate them. It reports false when the pool is full.
+func RandomUnassignedPlayerAddress(used map[string]struct{}) (string, bool) {
+	// Rejection sampling stays uniform and avoids scanning a mostly free pool.
+	for range 128 {
+		address := wireGuardPeerAddressAt(randomPlayerAddressIndex(wireGuardPeerAddressPoolSize))
+		if _, taken := used[address]; !taken {
+			return address, true
+		}
+	}
+	free := make([]string, 0, max(wireGuardPeerAddressPoolSize-len(used), 0))
+	for index := range wireGuardPeerAddressPoolSize {
+		address := wireGuardPeerAddressAt(index)
+		if _, taken := used[address]; !taken {
+			free = append(free, address)
+		}
+	}
+	if len(free) == 0 {
+		return "", false
+	}
+	return free[randomPlayerAddressIndex(len(free))], true
+}
+
+func randomPlayerAddressIndex(limit int) int {
+	// crypto/rand never returns an error; it aborts the process instead.
+	index, _ := rand.Int(rand.Reader, big.NewInt(int64(limit)))
+	return int(index.Int64())
 }
 
 func wireGuardServerEndpoint() string {
