@@ -96,6 +96,7 @@ BEGIN;
 DELETE FROM checker_runs;
 DELETE FROM issued_flags;
 DELETE FROM game_scheduler_events;
+DELETE FROM submission_events;
 DELETE FROM submitted_flags;
 DELETE FROM attack_events;
 DELETE FROM audit_logs;
