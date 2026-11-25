@@ -49,7 +49,14 @@ function DialogContent({
       >
         {children}
         {showCloseButton ? (
-          <DialogPrimitive.Close className="absolute top-3 right-3 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+          <DialogPrimitive.Close
+            className="absolute top-3 right-3 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onFocus={(event) => {
+              // This button sits at the top of a dialog that may scroll on short screens.
+              // Move the scrollport back to the button when keyboard focus reaches it.
+              event.currentTarget.parentElement?.scrollTo({ top: 0 });
+            }}
+          >
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
