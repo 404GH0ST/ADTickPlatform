@@ -137,8 +137,11 @@ state.
 `GET /api/v2/challenges/{challenge_id}/source`
 
 - Requires participant authentication.
-- Streams the configured whitebox challenge source bundle.
+- Downloads the configured whitebox challenge source bundle.
 - The payload may be a generated archive or a stored artifact file.
+- Generated directory archives are limited to 128 MiB of source data and 4,096
+  files/directories. At most two archives are prepared at once. An oversized
+  archive returns `413`; a busy archive service returns `429` with `Retry-After`.
 
 ## WireGuard Config Download
 

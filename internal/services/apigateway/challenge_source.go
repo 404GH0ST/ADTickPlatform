@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -22,6 +23,17 @@ type challengeSourceDescriptor struct {
 }
 
 var errChallengeSourceUnavailable = errors.New("challenge source unavailable")
+
+const (
+	maxChallengeSourceArchiveBytes   int64 = 128 << 20
+	maxChallengeSourceArchiveEntries       = 4096
+	maxConcurrentSourceArchives            = 2
+)
+
+var (
+	errChallengeSourceTooLarge  = errors.New("challenge source archive exceeds size or entry limit")
+	challengeSourceArchiveSlots = make(chan struct{}, maxConcurrentSourceArchives)
+)
 
 func validateChallengeSourceReference(sourceBundlePath string) error {
 	trimmed := sanitizeSourceBundlePath(sourceBundlePath)
@@ -75,7 +87,7 @@ func (s *Server) handleChallengeSourceDownload(w http.ResponseWriter, r *http.Re
 	}
 
 	if info.IsDir() {
-		serveChallengeSourceDirectory(w, resolvedPath, descriptor.Name)
+		serveChallengeSourceDirectory(w, r, resolvedPath, descriptor.Name)
 		return
 	}
 	serveChallengeSourceFile(w, r, resolvedPath, info)
@@ -185,33 +197,118 @@ func serveChallengeSourceFile(w http.ResponseWriter, r *http.Request, path strin
 	http.ServeContent(w, r, filename, info.ModTime(), file)
 }
 
-func serveChallengeSourceDirectory(w http.ResponseWriter, root string, challengeName string) {
+func serveChallengeSourceDirectory(w http.ResponseWriter, r *http.Request, root string, challengeName string) {
+	select {
+	case challengeSourceArchiveSlots <- struct{}{}:
+		defer func() { <-challengeSourceArchiveSlots }()
+	default:
+		w.Header().Set("Retry-After", "5")
+		writeProblem(w, http.StatusTooManyRequests, "Source busy", "too many source archives are being prepared; retry shortly.")
+		return
+	}
+
+	if err := inspectChallengeSourceDirectory(r.Context(), root); err != nil {
+		writeChallengeSourceArchiveFailure(w, err)
+		return
+	}
+
+	// Prepare the archive before sending a success response. A file changing or
+	// disappearing during the walk must not leave a successful partial download.
+	archiveFile, err := os.CreateTemp("", "adplatform-source-*.tar.gz")
+	if err != nil {
+		writeChallengeSourceArchiveFailure(w, err)
+		return
+	}
+	defer func() {
+		archiveFile.Close()
+		os.Remove(archiveFile.Name())
+	}()
+	if err := writeChallengeSourceArchive(r.Context(), archiveFile, root); err != nil {
+		writeChallengeSourceArchiveFailure(w, err)
+		return
+	}
+	if _, err := archiveFile.Seek(0, io.SeekStart); err != nil {
+		writeChallengeSourceArchiveFailure(w, err)
+		return
+	}
+
 	filename := fmt.Sprintf("%s-source.tar.gz", sanitizeArchiveName(challengeName))
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "private, no-store")
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5 * time.Minute))
+	http.ServeContent(w, r, filename, time.Time{}, archiveFile)
+}
 
-	gzipWriter := gzip.NewWriter(w)
-	defer gzipWriter.Close()
+func inspectChallengeSourceDirectory(ctx context.Context, root string) error {
+	var bytes int64
+	entries := 0
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root || entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			return nil
+		}
+		entries++
+		if entries > maxChallengeSourceArchiveEntries || info.Size() < 0 || info.Size() > maxChallengeSourceArchiveBytes-bytes {
+			return errChallengeSourceTooLarge
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+		return nil
+	})
+}
+
+func writeChallengeSourceArchive(ctx context.Context, target io.Writer, root string) error {
+	gzipWriter := gzip.NewWriter(target)
 	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
+	archive := sourceArchive{ctx: ctx, root: root, base: filepath.Base(root), tar: tarWriter, remainingBytes: maxChallengeSourceArchiveBytes}
+	walkErr := filepath.WalkDir(root, archive.add)
+	tarErr := tarWriter.Close()
+	gzipErr := gzipWriter.Close()
+	return errors.Join(walkErr, tarErr, gzipErr)
+}
 
-	archive := sourceArchive{root: root, base: filepath.Base(root), tar: tarWriter}
-	if err := filepath.WalkDir(root, archive.add); err != nil {
-		http.Error(w, "challenge source archive failed", http.StatusInternalServerError)
+func writeChallengeSourceArchiveFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return
 	}
+	if errors.Is(err, errChallengeSourceTooLarge) {
+		writeProblem(w, http.StatusRequestEntityTooLarge, "Source too large", "source archive exceeds the download limit.")
+		return
+	}
+	log.Printf("challenge source archive failed: %v", err)
+	writeProblem(w, http.StatusInternalServerError, "Source unavailable", "challenge source archive could not be prepared.")
 }
 
 // sourceArchive writes a challenge's source tree into a tar stream. Only
 // regular files and directories are archived: symlinks and special files are
 // skipped so the archive can never reach outside the resolved source root.
 type sourceArchive struct {
-	root string
-	base string
-	tar  *tar.Writer
+	ctx            context.Context
+	root           string
+	base           string
+	tar            *tar.Writer
+	entries        int
+	remainingBytes int64
 }
 
-func (a sourceArchive) add(path string, entry fs.DirEntry, err error) error {
+func (a *sourceArchive) add(path string, entry fs.DirEntry, err error) error {
+	if ctxErr := a.ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	if err != nil {
 		return err
 	}
@@ -224,6 +321,13 @@ func (a sourceArchive) add(path string, entry fs.DirEntry, err error) error {
 	}
 	if !info.Mode().IsRegular() && !info.IsDir() {
 		return nil
+	}
+	a.entries++
+	if a.entries > maxChallengeSourceArchiveEntries || info.Size() < 0 || info.Size() > a.remainingBytes {
+		return errChallengeSourceTooLarge
+	}
+	if info.Mode().IsRegular() {
+		a.remainingBytes -= info.Size()
 	}
 	// The header is built by hand rather than from the FileInfo so the
 	// archive carries no server uid, gid or owner names.
@@ -250,8 +354,20 @@ func (a sourceArchive) add(path string, entry fs.DirEntry, err error) error {
 		return err
 	}
 	defer file.Close()
-	_, err = io.Copy(a.tar, file)
+	_, err = io.CopyN(a.tar, &challengeSourceContextReader{ctx: a.ctx, reader: file}, info.Size())
 	return err
+}
+
+type challengeSourceContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *challengeSourceContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func openResolvedChallengeSource(path string, expected fs.FileInfo) (*os.File, error) {

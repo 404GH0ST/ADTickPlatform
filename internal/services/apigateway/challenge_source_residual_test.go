@@ -199,8 +199,8 @@ func TestSourceArchiveFailures(t *testing.T) {
 		}
 		return fs.FileInfoToDirEntry(info)
 	}
-	archive := func(w io.Writer) sourceArchive {
-		return sourceArchive{root: bundle, base: "bundle", tar: tar.NewWriter(w)}
+	archive := func(w io.Writer) *sourceArchive {
+		return &sourceArchive{ctx: context.Background(), root: bundle, base: "bundle", tar: tar.NewWriter(w), remainingBytes: maxChallengeSourceArchiveBytes}
 	}
 
 	if err := archive(io.Discard).add(mainPath, brokenEntry{}, nil); err == nil {
