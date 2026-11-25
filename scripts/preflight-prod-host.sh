@@ -16,6 +16,19 @@ PROD_ENV="${PROD_ENV:-deploy/compose/prod.env}"
 load_env_file "${PROD_ENV}"
 "${ROOT_DIR}/scripts/validate-prod-env.sh" "${PROD_ENV}"
 
+if [[ "${CONTROLLER_ACCESS_MODE:-host}" != "host" ]]; then
+  echo "prod-host requires CONTROLLER_ACCESS_MODE=host" >&2
+  exit 1
+fi
+if [[ "${WIREGUARD_GATEWAY_MODE:-host}" != "host" ]]; then
+  echo "prod-host requires WIREGUARD_GATEWAY_MODE=host" >&2
+  exit 1
+fi
+if [[ "${WIREGUARD_GATEWAY_FIREWALL_BACKEND:-nftables}" != "nftables" ]]; then
+  echo "prod-host requires WIREGUARD_GATEWAY_FIREWALL_BACKEND=nftables" >&2
+  exit 1
+fi
+
 require_noninteractive_root
 "${ROOT_DIR}/scripts/preflight-capture-host.sh" "${PROD_ENV}"
 
@@ -170,10 +183,6 @@ if [[ -n "${default_routes}" ]] && ! awk -v uplink="${internet_interface}" '
 fi
 
 if [[ "${GAME_CORE_CHECKER_SOURCE_MODE:-player}" == "player" ]]; then
-  if [[ "${CONTROLLER_ACCESS_MODE:-host}" != "host" ]]; then
-    echo "GAME_CORE_CHECKER_SOURCE_MODE=player requires CONTROLLER_ACCESS_MODE=host" >&2
-    exit 1
-  fi
   checker_route_conflicts="$(ip -4 -o route show root 10.79.0.0/16 | grep -v ' dev adpchk0 ' || true)"
   if [[ -n "${checker_route_conflicts}" ]]; then
     echo "checker network 10.79.0.0/16 conflicts with an existing host route: ${checker_route_conflicts}" >&2

@@ -24,6 +24,14 @@ require_https_url() {
 require_https_url EDGE_SITE_ADDRESS
 require_https_url AD_PLATFORM_PUBLIC_BASE_URL
 
+# Demo migrations install captain accounts with passwords published in the docs.
+for seed_flag in API_GATEWAY_AUTO_SEED DATABASE_INCLUDE_SEEDS; do
+  if [[ -n "${!seed_flag:-}" && "${!seed_flag}" != false ]]; then
+    echo "${seed_flag} must be false in production; seed migrations install public demo credentials" >&2
+    exit 1
+  fi
+done
+
 capture_mode="${CONTROLLER_CAPTURE_MODE:-disabled}"
 case "${capture_mode}" in
   guarded|disabled) ;;

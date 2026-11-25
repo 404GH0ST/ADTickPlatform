@@ -24,10 +24,17 @@ if ! jq -e '
   $proxy.networks["docker-control"].ipv4_address as $proxy_ip |
   (($proxy.ports // []) | length == 0) and
   (($proxy.networks | keys) == ["docker-control"]) and
+  ([.services["game-core"], .services["controller-service"], .services["wireguard-gateway"], .services["api-gateway"]] |
+    all(.environment.API_GATEWAY_AUTO_SEED == "false" and .environment.DATABASE_INCLUDE_SEEDS == "false")) and
   (.services["controller-service"].environment.DOCKER_HOST == ("tcp://" + $proxy_ip + ":2375")) and
   (.services["controller-service"].environment.CONTROLLER_REQUIRE_DISK_QUOTA == "true") and
   (.services["controller-service"].environment.CONTROLLER_SERVICE_DISK_LIMIT_MIB | test("^[1-9][0-9]{0,11}$")) and
+  (.services["controller-service"].network_mode == "host") and
+  (.services["controller-service"].environment.CONTROLLER_ACCESS_MODE == "host") and
   (.services["controller-service"].environment.CONTROLLER_SERVICE_ADDR | test("^(0\\.0\\.0\\.0|:|\\[?::)") | not) and
+  (.services["wireguard-gateway"].network_mode == "host") and
+  (.services["wireguard-gateway"].environment.WIREGUARD_GATEWAY_MODE == "host") and
+  (.services["wireguard-gateway"].environment.WIREGUARD_GATEWAY_FIREWALL_BACKEND == "nftables") and
   (.services["wireguard-gateway"].environment.WIREGUARD_GATEWAY_ADDR | test("^(0\\.0\\.0\\.0|:|\\[?::)") | not) and
   (.services.edge.environment.EDGE_SITE_ADDRESS | startswith("https://"))
 ' "${rendered}" >/dev/null; then
