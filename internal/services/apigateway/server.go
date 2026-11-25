@@ -1442,6 +1442,8 @@ func (s *Server) requirePlayerAuth(w http.ResponseWriter, r *http.Request, messa
 }
 
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
+	// Admin reads include team join keys and WireGuard private configuration.
+	w.Header().Set("Cache-Control", "no-store")
 	token, ok := httpapi.BearerToken(r)
 	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
 		writeProblem(w, http.StatusForbidden, "Authentication required", "please authenticate as organizer.")
