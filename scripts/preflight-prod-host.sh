@@ -87,12 +87,15 @@ validate_challenge_storage() {
     return 1
   fi
   local size=$((limit * 1048576))
-  local driver docker_root
+  local driver docker_root mount_info fs_type mount_options
   read -r driver docker_root < <(docker info --format '{{.Driver}} {{.DockerRootDir}}')
+  # Docker's data-root is normally root-only, so an operator cannot resolve
+  # overlay2 with findmnt even when Docker itself is reachable.
+  mount_info="$(run_as_root_noninteractive findmnt -n -o FSTYPE,OPTIONS -T "${docker_root}/overlay2")" || return 1
+  read -r fs_type mount_options <<< "${mount_info}"
   if [[ "${driver}" != overlay2 ]] ||
-     [[ "$(findmnt -n -o FSTYPE -T "${docker_root}/overlay2")" != xfs ]] ||
-     [[ ",$(findmnt -n -o OPTIONS -T "${docker_root}/overlay2")," != *,pquota,* &&
-        ",$(findmnt -n -o OPTIONS -T "${docker_root}/overlay2")," != *,prjquota,* ]]; then
+     [[ "${fs_type}" != xfs ]] ||
+     [[ ",${mount_options}," != *,pquota,* && ",${mount_options}," != *,prjquota,* ]]; then
     echo "prod-host requires Docker overlay2 on XFS with project quotas for challenge writable layers" >&2
     return 1
   fi
