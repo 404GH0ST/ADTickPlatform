@@ -1317,6 +1317,7 @@ type checkerTargetTickResult struct {
 	success int
 	skipped int
 	failed  int
+	health  *apigateway.CheckerExecutionRequest
 }
 
 // rotateCheckerTargets rotates the target list by tickID so hard timeouts do
@@ -1355,8 +1356,18 @@ func (s *gameCoreServer) runCheckerTargets(ctx, execCtx context.Context, tickID 
 	workerCtx, cancel := context.WithCancel(execCtx)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	jobs := make(chan int)
+	type checkerJob struct {
+		index  int
+		health *apigateway.CheckerExecutionRequest
+	}
+	var wg, pending sync.WaitGroup
+	// Every rotation is queued before any follow-up. A rotation can append one
+	// health job, so the queue never contains more jobs than there are targets.
+	jobs := make(chan checkerJob, len(targets))
+	pending.Add(len(targets))
+	for index := range targets {
+		jobs <- checkerJob{index: index}
+	}
 	var firstErr error
 	var errMu sync.Mutex
 
@@ -1364,12 +1375,30 @@ func (s *gameCoreServer) runCheckerTargets(ctx, execCtx context.Context, tickID 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range jobs {
-				if workerCtx.Err() != nil {
+			for job := range jobs {
+				if job.health == nil && workerCtx.Err() != nil {
+					pending.Done()
 					continue
 				}
-				result, err := s.runCheckerTarget(ctx, workerCtx, tickID, targets[index])
-				results[index] = result
+				var err error
+				index := job.index
+				if job.health != nil {
+					var health checkerTargetTickResult
+					health, err = s.runCheckerHealth(ctx, workerCtx, targets[index], *job.health)
+					results[index].total += health.total
+					results[index].success += health.success
+					results[index].skipped += health.skipped
+					results[index].failed += health.failed
+					results[index].health = nil
+				} else {
+					var result checkerTargetTickResult
+					result, err = s.runCheckerTarget(ctx, workerCtx, tickID, targets[index])
+					results[index] = result
+					if result.health != nil {
+						pending.Add(1)
+						jobs <- checkerJob{index: index, health: result.health}
+					}
+				}
 				if err != nil {
 					errMu.Lock()
 					if firstErr == nil {
@@ -1378,16 +1407,12 @@ func (s *gameCoreServer) runCheckerTargets(ctx, execCtx context.Context, tickID 
 					}
 					errMu.Unlock()
 				}
+				pending.Done()
 			}
 		}()
 	}
 
-	for index := range targets {
-		if workerCtx.Err() != nil {
-			break
-		}
-		jobs <- index
-	}
+	pending.Wait()
 	close(jobs)
 	wg.Wait()
 
@@ -1439,23 +1464,18 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 		}
 		return counts, nil
 	}
+	var previous issuedFlagRecord
 	if slices.Contains(s.checkerPhases, "put") {
-		previous, err := s.store.LatestIssuedFlag(ctx, target.TeamID, target.ChallengeID)
+		previous, err = s.store.LatestIssuedFlag(ctx, target.TeamID, target.ChallengeID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return counts, err
 		}
-		if err == nil && previous.CheckerToken != "" && previous.CheckerToken == target.CheckerToken {
-			if err := s.checkFlagRetention(ctx, execCtx, target, previous); err != nil {
-				return counts, err
-			}
+		if err != nil || previous.CheckerToken != target.CheckerToken {
+			previous = issuedFlagRecord{}
 		}
 	}
 	flagValue := s.issueFlag(target.TeamID, target.ChallengeID, tickID, tickID)
-
-	// All phases for this target run inside a single checker container, which
-	// chains each successful phase's output into the next and halts on the first
-	// failure. This collapses the per-phase container cold-starts of a tick.
-	batch, execErr := s.checker.ExecuteBatch(execCtx, apigateway.CheckerBatchExecutionRequest{
+	request := apigateway.CheckerBatchExecutionRequest{
 		ChallengeID:    target.ChallengeID,
 		TeamID:         target.TeamID,
 		TeamName:       target.TeamName,
@@ -1470,7 +1490,24 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 		Flag:           flagValue,
 		CheckerToken:   target.CheckerToken,
 		TimeoutSeconds: s.checkerTimeout,
-	})
+	}
+	if s.rotationFirst() {
+		return s.rotateCheckerTarget(ctx, execCtx, target, previous, request)
+	}
+	if previous.CheckerToken != "" {
+		if err := s.checkFlagRetention(ctx, execCtx, target, previous); err != nil {
+			return counts, err
+		}
+	}
+	batch, execErr := s.checker.ExecuteBatch(execCtx, request)
+	return s.recordCheckerPhases(ctx, execCtx, tickID, target, flagValue, request.Phases, batch, execErr)
+}
+
+func (s *gameCoreServer) recordCheckerPhases(
+	ctx, execCtx context.Context, tickID int, target checkerTarget, flagValue string,
+	phases []string, batch apigateway.CheckerBatchExecutionResult, execErr error,
+) (checkerTargetTickResult, error) {
+	var counts checkerTargetTickResult
 
 	phaseResults := make(map[string]apigateway.CheckerPhaseResult, len(batch.Phases))
 	for _, pr := range batch.Phases {
@@ -1482,7 +1519,7 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 	// as skipped, which the service-state summary reports as unknown, not down.
 	interrupted := execErr != nil && errors.Is(execCtx.Err(), context.Canceled)
 	halted := false
-	for _, phase := range s.checkerPhases {
+	for _, phase := range phases {
 		runTime := s.now().UTC()
 		run := checkerRunRecord{
 			TickID:        tickID,
@@ -1497,21 +1534,19 @@ func (s *gameCoreServer) runCheckerTarget(ctx, execCtx context.Context, tickID i
 			ExitCode:      -1,
 		}
 
+		result, ok := phaseResults[phase]
 		switch {
-		case interrupted:
-			run.Status = "skipped"
-			run.Message = "checker interrupted: tick cancelled before this target finished"
 		case halted:
 			run.Status = "skipped"
 			run.Message = "phase skipped after previous checker failure"
-		case execErr != nil:
-			// Batch transport/infra failure (docker, network, timeout): no phase
-			// ran. Attribute the failure to the first phase and skip the rest.
+		case !ok && interrupted:
+			run.Status = "skipped"
+			run.Message = "checker interrupted: tick cancelled before this target finished"
+		case !ok && execErr != nil:
 			run.Status = "failed"
 			run.Message = checkerExecutionErrorMessage(execErr)
 			halted = true
 		default:
-			result, ok := phaseResults[phase]
 			if !ok {
 				// Phase absent: a prior phase failed and the batch halted before it.
 				run.Status = "skipped"

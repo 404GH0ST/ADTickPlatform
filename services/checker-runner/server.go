@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -127,6 +129,7 @@ func (s *checkerRunnerServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/v1/checkers/validate", s.handleValidateChecker)
 	mux.HandleFunc("POST /internal/v1/checkers/execute", s.handleExecuteChecker)
 	mux.HandleFunc("POST /internal/v1/checkers/execute-batch", s.handleExecuteCheckerBatch)
+	mux.HandleFunc("POST /internal/v1/checkers/rotate", s.handleRotateChecker)
 }
 
 func (s *checkerRunnerServer) handleValidateChecker(w http.ResponseWriter, r *http.Request) {
@@ -640,49 +643,46 @@ const checkerBatchFramePrefix = "__ADP_PHASE_FRAME__ "
 // contains frame-like text remains data instead of being interpreted as control
 // records.
 func parseCheckerBatchFrames(output string) (map[string]checkerBatchFrame, error) {
-	frames := make(map[string]checkerBatchFrame)
 	if output == "" {
 		return nil, errors.New("checker batch output is empty")
 	}
-
-	for cursor := 0; cursor < len(output); {
-		headerEnd := strings.IndexByte(output[cursor:], '\n')
-		if headerEnd < 0 {
-			return nil, errors.New("checker batch frame header is incomplete")
+	frames := make(map[string]checkerBatchFrame)
+	reader := bufio.NewReader(strings.NewReader(output))
+	for {
+		if _, err := reader.Peek(1); err == io.EOF {
+			return frames, nil
 		}
-		header := output[cursor : cursor+headerEnd]
-		cursor += headerEnd + 1
-		if !strings.HasPrefix(header, checkerBatchFramePrefix) {
-			return nil, errors.New("checker batch frame header is invalid")
+		phase, frame, err := readCheckerBatchFrame(reader)
+		if err != nil {
+			return nil, err
 		}
-
-		fields := strings.Fields(strings.TrimPrefix(header, checkerBatchFramePrefix))
-		if len(fields) != 3 || !isValidCheckerPhase(fields[0]) {
-			return nil, errors.New("checker batch frame metadata is invalid")
-		}
-		phase := strings.ToLower(strings.TrimSpace(fields[0]))
 		if _, exists := frames[phase]; exists {
 			return nil, errors.New("checker batch frame phase is duplicated")
 		}
-		exitCode, err := strconv.Atoi(fields[1])
-		if err != nil || exitCode < 0 || exitCode > 255 {
-			return nil, errors.New("checker batch frame exit code is invalid")
-		}
-		payloadLength, err := strconv.Atoi(fields[2])
-		if err != nil || payloadLength < 0 || payloadLength > len(output)-cursor {
-			return nil, errors.New("checker batch frame payload length is invalid")
-		}
-
-		payloadEnd := cursor + payloadLength
-		payload := output[cursor:payloadEnd]
-		cursor = payloadEnd
-		if cursor >= len(output) || output[cursor] != '\n' {
-			return nil, errors.New("checker batch frame payload delimiter is missing")
-		}
-		cursor++
-		frames[phase] = checkerBatchFrame{output: payload, exitCode: exitCode}
+		frames[phase] = frame
 	}
-	return frames, nil
+}
+
+func readCheckerBatchFrame(reader *bufio.Reader) (string, checkerBatchFrame, error) {
+	header, err := reader.ReadSlice('\n')
+	if err != nil {
+		return "", checkerBatchFrame{}, err
+	}
+	line := strings.TrimSuffix(string(header), "\n")
+	fields := strings.Fields(strings.TrimPrefix(line, checkerBatchFramePrefix))
+	if !strings.HasPrefix(line, checkerBatchFramePrefix) || len(fields) != 3 || !isValidCheckerPhase(fields[0]) {
+		return "", checkerBatchFrame{}, errors.New("invalid checker frame header")
+	}
+	code, codeErr := strconv.Atoi(fields[1])
+	size, sizeErr := strconv.Atoi(fields[2])
+	if codeErr != nil || code < 0 || code > 255 || sizeErr != nil || size < 0 || size >= maxCheckerProcessOutputBytes {
+		return "", checkerBatchFrame{}, errors.New("invalid checker frame bounds")
+	}
+	payload := make([]byte, size+1)
+	if _, err := io.ReadFull(reader, payload); err != nil || payload[size] != '\n' {
+		return "", checkerBatchFrame{}, errors.New("incomplete checker frame payload")
+	}
+	return strings.ToLower(strings.TrimSpace(fields[0])), checkerBatchFrame{output: string(payload[:size]), exitCode: code}, nil
 }
 
 // checkerEntrypointBatchExecuteScript resolves the checker entrypoint once and
@@ -691,7 +691,10 @@ func parseCheckerBatchFrames(output string) (map[string]checkerBatchFrame, error
 // halting on the first failure. Per-phase output is length-prefixed so output
 // controlled by a target service cannot forge phase metadata.
 func checkerEntrypointBatchExecuteScript() string {
-	return `set -u
+	return checkerBatchEntrypoint + checkerBatchPhases
+}
+
+const checkerBatchEntrypoint = `set -u
 checker_exec=""
 checker_arg0=""
 if command -v checker >/dev/null 2>&1; then
@@ -716,7 +719,9 @@ run_phase() {
     "$checker_exec" "$1"
   fi
 }
-meta="${AD_METADATA:-}"
+`
+
+const checkerBatchPhases = `meta="${AD_METADATA:-}"
 for phase in $AD_PHASES; do
   case "$phase" in
     put|get|check) ;;
@@ -725,7 +730,7 @@ for phase in $AD_PHASES; do
       exit 2
       ;;
   esac
-  out=$(AD_PHASE="$phase" AD_METADATA="$meta" run_phase "$phase" 2>&1)
+  out=$(AD_PHASE="$phase" AD_METADATA="$meta" run_phase "$phase" </dev/null 2>&1)
   code=$?
   byte_count=$(printf '%s' "$out" | wc -c)
   printf '__ADP_PHASE_FRAME__ %s %s %s\n' "$phase" "$code" "$byte_count"
@@ -736,7 +741,6 @@ for phase in $AD_PHASES; do
   meta=$(printf '%s\n' "$out" | grep -v '^ADPLATFORM_SERVICE_STATE=' || true)
 done
 exit 0`
-}
 
 func checkerEntrypointValidationScript() string {
 	return `set -eu

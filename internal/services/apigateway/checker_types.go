@@ -112,3 +112,18 @@ type CheckerBatchExecutionResult struct {
 	TeamID      int                  `json:"team_id"`
 	Phases      []CheckerPhaseResult `json:"phases"`
 }
+
+type CheckerRotationRequest struct {
+	CheckerBatchExecutionRequest
+	PreviousTickID   int    `json:"previous_tick_id"`
+	PreviousFlag     string `json:"previous_flag"`
+	PreviousMetadata string `json:"previous_metadata,omitempty"`
+}
+
+// CheckerRotationEvent reports a previous-flag verdict, a new-flag phase, or
+// completion. The runner waits for game-core's acknowledgement of the durable
+// previous-flag verdict before it lets the checker overwrite the flag.
+type CheckerRotationEvent struct {
+	Kind   string             `json:"kind"`
+	Result CheckerPhaseResult `json:"result"`
+}

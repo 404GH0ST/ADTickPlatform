@@ -62,8 +62,19 @@ func (s *gameCoreServer) checkFlagRetention(ctx, execCtx context.Context, target
 		return ctx.Err()
 	}
 
+	_, err := s.recordFlagRetention(ctx, target, flag, apigateway.CheckerPhaseResult{
+		Status: result.Status, ExitCode: result.ExitCode, Output: result.Output, CheckedAt: result.CheckedAt,
+	}, execErr)
+	return err
+}
+
+func (s *gameCoreServer) recordFlagRetention(ctx context.Context, target checkerTarget, flag issuedFlagRecord, result apigateway.CheckerPhaseResult, execErr error) (bool, error) {
+	checkedAt, err := time.Parse(time.RFC3339, result.CheckedAt)
+	if err != nil {
+		checkedAt = s.now()
+	}
 	run := checkerRunRecord{TickID: flag.IssuedTick, TeamID: target.TeamID, TeamName: target.TeamName, ChallengeID: target.ChallengeID, ChallengeName: target.ChallengeName,
-		CheckerImage: target.CheckerImage, Phase: "get", Target: target.Target, CheckedAt: s.now().UTC(), Status: normalizedCheckerRunStatus(result.Status), ExitCode: result.ExitCode}
+		CheckerImage: target.CheckerImage, Phase: "get", Target: target.Target, CheckedAt: checkedAt.UTC(), Status: normalizedCheckerRunStatus(result.Status), ExitCode: result.ExitCode}
 	confirmed := execErr == nil && run.Status == "failed" && result.ExitCode == flagMissingExitCode
 	if execErr != nil {
 		run.Status = "failed"
@@ -81,12 +92,12 @@ func (s *gameCoreServer) checkFlagRetention(ctx, execCtx context.Context, target
 	}
 	applied, err := s.store.RecordRetentionCheck(ctx, flag, run, confirmed)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if applied {
 		s.scheduleScoreboardRecompute()
 	}
-	return s.store.ScheduleRetentionCheck(ctx, flag.Flag, s.nextRetentionCheck())
+	return applied, s.store.ScheduleRetentionCheck(ctx, flag.Flag, s.nextRetentionCheck())
 }
 
 // force is used before match completion. A pre-rotation check is also performed
