@@ -931,6 +931,31 @@ func (s *Server) handleAdminReconcileDeployments(w http.ResponseWriter, r *http.
 	writeData(w, http.StatusOK, result)
 }
 
+func (s *Server) handleAdminDeploymentReconcileJob(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	job, err := s.controller.DeploymentReconcileJob(r.Context(), r.Method)
+	if err != nil {
+		var problemErr *controllerProblemError
+		switch {
+		case errors.Is(err, errControllerDisabled):
+			writeProblem(w, http.StatusServiceUnavailable, "Deployment reconcile unavailable", "controller deployment reconcile is not configured.")
+		case errors.As(err, &problemErr):
+			writeProblem(w, problemErr.StatusCode(), problemErr.Title(), problemErr.Detail())
+		default:
+			writeProblem(w, http.StatusBadGateway, "Deployment reconcile unavailable", "controller deployment reconcile job could not be reached.")
+		}
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.recordAdminAudit(r.Context(), "deployment.reconcile.request", "deployment", "deployment-jobs", "requested deployment reconcile", map[string]any{"job_id": job.ID})
+		writeData(w, http.StatusAccepted, job)
+		return
+	}
+	writeData(w, http.StatusOK, job)
+}
+
 func (s *Server) handleAdminGameStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return

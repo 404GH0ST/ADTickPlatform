@@ -20,14 +20,16 @@ import (
 )
 
 type controllerServer struct {
-	adminToken string
-	store      apigateway.Store
-	executor   runtimeExecutor
-	access     serviceAccessExecutor
-	accessMu   sync.Mutex
-	wireGuard  controllerWireGuardReconciler
-	metrics    *controllerServiceMetrics
-	now        func() time.Time
+	adminToken    string
+	store         apigateway.Store
+	executor      runtimeExecutor
+	access        serviceAccessExecutor
+	accessMu      sync.Mutex
+	wireGuard     controllerWireGuardReconciler
+	metrics       *controllerServiceMetrics
+	now           func() time.Time
+	reconcileMu   sync.Mutex
+	reconcileJobs deploymentReconcileJobs
 }
 
 // fatal reports a startup failure and exits; tests replace it.
@@ -60,6 +62,8 @@ func run(ctx context.Context) error {
 		metrics:    newControllerServiceMetrics(),
 		now:        time.Now,
 	}
+	server.reconcileJobs.ctx, server.reconcileJobs.cancel = context.WithCancel(ctx)
+	defer server.reconcileJobs.shutdown()
 	if docker, ok := server.executor.(*dockerCLIExecutor); ok {
 		if err := docker.validateCaptureConfig(); err != nil {
 			return err
@@ -106,6 +110,8 @@ func buildStore(ctx context.Context) (apigateway.Store, error) {
 func (s *controllerServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/v1/deployments", s.handleListDeployments)
 	mux.HandleFunc("POST /internal/v1/deployments/reconcile", s.handleReconcileDeployments)
+	mux.HandleFunc("GET /internal/v1/deployments/reconcile/job", s.handleDeploymentReconcileJob)
+	mux.HandleFunc("POST /internal/v1/deployments/reconcile/job", s.handleDeploymentReconcileJob)
 	mux.HandleFunc("POST /internal/v1/challenges/validate", s.handleValidateChallengeRuntime)
 	mux.HandleFunc("GET /internal/v1/access/status", s.handleAccessStatus)
 	mux.HandleFunc("POST /internal/v1/access/reconcile", s.handleReconcileAccessPolicies)
@@ -135,18 +141,13 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	started := time.Now()
-	reconciler := newControllerTrustedReconciler(
-		controllerReconcileStoreAdapter{store: s.store},
-		s.executor,
-		s.access,
-		s.wireGuard,
-		s.now,
-	)
-	reconciler.accessMu = &s.accessMu
-	result, err := reconciler.Reconcile(r.Context())
+	if !s.reconcileMu.TryLock() {
+		writeProblem(w, http.StatusConflict, "Deployment reconcile already running", "Wait for the current deployment reconcile to finish.")
+		return
+	}
+	defer s.reconcileMu.Unlock()
+	result, err := s.reconcileDeployments(r.Context(), nil)
 	if err != nil {
-		s.metrics.recordDeploymentReconcile(time.Since(started), result.ProcessedInstances, true)
 		var reconcileErr *controllerReconcilePhaseError
 		if errors.As(err, &reconcileErr) {
 			writeProblem(w, reconcileErr.StatusCode(), reconcileErr.Title(), reconcileErr.Detail())
@@ -155,7 +156,6 @@ func (s *controllerServer) handleReconcileDeployments(w http.ResponseWriter, r *
 		writeProblem(w, http.StatusInternalServerError, "Runtime reconcile failed", err.Error())
 		return
 	}
-	s.metrics.recordDeploymentReconcile(time.Since(started), result.ProcessedInstances, false)
 	writeData(w, http.StatusOK, result)
 }
 

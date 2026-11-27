@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   browserRequestErrorMessage,
@@ -8,10 +8,27 @@ import {
 } from "@/lib/api-utils";
 import type {
   AdminControllerAccessStatus,
+  AdminDeploymentReconcileJob,
   AdminWireGuardGatewayStatus,
 } from "@/lib/admin-dashboard-types";
 
 export type TrustTone = "ok" | "warn" | "bad" | "unknown";
+
+const reconcileJobPath = "/api/admin/deployments/reconcile/job";
+
+function reconcileProgress(job: AdminDeploymentReconcileJob | null): string | null {
+  if (job?.status !== "running") return null;
+  switch (job.phase) {
+    case "runtime":
+      return `Team instances checked or started: ${job.ensured_instances}/${job.total_instances}.`;
+    case "access":
+      return "Applying host access rules…";
+    case "wireguard":
+      return "Verifying WireGuard access…";
+    default:
+      return "Starting reconciliation…";
+  }
+}
 
 export function toneForState(state?: string): TrustTone {
   const value = (state ?? "").toLowerCase();
@@ -54,6 +71,7 @@ export type TrustedState = {
   /** One-line summary of the above. */
   summary: string;
   pending: boolean;
+  progress: string | null;
   error: string | null;
   note: string | null;
   onReconcile: () => void;
@@ -68,8 +86,10 @@ export function useTrustedState(): TrustedState {
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [job, setJob] = useState<AdminDeploymentReconcileJob | null>(null);
+  const lastJob = useRef<AdminDeploymentReconcileJob | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -125,37 +145,66 @@ export function useTrustedState(): TrustedState {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  async function runTrustedReconcile() {
-    setPending(true);
-    setNote(null);
-    setError(null);
-    try {
-      const response = await fetch("/api/admin/deployments/reconcile", {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(
-          await response
-            .json()
-            .then((payload: { detail?: string }) => payload.detail)
-            .catch(() => "trusted reconcile failed"),
-        );
-      }
-      setNote(
-        "Reconcile finished: deployments, SSH access, and WireGuard should match host truth.",
-      );
-      await refresh();
+  const applyJob = useCallback((next: AdminDeploymentReconcileJob) => {
+    const previous = lastJob.current;
+    lastJob.current = next;
+    setJob(next);
+    if (previous?.status === "running" && next.status === "idle") {
+      setJobError("The controller restarted during reconciliation. Check the deployment status before retrying.");
+    } else if (next.status === "running" || previous?.status === "running") {
+      setJobError(null);
+    }
+    if (next.status === "completed" && (previous?.status !== "completed" || previous.id !== next.id)) {
+      void refresh();
       window.dispatchEvent(new Event("ad-platform:deployments-reconciled"));
+    }
+  }, [refresh]);
+
+  useEffect(() => {
+    if (starting) return;
+    const controller = new AbortController();
+    let timer: number;
+    async function poll() {
+      let delay = 5000;
+      try {
+        const response = await fetch(reconcileJobPath, { cache: "no-store", signal: controller.signal });
+        const latest = await processApiResponse<AdminDeploymentReconcileJob>(response, reconcileJobPath);
+        if (controller.signal.aborted) return;
+        applyJob(latest);
+        delay = latest.status === "running" ? 2000 : 30000;
+      } catch (pollError) {
+        if (!controller.signal.aborted && lastJob.current?.status === "running") {
+          setJobError(browserRequestErrorMessage(pollError, "Could not read reconciliation progress. Retrying."));
+        }
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(poll, delay);
+      }
+    }
+    void poll();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [applyJob, starting]);
+
+  async function runTrustedReconcile() {
+    setStarting(true);
+    setJobError(null);
+    try {
+      const response = await fetch(reconcileJobPath, { method: "POST" });
+      applyJob(await processApiResponse<AdminDeploymentReconcileJob>(response, reconcileJobPath));
     } catch (reconcileError) {
-      setError(
+      setJobError(
         browserRequestErrorMessage(reconcileError, "trusted reconcile failed"),
       );
     } finally {
-      setPending(false);
+      setStarting(false);
     }
   }
 
+  const pending = starting || job?.status === "running";
   const healthy =
+    !pending &&
     toneForState(access?.state) === "ok" &&
     toneForState(wireguard?.state) === "ok" &&
     (pendingDeployments ?? 0) === 0;
@@ -169,8 +218,11 @@ export function useTrustedState(): TrustedState {
       ? "Host state looks healthy: deployments, SSH access, and WireGuard all match."
       : "Host truth is incomplete or degraded — do not assume SSH/access is correct until reconcile succeeds.",
     pending,
-    error,
-    note,
+    progress: starting ? "Starting reconciliation…" : reconcileProgress(job),
+    error: jobError ?? (job?.status === "failed" ? job.error || "Deployment reconciliation failed." : error),
+    note: job?.status === "completed" && !starting
+      ? "Reconcile finished: deployments, SSH access, and WireGuard should match host truth."
+      : null,
     onReconcile: () => void runTrustedReconcile(),
     onRefresh: () => void refresh(),
   };

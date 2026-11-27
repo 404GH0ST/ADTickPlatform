@@ -353,6 +353,8 @@ test("organizer deployments reconcile completes queued jobs", async ({
   await expect(queuedCountCell).toHaveText("2");
 
   await page.getByTestId("run-trusted-reconcile").click();
+  await expect(page.getByText("Team instances checked or started: 1/3.")).toBeVisible();
+  await page.reload();
 
   await expect(
     page.getByText(

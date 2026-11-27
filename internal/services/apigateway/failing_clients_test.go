@@ -132,6 +132,10 @@ type failingControllerClient struct{}
 
 var _ controllerClient = failingControllerClient{}
 
+func (failingControllerClient) DeploymentReconcileJob(context.Context, string) (ControllerDeploymentReconcileJob, error) {
+	return ControllerDeploymentReconcileJob{}, errUpstreamDown
+}
+
 func (failingControllerClient) ReconcileDeployments(ctx context.Context) (r0 adminReconcileResult, err error) {
 	err = errUpstreamDown
 	return

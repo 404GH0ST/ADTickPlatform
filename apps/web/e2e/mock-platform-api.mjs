@@ -713,6 +713,8 @@ function createInitialState() {
     nextDeploymentJobID: 89,
     nextSchedulerEventID: 4,
     deploymentReconcileProblem: null,
+    deploymentReconcileJob: { status: "idle", ensured_instances: 0, total_instances: 0 },
+    deploymentReconcileProgressReads: 0,
     scoreboardFreeze: { freeze_at: null, unfreeze_at: null },
   };
 }
@@ -2519,6 +2521,28 @@ async function handleAdminDeploymentRoutes({ req, res, url, method }) {
     return reconcileDeployments(res);
   }
 
+  if (url.pathname === "/api/v2/admin/deployments/reconcile/job") {
+    const job = state.deploymentReconcileJob;
+    if (method === "POST") {
+      if (job.status !== "running") {
+        state.deploymentReconcileJob = {
+          id: "mock-reconcile", status: "running", phase: "runtime",
+          ensured_instances: 1, total_instances: 3,
+        };
+        state.deploymentReconcileProgressReads = 0;
+      }
+      return writeSuccess(res, state.deploymentReconcileJob);
+    }
+    if (method === "GET") {
+      if (job.status === "running" && state.deploymentReconcileProgressReads++ >= 2) {
+        state.deploymentReconcileJob = state.deploymentReconcileProblem
+          ? { ...job, status: "failed", error: state.deploymentReconcileProblem.detail }
+          : { ...job, status: "completed", ensured_instances: job.total_instances, result: finishDeploymentReconcile() };
+      }
+      return writeSuccess(res, state.deploymentReconcileJob);
+    }
+  }
+
   if (method === "POST" && url.pathname === "/api/v2/admin/platform/settings/reload") {
     state.platformSettings = {
       ...state.platformSettings,
@@ -2628,6 +2652,10 @@ function reconcileDeployments(res) {
     );
   }
 
+  return writeSuccess(res, finishDeploymentReconcile());
+}
+
+function finishDeploymentReconcile() {
   let processedJobs = 0;
   let processedInstances = 0;
   let completedJobs = 0;
@@ -2650,11 +2678,11 @@ function reconcileDeployments(res) {
     };
   });
 
-  return writeSuccess(res, {
+  return {
     processed_jobs: processedJobs,
     processed_instances: processedInstances,
     completed_jobs: completedJobs,
-  });
+  };
 }
 
 function deleteDeployment(res, deploymentID) {

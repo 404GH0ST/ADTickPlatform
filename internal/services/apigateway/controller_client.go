@@ -54,6 +54,7 @@ func (e *controllerProblemError) Detail() string {
 
 type controllerClient interface {
 	ReconcileDeployments(ctx context.Context) (adminReconcileResult, error)
+	DeploymentReconcileJob(ctx context.Context, method string) (ControllerDeploymentReconcileJob, error)
 	FactoryResetService(ctx context.Context, teamID, challengeID int) error
 	RestartService(ctx context.Context, teamID, challengeID int) error
 	ReconcileServiceAccess(ctx context.Context, teamID, challengeID int) error
@@ -71,6 +72,9 @@ type noopControllerClient struct{}
 
 func (noopControllerClient) ReconcileDeployments(context.Context) (adminReconcileResult, error) {
 	return adminReconcileResult{}, errControllerDisabled
+}
+func (noopControllerClient) DeploymentReconcileJob(context.Context, string) (ControllerDeploymentReconcileJob, error) {
+	return ControllerDeploymentReconcileJob{}, errControllerDisabled
 }
 func (noopControllerClient) FactoryResetService(context.Context, int, int) error { return nil }
 func (noopControllerClient) RestartService(context.Context, int, int) error      { return nil }
@@ -133,6 +137,10 @@ func (c *httpControllerClient) FactoryResetService(ctx context.Context, teamID, 
 
 func (c *httpControllerClient) ReconcileDeployments(ctx context.Context) (adminReconcileResult, error) {
 	return requestControllerJSON[adminReconcileResult](ctx, c, http.MethodPost, "/internal/v1/deployments/reconcile", nil)
+}
+
+func (c *httpControllerClient) DeploymentReconcileJob(ctx context.Context, method string) (ControllerDeploymentReconcileJob, error) {
+	return requestControllerJSON[ControllerDeploymentReconcileJob](ctx, c, method, "/internal/v1/deployments/reconcile/job", nil)
 }
 
 func (c *httpControllerClient) RestartService(ctx context.Context, teamID, challengeID int) error {

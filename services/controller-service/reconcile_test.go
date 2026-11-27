@@ -37,6 +37,8 @@ func TestControllerInternalRoutesRequireAdminAuth(t *testing.T) {
 	}{
 		{http.MethodGet, "/internal/v1/deployments", ""},
 		{http.MethodPost, "/internal/v1/deployments/reconcile", `{}`},
+		{http.MethodGet, "/internal/v1/deployments/reconcile/job", ""},
+		{http.MethodPost, "/internal/v1/deployments/reconcile/job", ""},
 		{http.MethodPost, "/internal/v1/challenges/validate", `{}`},
 		{http.MethodGet, "/internal/v1/access/status", ""},
 		{http.MethodPost, "/internal/v1/access/reconcile", `{}`},

@@ -178,6 +178,18 @@ func (l testRateLimiter) Allow(_ context.Context, key string, _ rateLimitPolicy)
 	return rateLimitDecision{allowed: true}, nil
 }
 
+func (testControllerClient) DeploymentReconcileJob(context.Context, string) (ControllerDeploymentReconcileJob, error) {
+	return ControllerDeploymentReconcileJob{}, errControllerDisabled
+}
+
+func (storeBackedControllerClient) DeploymentReconcileJob(context.Context, string) (ControllerDeploymentReconcileJob, error) {
+	return ControllerDeploymentReconcileJob{}, errControllerDisabled
+}
+
+func (*recordingResetControllerClient) DeploymentReconcileJob(context.Context, string) (ControllerDeploymentReconcileJob, error) {
+	return ControllerDeploymentReconcileJob{}, errControllerDisabled
+}
+
 func (c testControllerClient) ReconcileDeployments(_ context.Context) (adminReconcileResult, error) {
 	if c.deployReconcileErr != nil {
 		return adminReconcileResult{}, c.deployReconcileErr
@@ -4654,6 +4666,57 @@ func TestAdminReconcileDeploymentsUsesControllerWhenConfigured(t *testing.T) {
 	payload := decodeCompat[adminReconcileResult](t, response.Body.Bytes())
 	if payload.ProcessedJobs != 7 || payload.ProcessedInstances != 21 || payload.CompletedJobs != 3 {
 		t.Fatalf("unexpected reconcile payload %+v", payload)
+	}
+}
+
+func TestAdminDeploymentReconcileJobProxiesController(t *testing.T) {
+	const controllerToken = "controller-job-token"
+	const organizerToken = "dev-admin-token"
+	methods := make(chan string, 3)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/v1/deployments/reconcile/job" || r.Header.Get("Authorization") != "Bearer "+controllerToken {
+			t.Errorf("unexpected controller request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		methods <- r.Method
+		status := "completed"
+		if r.Method == http.MethodPost {
+			status = "running"
+		}
+		writeData(w, http.StatusOK, ControllerDeploymentReconcileJob{ID: "job-1", Status: status})
+	}))
+	defer upstream.Close()
+	mux := http.NewServeMux()
+	NewWithDeps("dev-team-token", organizerToken, 101, NewMemoryStore(101),
+		NewHTTPControllerClient(upstream.URL, controllerToken), noopWireGuardClient{}).RegisterRoutes(mux)
+	const path = "/api/v2/admin/deployments/reconcile/job"
+	for _, tc := range []struct {
+		method, token, status string
+		code                  int
+	}{
+		{http.MethodPost, "", "", http.StatusForbidden},
+		{http.MethodPost, organizerToken, "running", http.StatusAccepted},
+		{http.MethodGet, organizerToken, "completed", http.StatusOK},
+	} {
+		req := httptest.NewRequest(tc.method, path, nil)
+		if tc.token != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code != tc.code {
+			t.Fatalf("%s: want %d, got %d: %s", tc.method, tc.code, res.Code, res.Body)
+		}
+		if tc.status != "" {
+			job := decodeCompat[ControllerDeploymentReconcileJob](t, res.Body.Bytes())
+			if job.ID != "job-1" || job.Status != tc.status {
+				t.Fatalf("unexpected job: %+v", job)
+			}
+		}
+	}
+	if len(methods) != 2 || <-methods != http.MethodPost || <-methods != http.MethodGet {
+		t.Fatal("expected only the authenticated POST and GET to reach the controller")
 	}
 }
 

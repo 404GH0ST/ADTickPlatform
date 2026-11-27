@@ -145,6 +145,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/admin/deployments", s.handleAdminListDeployments)
 	mux.HandleFunc("DELETE /api/v2/admin/deployments/{deployment_id}", s.handleAdminDeleteDeployment)
 	mux.HandleFunc("POST /api/v2/admin/deployments/reconcile", s.handleAdminReconcileDeployments)
+	mux.HandleFunc("GET /api/v2/admin/deployments/reconcile/job", s.handleAdminDeploymentReconcileJob)
+	mux.HandleFunc("POST /api/v2/admin/deployments/reconcile/job", s.handleAdminDeploymentReconcileJob)
 	mux.HandleFunc("GET /api/v2/admin/audit-logs", s.handleAdminListAuditLogs)
 	mux.HandleFunc("GET /api/v2/admin/operations/status", s.handleAdminOperationsStatus)
 	mux.HandleFunc("GET /api/v2/admin/game/status", s.handleAdminGameStatus)

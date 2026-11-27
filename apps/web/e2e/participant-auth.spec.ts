@@ -124,6 +124,8 @@ const adminApiCases: ApiCase[] = [
   { method: "GET", path: "/api/admin/deployments" },
   { method: "DELETE", path: "/api/admin/deployments/77" },
   { method: "POST", path: "/api/admin/deployments/reconcile" },
+  { method: "GET", path: "/api/admin/deployments/reconcile/job" },
+  { method: "POST", path: "/api/admin/deployments/reconcile/job" },
   { method: "GET", path: "/api/admin/game/attacks" },
   { method: "GET", path: "/api/admin/game/checker-runs" },
   { method: "GET", path: "/api/admin/game/match" },

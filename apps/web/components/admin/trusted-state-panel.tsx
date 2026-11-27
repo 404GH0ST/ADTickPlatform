@@ -49,6 +49,7 @@ export function DefaultTrustedStateView({
   pendingDeployments,
   summary,
   pending,
+  progress,
   error,
   note,
   onReconcile,
@@ -118,6 +119,7 @@ export function DefaultTrustedStateView({
         ) : null}
         {error ? <StatusBanner message={error} variant="error" /> : null}
         {note ? <StatusBanner message={note} variant="success" /> : null}
+        {progress ? <p role="status" className="text-sm text-muted-foreground">{progress}</p> : null}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"

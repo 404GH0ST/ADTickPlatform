@@ -22,11 +22,7 @@ const (
 	controllerWireGuardTruthUnknownDetail = "runtime and controller access converged but WireGuard converge/verification failed, so host access truth was not established."
 )
 
-type controllerDeploymentReconcileState struct {
-	ProcessedJobs      int `json:"processed_jobs"`
-	ProcessedInstances int `json:"processed_instances"`
-	CompletedJobs      int `json:"completed_jobs"`
-}
+type controllerDeploymentReconcileState = apigateway.ControllerDeploymentReconcileResult
 
 type controllerReconcileStore interface {
 	ListControllerRuntimeTasks(context.Context) ([]apigateway.ControllerRuntimeTask, error)
@@ -47,15 +43,7 @@ func (a controllerReconcileStoreAdapter) ListControllerServiceAccessPolicies(ctx
 }
 
 func (a controllerReconcileStoreAdapter) ReconcileDeployments(ctx context.Context, now time.Time) (controllerDeploymentReconcileState, error) {
-	result, err := a.store.ReconcileAdminDeployments(ctx, now)
-	if err != nil {
-		return controllerDeploymentReconcileState{}, err
-	}
-	return controllerDeploymentReconcileState{
-		ProcessedJobs:      result.ProcessedJobs,
-		ProcessedInstances: result.ProcessedInstances,
-		CompletedJobs:      result.CompletedJobs,
-	}, nil
+	return a.store.ReconcileAdminDeployments(ctx, now)
 }
 
 type controllerWireGuardReconciler interface {
@@ -102,12 +90,13 @@ func (e *controllerReconcilePhaseError) Detail() string {
 }
 
 type controllerTrustedReconciler struct {
-	store     controllerReconcileStore
-	executor  runtimeExecutor
-	access    serviceAccessExecutor
-	accessMu  *sync.Mutex
-	wireGuard controllerWireGuardReconciler
-	now       func() time.Time
+	store      controllerReconcileStore
+	executor   runtimeExecutor
+	access     serviceAccessExecutor
+	accessMu   *sync.Mutex
+	wireGuard  controllerWireGuardReconciler
+	now        func() time.Time
+	onProgress func(phase string, ensured, total int)
 }
 
 type controllerTrustedReconcileOptions struct {
@@ -195,16 +184,26 @@ func (r controllerTrustedReconciler) Reconcile(ctx context.Context) (controllerD
 
 func (r controllerTrustedReconciler) ReconcileWithOptions(ctx context.Context, options controllerTrustedReconcileOptions) (controllerDeploymentReconcileState, error) {
 	result := controllerDeploymentReconcileState{}
+	ensured, total := 0, 0
+	report := func(phase string) {
+		if r.onProgress != nil {
+			r.onProgress(phase, ensured, total)
+		}
+	}
 
 	if options.includeRuntime {
 		tasks, err := r.store.ListControllerRuntimeTasks(ctx)
 		if err != nil {
 			return controllerDeploymentReconcileState{}, err
 		}
+		total = len(tasks)
+		report("runtime")
 		for _, task := range tasks {
 			if err := r.executor.EnsureService(ctx, task); err != nil {
 				return controllerDeploymentReconcileState{}, fmt.Errorf("runtime reconcile failed for team %d challenge %d: %w", task.TeamID, task.ChallengeID, err)
 			}
+			ensured++
+			report("runtime")
 		}
 		reconciled, err := r.store.ReconcileDeployments(ctx, r.now())
 		if err != nil {
@@ -217,6 +216,7 @@ func (r controllerTrustedReconciler) ReconcileWithOptions(ctx context.Context, o
 		return result, nil
 	}
 
+	report("access")
 	if r.accessMu != nil {
 		r.accessMu.Lock()
 		defer r.accessMu.Unlock()
@@ -234,6 +234,7 @@ func (r controllerTrustedReconciler) ReconcileWithOptions(ctx context.Context, o
 		return result, nil
 	}
 
+	report("wireguard")
 	wireGuardStatus, err := r.wireGuard.Reconcile(ctx)
 	if err != nil {
 		return result, wrapControllerReconcilePhaseError(http.StatusBadGateway, "Deployment reconcile failed", controllerWireGuardTruthUnknownDetail, err)

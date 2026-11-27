@@ -222,10 +222,22 @@ type adminDeploymentJob struct {
 	CompletedAt     string `json:"completed_at,omitempty"`
 }
 
-type adminReconcileResult struct {
+type ControllerDeploymentReconcileResult struct {
 	ProcessedJobs      int `json:"processed_jobs"`
 	ProcessedInstances int `json:"processed_instances"`
 	CompletedJobs      int `json:"completed_jobs"`
+}
+
+type adminReconcileResult = ControllerDeploymentReconcileResult
+
+type ControllerDeploymentReconcileJob struct {
+	ID      string                               `json:"id,omitempty"`
+	Status  string                               `json:"status"`
+	Phase   string                               `json:"phase,omitempty"`
+	Ensured int                                  `json:"ensured_instances"`
+	Total   int                                  `json:"total_instances"`
+	Result  *ControllerDeploymentReconcileResult `json:"result,omitempty"`
+	Error   string                               `json:"error,omitempty"`
 }
 
 type adminAuditLog struct {

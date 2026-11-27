@@ -295,6 +295,18 @@ Failure semantics:
 - `503` when the controller-owned trusted reconcile path is unavailable
 - `502` when runtime convergence finishes but access or WireGuard truth is still not established
 
+### Deployment reconcile job
+
+`POST /api/v2/admin/deployments/reconcile/job` returns `202` and starts a
+controller-owned reconciliation. A repeat request joins the current job.
+`GET /api/v2/admin/deployments/reconcile/job` reports the current or most
+recent job, including its phase, instance counts, and result or error.
+
+Closing the browser does not interrupt the job. The controller keeps the job
+display state in memory and restores pending deployment work on startup by
+default. The synchronous endpoint remains available for callers that wait for
+a result.
+
 ### GET `/api/v2/admin/audit-logs`
 
 List persisted control-plane audit entries.

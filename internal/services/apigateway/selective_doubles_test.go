@@ -578,6 +578,13 @@ type selController struct {
 
 var _ controllerClient = selController{}
 
+func (s selController) DeploymentReconcileJob(ctx context.Context, method string) (ControllerDeploymentReconcileJob, error) {
+	if err := s.fail["DeploymentReconcileJob"]; err != nil {
+		return ControllerDeploymentReconcileJob{}, err
+	}
+	return s.inner.DeploymentReconcileJob(ctx, method)
+}
+
 func (s selController) ReconcileDeployments(ctx context.Context) (r0 adminReconcileResult, err error) {
 	if err = s.fail["ReconcileDeployments"]; err != nil {
 		return

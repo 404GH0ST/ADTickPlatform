@@ -163,6 +163,16 @@ export type AdminReconcileResult = {
   completed_jobs: number;
 };
 
+export type AdminDeploymentReconcileJob = {
+  id?: string;
+  status: "idle" | "running" | "completed" | "failed";
+  phase?: "starting" | "runtime" | "access" | "wireguard";
+  ensured_instances: number;
+  total_instances: number;
+  result?: AdminReconcileResult;
+  error?: string;
+};
+
 export type AdminGameTickStatus = {
   id: number;
   status: string;
