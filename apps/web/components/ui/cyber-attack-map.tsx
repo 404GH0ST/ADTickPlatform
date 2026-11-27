@@ -2708,7 +2708,7 @@ function TeamNodeLabel({
         fontWeight={node.selected ? '700' : '650'}
         className="select-none font-sans"
       >
-        {node.name}
+        {getTeamLabelTitle(node)}
       </text>
       <text
         x={node.labelX}
@@ -2858,6 +2858,20 @@ const LABEL_MAX_WIDTH_WITH_INSTITUTION = 216;
 // size institution room for the wider of the two.
 const LABEL_META_CHAR_WIDTH = 5.2;
 const LABEL_INSTITUTION_CHAR_WIDTH = 6;
+// Name type is 11px (12.5px bold when selected); size the cut for the wider.
+const LABEL_TITLE_CHAR_WIDTH = 6.5;
+const LABEL_TITLE_SELECTED_CHAR_WIDTH = 7.6;
+
+function truncateLabelText(value: string, maxChars: number): string {
+  const chars = Array.from(value);
+  return chars.length > maxChars ? `${chars.slice(0, maxChars - 1).join('').trimEnd()}…` : value;
+}
+
+function getTeamLabelTitle(node: TeamNode): string {
+  const maxWidth = node.institution ? LABEL_MAX_WIDTH_WITH_INSTITUTION : LABEL_MAX_WIDTH;
+  const charWidth = node.selected ? LABEL_TITLE_SELECTED_CHAR_WIDTH : LABEL_TITLE_CHAR_WIDTH;
+  return truncateLabelText(node.name, Math.max(8, Math.floor((maxWidth - 22) / charWidth)));
+}
 
 function getTeamLabelMeta(node: TeamNode): { count: string; institution: string } {
   const count = `${node.outgoing} out`;
@@ -2867,14 +2881,12 @@ function getTeamLabelMeta(node: TeamNode): { count: string; institution: string 
   const room =
     LABEL_MAX_WIDTH_WITH_INSTITUTION - 22 - (count.length + 3) * LABEL_META_CHAR_WIDTH;
   const maxChars = Math.max(8, Math.floor(room / LABEL_INSTITUTION_CHAR_WIDTH));
-  const chars = Array.from(node.institution);
-  const institution =
-    chars.length > maxChars ? `${chars.slice(0, maxChars - 1).join('').trimEnd()}…` : node.institution;
+  const institution = truncateLabelText(node.institution, maxChars);
   return { count, institution };
 }
 
 function getTeamLabelWidth(node: TeamNode): number {
-  const titleWidth = node.name.length * 6.5;
+  const titleWidth = Array.from(getTeamLabelTitle(node)).length * LABEL_TITLE_CHAR_WIDTH;
   const meta = getTeamLabelMeta(node);
   const metaWidth = meta.institution
     ? Array.from(meta.institution).length * LABEL_INSTITUTION_CHAR_WIDTH +
