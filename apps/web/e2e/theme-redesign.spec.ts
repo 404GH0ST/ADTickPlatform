@@ -60,6 +60,41 @@ test.describe("as a participant", () => {
     await expect(scores).toHaveCount(0);
   });
 
+  test("the podium keeps first place tallest when other team names wrap", async ({ page }) => {
+    const teams = [
+      "Alpha",
+      "Northern Collegiate Infrastructure and Security Research Team ".repeat(3).trim(),
+      "InternationalCybersecurityAndInfrastructureResearchClub".repeat(3),
+    ];
+    const rows = teams.map((team, index) => ({
+      rank: index + 1, team, attack: 5, defense: 4, sla: 3, total: 12 - index, delta: "0",
+    }));
+    await page.route("**/api/platform/realtime/scoreboard/stream", (route) =>
+      route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(rows)}\n\n` }),
+    );
+
+    await page.goto("/scoreboard");
+    const podium = page.getByRole("list", { name: "Top teams" });
+    for (const team of teams) {
+      await expect(podium.getByText(team, { exact: true })).toBeVisible();
+    }
+    await page.evaluate(() => document.fonts.ready);
+    const cards = podium.getByRole("listitem");
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      const [first, second, third] = await cards.evaluateAll((items) =>
+        items.map((item) => item.getBoundingClientRect().toJSON()),
+      );
+      expect(first.height, `first place is tallest at ${width}px`).toBeGreaterThan(second.height);
+      expect(second.height, `second place is taller than third at ${width}px`).toBeGreaterThan(third.height);
+      expect(second.x).toBeLessThan(first.x);
+      expect(first.x).toBeLessThan(third.x);
+      expect(Math.abs(first.bottom - second.bottom)).toBeLessThanOrEqual(1);
+      expect(Math.abs(first.bottom - third.bottom)).toBeLessThanOrEqual(1);
+      for (const card of await cards.all()) await expectNoHorizontalOverflow(card);
+    }
+  });
+
   test("services features work through the redesigned view", async ({ page }) => {
     await page.goto("/services");
     const card = page.getByTestId("nb-service-svc-1");

@@ -21,18 +21,19 @@ function format(value: number) {
 // classic 2-1-3 podium. Phones get three short columns so the standings start
 // in the first screen. The breakpoint is in rem, so enlarged browser text
 // (or a 320px screen) falls back to a stack instead of overflowing.
-// Fills follow the medal ramp.
+// In the shared grid row, top margins create the steps while every card can
+// still grow to fit its content. Fills follow the medal ramp.
 const PODIUM = [
-  { place: 1, fill: "nb-fill-yellow", height: "min-[22rem]:order-2 min-[22rem]:min-h-[8.5rem] sm:min-h-[14rem]" },
-  { place: 2, fill: "nb-fill-silver", height: "min-[22rem]:order-1 min-[22rem]:min-h-[7.5rem] sm:min-h-[11rem]" },
-  { place: 3, fill: "nb-fill-orange", height: "min-[22rem]:order-3 min-[22rem]:min-h-[6.5rem] sm:min-h-[9.5rem]" },
+  { place: 1, fill: "nb-fill-yellow", layout: "min-[22rem]:order-2 min-[22rem]:min-h-[8.5rem] sm:min-h-[14rem]" },
+  { place: 2, fill: "nb-fill-silver", layout: "min-[22rem]:order-1 min-[22rem]:mt-4 min-[22rem]:min-h-[7.5rem] sm:mt-12 sm:min-h-[11rem]" },
+  { place: 3, fill: "nb-fill-orange", layout: "min-[22rem]:order-3 min-[22rem]:mt-8 min-[22rem]:min-h-[6.5rem] sm:mt-[4.5rem] sm:min-h-[9.5rem]" },
 ] as const;
 
-function PodiumBlock({ row, fill, height, mine }: { row: ScoreRow; fill: string; height: string; mine: boolean }) {
+function PodiumBlock({ row, fill, layout, mine }: { row: ScoreRow; fill: string; layout: string; mine: boolean }) {
   const first = row.rank === 1;
   return (
     <li
-      className={cn("nb-pop flex min-w-0 flex-col justify-between gap-2 rounded-[var(--nb-radius)] p-2.5 sm:gap-4 sm:p-5", fill, height, first && "sm:-translate-y-1")}
+      className={cn("nb-pop flex min-w-0 flex-col justify-between gap-2 rounded-[var(--nb-radius)] p-2.5 sm:gap-4 sm:p-5", fill, layout)}
       data-podium-current={mine ? "true" : undefined}
     >
       <div className="flex items-center justify-between gap-2">
@@ -93,13 +94,13 @@ export function NbScoreboard({ scoreRows, currentTeamName, frozen, freezeAt, una
       ) : (
         <>
           {podium.length > 0 ? (
-            <ol aria-label="Top teams" className="grid grid-cols-1 items-end gap-3 min-[22rem]:grid-cols-3 sm:gap-5">
+            <ol aria-label="Top teams" className="grid grid-cols-1 gap-3 min-[22rem]:grid-cols-3 sm:gap-5">
               {podium.map(({ slot, row }) => (
                 <PodiumBlock
                   key={row.team}
                   row={row}
                   fill={slot.fill}
-                  height={slot.height}
+                  layout={slot.layout}
                   mine={row.team === currentTeamName}
                 />
               ))}
