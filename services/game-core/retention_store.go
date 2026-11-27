@@ -121,26 +121,23 @@ func (s *memoryGameStore) RecordRetentionCheck(ctx context.Context, f issuedFlag
 		return false, nil
 	}
 	key := checkerRunKeyFromIDs(f.IssuedTick, f.OwnerTeamID, f.ChallengeID)
-	if run.Status != "success" {
+	if confirmed {
 		if s.retentionFailures == nil {
 			s.retentionFailures = map[checkerRunGroupKey]flagRetentionLoss{}
 		}
 		loss := s.retentionFailures[key]
-		if confirmed && !loss.ConfirmedMissing {
+		if !loss.ConfirmedMissing {
 			loss.ConfirmedMissing = true
 			loss.Penalty = retentionPenalty(len(s.teamNames) - 1)
 		}
 		s.retentionFailures[key] = loss
-		if confirmed && loss.ConfirmedMissing {
-			run.Message = fmt.Sprintf("confirmed missing stored flag; tick SLA forfeited and %.0f-point defense penalty", loss.Penalty)
-		}
+		run.Message = fmt.Sprintf("confirmed missing stored flag; tick SLA forfeited and %.0f-point defense penalty", loss.Penalty)
 	}
-	record := apigateway.GameCheckerRun{ID: s.nextRun, TickID: run.TickID, TeamID: run.TeamID, TeamName: run.TeamName, ChallengeID: run.ChallengeID, ChallengeName: run.ChallengeName, Phase: run.Phase, Target: run.Target, CheckerImage: run.CheckerImage, Status: run.Status, ExitCode: run.ExitCode, Message: run.Message, Output: run.Output, CheckedAt: run.CheckedAt.UTC().Format(time.RFC3339)}
+	record := apigateway.GameCheckerRun{ID: s.nextRun, TickID: run.TickID, TeamID: run.TeamID, TeamName: run.TeamName, ChallengeID: run.ChallengeID, ChallengeName: run.ChallengeName, Phase: run.Phase, Target: run.Target, CheckerImage: run.CheckerImage, Status: run.Status, ExitCode: run.ExitCode, Message: run.Message, Output: run.Output, CheckedAt: run.CheckedAt.UTC().Format(time.RFC3339), RetentionCheck: true}
 	s.nextRun++
 	s.runs = append([]apigateway.GameCheckerRun{record}, s.runs...)
-	// A passing delayed get confirms the tick's verdict; it must not replace a
-	// state the checker reported explicitly (see the Postgres store).
-	if _, recorded := s.serviceStates[key]; run.Status != "success" || !recorded {
+	// Only a confirmed loss can override the issuing tick's verdict.
+	if _, recorded := s.serviceStates[key]; confirmed || (run.Status == "success" && !recorded) {
 		s.refreshMemoryServiceState(run)
 	}
 	for i := range s.ticks {
@@ -193,30 +190,25 @@ func (s *postgresGameStore) RecordRetentionCheck(ctx context.Context, f issuedFl
 		return false, nil
 	}
 
-	if run.Status != "success" {
-		penalty := 0.0
-		if confirmed {
-			var opponents int
-			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE id<>$1 AND active=TRUE AND (play_from_tick IS NULL OR play_from_tick<=COALESCE((SELECT MAX(id) FROM game_ticks),0))`, f.OwnerTeamID).Scan(&opponents); err != nil {
-				return false, err
-			}
-			penalty = retentionPenalty(opponents)
+	if confirmed {
+		var opponents int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE id<>$1 AND active=TRUE AND (play_from_tick IS NULL OR play_from_tick<=COALESCE((SELECT MAX(id) FROM game_ticks),0))`, f.OwnerTeamID).Scan(&opponents); err != nil {
+			return false, err
 		}
+		penalty := retentionPenalty(opponents)
 		err = tx.QueryRowContext(ctx, `INSERT INTO flag_retention_failures(tick_id,team_id,challenge_id,flag,confirmed_missing,penalty_points,checked_at)
- VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET
+ VALUES($1,$2,$3,$4,TRUE,$5,$6) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET
  penalty_points=CASE WHEN flag_retention_failures.confirmed_missing THEN flag_retention_failures.penalty_points ELSE EXCLUDED.penalty_points END,
- confirmed_missing=flag_retention_failures.confirmed_missing OR EXCLUDED.confirmed_missing,checked_at=EXCLUDED.checked_at,
+ confirmed_missing=TRUE,checked_at=EXCLUDED.checked_at,
  reset_attempt_token=NULL,reset_created=FALSE,reset_prior_confirmed=NULL,reset_prior_penalty=NULL
- RETURNING penalty_points`, f.IssuedTick, f.OwnerTeamID, f.ChallengeID, f.Flag, confirmed, penalty, run.CheckedAt.UTC()).Scan(&penalty)
+ RETURNING penalty_points`, f.IssuedTick, f.OwnerTeamID, f.ChallengeID, f.Flag, penalty, run.CheckedAt.UTC()).Scan(&penalty)
 		if err != nil {
 			return false, err
 		}
-		if confirmed && penalty > 0 {
-			run.Message = fmt.Sprintf("confirmed missing stored flag; tick SLA forfeited and %.0f-point defense penalty", penalty)
-		}
+		run.Message = fmt.Sprintf("confirmed missing stored flag; tick SLA forfeited and %.0f-point defense penalty", penalty)
 	}
 
-	_, err = tx.ExecContext(ctx, `INSERT INTO checker_runs(tick_id,team_id,team_name,challenge_id,challenge_name,phase,target,checker_image,status,exit_code,message,output,checked_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, run.TickID, run.TeamID, run.TeamName, run.ChallengeID, run.ChallengeName, run.Phase, run.Target, run.CheckerImage, run.Status, run.ExitCode, run.Message, run.Output, run.CheckedAt.UTC())
+	_, err = tx.ExecContext(ctx, `INSERT INTO checker_runs(tick_id,team_id,team_name,challenge_id,challenge_name,phase,target,checker_image,status,exit_code,message,output,checked_at,retention_check) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE)`, run.TickID, run.TeamID, run.TeamName, run.ChallengeID, run.ChallengeName, run.Phase, run.Target, run.CheckerImage, run.Status, run.ExitCode, run.Message, run.Output, run.CheckedAt.UTC())
 	if err != nil {
 		return false, err
 	}
@@ -226,10 +218,8 @@ func (s *postgresGameStore) RecordRetentionCheck(ctx context.Context, f issuedFl
 			return false, err
 		}
 	}
-	// A passing delayed get only confirms the issuing tick's verdict. Deriving
-	// that tick's state again from phase exit codes would replace a state the
-	// checker reported explicitly (faulty, recovering, ...) with "ok".
-	if !stateRecorded {
+	// Keep existing checker verdicts unless the flag was confirmed missing.
+	if confirmed || (run.Status == "success" && !stateRecorded) {
 		if err = refreshPostgresServiceStateTx(ctx, tx, run); err != nil {
 			return false, err
 		}

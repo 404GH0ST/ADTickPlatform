@@ -560,7 +560,7 @@ func (s *memoryGameStore) recomputeScoreboardLocked() []apigateway.ScoreRowAlias
 		teamID := key.TeamID
 		challengeID := key.ChallengeID
 		value := faustSLAValueForStatus(summary.Status)
-		if _, failed := s.retentionFailures[key]; failed {
+		if s.retentionFailures[key].ConfirmedMissing {
 			value = 0
 		}
 		scores[teamID].SLA += value
@@ -1542,12 +1542,8 @@ func (s *memoryGameStore) refreshMemoryServiceState(run checkerRunRecord) {
 	challengeID := run.ChallengeID
 	key := checkerRunKeyFromIDs(tickID, teamID, challengeID)
 
-	if loss, failed := s.retentionFailures[key]; failed {
-		status := "down"
-		if loss.ConfirmedMissing {
-			status = "flag_not_found"
-		}
-		s.serviceStates[key] = apigateway.GameServiceStateSummary{Status: status, Phase: "get", TickID: tickID, Message: "stored flag failed retention verification"}
+	if s.retentionFailures[key].ConfirmedMissing {
+		s.serviceStates[key] = apigateway.GameServiceStateSummary{Status: "flag_not_found", Phase: "get", TickID: tickID, Message: "stored flag failed retention verification"}
 		return
 	}
 	if existing, ok := s.serviceStates[key]; ok && run.Status == "skipped" && strings.TrimSpace(run.ReportedServiceState) == "" {
@@ -1569,7 +1565,7 @@ func (s *memoryGameStore) refreshMemoryServiceState(run checkerRunRecord) {
 
 	group := make([]apigateway.GameCheckerRun, 0, 3)
 	for _, run := range s.runs {
-		if run.TickID != tickID || run.TeamID != teamID || run.ChallengeID != challengeID {
+		if run.RetentionCheck || run.TickID != tickID || run.TeamID != teamID || run.ChallengeID != challengeID {
 			continue
 		}
 		group = append(group, run)
@@ -1661,7 +1657,7 @@ func (s *postgresGameStore) loadCheckerRunSummariesFromRuns(ctx context.Context,
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
 		FROM checker_runs
-		WHERE `+strings.Join(clauses, " OR ")+`
+		WHERE NOT retention_check AND (`+strings.Join(clauses, " OR ")+`)
 		ORDER BY tick_id DESC, id DESC
 	`, args...)
 	if err != nil {
@@ -1693,16 +1689,12 @@ func (s *postgresGameStore) loadCheckerRunSummariesFromRuns(ctx context.Context,
 
 func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, run checkerRunRecord) error {
 	var confirmed bool
-	err := tx.QueryRowContext(ctx, `SELECT confirmed_missing FROM flag_retention_failures WHERE tick_id=$1 AND team_id=$2 AND challenge_id=$3`, run.TickID, run.TeamID, run.ChallengeID).Scan(&confirmed)
-	if err == nil {
-		status := "down"
-		if confirmed {
-			status = "flag_not_found"
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO checker_service_states(tick_id,team_id,challenge_id,service_state,state_phase,state_message,updated_at) VALUES($1,$2,$3,$4,'get','stored flag failed retention verification',NOW()) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET service_state=EXCLUDED.service_state,state_phase='get',state_message=EXCLUDED.state_message,updated_at=NOW()`, run.TickID, run.TeamID, run.ChallengeID, status)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM flag_retention_failures WHERE tick_id=$1 AND team_id=$2 AND challenge_id=$3 AND confirmed_missing)`, run.TickID, run.TeamID, run.ChallengeID).Scan(&confirmed)
+	if err != nil {
 		return err
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if confirmed {
+		_, err = tx.ExecContext(ctx, `INSERT INTO checker_service_states(tick_id,team_id,challenge_id,service_state,state_phase,state_message,updated_at) VALUES($1,$2,$3,'flag_not_found','get','stored flag failed retention verification',NOW()) ON CONFLICT(tick_id,team_id,challenge_id) DO UPDATE SET service_state=EXCLUDED.service_state,state_phase='get',state_message=EXCLUDED.state_message,updated_at=NOW()`, run.TickID, run.TeamID, run.ChallengeID)
 		return err
 	}
 
@@ -1739,7 +1731,7 @@ func refreshPostgresServiceStateTx(ctx context.Context, tx *sql.Tx, run checkerR
 	rows, err := tx.QueryContext(ctx, `
 		SELECT tick_id, team_id, challenge_id, phase, status, message, checked_at
 		FROM checker_runs
-		WHERE tick_id = $1 AND team_id = $2 AND challenge_id = $3
+		WHERE tick_id = $1 AND team_id = $2 AND challenge_id = $3 AND NOT retention_check
 		ORDER BY id DESC
 	`, run.TickID, run.TeamID, run.ChallengeID)
 	if err != nil {
@@ -2130,7 +2122,7 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 			GROUPING(f.challenge_id),
 			COALESCE(-SUM(CASE WHEN COALESCE(captures.capture_count, 0) > 0 THEN POWER(captures.capture_count::double precision, 0.75) ELSE 0.0 END + COALESCE(losses.penalty_points,0.0)), 0.0)
 		FROM issued_flags f
-		LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag
+		LEFT JOIN flag_retention_failures losses ON losses.flag = f.flag AND losses.confirmed_missing
 		LEFT JOIN (
 			SELECT flag, COUNT(*) AS capture_count
 			FROM submitted_flags
@@ -2148,7 +2140,7 @@ func (s *postgresGameStore) buildScoreboard(ctx context.Context, persist bool) (
 		       GROUPING(states.challenge_id),
 		       COALESCE(SUM(
 			       CASE
-			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id) THEN 0.0
+			           WHEN EXISTS (SELECT 1 FROM flag_retention_failures losses WHERE losses.tick_id=states.tick_id AND losses.team_id=states.team_id AND losses.challenge_id=states.challenge_id AND losses.confirmed_missing) THEN 0.0
 			           WHEN states.service_state = 'ok' THEN 1.0
 			           WHEN states.service_state = 'recovering' THEN 0.5
 			           ELSE 0.0

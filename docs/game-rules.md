@@ -448,8 +448,8 @@ normally. If the budget runs out, the match still stops, and a
 covered. The order is shuffled, so the same services are not always the ones
 left unchecked.
 
-Any failed retention check permanently forfeits that service's SLA for the issuing
-tick. A checker-confirmed missing or replaced value also incurs a defense deduction:
+A checker-confirmed missing or replaced flag permanently forfeits that service's
+SLA for the issuing tick and incurs a defense deduction:
 
 ```text
 n = number of other active teams eligible to play at confirmation time
@@ -465,9 +465,9 @@ Failures and the actual deduction appear in checker history and score replay.
 
 Checker `get` exit code **42** means a reachable service explicitly reported a
 missing flag or returned a value different from the originally issued value.
-Transport failures and ordinary checker errors still lose the tick's SLA but do
-not receive this additional confirmed-loss deduction. All bundled checkers support
-this distinction; custom checker images must implement the exit-code contract.
+An inconclusive delayed retrieval check stays in checker history and leaves the
+issuing tick's SLA and defense scores intact. Ordinary tick phases continue
+to determine SLA. Custom checker images must implement the exit-code contract.
 Participant factory resets delete the state volume. A reset that reaches state
 removal with an outstanding issued flag forfeits that flag's tick SLA and records
 the same severe defense deduction. The deduction is reserved atomically with

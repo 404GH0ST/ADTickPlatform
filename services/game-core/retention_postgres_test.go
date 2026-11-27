@@ -230,7 +230,7 @@ func TestPostgresTickTimeoutRecordsRunsAndCompletes(t *testing.T) {
 	}
 }
 
-func TestPostgresPassingRetentionKeepsCheckerReportedState(t *testing.T) {
+func TestPostgresUnconfirmedRetentionKeepsCheckerReportedState(t *testing.T) {
 	db := isolatedSubmissionDB(t)
 	ctx := context.Background()
 	if err := database.RunEmbeddedMigrationsWithOptions(ctx, db, database.MigrationOptions{IncludeSeeds: false}); err != nil {
@@ -274,6 +274,21 @@ func TestPostgresPassingRetentionKeepsCheckerReportedState(t *testing.T) {
 	if state != "faulty" {
 		t.Fatalf("checker-reported state was overwritten by a passing retention get: %q", state)
 	}
+	unconfirmed := passing
+	unconfirmed.Status, unconfirmed.ExitCode, unconfirmed.Message = "failed", -1, retentionVerificationFailed
+	if applied, err := store.RecordRetentionCheck(ctx, flag, unconfirmed, false); err != nil || !applied {
+		t.Fatalf("unconfirmed retention check not recorded: %v %v", applied, err)
+	}
+	var losses, observations int
+	if err := db.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM flag_retention_failures),
+		(SELECT COUNT(*) FROM checker_runs WHERE retention_check AND status = 'failed')
+	`).Scan(&losses, &observations); err != nil || losses != 0 || observations != 1 {
+		t.Fatalf("unconfirmed check must be diagnostic only: losses=%d observations=%d error=%v", losses, observations, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT service_state FROM checker_service_states WHERE tick_id=1 AND team_id=101 AND challenge_id=1`).Scan(&state); err != nil || state != "faulty" {
+		t.Fatalf("unconfirmed retention overwrote the original verdict: %q %v", state, err)
+	}
 	rows, err := store.buildScoreboard(ctx, false)
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +299,7 @@ func TestPostgresPassingRetentionKeepsCheckerReportedState(t *testing.T) {
 		}
 	}
 
-	// A failing delayed get still overrides the tick verdict.
+	// A confirmed loss still overrides the tick verdict.
 	failing := passing
 	failing.CheckedAt = now.Add(2 * time.Second)
 	failing.Status, failing.ExitCode, failing.Message = "failed", flagMissingExitCode, "stored flag failed retention verification"

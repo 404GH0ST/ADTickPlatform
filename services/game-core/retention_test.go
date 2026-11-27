@@ -152,7 +152,7 @@ func TestRetentionChecksOldFlagBeforeRotationEvenWhenNotDue(t *testing.T) {
 		t.Fatalf("old tick not forfeited independently of new tick: %+v", score)
 	}
 }
-func TestRetentionTransportFailureDoesNotReceiveSeverePenalty(t *testing.T) {
+func TestRetentionTransportFailurePreservesScore(t *testing.T) {
 	s, store, checker, _ := setupRetentionTest(t)
 	ctx := context.Background()
 	if _, err := s.advanceTick(ctx); err != nil {
@@ -162,15 +162,15 @@ func TestRetentionTransportFailureDoesNotReceiveSeverePenalty(t *testing.T) {
 	if err := s.verifyRetainedFlags(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	if row := retentionTeamScore(t, store); row.Defense != 0 || row.SLA != 0 {
-		t.Fatalf("transport failure treated as confirmed replacement: %+v", row)
+	if row := retentionTeamScore(t, store); row.Defense != 0 || row.SLA != 2 {
+		t.Fatalf("inconclusive retention changed the score: %+v", row)
 	}
 	checker.unavailable = false
 	checker.value = "replaced"
 	if err := s.verifyRetainedFlags(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	if row := retentionTeamScore(t, store); row.Defense != -10 {
+	if row := retentionTeamScore(t, store); row.Defense != -10 || row.SLA != 0 {
 		t.Fatalf("later confirmed loss not penalized: %+v", row)
 	}
 	runs, err := store.ListCheckerRuns(ctx, apigateway.GameCheckerRunQuery{Phase: "get", Status: "failed"})

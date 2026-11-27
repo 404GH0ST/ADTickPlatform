@@ -58,13 +58,13 @@ type GameSchedulerEventQuery struct {
 }
 
 type GameMatchStatus struct {
-	State                string `json:"state"`
-	StartedAt            string `json:"started_at,omitempty"`
-	EndedAt              string `json:"ended_at,omitempty"`
-	ScheduledStartAt     string `json:"scheduled_start_at,omitempty"`
-	ScheduledEndAt       string `json:"scheduled_end_at,omitempty"`
-	ScheduleConfigured   bool   `json:"schedule_configured,omitempty"`
-	AcceptingSubmissions bool   `json:"accepting_submissions"`
+	State                string            `json:"state"`
+	StartedAt            string            `json:"started_at,omitempty"`
+	EndedAt              string            `json:"ended_at,omitempty"`
+	ScheduledStartAt     string            `json:"scheduled_start_at,omitempty"`
+	ScheduledEndAt       string            `json:"scheduled_end_at,omitempty"`
+	ScheduleConfigured   bool              `json:"schedule_configured,omitempty"`
+	AcceptingSubmissions bool              `json:"accepting_submissions"`
 	Warmup               *GameWarmupResult `json:"warmup,omitempty"`
 }
 
@@ -116,6 +116,8 @@ type GameCheckerRun struct {
 	StatePhase    string `json:"state_phase,omitempty"`
 	StateMessage  string `json:"state_message,omitempty"`
 	CheckedAt     string `json:"checked_at"`
+
+	RetentionCheck bool `json:"-"`
 }
 
 type GameCheckerRunPage struct {
