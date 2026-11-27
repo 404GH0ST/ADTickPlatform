@@ -143,10 +143,16 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.d/99-adplatform.conf
    `GAME_CORE_FLAG_SECRET` for each event (see
    [Flag Lifecycle](game-rules.md#51-generation)).
    Set `GAME_CORE_FLAG_FORMAT_PREFIX` in `deploy/compose/prod.env` to choose
-   the prefix game-core uses at startup. The default is `PLAYIT`. For example,
-   `GAME_CORE_FLAG_FORMAT_PREFIX=MYCTF` produces `MYCTF{<payload>.<mac>}`.
-   The organizer dashboard can apply a different prefix at runtime with
-   **Save & Reload**. On restart, game-core reads the prefix from `prod.env` again.
+   a startup prefix. For example, `GAME_CORE_FLAG_FORMAT_PREFIX=MYCTF` produces
+   `MYCTF{<payload>.<mac>}`. On startup, game-core saves an explicit override
+   as both the stored and active prefix. Leave it blank to keep the last
+   active prefix from PostgreSQL across restarts. New databases start with
+   `PLAYIT`. **Save & Reload** in the organizer dashboard applies a prefix
+   immediately. An explicit startup override takes precedence on the next restart.
+   Set `GAME_CORE_MAX_TEAM_MEMBERS=3` for a maximum of three players per team,
+   including the captain. Use `0` for unlimited or leave it blank to keep the
+   limit saved in PostgreSQL. Lowering the limit blocks new joins to full teams
+   and keeps existing rosters intact.
    Production setup rejects plain HTTP. For local development without TLS, use
    the development stack instead of `prod.yml`. Public DNS names use Caddy's
    automatic ACME certificates; localhost and IP literals use the generated

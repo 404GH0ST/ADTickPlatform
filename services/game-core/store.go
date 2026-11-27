@@ -117,6 +117,7 @@ type checkerRunGroupKey struct {
 }
 
 type gameStore interface {
+	ApplyStartupPlatformSettings(ctx context.Context, configuredPrefix string, maxTeamMembers *int) (string, error)
 	ListCheckerTargets(ctx context.Context) ([]checkerTarget, error)
 	LockCheckerTarget(ctx context.Context, teamID, challengeID int) (func(), error)
 	CheckerTargetCurrent(ctx context.Context, target checkerTarget) (bool, error)
@@ -954,6 +955,13 @@ func (s *memoryGameStore) ListSchedulerEvents(_ context.Context, query apigatewa
 	return page, nil
 }
 
+func (s *memoryGameStore) ApplyStartupPlatformSettings(_ context.Context, configuredPrefix string, _ *int) (string, error) {
+	if configuredPrefix == "" {
+		return defaultFlagFormatPrefix, nil
+	}
+	return configuredPrefix, nil
+}
+
 func (s *memoryGameStore) Close() error {
 	return nil
 }
@@ -964,6 +972,34 @@ type postgresGameStore struct {
 
 func newPostgresGameStore(db *sql.DB) gameStore {
 	return &postgresGameStore{db: db}
+}
+
+func (s *postgresGameStore) ApplyStartupPlatformSettings(ctx context.Context, configuredPrefix string, maxTeamMembers *int) (string, error) {
+	if configuredPrefix != "" || maxTeamMembers != nil {
+		_, err := s.db.ExecContext(ctx, `
+			INSERT INTO platform_settings (id, flag_format_prefix, flag_format_active, max_team_members, updated_by)
+			VALUES (1, COALESCE(NULLIF($1, ''), $3), COALESCE(NULLIF($1, ''), $3), COALESCE($2, 0), 'system')
+			ON CONFLICT (id) DO UPDATE SET
+				flag_format_prefix = COALESCE(NULLIF($1, ''), platform_settings.flag_format_prefix),
+				flag_format_active = COALESCE(NULLIF($1, ''), platform_settings.flag_format_active),
+				max_team_members = COALESCE($2, platform_settings.max_team_members),
+				updated_at = NOW(),
+				updated_by = EXCLUDED.updated_by
+			WHERE ($1 <> '' AND ($1 <> platform_settings.flag_format_prefix OR $1 <> platform_settings.flag_format_active))
+			   OR ($2 IS NOT NULL AND $2 <> platform_settings.max_team_members)
+		`, configuredPrefix, maxTeamMembers, defaultFlagFormatPrefix)
+		if err != nil {
+			return "", err
+		}
+	}
+	if configuredPrefix != "" {
+		return configuredPrefix, nil
+	}
+	var activePrefix string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE((SELECT flag_format_active FROM platform_settings WHERE id = 1), $1)
+	`, defaultFlagFormatPrefix).Scan(&activePrefix)
+	return activePrefix, err
 }
 
 func (s *postgresGameStore) ListCheckerTargets(ctx context.Context) ([]checkerTarget, error) {

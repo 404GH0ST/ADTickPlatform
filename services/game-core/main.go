@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -50,9 +51,34 @@ func run(ctx context.Context) error {
 	}
 
 	adminToken := config.Secret("GAME_CORE_INTERNAL_TOKEN", "ADMIN_API_TOKEN")
-	flagPrefix := config.String("GAME_CORE_FLAG_FORMAT_PREFIX", "PLAYIT")
-	if len(strings.TrimSpace(flagPrefix)) > apigateway.MaxFlagFormatPrefixBytes {
+	configuredPrefix := strings.TrimSpace(config.String("GAME_CORE_FLAG_FORMAT_PREFIX", ""))
+	if len(configuredPrefix) > apigateway.MaxFlagFormatPrefixBytes {
 		return fmt.Errorf("GAME_CORE_FLAG_FORMAT_PREFIX must be at most %d bytes", apigateway.MaxFlagFormatPrefixBytes)
+	}
+	var maxTeamMembers *int
+	if value := strings.TrimSpace(config.String("GAME_CORE_MAX_TEAM_MEMBERS", "")); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || parsed < 0 {
+			return errors.New("GAME_CORE_MAX_TEAM_MEMBERS must be an integer between 0 and 2147483647")
+		}
+		limit := int(parsed)
+		maxTeamMembers = &limit
+	}
+	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
+	if err != nil {
+		return err
+	}
+	matchEndAt, err := optionalRFC3339Env("GAME_CORE_MATCH_END_AT")
+	if err != nil {
+		return err
+	}
+	if matchStartAt != nil && matchEndAt != nil && matchEndAt.Before(*matchStartAt) {
+		return errors.New("GAME_CORE_MATCH_END_AT must not be earlier than GAME_CORE_MATCH_START_AT")
+	}
+	flagSecret := config.RequiredSecret("GAME_CORE_FLAG_SECRET")
+	flagPrefix, err := store.ApplyStartupPlatformSettings(ctx, configuredPrefix, maxTeamMembers)
+	if err != nil {
+		return fmt.Errorf("initialize platform settings: %w", err)
 	}
 	server := newGameCoreServer(
 		adminToken,
@@ -61,7 +87,7 @@ func run(ctx context.Context) error {
 			config.String("CHECKER_RUNNER_INTERNAL_URL", ""),
 			config.Secret("CHECKER_RUNNER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 		), store, config.String("GAME_CORE_CHECKER_SOURCE_MODE", "service")),
-		newFlagCodec(config.RequiredSecret("GAME_CORE_FLAG_SECRET"), flagPrefix),
+		newFlagCodec(flagSecret, flagPrefix),
 		nil,
 		parseCheckerPhases(config.String("GAME_CORE_CHECKER_PHASES", "put,get,check")),
 		config.Int("GAME_CORE_CHECKER_TIMEOUT_SECONDS", 15),
@@ -83,17 +109,6 @@ func run(ctx context.Context) error {
 		config.Secret("CONTROLLER_INTERNAL_TOKEN", "ADMIN_API_TOKEN"),
 	)
 	httpapi.RegisterMetricsSource(info.Name, server)
-	matchStartAt, err := optionalRFC3339Env("GAME_CORE_MATCH_START_AT")
-	if err != nil {
-		return err
-	}
-	matchEndAt, err := optionalRFC3339Env("GAME_CORE_MATCH_END_AT")
-	if err != nil {
-		return err
-	}
-	if matchStartAt != nil && matchEndAt != nil && matchEndAt.Before(*matchStartAt) {
-		return errors.New("GAME_CORE_MATCH_END_AT must not be earlier than GAME_CORE_MATCH_START_AT")
-	}
 	server.matchStartAt = matchStartAt
 	server.matchEndAt = matchEndAt
 	scheduler := newIntervalGameScheduler(

@@ -16,6 +16,10 @@ type failingGameStore struct{}
 
 var _ gameStore = failingGameStore{}
 
+func (failingGameStore) ApplyStartupPlatformSettings(context.Context, string, *int) (string, error) {
+	return "", errGameStoreDown
+}
+
 func (failingGameStore) ListCheckerTargets(ctx context.Context) (r0 []checkerTarget, err error) {
 	err = errGameStoreDown
 	return

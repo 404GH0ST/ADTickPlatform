@@ -43,6 +43,13 @@ type faultingGameStore struct {
 
 var _ gameStore = faultingGameStore{}
 
+func (s faultingGameStore) ApplyStartupPlatformSettings(ctx context.Context, configuredPrefix string, maxTeamMembers *int) (string, error) {
+	if s.faults.fail() {
+		return "", errGameStoreDown
+	}
+	return s.inner.ApplyStartupPlatformSettings(ctx, configuredPrefix, maxTeamMembers)
+}
+
 func (s faultingGameStore) ListCheckerTargets(ctx context.Context) (r0 []checkerTarget, err error) {
 	if s.faults.fail() {
 		err = errGameStoreDown
