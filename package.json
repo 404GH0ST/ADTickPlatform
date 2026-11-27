@@ -1,12 +1,12 @@
 {
   "name": "ad-platform",
   "private": true,
-  "packageManager": "bun@1.4.4",
+  "packageManager": "bun@1.4.5",
   "workspaces": [
     "apps/*"
   ],
   "overrides": {
-    "postcss": "8.5.32"
+    "postcss": "8.5.33"
   },
   "scripts": {
     "release-notes": "./scripts/release-notes.sh",
