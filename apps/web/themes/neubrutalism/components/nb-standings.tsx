@@ -33,9 +33,6 @@ function RankDelta({ delta }: { delta: string }) {
   );
 }
 
-/** Above this many teams the per-service breakdown starts collapsed. */
-const DETAIL_OPEN_MAX_TEAMS = 8;
-
 /**
  * Standings list shared by the participant and organizer boards: one row per
  * team with totals, then (toggleable) a card per service with its signed
@@ -43,7 +40,7 @@ const DETAIL_OPEN_MAX_TEAMS = 8;
  */
 export function NbStandings({
   rows,
-  teamCount = rows.length,
+  defaultShowServiceScores = true,
   currentTeamName,
   showDelta = false,
   title = "Standings",
@@ -53,7 +50,7 @@ export function NbStandings({
   testId,
 }: {
   rows: ScoreRow[];
-  teamCount?: number;
+  defaultShowServiceScores?: boolean;
   currentTeamName?: string;
   showDelta?: boolean;
   title?: string;
@@ -64,7 +61,7 @@ export function NbStandings({
 }) {
   const hasDetail = rows.some((row) => row.services && row.services.length > 0);
   const [detailPreference, setDetailPreference] = useState<boolean | null>(null);
-  const showDetail = detailPreference ?? (teamCount <= DETAIL_OPEN_MAX_TEAMS);
+  const showDetail = detailPreference ?? defaultShowServiceScores;
   return (
     <div className="nb-panel @container overflow-hidden" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b-[3px] border-border px-5 py-3">

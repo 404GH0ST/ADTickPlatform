@@ -15,6 +15,8 @@ import {
 
 import { NbStandings } from "./nb-standings";
 
+const DETAIL_OPEN_MAX_TEAMS = 8;
+
 /**
  * Organizer scoreboard: the same standings design participants see (plus rank
  * movement), then freeze, replay audit and award leaders from the stock tab.
@@ -37,7 +39,7 @@ export function NbOrganizerScoreboard({
         testId="authoritative-scoreboard-card"
         title="Live standings"
         rows={rows}
-        teamCount={scoreRows.length}
+        defaultShowServiceScores={scoreRows.length <= DETAIL_OPEN_MAX_TEAMS}
         showDelta
         emptyMessage={
           unavailable

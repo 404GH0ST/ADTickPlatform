@@ -39,6 +39,27 @@ test.describe("as a participant", () => {
     await expect(page.locator('[data-current-team="true"]')).toHaveCount(1);
   });
 
+  test("participant per-service scores open by default for large rosters", async ({ page }) => {
+    const service = { challenge_id: 1, service: "Fixture service", attack: 5, defense: 4, sla: 3, total: 12 };
+    const rows = Array.from({ length: 10 }, (_, index) => ({
+      rank: index + 1, team: `Fixture team ${index + 1}`, attack: 5, defense: 4, sla: 3, total: 12, delta: "0", services: [service],
+    }));
+    await page.route("**/api/platform/realtime/scoreboard/stream", (route) =>
+      route.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify(rows)}\n\n` }),
+    );
+
+    await page.goto("/scoreboard");
+    const toggle = page.getByRole("button", { name: "Per-service scores" });
+    const scores = page.getByTestId("nb-service-score");
+    await expect(page.getByTestId("nb-score-row")).toHaveCount(rows.length);
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(scores).toHaveCount(rows.length);
+
+    await toggle.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(scores).toHaveCount(0);
+  });
+
   test("services features work through the redesigned view", async ({ page }) => {
     await page.goto("/services");
     const card = page.getByTestId("nb-service-svc-1");
