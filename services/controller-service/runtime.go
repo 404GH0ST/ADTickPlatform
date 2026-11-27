@@ -268,9 +268,11 @@ func (e *dockerCLIExecutor) EnsureService(ctx context.Context, task apigateway.C
 			return err
 		}
 		if len(info.Config.Entrypoint) == 1 && info.Config.Entrypoint[0] == captureGate {
-			// Existing guarded containers without the DNS restriction must be
-			// recreated so the current egress policy actually applies.
-			if err := e.verifyContainerDNS(overallCtx, task); err == nil {
+			// Existing guarded containers without the DNS restriction, or whose
+			// baked checker token a redeploy has since rotated, must be
+			// recreated: the DNS policy and the token both take effect only at
+			// container creation, so a warm reconcile would leave stale ones.
+			if err := e.verifyContainerDNS(overallCtx, task); err == nil && checkerTokenCurrent(info, task) {
 				if err = e.reconcileCapturedService(overallCtx, task); err != nil {
 					e.stopCapturedService(task.ContainerName)
 					return err

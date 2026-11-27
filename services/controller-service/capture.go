@@ -35,6 +35,7 @@ type captureInspect struct {
 	Config struct {
 		Entrypoint  []string
 		Cmd         []string
+		Env         []string
 		User        string
 		Healthcheck struct{ Test []string }
 		Labels      map[string]string
@@ -119,6 +120,29 @@ func (e *dockerCLIExecutor) inspectCapture(ctx context.Context, name string) (ca
 		return info, fmt.Errorf("invalid capture runtime metadata")
 	}
 	return list[0], nil
+}
+
+// capturedCheckerToken returns the AD_CHECKER_TOKEN baked into the inspected
+// container, or "" when absent. A guarded container's environment is fixed at
+// creation, so this is the token the in-container checker gate authenticates
+// with.
+func capturedCheckerToken(info captureInspect) string {
+	for _, kv := range info.Config.Env {
+		if token, ok := strings.CutPrefix(kv, "AD_CHECKER_TOKEN="); ok {
+			return token
+		}
+	}
+	return ""
+}
+
+// checkerTokenCurrent reports whether a running guarded container may be kept
+// by a warm reconcile, or must be recreated because its baked checker token no
+// longer matches the task's. A redeploy rotates the database token; the token
+// is baked into the container environment and cannot change in place, so a warm
+// reconcile would leave the gate rejecting every checker put. An empty task
+// token means no token is managed for this task, which matches.
+func checkerTokenCurrent(info captureInspect, task apigateway.ControllerRuntimeTask) bool {
+	return task.CheckerToken == "" || capturedCheckerToken(info) == task.CheckerToken
 }
 func (e *dockerCLIExecutor) capturePolicy(ctx context.Context, args ...string) error {
 	output, err := exec.CommandContext(ctx, e.captureTool, args...).CombinedOutput()
