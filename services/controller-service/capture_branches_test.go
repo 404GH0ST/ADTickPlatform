@@ -401,7 +401,7 @@ func guardedStopped(t *testing.T) captureInspect {
 func TestSweepCaptureAndMonitor(t *testing.T) {
 	ctx := context.Background()
 	good := inspectJSON(t, guardedInspect())
-	psGuarded := "ps --filter label=adplatform.capture=guarded *"
+	psGuarded := "ps -a --filter label=adplatform.capture=guarded *"
 
 	e, _, _ := captureWorld{dockerRules: []cliRule{on(psGuarded, reply("", 1))}}.executor(t)
 	if err := e.sweepCapture(ctx); err == nil {
@@ -433,7 +433,7 @@ func TestSweepCaptureAndMonitor(t *testing.T) {
 	stop := e.startCaptureMonitor()
 	time.Sleep(120 * time.Millisecond)
 	stop()
-	if callsMatching(dockerCalls(), "ps --filter") == 0 {
+	if callsMatching(dockerCalls(), "ps -a --filter") == 0 {
 		t.Fatal("the monitor must sweep periodically")
 	}
 	defaulted := guardedExecutor(t, "docker", "tool")
@@ -478,7 +478,7 @@ func (c *cancelAfterFirstCheck) Err() error {
 
 func TestSweepCaptureStopsWhenCancelled(t *testing.T) {
 	good := inspectJSON(t, guardedInspect())
-	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(good, 0))}}.executor(t)
+	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps -a --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(good, 0))}}.executor(t)
 	// Stamps fresh so only cancellation, not staleness, can end the sweep.
 	e.captureSeen = map[string]captureStamp{"cid-1": {Started: guardedInspect().State.StartedAt, Verified: time.Now()}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -500,7 +500,7 @@ func TestSweepCaptureBatchesInspects(t *testing.T) {
 	second.Name = "/svc-102-1"
 	second.Config.Labels = map[string]string{"adplatform.capture": "guarded", "adplatform.capture_owner": "capvol", "adplatform.team_id": "102", "adplatform.challenge_id": "1", "adplatform.service_ip": "10.80.1.102"}
 	both := inspectJSON(t, first, second)
-	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(both, 0))}}.executor(t)
+	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps -a --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(both, 0))}}.executor(t)
 	// Fresh stamps: the sweep should inspect once and reconcile nothing.
 	now := time.Now()
 	e.captureSeen = map[string]captureStamp{"cid-1": {Started: first.State.StartedAt, Verified: now}, "cid-2": {Started: second.State.StartedAt, Verified: now}}
@@ -509,5 +509,35 @@ func TestSweepCaptureBatchesInspects(t *testing.T) {
 	}
 	if n := callsMatching(dockerCalls(), "inspect "); n != 1 {
 		t.Fatalf("the fleet must be inspected in one docker call, saw %d: %v", n, dockerCalls())
+	}
+}
+
+// TestSweepCaptureRestartsStoppedContainer proves the sweep recovers a guarded
+// container it had previously stopped: it lists stopped containers (ps -a) and
+// reconciles one even when its last verification is still fresh.
+func TestSweepCaptureRestartsStoppedContainer(t *testing.T) {
+	stopped := guardedInspect()
+	stopped.State.Running = false
+	running := guardedInspect()
+	e, dockerCalls, _ := captureWorld{
+		dockerRules: []cliRule{
+			on("ps -a --filter *", reply("svc-101-1\n", 0)),
+			// batch-decision inspect, then reconcile's own two inspects.
+			seq(inspectSvc, reply(inspectJSON(t, stopped), 0), reply(inspectJSON(t, stopped), 0), reply(inspectJSON(t, running), 0)),
+			seq(gateProbe, reply("starting", 1), reply(testNonce+"\n", 0)),
+		},
+		toolRules: []cliRule{
+			seq("check *", reply("missing", 1), reply("missing", 1), reply("", 0)),
+			seq("rx-check *", reply("missing", 1), reply("", 0)),
+		},
+	}.executor(t)
+	// Fresh stamp: a running container with this stamp would be skipped, so this
+	// proves the recovery is driven by the stopped state, not staleness.
+	e.captureSeen = map[string]captureStamp{"cid-1": {Started: stopped.State.StartedAt, Verified: time.Now()}}
+	if err := e.sweepCapture(context.Background()); err != nil {
+		t.Fatalf("sweep recovering a stopped container failed: %v\ndocker: %v", err, dockerCalls())
+	}
+	if callsMatching(dockerCalls(), "start svc-101-1") == 0 {
+		t.Fatalf("a stopped guarded container must be restarted by the sweep: %v", dockerCalls())
 	}
 }

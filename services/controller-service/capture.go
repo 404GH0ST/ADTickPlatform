@@ -403,7 +403,9 @@ func (e *dockerCLIExecutor) rememberCapture(info captureInspect) {
 	e.captureSeen[info.ID] = captureStamp{info.State.StartedAt, time.Now()}
 }
 func (e *dockerCLIExecutor) sweepCapture(ctx context.Context) error {
-	output, err := e.execDocker(ctx, "ps", "--filter", "label=adplatform.capture=guarded", "--filter", "label=adplatform.capture_owner="+e.captureVolume, "--format", "{{.Names}}")
+	// -a so a guarded container the guard previously stopped is still listed and
+	// can be recovered; a running-only listing would orphan it permanently.
+	output, err := e.execDocker(ctx, "ps", "-a", "--filter", "label=adplatform.capture=guarded", "--filter", "label=adplatform.capture_owner="+e.captureVolume, "--format", "{{.Names}}")
 	if err != nil {
 		return err
 	}
@@ -477,7 +479,10 @@ func (e *dockerCLIExecutor) reconcileCaptureInstance(ctx context.Context, name s
 	e.captureMu.Lock()
 	stamp := e.captureSeen[info.ID]
 	e.captureMu.Unlock()
-	if stamp.Started == info.State.StartedAt && time.Since(stamp.Verified) <= 30*time.Second {
+	// A stopped guarded container is always reconciled (which restarts it), even
+	// when its stamp is fresh: otherwise a recent verification would keep it
+	// "current" and it would never be brought back up.
+	if info.State.Running && stamp.Started == info.State.StartedAt && time.Since(stamp.Verified) <= 30*time.Second {
 		return nil
 	}
 	team, _ := strconv.Atoi(info.Config.Labels["adplatform.team_id"])
