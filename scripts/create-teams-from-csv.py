@@ -20,6 +20,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = "team-keys.txt"
 NAME_HEADERS = {"team name", "team_name", "team", "name"}
 EMAIL_HEADERS = {"email", "contact_email", "contact email", "team email", "team_email"}
+INSTITUTION_HEADERS = {"institution", "school", "university", "organization", "organisation", "affiliation"}
+# Matches maxTeamInstitutionLength in the API gateway; checked up front so a bad
+# row fails the import before any team is created.
+MAX_INSTITUTION_LENGTH = 120
 
 
 def is_truthy(value: str | None) -> bool:
@@ -121,7 +125,14 @@ def find_column(headers: Iterable[str], candidates: set[str]) -> str | None:
     return None
 
 
-def read_teams(csv_path: Path) -> list[tuple[str, str]]:
+def normalize_institution(value: str, line_number: int) -> str:
+    institution = " ".join(value.split())
+    if len(institution) > MAX_INSTITUTION_LENGTH:
+        raise SystemExit(f"CSV line {line_number} institution must be at most {MAX_INSTITUTION_LENGTH} characters.")
+    return institution
+
+
+def read_teams(csv_path: Path) -> list[tuple[str, str, str]]:
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.reader(handle))
 
@@ -136,11 +147,12 @@ def read_teams(csv_path: Path) -> list[tuple[str, str]]:
         and (normalized_first & EMAIL_HEADERS or {cell.replace("_", " ") for cell in normalized_first} & EMAIL_HEADERS)
     )
 
-    teams: list[tuple[str, str]] = []
+    teams: list[tuple[str, str, str]] = []
     if has_header:
         headers = first_row
         name_column = find_column(headers, NAME_HEADERS)
         email_column = find_column(headers, EMAIL_HEADERS)
+        institution_column = find_column(headers, INSTITUTION_HEADERS)
         if name_column is None or email_column is None:
             raise SystemExit("CSV header must include team name and email columns.")
         for line_number, row in enumerate(rows[1:], start=2):
@@ -149,20 +161,22 @@ def read_teams(csv_path: Path) -> list[tuple[str, str]]:
             email = record.get(email_column, "").strip()
             if not name or not email:
                 raise SystemExit(f"CSV line {line_number} must include both team name and email.")
-            teams.append((name, email))
+            institution = normalize_institution(record.get(institution_column, "") if institution_column else "", line_number)
+            teams.append((name, email, institution))
     else:
         for line_number, row in enumerate(rows, start=1):
             if len(row) < 2:
-                raise SystemExit(f"CSV line {line_number} must have at least two columns: team name,email.")
+                raise SystemExit(f"CSV line {line_number} must have at least two columns: team name,email[,institution].")
             name = row[0].strip()
             email = row[1].strip()
             if not name or not email:
                 raise SystemExit(f"CSV line {line_number} must include both team name and email.")
-            teams.append((name, email))
+            institution = normalize_institution(row[2] if len(row) > 2 else "", line_number)
+            teams.append((name, email, institution))
 
     seen_names: set[str] = set()
     seen_emails: set[str] = set()
-    for name, email in teams:
+    for name, email, _institution in teams:
         name_key = name.casefold()
         email_key = email.casefold()
         if name_key in seen_names:
@@ -181,8 +195,12 @@ def create_team(
     ssl_context: ssl.SSLContext | None,
     name: str,
     email: str,
+    institution: str,
 ) -> dict[str, object]:
-    payload = json.dumps({"name": name, "contact_email": email}).encode()
+    body: dict[str, str] = {"name": name, "contact_email": email}
+    if institution:
+        body["institution"] = institution
+    payload = json.dumps(body).encode()
     request = urllib.request.Request(
         f"{api_url}/api/v2/admin/teams",
         data=payload,
@@ -208,7 +226,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create platform teams from a CSV containing team name and email columns.",
     )
-    parser.add_argument("csv", type=Path, help="CSV file. Use headers or plain rows: team name,email")
+    parser.add_argument("csv", type=Path, help="CSV file. Use headers (team name, email, optional institution) or plain rows: team name,email[,institution]")
     parser.add_argument("-o", "--output", type=Path, default=Path(DEFAULT_OUTPUT), help=f"output txt file (default: {DEFAULT_OUTPUT})")
     parser.add_argument("--api-url", help="admin API base URL (default: AD_PLATFORM_API_URL or http://localhost:8080)")
     parser.add_argument("--admin-token", help="admin bearer token (default: ADMIN_API_TOKEN)")
@@ -228,8 +246,9 @@ def main() -> int:
 
     if args.dry_run:
         print(f"parsed {len(teams)} team(s):")
-        for name, email in teams:
-            print(f"- {name} <{email}>")
+        for name, email, institution in teams:
+            suffix = f" [{institution}]" if institution else ""
+            print(f"- {name} <{email}>{suffix}")
         return 0
 
     api_url = resolve_api_url(args.api_url)
@@ -240,8 +259,8 @@ def main() -> int:
 
     key_lines: list[str] = []
     print(f"creating {len(teams)} team(s) via {api_url}")
-    for name, email in teams:
-        response = create_team(api_url, admin_token, ssl_context, name, email)
+    for name, email, institution in teams:
+        response = create_team(api_url, admin_token, ssl_context, name, email, institution)
         join_key = str(response.get("join_key") or response.get("team_key") or "").strip()
         if not join_key:
             raise SystemExit(f"create team {name!r} succeeded but response did not include join_key.")
