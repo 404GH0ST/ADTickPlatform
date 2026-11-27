@@ -162,32 +162,37 @@ export function NbStandings({
                       aria-label={`${row.team} per-service scores`}
                       className="col-span-full mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),1fr))] gap-2 @[42rem]:col-[2/-1]"
                     >
+                      {/* The cards share row tracks. Query containers sit inside them so size containment cannot isolate those tracks. */}
                       {row.services.map((service) => (
                         <li
                           key={service.challenge_id}
                           data-testid="nb-service-score"
-                          className="@container grid grid-cols-1 gap-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent bg-[var(--nb-zebra)] px-1.5 py-2 text-xs text-card-foreground @[12rem]:px-3"
+                          className="row-span-2 grid grid-cols-1 grid-rows-subgrid gap-y-1 rounded-[var(--nb-radius-sm)] border-2 border-transparent bg-[var(--nb-zebra)] px-1.5 py-2 text-xs text-card-foreground @[12rem]:px-3"
                         >
-                          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1 wrap-anywhere">
-                            <span className="text-sm font-bold">{service.service}</span>
-                            <span
-                              className={cn("nb-display ms-auto text-end text-sm font-extrabold tabular-nums @[9rem]:text-base", service.total < 0 && "text-negative")}
-                            >
-                              {service.total > 0 ? "+" : ""}
-                              {format(service.total)}
-                            </span>
-                          </span>
-                          <span className="grid min-w-0 grid-cols-1 gap-1.5 tabular-nums @[9rem]:grid-cols-2 @[16rem]:grid-cols-[repeat(2,minmax(0,1fr))_minmax(0,1.5fr)]">
-                            <span className="nb-sticker nb-stat nb-stat-a min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Attack">
-                              <span className="min-w-0"><span aria-hidden>A </span><span className="sr-only">Attack </span>{format(service.attack)}</span>
-                            </span>
-                            <span className="nb-sticker nb-stat nb-stat-d min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Defense">
-                              <span className="min-w-0"><span aria-hidden>D </span><span className="sr-only">Defense </span>{format(service.defense)}</span>
-                            </span>
-                            <span className="nb-sticker nb-stat nb-stat-sla col-span-full min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal @[16rem]:col-span-1" title="SLA">
-                              SLA {format(service.sla)}
-                            </span>
-                          </span>
+                          <div className="@container min-w-0">
+                            <div className="grid items-baseline gap-x-3 gap-y-1 wrap-anywhere @[9rem]:grid-cols-[minmax(0,1fr)_fit-content(50%)]">
+                              <span className="text-sm font-bold">{service.service}</span>
+                              <span
+                                className={cn("nb-display min-w-0 text-end text-sm font-extrabold tabular-nums @[9rem]:text-base", service.total < 0 && "text-negative")}
+                              >
+                                {service.total > 0 ? "+" : ""}
+                                {format(service.total)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="@container grid min-w-0">
+                            <div className="grid min-w-0 grid-cols-1 gap-1.5 tabular-nums @[9rem]:grid-cols-2 @[16rem]:grid-cols-[repeat(2,minmax(0,1fr))_minmax(0,1.5fr)]">
+                              <span className="nb-sticker nb-stat nb-stat-a min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Attack">
+                                <span className="min-w-0"><span aria-hidden>A </span><span className="sr-only">Attack </span>{format(service.attack)}</span>
+                              </span>
+                              <span className="nb-sticker nb-stat nb-stat-d min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal" title="Defense">
+                                <span className="min-w-0"><span aria-hidden>D </span><span className="sr-only">Defense </span>{format(service.defense)}</span>
+                              </span>
+                              <span className="nb-sticker nb-stat nb-stat-sla col-span-full min-w-0 justify-center px-1 py-0 text-center text-[0.6875rem] wrap-anywhere whitespace-normal @[16rem]:col-span-1" title="SLA">
+                                SLA {format(service.sla)}
+                              </span>
+                            </div>
+                          </div>
                         </li>
                       ))}
                     </ul>

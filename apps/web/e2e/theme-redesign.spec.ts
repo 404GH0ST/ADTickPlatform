@@ -456,11 +456,12 @@ test("organizer scoreboard fits long team names and large service scores", async
   const teams = ["East", "West"].map(
     (suffix) => `Northern Collegiate Infrastructure and Security Research Team ${suffix}`,
   );
-  const services = [1, 2, 3].map((id) => ({
-    challenge_id: id,
-    service: `Scoring fixture ${id}`,
+  const serviceNames = ["Decrypt as a Service with a long challenge name", "Last Call", "Piksel"];
+  const services = serviceNames.map((service, index) => ({
+    challenge_id: index + 1,
+    service,
     attack: 6530.25,
-    defense: id === 1 ? -1 : -3678.75,
+    defense: index === 0 ? -1 : -3678.75,
     sla: 2801.59,
     total: 13010.59,
   }));
@@ -528,6 +529,16 @@ test("organizer scoreboard fits long team names and large service scores", async
 
   const cards = page.getByTestId("nb-service-score");
   await expect(cards).toHaveCount(6);
+  const serviceRow = standings.first().getByTestId("nb-service-score");
+  const longName = serviceRow.nth(0).getByText(serviceNames[0], { exact: true });
+  const shortName = serviceRow.nth(1).getByText(serviceNames[1], { exact: true });
+  expect((await longName.boundingBox())!.height).toBeGreaterThan((await shortName.boundingBox())!.height);
+  expect(await serviceRow.evaluateAll((cards) => {
+    const badgeTops = cards.map((card) => Array.from(card.querySelectorAll(".nb-sticker"),
+      (badge) => badge.getBoundingClientRect().top,
+    ));
+    return badgeTops.every((tops) => tops.every((top, index) => Math.abs(top - badgeTops[0][index]) <= 1));
+  }), "badges align across service cards with different name lengths").toBe(true);
   const stacked = await cards.evaluateAll((cards) => cards.every((card) => {
     const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
       (chip) => chip.getBoundingClientRect(),
@@ -550,7 +561,7 @@ test("organizer scoreboard fits long team names and large service scores", async
   await page.setViewportSize({ width: 320, height: 850 });
   const enlargedText = await page.addStyleTag({ content: "html { font-size: 32px; }" });
   expect(await total.evaluate(fitsOnOneLine), "total fits at 200% text size").toBe(true);
-  await expect(cards.first().getByText("Scoring fixture 1", { exact: true })).toBeVisible();
+  await expect(longName).toBeVisible();
   const fullRows = await cards.evaluateAll((cards) => cards.every((card) => {
     const [attack, defense, sla] = Array.from(card.querySelectorAll(".nb-sticker"),
       (chip) => chip.getBoundingClientRect(),
