@@ -454,3 +454,32 @@ func TestScoringRecomputeTimers(t *testing.T) {
 	}
 	failing.scoringMu.Unlock()
 }
+
+// A finished match sits behind the match-pause firewall, which also drops
+// checker traffic, so a required warmup could never pass before a restart.
+// Restarting skips it; a first start is still gated.
+func TestRestartingAFinishedMatchSkipsTheWarmup(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryGameStore()
+	server := newGameCoreServer("dev-admin-token", store, testCheckerClient{failPhase: "put"}, newFlagCodec("s", "PLAYIT"), &testGameScheduler{}, []string{"put", "get", "check"}, 15).
+		WithWarmupRequired(true).
+		WithAutoTickOnMatchStart(false)
+	mux := serverMux(server)
+	if response := call(mux, http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusConflict {
+		t.Fatalf("a first start is gated by a failing warmup: %d %s", response.Code, response.Body.String())
+	}
+
+	if _, err := store.StartMatch(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StopMatch(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// The checker still fails every put: a warmup here would answer 409.
+	if response := call(mux, http.MethodPost, "/internal/v1/game/match/start", ""); response.Code != http.StatusOK {
+		t.Fatalf("restart must skip the warmup: %d %s", response.Code, response.Body.String())
+	}
+	if status, err := server.matchStatus(ctx); err != nil || status.State != "running" {
+		t.Fatalf("the finished match is running again: %+v %v", status, err)
+	}
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,5 +50,22 @@ func TestTimedOutWarmupDoesNotCountUnattemptedTargets(t *testing.T) {
 	}
 	if result.Status == "passed" {
 		t.Fatalf("an aborted warmup that verified %d/%d targets must not pass: %+v", result.PutSuccess, result.TotalTargets, result)
+	}
+}
+
+// A timed-out warmup names the targets it never reached separately from the
+// ones whose put actually failed.
+func TestTimedOutWarmupMessageSeparatesUnreachedTargets(t *testing.T) {
+	server := newGameCoreServer("dev-admin-token", newMemoryGameStore(), &firstPutHangs{}, newFlagCodec("s", "PLAYIT"), &testGameScheduler{}, []string{"put"}, 15).
+		WithCheckerParallelism(1).
+		WithWarmupPutRetries(0).
+		WithWarmupTimeout(50 * time.Millisecond)
+	result, _ := server.runWarmup(context.Background())
+	unreached := result.PutFailed - len(result.Failures)
+	if result.Status != "failed" || unreached <= 0 {
+		t.Fatalf("fixture needs a timed-out warmup with unreached targets: %+v", result)
+	}
+	if !strings.Contains(result.Message, "timed out") || !strings.Contains(result.Message, fmt.Sprintf("%d were not reached", unreached)) {
+		t.Fatalf("message must report unreached targets apart from failures: %q", result.Message)
 	}
 }

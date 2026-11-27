@@ -447,7 +447,12 @@ func (s *gameCoreServer) handleStartMatch(w http.ResponseWriter, r *http.Request
 	// its existing ticks and scores.
 	restarting := current.State == "finished"
 
-	if s.warmupRequired {
+	// The warmup gates the first start only. A finished match sits behind the
+	// match-pause firewall, which drops checker traffic too, and that guard
+	// lifts only once the match is running again, so a warmup here could never
+	// pass. The services were verified at the first start, and the restart's
+	// first tick runs every checker phase against them anyway.
+	if s.warmupRequired && !restarting {
 		warmup, warmupErr := s.runWarmup(r.Context())
 		if warmupErr != nil {
 			writeProblem(w, http.StatusInternalServerError, "Warmup failed", warmupErr.Error())
@@ -1212,7 +1217,15 @@ producer:
 		result.Status = "passed"
 	} else {
 		result.Status = "failed"
-		if result.Message == "" && result.PutFailed > 0 {
+		// Targets the warmup never reached are unverified, not failed: report
+		// them apart so a timeout is not mistaken for every checker failing.
+		unreached := result.PutFailed - len(failures)
+		switch {
+		case result.Message != "" || result.PutFailed == 0:
+		case aborted && unreached > 0:
+			result.Message = fmt.Sprintf("warmup timed out after %s: %d of %d targets failed put phase and %d were not reached (required success rate: %.0f%%)",
+				s.warmupTimeout, len(failures), result.TotalTargets, unreached, s.warmupMinSuccess*100)
+		default:
 			result.Message = fmt.Sprintf("%d of %d targets failed put phase (required success rate: %.0f%%)",
 				result.PutFailed, result.TotalTargets, s.warmupMinSuccess*100)
 		}
