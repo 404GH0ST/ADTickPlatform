@@ -310,6 +310,15 @@ func (s *intervalGameScheduler) run(ctx context.Context, interval time.Duration)
 		tickCtx, tickCancel := context.WithCancel(ctx)
 		tick, err := s.advance(tickCtx)
 		tickCancel()
+		// Stop as soon as the match is over (a tick refused for it, or a
+		// scheduled end passed during this tick) instead of looping on
+		// refused ticks until the match monitor notices.
+		matchFinished := errors.Is(err, errContestOver)
+		if !matchFinished && s.match != nil {
+			if match, matchErr := s.match(ctx); matchErr == nil && match.State == "finished" {
+				matchFinished = true
+			}
+		}
 		now := s.now().UTC()
 
 		elapsed := now.Sub(tickStart)
@@ -326,7 +335,10 @@ func (s *intervalGameScheduler) run(ctx context.Context, interval time.Duration)
 		s.status.LastRunAt = now.Format(time.RFC3339)
 		s.status.NextRunAt = now.Add(nextWait).Format(time.RFC3339)
 		s.status.IntervalSeconds = int(s.interval / time.Second)
-		if err != nil {
+		switch {
+		case errors.Is(err, errContestOver):
+			// Not a tick failure: the match ended. The stop below records it.
+		case err != nil:
 			s.status.LastError = strings.TrimSpace(err.Error())
 			s.persistLocked(now)
 			s.appendEventLocked(now, schedulerEventRecord{
@@ -335,7 +347,7 @@ func (s *intervalGameScheduler) run(ctx context.Context, interval time.Duration)
 				State:     s.status.State,
 				Message:   s.status.LastError,
 			})
-		} else {
+		default:
 			s.status.LastTickID = tick.ID
 			s.status.LastError = ""
 			s.persistLocked(now)
@@ -346,6 +358,11 @@ func (s *intervalGameScheduler) run(ctx context.Context, interval time.Duration)
 				TickID:    tick.ID,
 				Message:   "scheduled tick completed successfully",
 			})
+		}
+		if matchFinished {
+			_, _ = s.stopLocked("scheduler", "scheduler stopped: the match finished")
+			s.mu.Unlock()
+			return
 		}
 		s.mu.Unlock()
 

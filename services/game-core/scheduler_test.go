@@ -194,3 +194,45 @@ func TestIntervalGameSchedulerRestoreStopsWhenMatchPaused(t *testing.T) {
 		t.Fatalf("persisted state = %q, want stopped", persisted.State)
 	}
 }
+
+// The scheduler stops itself when its tick ends the match (a scheduled end
+// passing) or a tick is refused because the match is over, without waiting for
+// the match monitor.
+func TestIntervalGameSchedulerStopsWhenTheMatchFinishes(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		store := newMemoryGameStore()
+		if _, err := store.StartMatch(context.Background(), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		var ticks atomic.Int32
+		scheduler := newIntervalGameScheduler(store, 5*time.Millisecond, false, func(ctx context.Context) (apigateway.GameTickStatus, error) {
+			id := ticks.Add(1)
+			if id == 2 {
+				if _, err := store.StopMatch(ctx, time.Now()); err != nil {
+					return apigateway.GameTickStatus{}, err
+				}
+				if refuse {
+					return apigateway.GameTickStatus{}, errContestOver
+				}
+			}
+			return apigateway.GameTickStatus{ID: int(id), Status: "completed"}, nil
+		}, store.MatchStatus)
+
+		if _, err := scheduler.Start(); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for scheduler.Status().State == "running" && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		status := scheduler.Status()
+		if status.State != "stopped" || status.NextRunAt != "" || status.LastError != "" {
+			t.Fatalf("refuse=%v: the scheduler stops cleanly once the match finishes: %+v", refuse, status)
+		}
+		time.Sleep(30 * time.Millisecond)
+		if got := ticks.Load(); got != 2 {
+			t.Fatalf("refuse=%v: no tick runs after the match finished, got %d", refuse, got)
+		}
+		scheduler.Close()
+	}
+}
