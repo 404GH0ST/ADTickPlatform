@@ -189,22 +189,19 @@ def read_teams(csv_path: Path) -> list[tuple[str, str, str]]:
     return teams
 
 
-def create_team(
+def admin_request(
     api_url: str,
     admin_token: str,
     ssl_context: ssl.SSLContext | None,
-    name: str,
-    email: str,
-    institution: str,
-) -> dict[str, object]:
-    body: dict[str, str] = {"name": name, "contact_email": email}
-    if institution:
-        body["institution"] = institution
-    payload = json.dumps(body).encode()
+    method: str,
+    path: str,
+    body: dict[str, str] | None,
+    action: str,
+) -> object:
     request = urllib.request.Request(
-        f"{api_url}/api/v2/admin/teams",
-        data=payload,
-        method="POST",
+        f"{api_url}{path}",
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method,
         headers={
             "Authorization": f"Bearer {admin_token}",
             "Content-Type": "application/json",
@@ -216,10 +213,53 @@ def create_team(
         with urllib.request.urlopen(request, context=ssl_context, timeout=30) as response:
             return json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
-        body = error.read().decode(errors="replace")
-        raise SystemExit(f"create team {name!r} failed (status={error.code}):\n{body}") from error
+        detail = error.read().decode(errors="replace")
+        raise SystemExit(f"{action} failed (status={error.code}):\n{detail}") from error
     except urllib.error.URLError as error:
-        raise SystemExit(f"create team {name!r} failed: {error.reason}") from error
+        raise SystemExit(f"{action} failed: {error.reason}") from error
+
+
+def create_team(
+    api_url: str,
+    admin_token: str,
+    ssl_context: ssl.SSLContext | None,
+    name: str,
+    email: str,
+    institution: str,
+) -> dict[str, object]:
+    body = {"name": name, "contact_email": email}
+    if institution:
+        body["institution"] = institution
+    response = admin_request(api_url, admin_token, ssl_context, "POST", "/api/v2/admin/teams", body, f"create team {name!r}")
+    return response if isinstance(response, dict) else {}
+
+
+def list_teams(api_url: str, admin_token: str, ssl_context: ssl.SSLContext | None) -> list[dict[str, object]]:
+    response = admin_request(api_url, admin_token, ssl_context, "GET", "/api/v2/admin/teams", None, "list teams")
+    if not isinstance(response, list):
+        raise SystemExit("list teams returned an unexpected response.")
+    return [team for team in response if isinstance(team, dict)]
+
+
+def update_team_institution(
+    api_url: str,
+    admin_token: str,
+    ssl_context: ssl.SSLContext | None,
+    team: dict[str, object],
+    institution: str,
+) -> dict[str, object]:
+    # The update endpoint requires name and email; resend the stored values so
+    # only the institution changes.
+    body = {
+        "name": str(team.get("name") or ""),
+        "contact_email": str(team.get("contact_email") or ""),
+        "institution": institution,
+    }
+    response = admin_request(
+        api_url, admin_token, ssl_context, "PUT", f"/api/v2/admin/teams/{team.get('id')}", body,
+        f"update team {body['name']!r}",
+    )
+    return response if isinstance(response, dict) else {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -231,6 +271,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-url", help="admin API base URL (default: AD_PLATFORM_API_URL or http://localhost:8080)")
     parser.add_argument("--admin-token", help="admin bearer token (default: ADMIN_API_TOKEN)")
     parser.add_argument("--insecure", action="store_true", help="skip HTTPS certificate verification")
+    parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="for teams that already exist (matched by name), set the CSV institution instead of failing; "
+        "name, email and join key are left as they are",
+    )
     parser.add_argument("--dry-run", action="store_true", help="parse CSV and print teams without calling the API")
     return parser.parse_args()
 
@@ -257,15 +303,36 @@ def main() -> int:
     output_path = args.output.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    existing: dict[str, dict[str, object]] = {}
+    if args.update_existing:
+        existing_teams = list_teams(api_url, admin_token, ssl_context)
+        existing = {str(team.get("name") or "").casefold(): team for team in existing_teams}
+        existing_emails = {str(team.get("contact_email") or "").casefold(): team for team in existing_teams}
+        # Check every row before changing anything: a new name whose email
+        # belongs to another team would be rejected mid-run.
+        for name, email, _institution in teams:
+            owner = existing_emails.get(email.casefold())
+            if name.casefold() not in existing and owner is not None:
+                raise SystemExit(f"email {email} already belongs to team {owner.get('name')!r}, not {name!r}.")
+
     key_lines: list[str] = []
-    print(f"creating {len(teams)} team(s) via {api_url}")
+    print(f"processing {len(teams)} team(s) via {api_url}")
     for name, email, institution in teams:
-        response = create_team(api_url, admin_token, ssl_context, name, email, institution)
-        join_key = str(response.get("join_key") or response.get("team_key") or "").strip()
+        current = existing.get(name.casefold())
+        if current is not None:
+            if str(current.get("institution") or "") == institution:
+                response = current
+                print(f"unchanged {name}")
+            else:
+                response = update_team_institution(api_url, admin_token, ssl_context, current, institution)
+                print(f"updated {name}")
+        else:
+            response = create_team(api_url, admin_token, ssl_context, name, email, institution)
+            print(f"created {name}")
+        join_key = str(response.get("join_key") or response.get("team_key") or current and current.get("join_key") or "").strip()
         if not join_key:
-            raise SystemExit(f"create team {name!r} succeeded but response did not include join_key.")
+            raise SystemExit(f"team {name!r} has no join_key in the API response.")
         key_lines.append(f"{name}:{join_key}\n")
-        print(f"created {name}")
 
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False) as key_file:
         temporary_path = Path(key_file.name)
