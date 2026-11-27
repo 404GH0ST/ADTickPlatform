@@ -19,6 +19,7 @@ CHALLENGE_REPO_DIR="${CHALLENGE_REPO_DIR:-${ROOT_DIR}/../adplatform-challenges}"
 CHALLENGE_CATALOG_PATH="${CHALLENGE_CATALOG_PATH:-${CHALLENGE_REPO_DIR}/catalog/challenges.json}"
 IMPORT_VALIDATE="${IMPORT_VALIDATE:-false}"
 IMPORT_DEPLOY="${IMPORT_DEPLOY:-false}"
+IMPORT_EGRESS_ENABLED="${IMPORT_EGRESS_ENABLED:-}"
 
 if [[ "${API_URL}" == *"api-gateway"* ]] && [[ -n "${PUBLIC_URL}" ]]; then
   API_URL="${PUBLIC_URL}"
@@ -52,11 +53,13 @@ Environment overrides:
   CHALLENGE_CATALOG_PATH=<repo>/catalog/challenges.json
   IMPORT_VALIDATE=false|true
   IMPORT_DEPLOY=false|true
+  IMPORT_EGRESS_ENABLED=false|true  Leave unset to use the API defaults.
   AD_PLATFORM_API_URL
   AD_PLATFORM_PUBLIC_BASE_URL
   ADMIN_API_TOKEN
 
 Notes:
+  - optional category and protocol values in a catalog entry override its manifest.
   - source_bundle_path is imported as "<slug>" relative to AD_CHALLENGE_SOURCE_ROOT.
   - to make participant source downloads work, point CHALLENGE_SOURCE_HOST_PATH at:
       <challenge repo>/challenges
@@ -72,6 +75,18 @@ if [[ ! -f "${CHALLENGE_CATALOG_PATH}" ]]; then
   echo "challenge catalog not found: ${CHALLENGE_CATALOG_PATH}" >&2
   exit 1
 fi
+case "${IMPORT_EGRESS_ENABLED}" in
+  ""|true|false) ;;
+  *) echo "IMPORT_EGRESS_ENABLED must be true or false" >&2; exit 1 ;;
+esac
+
+manifest_entries="$(jq -cer '
+  if type == "array" and length > 0 and all(.[]; (.manifest | type == "string" and length > 0))
+  then .[]
+  else error("catalog must contain a nonempty list of manifest paths")
+  end
+' "${CHALLENGE_CATALOG_PATH}")"
+mapfile -t manifests <<<"${manifest_entries}"
 
 curl_json() {
   local label="$1"
@@ -112,9 +127,8 @@ admin_challenges="$(
     -H @<(bearer_header "${ADMIN_TOKEN}")
 )"
 
-mapfile -t manifests < <(jq -r '.[].manifest' "${CHALLENGE_CATALOG_PATH}")
-
-for manifest_ref in "${manifests[@]}"; do
+for manifest_entry in "${manifests[@]}"; do
+  manifest_ref="$(jq -r '.manifest' <<<"${manifest_entry}")"
   manifest_path="${CHALLENGE_REPO_DIR}/${manifest_ref}"
   if [[ ! -f "${manifest_path}" ]]; then
     echo "challenge manifest not found: ${manifest_path}" >&2
@@ -128,6 +142,8 @@ for manifest_ref in "${manifests[@]}"; do
   source_bundle_path="$(jq -r '(.source_bundle_path // .slug)' "${manifest_path}")"
   service_port="$(jq -r '(.service_port // .ports[0] // 0)' "${manifest_path}")"
   service_subnet_octet="$(jq -r '(.service_subnet_octet // 0)' "${manifest_path}")"
+  category="$(jq -r --argjson entry "${manifest_entry}" '$entry.category // .category // empty' "${manifest_path}")"
+  protocol="$(jq -r --argjson entry "${manifest_entry}" '$entry.protocol // .protocol // empty' "${manifest_path}")"
 
   existing_challenge="$(
     printf '%s\n' "${admin_challenges}" | jq -c \
@@ -142,36 +158,54 @@ for manifest_ref in "${manifests[@]}"; do
       --arg baseline_image "${service_image}" \
       --arg checker_image "${checker_image}" \
       --arg source_bundle_path "${source_bundle_path}" \
-      --argjson service_port "${service_port}" \
-      --argjson service_subnet_octet "${service_subnet_octet}" \
+      --arg category "${category}" \
+      --arg protocol "${protocol}" \
+      --argjson egress_enabled "${IMPORT_EGRESS_ENABLED:-null}" \
       '({
         name: $name,
         baseline_image: $baseline_image,
         checker_image: $checker_image,
         source_bundle_path: $source_bundle_path
       }
-      + (if $service_port > 0 then {service_port: $service_port} else {} end)
-      + (if $service_subnet_octet > 0 then {service_subnet_octet: $service_subnet_octet} else {} end))'
+      + (if $category != "" then {category: $category} else {} end)
+      + (if $protocol != "" then {protocol: $protocol} else {} end)
+      + (if $egress_enabled == null then {} else {egress_enabled: $egress_enabled} end))'
   )"
 
   if [[ -n "${existing_challenge}" ]]; then
     challenge_id="$(printf '%s\n' "${existing_challenge}" | jq -r '.id')"
     echo "updating ${display_name} (${challenge_id})"
-    curl_json "update challenge ${display_name}" \
-      -X PUT "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
-      -H @<(bearer_header "${ADMIN_TOKEN}") \
-      -H 'Content-Type: application/json' \
-      -d "${payload}" >/dev/null
+    imported="$(
+      curl_json "update challenge ${display_name}" \
+        -X PUT "${API_URL}/api/v2/admin/challenges/${challenge_id}" \
+        -H @<(bearer_header "${ADMIN_TOKEN}") \
+        -H 'Content-Type: application/json' \
+        -d "${payload}"
+    )"
   else
     echo "creating ${display_name}"
-    created="$(
+    payload="$(
+      jq -c \
+        --argjson service_port "${service_port}" \
+        --argjson service_subnet_octet "${service_subnet_octet}" \
+        '. + (if $service_port > 0 then {service_port: $service_port} else {} end)
+           + (if $service_subnet_octet > 0 then {service_subnet_octet: $service_subnet_octet} else {} end)' \
+        <<<"${payload}"
+    )"
+    imported="$(
       curl_json "create challenge ${display_name}" \
         -X POST "${API_URL}/api/v2/admin/challenges" \
         -H @<(bearer_header "${ADMIN_TOKEN}") \
         -H 'Content-Type: application/json' \
         -d "${payload}"
     )"
-    challenge_id="$(printf '%s\n' "${created}" | jq -r '.id')"
+    challenge_id="$(printf '%s\n' "${imported}" | jq -r '.id')"
+  fi
+
+  if [[ -n "${IMPORT_EGRESS_ENABLED}" ]] &&
+    ! jq -e --argjson expected "${IMPORT_EGRESS_ENABLED}" '.egress_enabled == $expected' <<<"${imported}" >/dev/null; then
+    echo "challenge ${display_name} returned an unexpected egress setting" >&2
+    exit 1
   fi
 
   if [[ "${IMPORT_VALIDATE}" == "true" ]]; then
