@@ -75,6 +75,7 @@ func newRuntimeExecutor() runtimeExecutor {
 			captureProcRoot:      config.String("CONTROLLER_CAPTURE_PROC_ROOT", "/host/proc"),
 			captureNetnsRoot:     config.String("CONTROLLER_CAPTURE_NETNS_ROOT", "/host/docker-netns"),
 			captureNetnsHostRoot: config.String("CAPTURE_NETNS_HOST_PATH", "/var/run/docker/netns"),
+			captureSweepInterval: config.Duration("CONTROLLER_CAPTURE_SWEEP_INTERVAL", 2*time.Second),
 			timeout:              config.Duration("CONTROLLER_RUNTIME_TIMEOUT", 15*time.Second),
 		}
 	default:

@@ -27,6 +27,7 @@ type captureStamp struct {
 }
 type captureInspect struct {
 	ID    string `json:"Id"`
+	Name  string `json:"Name"`
 	State struct {
 		Pid       int
 		Running   bool
@@ -120,6 +121,22 @@ func (e *dockerCLIExecutor) inspectCapture(ctx context.Context, name string) (ca
 		return info, fmt.Errorf("invalid capture runtime metadata")
 	}
 	return list[0], nil
+}
+
+// inspectCaptures inspects every named container in a single docker call. One
+// sweep of a large fleet would otherwise fork docker once per container. On any
+// error (for example a container removed between listing and inspect) the
+// caller falls back to inspecting each container on its own.
+func (e *dockerCLIExecutor) inspectCaptures(ctx context.Context, names []string) ([]captureInspect, error) {
+	output, err := e.execDocker(ctx, append([]string{"inspect"}, names...)...)
+	if err != nil {
+		return nil, err
+	}
+	var list []captureInspect
+	if err = json.Unmarshal(output, &list); err != nil {
+		return nil, fmt.Errorf("invalid capture runtime metadata")
+	}
+	return list, nil
 }
 
 // capturedCheckerToken returns the AD_CHECKER_TOKEN baked into the inspected
@@ -390,34 +407,85 @@ func (e *dockerCLIExecutor) sweepCapture(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range strings.Fields(string(output)) {
+	names := strings.Fields(string(output))
+	if len(names) == 0 {
+		return nil
+	}
+	// Inspect the whole fleet in one docker call. A container removed between
+	// the listing and the inspect fails the batch; fall back to per-container
+	// inspects so the rest of the sweep still runs.
+	infos, err := e.inspectCaptures(ctx, names)
+	if err != nil {
+		return e.sweepCaptureIndividually(ctx, names)
+	}
+	byName := make(map[string]captureInspect, len(infos))
+	for _, info := range infos {
+		byName[strings.TrimPrefix(info.Name, "/")] = info
+	}
+	for _, name := range names {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		info, ok := byName[name]
+		if !ok {
+			continue
 		}
 		// A busy instance is already being reconciled by its current operation.
 		lock := e.captureInstanceLock(name)
 		if !lock.TryLock() {
 			continue
 		}
-		info, err := e.inspectCapture(ctx, name)
-		if err == nil {
-			e.captureMu.Lock()
-			stamp := e.captureSeen[info.ID]
-			e.captureMu.Unlock()
-			if stamp.Started != info.State.StartedAt || time.Since(stamp.Verified) > 30*time.Second {
-				team, _ := strconv.Atoi(info.Config.Labels["adplatform.team_id"])
-				challenge, _ := strconv.Atoi(info.Config.Labels["adplatform.challenge_id"])
-				task := apigateway.ControllerRuntimeTask{TeamID: team, ChallengeID: challenge, ContainerName: name, SSHHost: info.Config.Labels["adplatform.service_ip"]}
-				err = e.reconcileCapturedService(ctx, task)
-			}
-		}
-		if err != nil {
-			e.stopCapturedService(name)
-		}
+		err := e.reconcileCaptureInstance(ctx, name, info)
 		lock.Unlock()
 		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sweepCaptureIndividually inspects and reconciles each container on its own, as
+// a fallback when a batch inspect fails.
+func (e *dockerCLIExecutor) sweepCaptureIndividually(ctx context.Context, names []string) error {
+	for _, name := range names {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		lock := e.captureInstanceLock(name)
+		if !lock.TryLock() {
+			continue
+		}
+		info, err := e.inspectCapture(ctx, name)
+		if err != nil {
+			e.stopCapturedService(name)
+			lock.Unlock()
 			return fmt.Errorf("capture guard recovery for %s: %w", name, err)
 		}
+		err = e.reconcileCaptureInstance(ctx, name, info)
+		lock.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reconcileCaptureInstance re-verifies one guarded container from an inspected
+// snapshot, reconciling it only when it has restarted or its last verification
+// has aged out. The caller holds the instance lock.
+func (e *dockerCLIExecutor) reconcileCaptureInstance(ctx context.Context, name string, info captureInspect) error {
+	e.captureMu.Lock()
+	stamp := e.captureSeen[info.ID]
+	e.captureMu.Unlock()
+	if stamp.Started == info.State.StartedAt && time.Since(stamp.Verified) <= 30*time.Second {
+		return nil
+	}
+	team, _ := strconv.Atoi(info.Config.Labels["adplatform.team_id"])
+	challenge, _ := strconv.Atoi(info.Config.Labels["adplatform.challenge_id"])
+	task := apigateway.ControllerRuntimeTask{TeamID: team, ChallengeID: challenge, ContainerName: name, SSHHost: info.Config.Labels["adplatform.service_ip"]}
+	if err := e.reconcileCapturedService(ctx, task); err != nil {
+		e.stopCapturedService(name)
+		return fmt.Errorf("capture guard recovery for %s: %w", name, err)
 	}
 	return nil
 }

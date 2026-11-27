@@ -45,7 +45,10 @@ func TestCaptureSweepSkipsBusyInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "inspect") || strings.Contains(string(body), "stop") {
-		t.Fatalf("the sweep must leave a busy instance alone: %s", body)
+	// A busy instance may be inspected as part of the batch, but must never be
+	// mutated (stopped, restarted, or exec'd into) while another operation holds
+	// its lock.
+	if strings.Contains(string(body), "stop") || strings.Contains(string(body), "restart") || strings.Contains(string(body), "exec") {
+		t.Fatalf("the sweep must not mutate a busy instance: %s", body)
 	}
 }

@@ -24,6 +24,7 @@ var testNonce = strings.Repeat("ab", 32)
 func guardedInspect() captureInspect {
 	var info captureInspect
 	info.ID = "cid-1"
+	info.Name = "/svc-101-1"
 	info.State.Pid = 4242
 	info.State.Running = true
 	info.State.StartedAt = "2026-11-19T00:00:00Z"
@@ -475,14 +476,38 @@ func (c *cancelAfterFirstCheck) Err() error {
 	return nil
 }
 
-func TestSweepCaptureStopsBetweenInstancesWhenCancelled(t *testing.T) {
+func TestSweepCaptureStopsWhenCancelled(t *testing.T) {
 	good := inspectJSON(t, guardedInspect())
-	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps --filter *", reply("svc-101-1\nsvc-101-1\n", 0)), on(inspectSvc, reply(good, 0))}}.executor(t)
+	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(good, 0))}}.executor(t)
+	// Stamps fresh so only cancellation, not staleness, can end the sweep.
 	e.captureSeen = map[string]captureStamp{"cid-1": {Started: guardedInspect().State.StartedAt, Verified: time.Now()}}
-	if err := e.sweepCapture(&cancelAfterFirstCheck{Context: context.Background()}); err == nil {
-		t.Fatal("cancellation between instances must stop the sweep")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := e.sweepCapture(ctx); err == nil {
+		t.Fatal("a cancelled sweep must stop")
 	}
-	if callsMatching(dockerCalls(), inspectSvc) != 1 {
-		t.Fatalf("only the first instance may be inspected: %v", dockerCalls())
+	if callsMatching(dockerCalls(), gateStatus) != 0 || callsMatching(dockerCalls(), "restart ") != 0 || callsMatching(dockerCalls(), "stop ") != 0 {
+		t.Fatalf("a cancelled sweep must not reconcile or stop any instance: %v", dockerCalls())
+	}
+}
+
+// TestSweepCaptureBatchesInspects proves the whole fleet is inspected in a
+// single docker call rather than one per container.
+func TestSweepCaptureBatchesInspects(t *testing.T) {
+	first := guardedInspect()
+	second := guardedInspect()
+	second.ID = "cid-2"
+	second.Name = "/svc-102-1"
+	second.Config.Labels = map[string]string{"adplatform.capture": "guarded", "adplatform.capture_owner": "capvol", "adplatform.team_id": "102", "adplatform.challenge_id": "1", "adplatform.service_ip": "10.80.1.102"}
+	both := inspectJSON(t, first, second)
+	e, dockerCalls, _ := captureWorld{dockerRules: []cliRule{on("ps --filter *", reply("svc-101-1\nsvc-102-1\n", 0)), on("inspect *", reply(both, 0))}}.executor(t)
+	// Fresh stamps: the sweep should inspect once and reconcile nothing.
+	now := time.Now()
+	e.captureSeen = map[string]captureStamp{"cid-1": {Started: first.State.StartedAt, Verified: now}, "cid-2": {Started: second.State.StartedAt, Verified: now}}
+	if err := e.sweepCapture(context.Background()); err != nil {
+		t.Fatalf("batched sweep failed: %v", err)
+	}
+	if n := callsMatching(dockerCalls(), "inspect "); n != 1 {
+		t.Fatalf("the fleet must be inspected in one docker call, saw %d: %v", n, dockerCalls())
 	}
 }
